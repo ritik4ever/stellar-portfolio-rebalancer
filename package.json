@@ -1,0 +1,53 @@
+{
+    "name": "stellar-portfolio-rebalancer",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Intelligent portfolio rebalancing service for Stellar ecosystem using Reflector oracles",
+    "scripts": {
+        "install:all": "npm run install:backend && npm run install:frontend && npm run install:contracts",
+        "install:contracts": "cd contracts && cargo check",
+        "install:backend": "cd backend && npm install",
+        "install:frontend": "cd frontend && npm install",
+        "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+        "dev:backend": "cd backend && npm run dev",
+        "dev:frontend": "cd frontend && npm run dev",
+        "build": "npm run build:contracts && npm run build:backend && npm run build:frontend",
+        "build:contracts": "cd contracts && cargo build --release --target wasm32-unknown-unknown",
+        "build:backend": "cd backend && npm run build",
+        "build:frontend": "cd frontend && npm run build",
+        "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+        "start:backend": "cd backend && npm start",
+        "start:frontend": "cd frontend && npm run preview",
+        "test": "npm run test:contracts && npm run test:backend",
+        "test:contracts": "cd contracts && cargo test",
+        "test:backend": "cd backend && npm test",
+        "lint": "npm run lint:backend && npm run lint:frontend",
+        "lint:backend": "cd backend && npm run lint",
+        "lint:frontend": "cd frontend && npm run lint",
+        "clean": "npm run clean:all",
+        "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    },
+    "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=9.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/your-username/stellar-portfolio-rebalancer"
+    },
+    "keywords": [
+        "stellar",
+        "defi",
+        "portfolio",
+        "rebalancing",
+        "soroban",
+        "reflector",
+        "oracle",
+        "hackathon"
+    ],
+    "author": "Your Name",
+    "license": "MIT"
+}

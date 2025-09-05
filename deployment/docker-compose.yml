@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Frontend service
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../deployment/Dockerfile.frontend
+    container_name: portfolio-frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - frontend_dist:/app/dist
+    depends_on:
+      - backend
+
+  # Backend service
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../deployment/Dockerfile.backend
+    container_name: portfolio-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - REFLECTOR_ADDRESS=${REFLECTOR_ADDRESS}
+      - STELLAR_NETWORK=${STELLAR_NETWORK}
+    ports:
+      - "3001:3001"
+    depends_on:
+      - redis
+    volumes:
+      - ./logs:/app/logs
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: portfolio-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: portfolio-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - frontend_dist:/usr/share/nginx/html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+
+  # Monitoring service (optional)
+  monitoring:
+    build:
+      context: ../backend
+      dockerfile: ../deployment/Dockerfile.monitoring
+    container_name: portfolio-monitoring
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - backend
+
+volumes:
+  frontend_dist:
+  redis_data:
+
+
+networks:
+  default:
+    name: portfolio-network
