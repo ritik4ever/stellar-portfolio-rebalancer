@@ -1,12 +1,13 @@
 import { SorobanRpc } from '@stellar/stellar-sdk'
-import type { PricesMap, PriceData } from '../types/index.ts'
+import type { PricesMap, PriceData } from '../types/index.js'
 
 export class ReflectorService {
     private coinGeckoApiKey: string
     private coinGeckoIds: Record<string, string>
     private priceCache: Map<string, { data: PriceData, timestamp: number }>
     private readonly CACHE_DURATION = 120000 // 2 minutes
-    private readonly MIN_REQUEST_INTERVAL = 10000 // 10 sconds between requests
+    private lastRequestTime = 0
+    private readonly MIN_REQUEST_INTERVAL = 10000 // 10 seconds between requests
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
@@ -113,7 +114,8 @@ export class ReflectorService {
                         price: coinData.usd || 0,
                         change: coinData.usd_24h_change || 0,
                         timestamp: coinData.last_updated_at || Date.now() / 1000,
-                        source: apiKey ? 'coingecko_pro' : 'coingecko_free'
+                        source: apiKey ? 'coingecko_pro' : 'coingecko_free',
+                        volume: coinData.usd_24h_vol || 0
                     }
 
                     prices[asset] = priceData
