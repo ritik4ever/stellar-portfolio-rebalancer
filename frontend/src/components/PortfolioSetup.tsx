@@ -106,7 +106,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({ onNavigate, publicKey }
                 return acc
             }, {} as Record<string, number>)
 
-            const response = await fetch('/api/portfolio', {
+            // Use the correct backend URL
+            const API_URL = 'https://stellar-portfolio-rebalancer.onrender.com'
+
+            const response = await fetch(`${API_URL}/api/portfolio`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -119,7 +122,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({ onNavigate, publicKey }
             })
 
             if (response.ok) {
-                await response.json()
                 setSuccess(true)
                 setTimeout(() => {
                     onNavigate('dashboard')
