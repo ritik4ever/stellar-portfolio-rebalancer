@@ -241,4 +241,41 @@ router.get('/prices', async (req, res) => {
     }
 })
 
+router.get('/market/:asset/details', async (req, res) => {
+    try {
+        const asset = req.params.asset.toUpperCase()
+        const reflector = new ReflectorService()
+        const marketData = await reflector.getDetailedMarketData(asset)
+
+        res.json({
+            ...marketData,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to fetch detailed market data', { error: getErrorObject(error) })
+        res.status(500).json({ error: 'Failed to fetch market data' })
+    }
+})
+
+// Get price charts for frontend
+router.get('/market/:asset/chart', async (req, res) => {
+    try {
+        const asset = req.params.asset.toUpperCase()
+        const days = parseInt(req.query.days as string) || 7
+
+        const reflector = new ReflectorService()
+        const history = await reflector.getPriceHistory(asset, days)
+
+        res.json({
+            asset,
+            data: history,
+            timeframe: `${days}d`,
+            dataPoints: history.length
+        })
+    } catch (error) {
+        logger.error('Failed to fetch price chart', { error: getErrorObject(error) })
+        res.status(500).json({ error: 'Failed to fetch chart data' })
+    }
+})
+
 export { router as portfolioRouter }

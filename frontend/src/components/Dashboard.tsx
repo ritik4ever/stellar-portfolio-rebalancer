@@ -5,6 +5,8 @@ import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink } from 'luc
 import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
 import { StellarWallet } from '../utils/stellar'
+import PriceTracker from './PriceTracker'
+import { API_CONFIG } from '../config/api'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -17,14 +19,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [loading, setLoading] = useState(true)
     const [rebalancing, setRebalancing] = useState(false)
 
-    // Rest of the component remains the same...
     useEffect(() => {
         if (publicKey) {
             fetchPortfolioData()
             fetchPrices()
             const interval = setInterval(() => {
                 fetchPrices()
-            }, 30000)
+            }, 60000) // Reduce frequency to avoid rate limits
             return () => clearInterval(interval)
         } else {
             loadDemoData()
@@ -33,18 +34,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const fetchPortfolioData = async () => {
         try {
-            const response = await fetch(`/api/user/${publicKey}/portfolios`)
+            console.log('Fetching portfolio data for:', publicKey)
+            const response = await fetch(`${API_CONFIG.BASE_URL}/api/user/${publicKey}/portfolios`)
+
             if (response.ok) {
                 const portfolios = await response.json()
+                console.log('Found portfolios:', portfolios)
+
                 if (portfolios.length > 0) {
-                    // Use first portfolio
-                    const portfolioResponse = await fetch(`/api/portfolio/${portfolios[0].id}`)
-                    const data = await portfolioResponse.json()
-                    setPortfolioData(data.portfolio)
+                    // Use the most recent portfolio (last in array)
+                    const latestPortfolio = portfolios[portfolios.length - 1]
+                    console.log('Using portfolio:', latestPortfolio)
+
+                    const portfolioResponse = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${latestPortfolio.id}`)
+                    if (portfolioResponse.ok) {
+                        const data = await portfolioResponse.json()
+                        console.log('Portfolio data:', data)
+                        setPortfolioData(data.portfolio || data)
+                    } else {
+                        console.log('Portfolio details fetch failed, using list data')
+                        setPortfolioData(latestPortfolio)
+                    }
                 } else {
+                    console.log('No portfolios found, loading demo data')
                     loadDemoData()
                 }
             } else {
+                console.log('Portfolio list fetch failed, loading demo data')
                 loadDemoData()
             }
         } catch (error) {
@@ -57,9 +73,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const fetchPrices = async () => {
         try {
-            const response = await fetch('/api/prices')
+            const response = await fetch(`${API_CONFIG.BASE_URL}/api/prices`)
             if (response.ok) {
                 const priceData = await response.json()
+                console.log('Fetched prices:', priceData)
                 setPrices(priceData)
             }
         } catch (error) {
@@ -68,42 +85,43 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     }
 
     const loadDemoData = () => {
+        console.log('Loading demo data')
         setPortfolioData({
-            totalValue: 12450.75,
-            dayChange: 2.34,
-            needsRebalance: true,
+            id: 'demo',
+            totalValue: 10000,
+            dayChange: 0.85,
+            needsRebalance: false,
             lastRebalance: '2 hours ago',
             allocations: [
-                { asset: 'XLM', target: 40, current: 42.3, amount: 4980.30 },
-                { asset: 'USDC', target: 35, current: 33.1, amount: 4357.76 },
-                { asset: 'BTC', target: 25, current: 24.6, amount: 3112.69 }
+                { asset: 'XLM', target: 40, current: 40.2, amount: 4020 },
+                { asset: 'USDC', target: 60, current: 59.8, amount: 5980 }
             ]
         })
         setPrices({
-            XLM: { price: 0.36, change: 2.34 },
-            USDC: { price: 0.9998, change: -0.01 },
-            BTC: { price: 45000, change: 1.87 },
-            ETH: { price: 3000, change: -0.54 }
+            XLM: { price: 0.354, change: -1.86 },
+            USDC: { price: 1.0, change: -0.01 },
+            BTC: { price: 110000, change: -1.19 },
+            ETH: { price: 4200, change: -1.50 }
         })
         setLoading(false)
     }
 
     const executeRebalance = async () => {
-        if (!portfolioData?.id) {
-            alert('Please create a portfolio first')
+        if (!portfolioData?.id || portfolioData.id === 'demo') {
+            alert('Rebalancing not available in demo mode. Please create a real portfolio.')
             return
         }
 
         setRebalancing(true)
 
         try {
-            const response = await fetch(`/api/portfolio/${portfolioData.id}/rebalance`, {
+            const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioData.id}/rebalance`, {
                 method: 'POST'
             })
 
             if (response.ok) {
                 const result = await response.json()
-                alert(`Rebalance executed successfully! Gas used: ${result.result.gasUsed}`)
+                alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
                 fetchPortfolioData() // Refresh data
             } else {
                 alert('Rebalance failed. Please try again.')
@@ -127,12 +145,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         onNavigate('landing')
     }
 
+    // Create allocation data from portfolio data
     const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
         name: alloc.asset,
-        value: alloc.target,
-        amount: alloc.amount,
+        value: alloc.target || alloc.percentage, // Handle both formats
+        amount: alloc.amount || 0,
         color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
     })) || []
+
+    // If portfolio has allocations object instead of array, convert it
+    if (portfolioData?.allocations && typeof portfolioData.allocations === 'object' && !Array.isArray(portfolioData.allocations)) {
+        const allocationsArray = Object.entries(portfolioData.allocations).map(([asset, percentage], index) => ({
+            name: asset,
+            value: percentage as number,
+            amount: (portfolioData.totalValue || 10000) * (percentage as number) / 100,
+            color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
+        }))
+        allocationData.splice(0, allocationData.length, ...allocationsArray)
+    }
 
     const performanceData = [
         { date: '1/1', value: 10000 },
@@ -140,7 +170,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         { date: '1/3', value: 10100 },
         { date: '1/4', value: 10800 },
         { date: '1/5', value: 11200 },
-        { date: '1/6', value: portfolioData?.totalValue || 12450 }
+        { date: '1/6', value: portfolioData?.totalValue || 10000 }
     ]
 
     const walletType = StellarWallet.getWalletType()
@@ -235,6 +265,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             </div>
 
             <div className="p-6 max-w-7xl mx-auto">
+                {/* Debug Info */}
+                {process.env.NODE_ENV === 'development' && (
+                    <div className="bg-gray-100 p-2 rounded mb-4 text-xs">
+                        <div>Portfolio ID: {portfolioData?.id}</div>
+                        <div>Allocations: {JSON.stringify(allocationData)}</div>
+                    </div>
+                )}
+
                 {/* Portfolio Overview */}
                 <div className="grid lg:grid-cols-3 gap-6 mb-8">
                     <div className="lg:col-span-2">
@@ -295,7 +333,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </p>
                                 <button
                                     onClick={executeRebalance}
-                                    disabled={rebalancing || !publicKey}
+                                    disabled={rebalancing || !publicKey || portfolioData?.id === 'demo'}
                                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
                                 >
                                     {rebalancing ? (
@@ -307,9 +345,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         'Execute Rebalance'
                                     )}
                                 </button>
-                                {!publicKey && (
+                                {(!publicKey || portfolioData?.id === 'demo') && (
                                     <p className="text-xs text-orange-600 mt-2 text-center">
-                                        Connect wallet to execute rebalance
+                                        {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}
                                     </p>
                                 )}
                             </motion.div>
@@ -350,6 +388,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                {/* Price Tracker */}
+                <div className="mb-8">
+                    <PriceTracker />
                 </div>
 
                 {/* Asset Cards */}

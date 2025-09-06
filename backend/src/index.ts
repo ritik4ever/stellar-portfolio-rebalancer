@@ -66,3 +66,13 @@ process.on('SIGTERM', () => {
         logger.info('Process terminated')
     })
 })
+
+app.use(cors({
+    origin: [
+        'http://localhost:3000',  // Local frontend
+        'https://your-vercel-app.vercel.app'  // Replace with your actual Vercel URL
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}))

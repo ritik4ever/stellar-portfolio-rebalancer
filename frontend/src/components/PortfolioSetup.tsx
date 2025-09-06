@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Trash2, ArrowLeft, AlertCircle, CheckCircle } from 'lucide-react'
+import { API_CONFIG } from '../config/api'
 
 interface PortfolioSetupProps {
     onNavigate: (view: string) => void
@@ -106,10 +107,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({ onNavigate, publicKey }
                 return acc
             }, {} as Record<string, number>)
 
-            // Use the correct backend URL
-            const API_URL = 'https://stellar-portfolio-rebalancer.onrender.com'
-
-            const response = await fetch(`${API_URL}/api/portfolio`, {
+            const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
