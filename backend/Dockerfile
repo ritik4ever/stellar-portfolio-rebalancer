@@ -2,9 +2,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dependencies
+# Copy package files
 COPY package*.json ./
-RUN npm ci --only=production
+
+# Install all dependencies (including dev dependencies for build)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -12,15 +14,14 @@ COPY . .
 # Build the application
 RUN npm run build
 
+# Remove dev dependencies after build
+RUN npm prune --production
+
 # Create logs directory
 RUN mkdir -p logs
 
 # Expose port
 EXPOSE 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3001/api/health || exit 1
 
 # Start the application
 CMD ["npm", "start"]
