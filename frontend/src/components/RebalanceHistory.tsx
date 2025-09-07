@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
 import { API_CONFIG } from '../config/api'
 
 interface RebalanceEvent {
     id: string
     timestamp: string
+    dateFormatted?: string
+    timeFormatted?: string
     trigger: string
     trades: number
     gasUsed: string
@@ -17,8 +19,10 @@ interface RebalanceEvent {
         reason?: string
         volatilityDetected?: boolean
         riskLevel?: 'low' | 'medium' | 'high'
-        priceDirection?: 'up' | 'down' // Add price direction
+        priceDirection?: 'up' | 'down'
         performanceImpact?: 'positive' | 'negative' | 'neutral'
+        executionTime?: number
+        chain?: string
     }
 }
 
@@ -46,13 +50,16 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 url += `?portfolioId=${portfolioId}`
             }
 
+            console.log('Fetching rebalance history from:', url)
             const response = await fetch(url)
+
             if (response.ok) {
                 const data = await response.json()
+                console.log('Rebalance history data:', data)
                 setHistory(data.history || [])
                 setError(null)
             } else {
-                // If API fails, show demo data
+                console.warn('API failed, using demo data')
                 setHistory(getDemoHistory())
             }
         } catch (err) {
@@ -65,11 +72,33 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
         }
     }
 
+    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
+        const date = new Date(timestamp)
+
+        const dateFormatted = date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        })
+
+        const timeFormatted = date.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        })
+
+        return { dateFormatted, timeFormatted }
+    }
+
     const getDemoHistory = (): RebalanceEvent[] => {
+        const now = new Date()
+
         return [
             {
                 id: '1',
-                timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+                timestamp: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
+                ...formatDateTime(new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString()),
                 trigger: 'Threshold exceeded (8.2%)',
                 trades: 3,
                 gasUsed: '0.0234 XLM',
@@ -79,56 +108,70 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                     fromAsset: 'XLM',
                     toAsset: 'ETH',
                     amount: 1200,
-                    reason: 'XLM allocation exceeded target by 8.2%',
+                    reason: 'Portfolio allocation drift exceeded rebalancing threshold',
                     riskLevel: 'medium',
                     priceDirection: 'down',
-                    performanceImpact: 'negative'
+                    performanceImpact: 'neutral',
+                    executionTime: 2400,
+                    chain: 'Stellar'
                 }
             },
             {
                 id: '2',
-                timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(), // 12 hours ago
+                timestamp: new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString(),
+                ...formatDateTime(new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString()),
                 trigger: 'Scheduled rebalance',
                 trades: 2,
                 gasUsed: '0.0156 XLM',
                 status: 'completed',
                 portfolioId: portfolioId || 'demo',
                 details: {
-                    reason: 'Daily scheduled rebalance',
+                    reason: 'Automated scheduled rebalancing executed',
                     riskLevel: 'low',
                     priceDirection: 'up',
-                    performanceImpact: 'positive'
+                    performanceImpact: 'positive',
+                    executionTime: 1800,
+                    chain: 'Stellar'
                 }
             },
             {
                 id: '3',
-                timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+                timestamp: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+                ...formatDateTime(new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString()),
                 trigger: 'Volatility circuit breaker',
                 trades: 1,
                 gasUsed: '0.0089 XLM',
                 status: 'completed',
                 portfolioId: portfolioId || 'demo',
                 details: {
-                    reason: 'High volatility detected in ETH, protective rebalance executed',
+                    reason: 'High market volatility detected, protective rebalance executed',
                     volatilityDetected: true,
                     riskLevel: 'high',
                     priceDirection: 'down',
-                    performanceImpact: 'negative'
+                    performanceImpact: 'negative',
+                    executionTime: 3200,
+                    chain: 'Stellar'
                 }
             },
             {
                 id: '4',
-                timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 1 week ago
-                trigger: 'Manual trigger',
+                timestamp: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+                ...formatDateTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+                trigger: 'Manual rebalance',
                 trades: 4,
                 gasUsed: '0.0298 XLM',
-                status: 'failed',
+                status: 'completed',
                 portfolioId: portfolioId || 'demo',
                 details: {
-                    reason: 'User-initiated rebalance failed due to insufficient liquidity',
+                    fromAsset: 'BTC',
+                    toAsset: 'USDC',
+                    amount: 0.05,
+                    reason: 'User-initiated manual rebalancing',
                     riskLevel: 'low',
-                    priceDirection: 'down',
-                    performanceImpact: 'negative'
+                    priceDirection: 'up',
+                    performanceImpact: 'positive',
+                    executionTime: 2100,
+                    chain: 'Stellar'
                 }
             }
         ]
@@ -141,7 +184,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
         if (diffInHours < 1) {
             const minutes = Math.floor(diffInHours * 60)
-            return `${minutes} minutes ago`
+            return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`
         } else if (diffInHours < 24) {
             const hours = Math.floor(diffInHours)
             return `${hours} hour${hours > 1 ? 's' : ''} ago`
@@ -149,6 +192,11 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             const days = Math.floor(diffInHours / 24)
             return `${days} day${days > 1 ? 's' : ''} ago`
         }
+    }
+
+    const formatExecutionTime = (ms?: number) => {
+        if (!ms) return null
+        return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
     }
 
     const getStatusIcon = (status: string) => {
@@ -229,87 +277,133 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         <p className="text-sm mt-1">Portfolio rebalances will appear here when they occur</p>
                     </div>
                 ) : (
-                    history.map((event) => (
-                        <div key={event.id} className="p-6 hover:bg-gray-50 transition-colors">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-4">
-                                    <div className="flex-shrink-0">
-                                        <div className={`w-10 h-10 ${getStatusBgColor(event.status)} rounded-full flex items-center justify-center`}>
-                                            {getStatusIcon(event.status)}
+                    history.map((event) => {
+                        const { dateFormatted, timeFormatted } = event.dateFormatted && event.timeFormatted
+                            ? { dateFormatted: event.dateFormatted, timeFormatted: event.timeFormatted }
+                            : formatDateTime(event.timestamp)
+
+                        return (
+                            <div key={event.id} className="p-6 hover:bg-gray-50 transition-colors">
+                                <div className="flex items-start justify-between">
+                                    <div className="flex items-start space-x-4">
+                                        <div className="flex-shrink-0">
+                                            <div className={`w-10 h-10 ${getStatusBgColor(event.status)} rounded-full flex items-center justify-center`}>
+                                                {getStatusIcon(event.status)}
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center space-x-2 mb-2">
+                                                <span className="font-medium text-gray-900">{event.trigger}</span>
+                                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                                                    {event.trades} trade{event.trades > 1 ? 's' : ''}
+                                                </span>
+                                                {event.details?.riskLevel && (
+                                                    <span className={`text-xs px-2 py-1 rounded flex items-center ${getRiskLevelColor(event.details.riskLevel)}`}>
+                                                        {event.details.riskLevel === 'high' ? (
+                                                            <TrendingDown className="w-3 h-3 mr-1" />
+                                                        ) : event.details.riskLevel === 'medium' ? (
+                                                            <TrendingDown className="w-3 h-3 mr-1" />
+                                                        ) : (
+                                                            <TrendingUp className="w-3 h-3 mr-1" />
+                                                        )}
+                                                        {event.details.riskLevel} risk
+                                                    </span>
+                                                )}
+                                                {event.details?.chain && (
+                                                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded flex items-center">
+                                                        <Link className="w-3 h-3 mr-1" />
+                                                        {event.details.chain}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Enhanced date and time display */}
+                                            <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
+                                                <div className="flex items-center">
+                                                    <Calendar className="w-4 h-4 mr-1" />
+                                                    <span className="font-medium">{dateFormatted}</span>
+                                                    <span className="mx-1">at</span>
+                                                    <span>{timeFormatted}</span>
+                                                </div>
+                                                <span className="text-gray-300">•</span>
+                                                <div className="flex items-center">
+                                                    <Clock className="w-4 h-4 mr-1" />
+                                                    {formatTimestamp(event.timestamp)}
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
+                                                <span>Gas: {event.gasUsed}</span>
+                                                {event.details?.executionTime && (
+                                                    <span>Execution: {formatExecutionTime(event.details.executionTime)}</span>
+                                                )}
+                                                {event.details?.amount && (
+                                                    <span>Amount: ${event.details.amount.toLocaleString()}</span>
+                                                )}
+                                            </div>
+
+                                            {/* Enhanced badges */}
+                                            <div className="flex items-center space-x-2 mb-2">
+                                                {event.details?.volatilityDetected && (
+                                                    <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded flex items-center">
+                                                        <TrendingDown className="w-3 h-3 mr-1" />
+                                                        High Volatility
+                                                    </span>
+                                                )}
+                                                {event.details?.performanceImpact && (
+                                                    <span className={`text-xs px-2 py-1 rounded flex items-center ${event.details.performanceImpact === 'positive'
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : event.details.performanceImpact === 'negative'
+                                                            ? 'bg-red-100 text-red-800'
+                                                            : 'bg-gray-100 text-gray-800'
+                                                        }`}>
+                                                        {event.details.performanceImpact === 'positive' ? (
+                                                            <TrendingUp className="w-3 h-3 mr-1" />
+                                                        ) : event.details.performanceImpact === 'negative' ? (
+                                                            <TrendingDown className="w-3 h-3 mr-1" />
+                                                        ) : null}
+                                                        {event.details.performanceImpact} impact
+                                                    </span>
+                                                )}
+                                                {event.details?.priceDirection && (
+                                                    <span className={`text-xs px-2 py-1 rounded flex items-center ${event.details.priceDirection === 'up'
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-red-100 text-red-800'
+                                                        }`}>
+                                                        {event.details.priceDirection === 'up' ? (
+                                                            <TrendingUp className="w-3 h-3 mr-1" />
+                                                        ) : (
+                                                            <TrendingDown className="w-3 h-3 mr-1" />
+                                                        )}
+                                                        Market {event.details.priceDirection}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {event.details?.reason && (
+                                                <div className="text-sm text-gray-600 italic mb-2">
+                                                    {event.details.reason}
+                                                </div>
+                                            )}
+
+                                            {event.details?.fromAsset && event.details?.toAsset && (
+                                                <div className="flex items-center text-sm">
+                                                    <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs mr-2">
+                                                        {event.details.fromAsset}
+                                                    </span>
+                                                    <ArrowRight className="w-3 h-3 text-gray-400 mx-1" />
+                                                    <span className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs ml-2">
+                                                        {event.details.toAsset}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className="flex-1">
-                                        <div className="flex items-center space-x-2 mb-1">
-                                            <span className="font-medium text-gray-900">{event.trigger}</span>
-                                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                                                {event.trades} trade{event.trades > 1 ? 's' : ''}
-                                            </span>
-                                            {event.details?.riskLevel && (
-                                                <span className={`text-xs px-2 py-1 rounded flex items-center ${getRiskLevelColor(event.details.riskLevel)}`}>
-                                                    {event.details.riskLevel === 'high' ? (
-                                                        <TrendingDown className="w-3 h-3 mr-1" />
-                                                    ) : event.details.riskLevel === 'medium' ? (
-                                                        <TrendingDown className="w-3 h-3 mr-1" />
-                                                    ) : (
-                                                        <TrendingUp className="w-3 h-3 mr-1" />
-                                                    )}
-                                                    {event.details.riskLevel} risk
-                                                </span>
-                                            )}
-                                            {event.details?.volatilityDetected && (
-                                                <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded flex items-center">
-                                                    <TrendingDown className="w-3 h-3 mr-1" />
-                                                    Volatility
-                                                </span>
-                                            )}
-                                            {event.details?.performanceImpact && (
-                                                <span className={`text-xs px-2 py-1 rounded flex items-center ${event.details.performanceImpact === 'positive'
-                                                    ? 'bg-green-100 text-green-800'
-                                                    : event.details.performanceImpact === 'negative'
-                                                        ? 'bg-red-100 text-red-800'
-                                                        : 'bg-gray-100 text-gray-800'
-                                                    }`}>
-                                                    {event.details.performanceImpact === 'positive' ? (
-                                                        <TrendingUp className="w-3 h-3 mr-1" />
-                                                    ) : event.details.performanceImpact === 'negative' ? (
-                                                        <TrendingDown className="w-3 h-3 mr-1" />
-                                                    ) : null}
-                                                    {event.details.performanceImpact}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center space-x-4 text-sm text-gray-500">
-                                            <div className="flex items-center">
-                                                <Clock className="w-4 h-4 mr-1" />
-                                                {formatTimestamp(event.timestamp)}
-                                            </div>
-                                            <span>Gas: {event.gasUsed}</span>
-                                            {event.details?.amount && (
-                                                <span>Amount: ${event.details.amount.toLocaleString()}</span>
-                                            )}
-                                        </div>
-                                        {event.details?.reason && (
-                                            <div className="mt-1 text-sm text-gray-600 italic">
-                                                {event.details.reason}
-                                            </div>
-                                        )}
-                                        {event.details?.fromAsset && event.details?.toAsset && (
-                                            <div className="mt-1 flex items-center text-sm text-gray-600">
-                                                <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs mr-1">
-                                                    {event.details.fromAsset}
-                                                </span>
-                                                <ArrowRight className="w-3 h-3 mx-1" />
-                                                <span className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-                                                    {event.details.toAsset}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
+                                    <ArrowRight className="w-4 h-4 text-gray-400 mt-2" />
                                 </div>
-                                <ArrowRight className="w-4 h-4 text-gray-400" />
                             </div>
-                        </div>
-                    ))
+                        )
+                    })
                 )}
             </div>
 
@@ -329,6 +423,10 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                             <div className="flex items-center">
                                 <div className="w-2 h-2 bg-red-500 rounded-full mr-1"></div>
                                 <span>Failed/High Risk</span>
+                            </div>
+                            <div className="flex items-center">
+                                <div className="w-2 h-2 bg-blue-500 rounded-full mr-1"></div>
+                                <span>Stellar Network</span>
                             </div>
                         </div>
                     </div>
