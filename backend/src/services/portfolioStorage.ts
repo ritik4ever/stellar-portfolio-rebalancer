@@ -67,6 +67,35 @@ class PortfolioStorage {
         this.portfolios.set(id, { ...portfolio, ...updates })
         return true
     }
+
+    /**
+     * Get all portfolios
+     */
+    getAllPortfolios(): Portfolio[] {
+        return Array.from(this.portfolios.values())
+    }
+
+    /**
+     * Get portfolio count
+     */
+    getPortfolioCount(): number {
+        return this.portfolios.size
+    }
+
+    /**
+     * Delete a portfolio
+     */
+    deletePortfolio(id: string): boolean {
+        return this.portfolios.delete(id)
+    }
+
+    /**
+     * Clear all portfolios (for testing)
+     */
+    clearAll(): void {
+        this.portfolios.clear()
+    }
 }
 
 export const portfolioStorage = new PortfolioStorage()
+export type { Portfolio }

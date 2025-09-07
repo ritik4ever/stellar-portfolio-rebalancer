@@ -1,4 +1,4 @@
-// index.ts - COMPLETE ERROR-FREE VERSION
+// index.ts - COMPLETE VERSION WITH AUTO-REBALANCER
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'node:http'
@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
+import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
 
 const app = express()
@@ -45,7 +46,8 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        autoRebalancer: autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
     })
 })
 
@@ -106,13 +108,23 @@ app.get('/', (req, res) => {
         status: 'running',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
+        features: {
+            automaticRebalancing: !!autoRebalancer?.getStatus().isRunning,
+            priceFeeds: true,
+            riskManagement: true,
+            portfolioManagement: true
+        },
         endpoints: {
             health: '/health',
             corsTest: '/test/cors',
-            coinGeckoTest: '/test/coingecko'
+            coinGeckoTest: '/test/coingecko',
+            autoRebalancerStatus: '/api/auto-rebalancer/status'
         }
     })
 })
+
+// Create auto-rebalancer instance
+const autoRebalancer = new AutoRebalancerService()
 
 // Mount API routes
 app.use('/api', portfolioRouter)
@@ -124,7 +136,12 @@ app.use((req, res) => {
     res.status(404).json({
         error: 'Route not found',
         method: req.method,
-        url: req.url
+        url: req.url,
+        availableEndpoints: {
+            health: '/health',
+            api: '/api/*',
+            autoRebalancer: '/api/auto-rebalancer/*'
+        }
     })
 })
 
@@ -145,20 +162,24 @@ const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws) => {
     console.log('WebSocket connection established')
-    ws.send(JSON.stringify({ type: 'connection', message: 'Connected' }))
+    ws.send(JSON.stringify({
+        type: 'connection',
+        message: 'Connected',
+        autoRebalancerStatus: autoRebalancer.getStatus()
+    }))
 
     ws.on('error', (error) => {
         console.error('WebSocket error:', error)
     })
 })
 
-// Start rebalancing service
+// Start existing rebalancing service
 try {
     const rebalancingService = new RebalancingService(wss)
     rebalancingService.start()
-    console.log('Rebalancing service started')
+    console.log('[LEGACY-REBALANCER] Legacy rebalancing service started')
 } catch (error) {
-    console.error('Failed to start rebalancing service:', error)
+    console.error('Failed to start legacy rebalancing service:', error)
 }
 
 // Start server
@@ -166,21 +187,96 @@ server.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`)
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`)
     console.log(`CoinGecko API Key: ${!!process.env.COINGECKO_API_KEY ? 'SET' : 'NOT SET'}`)
-    console.log('Test endpoints:')
+
+    // Start automatic rebalancing service
+    const shouldStartAutoRebalancer =
+        process.env.NODE_ENV === 'production' ||
+        process.env.ENABLE_AUTO_REBALANCER === 'true'
+
+    if (shouldStartAutoRebalancer) {
+        try {
+            console.log('[AUTO-REBALANCER] Starting automatic rebalancing service...')
+            autoRebalancer.start()
+            console.log('[AUTO-REBALANCER] ✅ Automatic rebalancing service started successfully')
+
+            // Broadcast to WebSocket clients
+            wss.clients.forEach(client => {
+                if (client.readyState === client.OPEN) {
+                    client.send(JSON.stringify({
+                        type: 'autoRebalancerStarted',
+                        status: autoRebalancer.getStatus(),
+                        timestamp: new Date().toISOString()
+                    }))
+                }
+            })
+        } catch (error) {
+            console.error('[AUTO-REBALANCER] ❌ Failed to start automatic rebalancing service:', error)
+        }
+    } else {
+        console.log('[AUTO-REBALANCER] Automatic rebalancing disabled in development mode')
+        console.log('[AUTO-REBALANCER] Set ENABLE_AUTO_REBALANCER=true to enable in development')
+    }
+
+    console.log('Available endpoints:')
     console.log(`  Health: http://localhost:${port}/health`)
-    console.log(`  CORS: http://localhost:${port}/test/cors`)
-    console.log(`  CoinGecko: http://localhost:${port}/test/coingecko`)
+    console.log(`  CORS Test: http://localhost:${port}/test/cors`)
+    console.log(`  CoinGecko Test: http://localhost:${port}/test/coingecko`)
+    console.log(`  Auto-Rebalancer Status: http://localhost:${port}/api/auto-rebalancer/status`)
 })
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully')
-    server.close(() => process.exit(0))
+const gracefulShutdown = (signal: string) => {
+    console.log(`\n[SHUTDOWN] ${signal} received, shutting down gracefully...`)
+
+    // Stop auto-rebalancer
+    try {
+        autoRebalancer.stop()
+        console.log('[SHUTDOWN] Auto-rebalancer stopped')
+    } catch (error) {
+        console.error('[SHUTDOWN] Error stopping auto-rebalancer:', error)
+    }
+
+    // Close WebSocket connections
+    wss.clients.forEach(client => {
+        client.send(JSON.stringify({
+            type: 'serverShutdown',
+            message: 'Server is shutting down',
+            timestamp: new Date().toISOString()
+        }))
+        client.close()
+    })
+
+    // Close server
+    server.close((err) => {
+        if (err) {
+            console.error('[SHUTDOWN] Error closing server:', err)
+            process.exit(1)
+        }
+        console.log('[SHUTDOWN] Server closed successfully')
+        process.exit(0)
+    })
+
+    // Force exit after 10 seconds
+    setTimeout(() => {
+        console.log('[SHUTDOWN] Force exit after timeout')
+        process.exit(1)
+    }, 10000)
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+    console.error('[UNCAUGHT-EXCEPTION] Uncaught exception:', error)
+    gracefulShutdown('UNCAUGHT_EXCEPTION')
 })
 
-process.on('SIGINT', () => {
-    console.log('SIGINT received, shutting down gracefully')
-    server.close(() => process.exit(0))
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[UNHANDLED-REJECTION] Unhandled promise rejection:', reason)
+    console.error('Promise:', promise)
 })
 
+// Export instances for use in routes
+export { autoRebalancer }
 export default app

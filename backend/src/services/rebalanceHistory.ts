@@ -9,6 +9,9 @@ export interface RebalanceEvent {
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
+    isAutomatic?: boolean
+    riskAlerts?: any[]
+    error?: string
     details?: {
         fromAsset?: string
         toAsset?: string
@@ -25,6 +28,7 @@ export interface RebalanceEvent {
 
 export class RebalanceHistoryService {
     private history: Map<string, RebalanceEvent[]> = new Map()
+    private events: RebalanceEvent[] = [] // Global events array for auto-rebalancer
     private riskService: RiskManagementService
 
     constructor() {
@@ -37,6 +41,9 @@ export class RebalanceHistoryService {
         trades: number
         gasUsed: string
         status: 'completed' | 'failed' | 'pending'
+        isAutomatic?: boolean
+        riskAlerts?: any[]
+        error?: string
         fromAsset?: string
         toAsset?: string
         amount?: number
@@ -44,13 +51,16 @@ export class RebalanceHistoryService {
         portfolio?: any
     }): Promise<RebalanceEvent> {
         const event: RebalanceEvent = {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            id: this.generateEventId(),
             portfolioId: eventData.portfolioId,
             timestamp: new Date().toISOString(),
             trigger: eventData.trigger,
             trades: eventData.trades,
             gasUsed: eventData.gasUsed,
             status: eventData.status,
+            isAutomatic: eventData.isAutomatic || false,
+            riskAlerts: eventData.riskAlerts || [],
+            error: eventData.error || undefined,
             details: {
                 fromAsset: eventData.fromAsset,
                 toAsset: eventData.toAsset,
@@ -73,7 +83,7 @@ export class RebalanceHistoryService {
             }
         }
 
-        // Store the event
+        // Store in portfolio-specific history
         const portfolioHistory = this.history.get(eventData.portfolioId) || []
         portfolioHistory.unshift(event) // Add to beginning
 
@@ -84,7 +94,15 @@ export class RebalanceHistoryService {
 
         this.history.set(eventData.portfolioId, portfolioHistory)
 
-        console.log(`[INFO] Rebalance event recorded: ${event.id} for portfolio ${eventData.portfolioId}`)
+        // Store in global events array
+        this.events.push(event)
+
+        // Keep only last 1000 events to prevent memory issues
+        if (this.events.length > 1000) {
+            this.events = this.events.slice(-1000)
+        }
+
+        console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
         return event
     }
 
@@ -106,11 +124,61 @@ export class RebalanceHistoryService {
             .slice(0, limit)
     }
 
+    /**
+     * Get recent auto-rebalances for a portfolio
+     */
+    getRecentAutoRebalances(portfolioId: string, limit: number = 10): RebalanceEvent[] {
+        try {
+            return this.events
+                .filter(event =>
+                    event.portfolioId === portfolioId &&
+                    event.isAutomatic === true
+                )
+                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                .slice(0, limit)
+        } catch (error) {
+            console.error('Error getting recent auto-rebalances:', error)
+            return []
+        }
+    }
+
+    /**
+     * Get auto-rebalances since a specific date
+     */
+    getAutoRebalancesSince(portfolioId: string, since: Date): RebalanceEvent[] {
+        try {
+            return this.events.filter(event =>
+                event.portfolioId === portfolioId &&
+                event.isAutomatic === true &&
+                new Date(event.timestamp) >= since
+            )
+        } catch (error) {
+            console.error('Error getting auto-rebalances since date:', error)
+            return []
+        }
+    }
+
+    /**
+     * Get all auto-rebalances across all portfolios
+     */
+    getAllAutoRebalances(): RebalanceEvent[] {
+        try {
+            return this.events.filter(event => event.isAutomatic === true)
+        } catch (error) {
+            console.error('Error getting all auto-rebalances:', error)
+            return []
+        }
+    }
+
+    private generateEventId(): string {
+        return Date.now().toString() + Math.random().toString(36).substr(2, 9)
+    }
+
     private generateReasonFromTrigger(trigger: string): string {
         if (trigger.includes('Threshold exceeded')) {
             return `Portfolio allocation drift exceeded rebalancing threshold`
         }
-        if (trigger.includes('Scheduled')) {
+        if (trigger.includes('Scheduled') || trigger.includes('Automatic')) {
             return 'Automated scheduled rebalancing executed'
         }
         if (trigger.includes('Volatility') || trigger.includes('circuit breaker')) {
@@ -149,7 +217,7 @@ export class RebalanceHistoryService {
             return 'medium'
         }
 
-        if (trigger.includes('Scheduled') || trigger.includes('Manual')) {
+        if (trigger.includes('Scheduled') || trigger.includes('Manual') || trigger.includes('Automatic')) {
             return 'low'
         }
 
@@ -172,7 +240,7 @@ export class RebalanceHistoryService {
             return 'negative' // Protective action due to bad market conditions
         }
 
-        if (trigger.includes('Scheduled')) {
+        if (trigger.includes('Scheduled') || trigger.includes('Automatic')) {
             return 'positive' // Proactive maintenance
         }
 
@@ -194,6 +262,7 @@ export class RebalanceHistoryService {
                 trades: 3,
                 gasUsed: '0.0234 XLM',
                 status: 'completed',
+                isAutomatic: false,
                 details: {
                     fromAsset: 'XLM',
                     toAsset: 'ETH',
@@ -208,10 +277,11 @@ export class RebalanceHistoryService {
                 id: '2',
                 portfolioId,
                 timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Scheduled rebalance',
+                trigger: 'Automatic Rebalancing',
                 trades: 2,
                 gasUsed: '0.0156 XLM',
                 status: 'completed',
+                isAutomatic: true,
                 details: {
                     reason: 'Automated scheduled rebalancing executed',
                     riskLevel: 'low',
@@ -227,6 +297,7 @@ export class RebalanceHistoryService {
                 trades: 1,
                 gasUsed: '0.0089 XLM',
                 status: 'completed',
+                isAutomatic: true,
                 details: {
                     reason: 'High market volatility detected, protective rebalance executed',
                     volatilityDetected: true,
@@ -237,18 +308,22 @@ export class RebalanceHistoryService {
             }
         ]
 
+        // Add to both storage methods
         this.history.set(portfolioId, demoEvents)
+        this.events.push(...demoEvents)
     }
 
     // Clear all history (for testing)
     clearHistory(): void {
         this.history.clear()
+        this.events = []
     }
 
     // Get statistics
-    getHistoryStats(): { totalEvents: number, portfolios: number, recentActivity: number } {
+    getHistoryStats(): { totalEvents: number, portfolios: number, recentActivity: number, autoRebalances: number } {
         let totalEvents = 0
         let recentActivity = 0
+        let autoRebalances = 0
         const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000)
 
         this.history.forEach(events => {
@@ -256,12 +331,14 @@ export class RebalanceHistoryService {
             recentActivity += events.filter(e =>
                 new Date(e.timestamp).getTime() > oneDayAgo
             ).length
+            autoRebalances += events.filter(e => e.isAutomatic).length
         })
 
         return {
             totalEvents,
             portfolios: this.history.size,
-            recentActivity
+            recentActivity,
+            autoRebalances
         }
     }
 }

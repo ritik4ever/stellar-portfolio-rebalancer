@@ -13,6 +13,12 @@ const reflectorService = new ReflectorService()
 const rebalanceHistoryService = new RebalanceHistoryService()
 const riskManagementService = new RiskManagementService()
 
+// Import autoRebalancer from index.js (will be available after server starts)
+let autoRebalancer: any = null
+import('../index.js').then(module => {
+    autoRebalancer = module.autoRebalancer
+}).catch(console.error)
+
 // Helper function for error handling
 const getErrorMessage = (error: unknown): string => {
     if (error instanceof Error) return error.message
@@ -53,7 +59,8 @@ router.get('/health', (req, res) => {
             circuit_breakers: true,
             demo_portfolios: true,
             risk_management: true,
-            rebalance_history: true
+            rebalance_history: true,
+            auto_rebalancer: autoRebalancer ? autoRebalancer.getStatus().isRunning : false
         }
     })
 })
@@ -97,7 +104,8 @@ router.post('/portfolio', async (req, res) => {
             trigger: 'Portfolio Created',
             trades: 0,
             gasUsed: '0 XLM',
-            status: 'completed'
+            status: 'completed',
+            isAutomatic: false
         })
 
         logger.info('Portfolio created successfully', {
@@ -222,6 +230,17 @@ router.post('/portfolio/:id/rebalance', async (req, res) => {
 
         const result = await stellarService.executeRebalance(portfolioId)
 
+        // Record manual rebalance event
+        await rebalanceHistoryService.recordRebalanceEvent({
+            portfolioId,
+            trigger: 'Manual Rebalance',
+            trades: result.trades || 0,
+            gasUsed: result.gasUsed || '0 XLM',
+            status: 'completed',
+            isAutomatic: false,
+            riskAlerts: riskCheck.alerts
+        })
+
         logger.info('Rebalance executed successfully', { portfolioId, result })
         res.json({
             result,
@@ -316,7 +335,8 @@ router.get('/rebalance/history', async (req, res) => {
                     trigger: 'Portfolio Created',
                     trades: 0,
                     gasUsed: '0 XLM',
-                    status: 'completed'
+                    status: 'completed',
+                    isAutomatic: false
                 })
                 history = await rebalanceHistoryService.getRebalanceHistory(portfolioId, limit)
             }
@@ -355,7 +375,10 @@ router.post('/rebalance/history', async (req, res) => {
 
         console.log('[INFO] Recording new rebalance event:', eventData)
 
-        const event = await rebalanceHistoryService.recordRebalanceEvent(eventData)
+        const event = await rebalanceHistoryService.recordRebalanceEvent({
+            ...eventData,
+            isAutomatic: eventData.isAutomatic || false
+        })
 
         res.json({
             success: true,
@@ -501,6 +524,12 @@ router.get('/prices/enhanced', async (req, res) => {
             }
         })
 
+        res.json({
+            success: true,
+            prices: enhancedPrices,
+            riskAlerts,
+            timestamp: new Date().toISOString()
+        })
     } catch (error) {
         console.error('[ERROR] Failed to fetch enhanced prices:', error)
         res.status(500).json({
@@ -552,6 +581,144 @@ router.get('/market/:asset/chart', async (req, res) => {
 })
 
 // ================================
+// AUTO-REBALANCER ROUTES
+// ================================
+
+// Get auto-rebalancer status
+router.get('/auto-rebalancer/status', (req, res) => {
+    try {
+        if (!autoRebalancer) {
+            return res.json({
+                success: false,
+                error: 'Auto-rebalancer not initialized',
+                status: { isRunning: false }
+            })
+        }
+
+        const status = autoRebalancer.getStatus()
+        const statistics = autoRebalancer.getStatistics()
+
+        res.json({
+            success: true,
+            status,
+            statistics,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Start auto-rebalancer
+router.post('/auto-rebalancer/start', (req, res) => {
+    try {
+        if (!autoRebalancer) {
+            return res.status(500).json({
+                success: false,
+                error: 'Auto-rebalancer not initialized'
+            })
+        }
+
+        autoRebalancer.start()
+
+        res.json({
+            success: true,
+            message: 'Auto-rebalancer started successfully',
+            status: autoRebalancer.getStatus(),
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Stop auto-rebalancer
+router.post('/auto-rebalancer/stop', (req, res) => {
+    try {
+        if (!autoRebalancer) {
+            return res.status(500).json({
+                success: false,
+                error: 'Auto-rebalancer not initialized'
+            })
+        }
+
+        autoRebalancer.stop()
+
+        res.json({
+            success: true,
+            message: 'Auto-rebalancer stopped successfully',
+            status: autoRebalancer.getStatus(),
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Force immediate check
+router.post('/auto-rebalancer/force-check', async (req, res) => {
+    try {
+        if (!autoRebalancer) {
+            return res.status(500).json({
+                success: false,
+                error: 'Auto-rebalancer not initialized'
+            })
+        }
+
+        await autoRebalancer.forceCheck()
+
+        res.json({
+            success: true,
+            message: 'Force check completed',
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Get auto-rebalancing history
+router.get('/auto-rebalancer/history', async (req, res) => {
+    try {
+        const portfolioId = req.query.portfolioId as string
+        const limit = parseInt(req.query.limit as string) || 50
+
+        let history
+        if (portfolioId) {
+            history = rebalanceHistoryService.getRecentAutoRebalances(portfolioId, limit)
+        } else {
+            history = rebalanceHistoryService.getAllAutoRebalances().slice(0, limit)
+        }
+
+        res.json({
+            success: true,
+            history,
+            count: history.length,
+            portfolioId: portfolioId || 'all',
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error),
+            history: []
+        })
+    }
+})
+
+// ================================
 // SYSTEM STATUS ROUTES
 // ================================
 
@@ -565,6 +732,10 @@ router.get('/system/status', async (req, res) => {
         // Check API health
         const prices = await reflectorService.getCurrentPrices()
         const priceSourcesHealthy = Object.keys(prices).length > 0
+
+        // Auto-rebalancer status
+        const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
+        const autoRebalancerStats = autoRebalancer ? autoRebalancer.getStatistics() : null
 
         res.json({
             success: true,
@@ -584,11 +755,16 @@ router.get('/system/status', async (req, res) => {
                 enabled: true,
                 alertsActive: Object.values(circuitBreakers).some((cb: any) => cb.isTriggered)
             },
+            autoRebalancer: {
+                status: autoRebalancerStatus,
+                statistics: autoRebalancerStats,
+                enabled: !!autoRebalancer
+            },
             services: {
                 priceFeeds: priceSourcesHealthy,
                 riskManagement: true,
                 webSockets: true,
-                autoRebalancing: true,
+                autoRebalancing: autoRebalancerStatus.isRunning,
                 stellarNetwork: true
             }
         })
@@ -719,6 +895,9 @@ router.get('/debug/env', async (req, res) => {
             apiKeySet: !!process.env.COINGECKO_API_KEY,
             apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0,
             apiKeyPreview: process.env.COINGECKO_API_KEY?.substring(0, 15) + '...' || 'Not Set',
+            autoRebalancerEnabled: !!autoRebalancer,
+            autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
+            enableAutoRebalancer: process.env.ENABLE_AUTO_REBALANCER,
             port: process.env.PORT,
             timestamp: new Date().toISOString()
         })
@@ -726,6 +905,38 @@ router.get('/debug/env', async (req, res) => {
         res.status(500).json({
             error: getErrorMessage(error),
             timestamp: new Date().toISOString()
+        })
+    }
+})
+
+// Test auto-rebalancer functionality
+router.get('/debug/auto-rebalancer-test', async (req, res) => {
+    try {
+        if (!autoRebalancer) {
+            return res.json({
+                success: false,
+                error: 'Auto-rebalancer not initialized',
+                autoRebalancerAvailable: false
+            })
+        }
+
+        const status = autoRebalancer.getStatus()
+        const statistics = autoRebalancer.getStatistics()
+        const portfolioCount = portfolioStorage.portfolios.size
+
+        res.json({
+            success: true,
+            autoRebalancerAvailable: true,
+            status,
+            statistics,
+            portfolioCount,
+            testTimestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error),
+            autoRebalancerAvailable: false
         })
     }
 })
