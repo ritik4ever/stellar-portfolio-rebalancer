@@ -7,6 +7,7 @@ import RebalanceHistory from './RebalanceHistory'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
+import { browserPriceService } from '../services/browserPriceService'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -18,6 +19,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [prices, setPrices] = useState<any>({})
     const [loading, setLoading] = useState(true)
     const [rebalancing, setRebalancing] = useState(false)
+    const [priceSource, setPriceSource] = useState<string>('loading...')
 
     useEffect(() => {
         if (publicKey) {
@@ -73,14 +75,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const fetchPrices = async () => {
         try {
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/prices`)
-            if (response.ok) {
-                const priceData = await response.json()
-                console.log('Fetched prices:', priceData)
-                setPrices(priceData)
-            }
+            console.log('Fetching prices using browser service...')
+            // Use browser price service directly
+            const priceData = await browserPriceService.getCurrentPrices()
+            console.log('Browser prices fetched:', priceData)
+
+            // Transform to expected format if needed
+            const transformedPrices: any = {}
+            Object.entries(priceData).forEach(([asset, data]) => {
+                transformedPrices[asset] = {
+                    price: data.price,
+                    change: data.change || 0
+                }
+            })
+
+            setPrices(transformedPrices)
+            setPriceSource('CoinGecko Browser API')
         } catch (error) {
-            console.error('Failed to fetch prices:', error)
+            console.error('Failed to fetch prices from browser service:', error)
+            setPriceSource('Fallback Data')
+
+            // Fallback to demo prices
+            setPrices({
+                XLM: { price: 0.354, change: -1.86 },
+                USDC: { price: 1.0, change: -0.01 },
+                BTC: { price: 110000, change: -1.19 },
+                ETH: { price: 4200, change: -1.50 }
+            })
         }
     }
 
@@ -97,12 +118,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 { asset: 'USDC', target: 60, current: 59.8, amount: 5980 }
             ]
         })
-        setPrices({
-            XLM: { price: 0.354, change: -1.86 },
-            USDC: { price: 1.0, change: -0.01 },
-            BTC: { price: 110000, change: -1.19 },
-            ETH: { price: 4200, change: -1.50 }
-        })
+
+        // Load demo prices and try to get real prices
+        fetchPrices()
         setLoading(false)
     }
 
@@ -265,11 +283,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             </div>
 
             <div className="p-6 max-w-7xl mx-auto">
+
+
                 {/* Debug Info */}
                 {process.env.NODE_ENV === 'development' && (
                     <div className="bg-gray-100 p-2 rounded mb-4 text-xs">
                         <div>Portfolio ID: {portfolioData?.id}</div>
                         <div>Allocations: {JSON.stringify(allocationData)}</div>
+                        <div>Price Source: {priceSource}</div>
                     </div>
                 )}
 
@@ -281,9 +302,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 <h2 className="text-lg font-semibold text-gray-900">Portfolio Value</h2>
                                 <div className="flex items-center space-x-2 text-sm text-gray-500">
                                     <span>Last updated: just now</span>
-                                    {prices.XLM && (
-                                        <span className="text-green-600">Live prices</span>
-                                    )}
+                                    <span className={`px-2 py-1 rounded text-xs ${priceSource.includes('Browser') ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                                        }`}>
+                                        {priceSource}
+                                    </span>
                                 </div>
                             </div>
                             <div className="mb-4">
