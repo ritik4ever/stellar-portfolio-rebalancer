@@ -29,28 +29,28 @@ export const API_CONFIG = {
     WEBSOCKET_URL: getBaseUrl().replace('http', 'ws'),
 
     // Request timeout settings
-    TIMEOUT: 10000, // 10 seconds
+    TIMEOUT: 15000, // Increased to 15 seconds for production
     RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 1000, // 1 second
 
-    // Endpoints
+    // Endpoints - FIXED: Made consistent with backend routes
     ENDPOINTS: {
         // Basic endpoints
         HEALTH: '/health',
         ROOT: '/',
 
-        // Portfolio endpoints
-        PORTFOLIO: '/portfolio',
-        USER_PORTFOLIOS: (address: string) => `/user/${address}/portfolios`,
-        PORTFOLIO_DETAIL: (id: string) => `/portfolio/${id}`,
-        PORTFOLIO_REBALANCE: (id: string) => `/portfolio/${id}/rebalance`,
-        PORTFOLIO_REBALANCE_STATUS: (id: string) => `/portfolio/${id}/rebalance-status`,
+        // Portfolio endpoints - Note: backend mounts these under both /api and root
+        PORTFOLIO: '/api/portfolio',
+        USER_PORTFOLIOS: (address: string) => `/api/user/${address}/portfolios`,
+        PORTFOLIO_DETAIL: (id: string) => `/api/portfolio/${id}`,
+        PORTFOLIO_REBALANCE: (id: string) => `/api/portfolio/${id}/rebalance`,
+        PORTFOLIO_REBALANCE_STATUS: (id: string) => `/api/portfolio/${id}/rebalance-status`,
 
         // Price endpoints
-        PRICES: '/prices',
+        PRICES: '/api/prices',
         PRICES_ENHANCED: '/api/prices/enhanced',
-        MARKET_DETAILS: (asset: string) => `/market/${asset}/details`,
-        PRICE_CHART: (asset: string) => `/market/${asset}/chart`,
+        MARKET_DETAILS: (asset: string) => `/api/market/${asset}/details`,
+        PRICE_CHART: (asset: string) => `/api/market/${asset}/chart`,
 
         // Rebalance history endpoints
         REBALANCE_HISTORY: '/api/rebalance/history',
@@ -59,6 +59,10 @@ export const API_CONFIG = {
         // Risk management endpoints
         RISK_METRICS: (portfolioId: string) => `/api/risk/metrics/${portfolioId}`,
         RISK_CHECK: (portfolioId: string) => `/api/risk/check/${portfolioId}`,
+
+        // Test endpoints for debugging
+        TEST_CORS: '/test/cors',
+        TEST_COINGECKO: '/test/coingecko',
     }
 }
 
@@ -86,8 +90,11 @@ export const apiRequest = async <T>(
         headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
+            'Origin': window.location.origin, // Explicitly set origin for CORS
             ...options.headers,
         },
+        credentials: 'include', // Important for CORS with credentials
+        mode: 'cors', // Explicitly set CORS mode
         ...options,
     }
 
@@ -98,12 +105,14 @@ export const apiRequest = async <T>(
 
     try {
         console.log(`API Request: ${options.method || 'GET'} ${url}`)
+        console.log('Request headers:', defaultOptions.headers)
 
         const response = await fetch(url, defaultOptions)
         clearTimeout(timeoutId)
 
         // Log response details
         console.log(`API Response: ${response.status} ${response.statusText}`)
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()))
 
         if (!response.ok) {
             // Try to get error message from response
@@ -113,6 +122,11 @@ export const apiRequest = async <T>(
                 errorMessage = errorData.error || errorData.message || errorMessage
             } catch {
                 // If we can't parse error as JSON, use status text
+            }
+
+            // Special handling for CORS errors
+            if (response.status === 0 || response.type === 'opaque') {
+                errorMessage = 'CORS error - check backend configuration'
             }
 
             throw new Error(errorMessage)
@@ -135,15 +149,25 @@ export const apiRequest = async <T>(
 
         // Handle network errors and timeouts
         if (error instanceof Error) {
+            console.error(`API Request failed: ${url}`, error.message)
+
             if (error.name === 'AbortError') {
                 console.error(`API Request timeout: ${url}`)
                 throw new Error(`Request timeout after ${API_CONFIG.TIMEOUT}ms`)
             }
 
-            console.error(`API Request failed: ${url}`, error.message)
+            // Special handling for CORS errors
+            if (error.message.includes('CORS') || error.message.includes('fetch')) {
+                console.error('CORS Error Details:', {
+                    url,
+                    origin: window.location.origin,
+                    userAgent: navigator.userAgent
+                })
+            }
 
-            // Retry logic for network errors
+            // Retry logic for network errors (but not CORS errors)
             if (retryCount < API_CONFIG.RETRY_ATTEMPTS &&
+                !error.message.includes('CORS') &&
                 (error.message.includes('fetch') || error.message.includes('network'))) {
                 console.log(`Retrying request (${retryCount + 1}/${API_CONFIG.RETRY_ATTEMPTS})...`)
                 await new Promise(resolve => setTimeout(resolve, API_CONFIG.RETRY_DELAY * (retryCount + 1)))
@@ -227,6 +251,31 @@ export const checkApiHealth = async (): Promise<boolean> => {
     } catch (error) {
         console.error('API health check failed:', error)
         return false
+    }
+}
+
+// Debug functions for testing connectivity
+export const testCors = async (): Promise<boolean> => {
+    try {
+        console.log('Testing CORS connectivity...')
+        const response = await apiRequest<any>(API_CONFIG.ENDPOINTS.TEST_CORS)
+        console.log('CORS test successful:', response)
+        return true
+    } catch (error) {
+        console.error('CORS test failed:', error)
+        return false
+    }
+}
+
+export const testCoinGecko = async (): Promise<any> => {
+    try {
+        console.log('Testing CoinGecko API...')
+        const response = await apiRequest<any>(API_CONFIG.ENDPOINTS.TEST_COINGECKO)
+        console.log('CoinGecko test result:', response)
+        return response
+    } catch (error) {
+        console.error('CoinGecko test failed:', error)
+        throw error
     }
 }
 

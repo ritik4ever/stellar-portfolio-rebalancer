@@ -10,19 +10,52 @@ import { logger } from './utils/logger.js'
 const app = express()
 const port = process.env.PORT || 3001
 
-app.use(cors({
-    origin: [
-        'http://localhost:3000',  // Local frontend
-        'http://localhost:5173',  // Vite dev server
-        'https://stellar-portfolio-rebalancer.vercel.app', // Your actual Vercel domain
-        'https://*.vercel.app',   // Any Vercel preview deployments
-        'https://stellar-portfolio-rebalancer.onrender.com' // Your backend domain (for self-requests)
-    ],
+// FIXED CORS Configuration with proper TypeScript types
+const corsOptions = {
+    origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+        // Allow requests with no origin (mobile apps, etc.)
+        if (!origin) return callback(null, true)
+
+        const allowedOrigins = [
+            'http://localhost:3000',
+            'http://localhost:5173',
+            'https://stellar-portfolio-rebalancer.vercel.app',
+            'https://stellar-portfolio-rebalancer-git-main-ritik4evers-projects.vercel.app',
+            'https://stellar-portfolio-rebalancer-ho6hzc0ht-ritik4evers-projects.vercel.app',
+            'https://stellar-portfolio-rebalancer.onrender.com'
+        ]
+
+        // Check exact matches first
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true)
+        }
+
+        // Check Vercel patterns
+        if (origin.match(/^https:\/\/stellar-portfolio-rebalancer.*\.vercel\.app$/) ||
+            origin.match(/^https:\/\/.*-ritik4evers-projects\.vercel\.app$/)) {
+            return callback(null, true)
+        }
+
+        // Log rejected origins for debugging
+        console.log('CORS rejected origin:', origin)
+        callback(new Error('Not allowed by CORS'))
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    optionsSuccessStatus: 200 // For legacy browser support
-}))
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Accept',
+        'Origin',
+        'X-Requested-With'
+    ],
+    optionsSuccessStatus: 200
+}
+
+app.use(cors(corsOptions))
+
+// Explicit preflight handling
+app.options('*', cors(corsOptions))
 
 // Middleware
 app.use(express.json({ limit: '10mb' }))
@@ -32,6 +65,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use((req, res, next) => {
     logger.info(`${req.method} ${req.url}`, {
         userAgent: req.get('User-Agent'),
+        origin: req.get('Origin'),
         ip: req.ip
     })
     next()
@@ -50,6 +84,7 @@ app.get('/', (req, res) => {
         status: 'running',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
+        origin: req.get('Origin'),
         features: {
             rebalancing: true,
             riskManagement: true,
@@ -66,8 +101,60 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         memory: process.memoryUsage(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        origin: req.get('Origin')
     })
+})
+
+// CORS test endpoint
+app.get('/test/cors', (req, res) => {
+    res.json({
+        success: true,
+        message: 'CORS is working!',
+        origin: req.get('Origin'),
+        timestamp: new Date().toISOString(),
+        headers: {
+            origin: req.get('Origin'),
+            userAgent: req.get('User-Agent')
+        }
+    })
+})
+
+// CoinGecko test endpoint
+app.get('/test/coingecko', async (req, res) => {
+    try {
+        console.log('Testing CoinGecko API...')
+        console.log('Environment variables:', {
+            hasApiKey: !!process.env.COINGECKO_API_KEY,
+            nodeEnv: process.env.NODE_ENV
+        })
+
+        // Import ReflectorService dynamically
+        const { ReflectorService } = await import('./services/reflector.js')
+        const reflector = new ReflectorService()
+
+        // Clear cache to force fresh request
+        reflector.clearCache()
+
+        const prices = await reflector.getCurrentPrices()
+
+        res.json({
+            success: true,
+            apiKey: !!process.env.COINGECKO_API_KEY,
+            environment: process.env.NODE_ENV,
+            prices,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        console.error('CoinGecko test failed:', error)
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        res.status(500).json({
+            success: false,
+            error: errorMessage,
+            apiKey: !!process.env.COINGECKO_API_KEY,
+            environment: process.env.NODE_ENV
+        })
+    }
 })
 
 // Error handling middleware (must be last)

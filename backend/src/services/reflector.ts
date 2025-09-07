@@ -6,6 +6,7 @@ export class ReflectorService {
     private coinGeckoIds: Record<string, string>
     private priceCache: Map<string, { data: PriceData, timestamp: number }>
     private readonly CACHE_DURATION = process.env.NODE_ENV === 'production' ? 600000 : 300000 // 10 min vs 5 min
+
     private lastRequestTime = 0
     private readonly MIN_REQUEST_INTERVAL = 60000 // 1 minute instead of 10 seconds
 
