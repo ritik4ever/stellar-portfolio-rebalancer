@@ -90,22 +90,13 @@ export class ReflectorService {
             const apiKey = this.coinGeckoApiKey
 
             // FIXED: Use correct API endpoints
-        const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
-
+            const baseUrl = 'https://api.coingecko.com/api/v3'
             console.log('[DEBUG] Using API:', apiKey ? 'CoinGecko Pro' : 'CoinGecko Free')
             console.log('[DEBUG] Base URL:', baseUrl)
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
                 'User-Agent': 'StellarPortfolioRebalancer/1.0'
-            }
-
-            // FIXED: Proper API key header for Pro API
-            if (apiKey && apiKey.trim()) {
-                headers['x-cg-pro-api-key'] = apiKey.trim()
-                console.log('[DEBUG] Using Pro API key (length:', apiKey.length, ')')
             }
 
             // FIXED: Build correct coin IDs
