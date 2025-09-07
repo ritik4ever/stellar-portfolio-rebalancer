@@ -90,10 +90,9 @@ export class ReflectorService {
             const apiKey = this.coinGeckoApiKey
 
             // FIXED: Use correct API endpoints
-           const useFreeTier = process.env.USE_FREE_API === 'true'
-const baseUrl = (apiKey && !useFreeTier) 
-    ? 'https://pro-api.coingecko.com/api/v3'
-    : 'https://api.coingecko.com/api/v3'
+        const baseUrl = apiKey && apiKey.trim()
+                ? 'https://pro-api.coingecko.com/api/v3'
+                : 'https://api.coingecko.com/api/v3'
 
             console.log('[DEBUG] Using API:', apiKey ? 'CoinGecko Pro' : 'CoinGecko Free')
             console.log('[DEBUG] Base URL:', baseUrl)
