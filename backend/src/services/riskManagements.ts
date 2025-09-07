@@ -53,7 +53,7 @@ export class RiskManagementService {
         Object.entries(prices).forEach(([asset, priceData]) => {
             // Update price history
             let history = this.priceHistory.get(asset) || []
-            history.push({ price: priceData.price, timestamp })
+            history.push({ price: (priceData as any).price, timestamp })
 
             // Keep only recent history
             if (history.length > this.MAX_PRICE_HISTORY) {

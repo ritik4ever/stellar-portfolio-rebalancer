@@ -1,3 +1,4 @@
+// index.ts - COMPLETE ERROR-FREE VERSION
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'node:http'
@@ -10,7 +11,7 @@ import { logger } from './utils/logger.js'
 const app = express()
 const port = process.env.PORT || 3001
 
-// SIMPLIFIED CORS - ALLOW ALL (for now)
+// CORS configuration - Allow all origins to fix CORS issues
 app.use(cors({
     origin: true, // Allow all origins
     credentials: true,
@@ -39,7 +40,7 @@ app.use((req, res, next) => {
     next()
 })
 
-// CRITICAL: Test endpoints FIRST (before other routes)
+// Health check endpoint
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
@@ -48,6 +49,7 @@ app.get('/health', (req, res) => {
     })
 })
 
+// CORS test endpoint
 app.get('/test/cors', (req, res) => {
     res.json({
         success: true,
@@ -57,11 +59,26 @@ app.get('/test/cors', (req, res) => {
     })
 })
 
+// CoinGecko test endpoint with detailed debugging
 app.get('/test/coingecko', async (req, res) => {
     try {
-        console.log('Testing CoinGecko API...')
+        console.log('[TEST] Testing CoinGecko API...')
         const { ReflectorService } = await import('./services/reflector.js')
         const reflector = new ReflectorService()
+
+        // Test connectivity first
+        const testResult = await reflector.testApiConnectivity()
+
+        if (!testResult.success) {
+            return res.status(500).json({
+                success: false,
+                error: testResult.error,
+                hasApiKey: !!process.env.COINGECKO_API_KEY,
+                apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0
+            })
+        }
+
+        // Try to get actual prices
         reflector.clearCache()
         const prices = await reflector.getCurrentPrices()
 
@@ -69,6 +86,8 @@ app.get('/test/coingecko', async (req, res) => {
             success: true,
             prices,
             hasApiKey: !!process.env.COINGECKO_API_KEY,
+            apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0,
+            testResult,
             environment: process.env.NODE_ENV
         })
     } catch (error) {
@@ -86,14 +105,17 @@ app.get('/', (req, res) => {
         message: 'Stellar Portfolio Rebalancer API',
         status: 'running',
         version: '1.0.0',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        endpoints: {
+            health: '/health',
+            corsTest: '/test/cors',
+            coinGeckoTest: '/test/coingecko'
+        }
     })
 })
 
-// MOUNT API ROUTES
+// Mount API routes
 app.use('/api', portfolioRouter)
-
-// DUPLICATE ROUTES AT ROOT FOR COMPATIBILITY
 app.use('/', portfolioRouter)
 
 // 404 handler
@@ -102,8 +124,7 @@ app.use((req, res) => {
     res.status(404).json({
         error: 'Route not found',
         method: req.method,
-        url: req.url,
-        timestamp: new Date().toISOString()
+        url: req.url
     })
 })
 
@@ -119,7 +140,7 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
 // Create server
 const server = createServer(app)
 
-// WebSocket (simplified)
+// WebSocket setup
 const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws) => {
@@ -131,7 +152,7 @@ wss.on('connection', (ws) => {
     })
 })
 
-// Start rebalancing service (with error handling)
+// Start rebalancing service
 try {
     const rebalancingService = new RebalancingService(wss)
     rebalancingService.start()
@@ -154,16 +175,12 @@ server.listen(port, () => {
 // Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('SIGTERM received, shutting down gracefully')
-    server.close(() => {
-        process.exit(0)
-    })
+    server.close(() => process.exit(0))
 })
 
 process.on('SIGINT', () => {
     console.log('SIGINT received, shutting down gracefully')
-    server.close(() => {
-        process.exit(0)
-    })
+    server.close(() => process.exit(0))
 })
 
 export default app

@@ -159,7 +159,7 @@ export class RebalanceHistoryService {
     private determinePriceDirection(prices?: PricesMap): 'up' | 'down' {
         if (!prices) return 'down'
 
-        const changes = Object.values(prices).map(p => p.change || 0)
+        const changes = Object.values(prices).map((p: any) => p.change || 0)
         const averageChange = changes.reduce((sum, change) => sum + change, 0) / changes.length
 
         return averageChange >= 0 ? 'up' : 'down'

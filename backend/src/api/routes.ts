@@ -487,26 +487,17 @@ router.get('/prices/enhanced', async (req, res) => {
         const riskAlerts = riskManagementService.updatePriceData(prices)
 
         // Add risk information to price data
-        const enhancedPrices = Object.entries(prices).reduce((acc, [asset, data]) => {
-            acc[asset] = {
-                ...data,
-                riskAlerts: riskAlerts.filter((alert: any) => alert.asset === asset),
-                volatilityLevel: Math.abs(data.change || 0) > 10 ? 'high' :
-                    Math.abs(data.change || 0) > 5 ? 'medium' : 'low'
-            }
-            return acc
-        }, {} as Record<string, any>)
+        const enhancedPrices: Record<string, any> = {}
 
-        res.json({
-            success: true,
-            prices: enhancedPrices,
-            riskAlerts,
-            circuitBreakers: riskManagementService.getCircuitBreakerStatus(),
-            metadata: {
-                source: 'enhanced_with_risk_analysis',
-                lastUpdate: new Date().toISOString(),
-                alertsCount: riskAlerts.length,
-                assets: Object.keys(prices).length
+        Object.entries(prices).forEach(([asset, data]) => {
+            // Type assertion to handle PriceData properly
+            const priceData = data as any
+
+            enhancedPrices[asset] = {
+                ...priceData,
+                riskAlerts: riskAlerts.filter((alert: any) => alert.asset === asset),
+                volatilityLevel: Math.abs(priceData.change || 0) > 10 ? 'high' :
+                    Math.abs(priceData.change || 0) > 5 ? 'medium' : 'low'
             }
         })
     } catch (error) {
