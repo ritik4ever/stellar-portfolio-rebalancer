@@ -286,7 +286,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
 
                 {/* Debug Info */}
-                {process.env.NODE_ENV === 'development' && (
+                {(import.meta as any).env?.DEV && (
                     <div className="bg-gray-100 p-2 rounded mb-4 text-xs">
                         <div>Portfolio ID: {portfolioData?.id}</div>
                         <div>Allocations: {JSON.stringify(allocationData)}</div>

@@ -1,21 +1,27 @@
-// API Configuration with environment detection and browser price service
 import { browserPriceService } from '../services/browserPriceService'
 
 const getBaseUrl = (): string => {
+    // In Vite, environment variables need VITE_ prefix to be available in browser
+    const viteEnv = (import.meta as any).env
+    if (viteEnv?.VITE_API_URL) {
+        return viteEnv.VITE_API_URL
+    }
+
     if (typeof window !== 'undefined') {
         const hostname = window.location.hostname
         const isDev = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')
 
         if (isDev) {
-            const currentPort = window.location.port
-            if (currentPort === '3000' || currentPort === '5173') {
-                return 'http://localhost:3001'
-            }
-            return `http://localhost:3001`
+            return 'http://localhost:3001'
         }
+
+        // Production fallback
         return 'https://stellar-portfolio-rebalancer.onrender.com'
     }
-    return process.env.NODE_ENV === 'production'
+
+    // Server-side fallback
+    const isProd = viteEnv?.PROD
+    return isProd
         ? 'https://stellar-portfolio-rebalancer.onrender.com'
         : 'http://localhost:3001'
 }
@@ -52,6 +58,15 @@ export const API_CONFIG = {
     }
 }
 
+// Debug logging
+const viteEnv = (import.meta as any).env
+console.log('API Configuration:', {
+    baseUrl: API_CONFIG.BASE_URL,
+    isDev: !viteEnv?.PROD,
+    envApiUrl: viteEnv?.VITE_API_URL,
+    mode: viteEnv?.MODE
+})
+
 export const createApiUrl = (endpoint: string, params?: Record<string, string>): string => {
     let url = `${API_CONFIG.BASE_URL}${endpoint}`
     if (params) {
@@ -61,7 +76,7 @@ export const createApiUrl = (endpoint: string, params?: Record<string, string>):
     return url
 }
 
-// Enhanced fetch wrapper that can use browser prices when needed
+// Enhanced fetch wrapper with better error handling
 export const apiRequest = async <T>(
     endpoint: string,
     options: RequestInit = {},
@@ -81,14 +96,25 @@ export const apiRequest = async <T>(
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_CONFIG.BASE_URL}${endpoint}`
 
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+    // Add origin header only in browser context
+    if (typeof window !== 'undefined') {
+        headers['Origin'] = window.location.origin
+    }
+
+    // Merge with any custom headers
+    if (options.headers) {
+        Object.assign(headers, options.headers)
+    }
+
     const defaultOptions: RequestInit = {
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            ...options.headers,
-        },
-        credentials: 'include',
+        headers,
         mode: 'cors',
+        credentials: 'omit', // Changed from 'include' to avoid CORS issues
         ...options,
     }
 
@@ -98,11 +124,13 @@ export const apiRequest = async <T>(
 
     try {
         console.log(`API Request: ${options.method || 'GET'} ${url}`)
+        console.log('Request headers:', headers)
 
         const response = await fetch(url, defaultOptions)
         clearTimeout(timeoutId)
 
         console.log(`API Response: ${response.status} ${response.statusText}`)
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()))
 
         if (!response.ok) {
             let errorMessage = `HTTP ${response.status}: ${response.statusText}`
@@ -139,7 +167,7 @@ export const apiRequest = async <T>(
             // Retry logic (not for browser price service)
             if (retryCount < API_CONFIG.RETRY_ATTEMPTS &&
                 !endpoint.includes('/prices') &&
-                (error.message.includes('fetch') || error.message.includes('network'))) {
+                (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('Failed to fetch'))) {
                 console.log(`Retrying request (${retryCount + 1}/${API_CONFIG.RETRY_ATTEMPTS})...`)
                 await new Promise(resolve => setTimeout(resolve, API_CONFIG.RETRY_DELAY * (retryCount + 1)))
                 return apiRequest<T>(endpoint, options, retryCount + 1)
