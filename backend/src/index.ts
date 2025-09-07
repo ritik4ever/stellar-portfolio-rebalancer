@@ -10,16 +10,18 @@ import { logger } from './utils/logger.js'
 const app = express()
 const port = process.env.PORT || 3001
 
-// Enhanced CORS configuration
 app.use(cors({
     origin: [
         'http://localhost:3000',  // Local frontend
         'http://localhost:5173',  // Vite dev server
-        'https://your-vercel-app.vercel.app'  // Replace with your actual Vercel URL
+        'https://stellar-portfolio-rebalancer.vercel.app', // Your actual Vercel domain
+        'https://*.vercel.app',   // Any Vercel preview deployments
+        'https://stellar-portfolio-rebalancer.onrender.com' // Your backend domain (for self-requests)
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    optionsSuccessStatus: 200 // For legacy browser support
 }))
 
 // Middleware
