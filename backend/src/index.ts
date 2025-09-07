@@ -10,428 +10,160 @@ import { logger } from './utils/logger.js'
 const app = express()
 const port = process.env.PORT || 3001
 
-// Production-ready CORS configuration
-const corsOptions: cors.CorsOptions = {
-    origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-        // Allow requests with no origin (mobile apps, Postman, etc.)
-        if (!origin) {
-            return callback(null, true)
-        }
-
-        const allowedOrigins = [
-            'http://localhost:3000',
-            'http://localhost:5173',
-            'https://stellar-portfolio-rebalancer.vercel.app',
-            'https://stellar-portfolio-rebalancer-git-main-ritik4evers-projects.vercel.app',
-            'https://stellar-portfolio-rebalancer-ho6hzc0ht-ritik4evers-projects.vercel.app',
-            'https://stellar-portfolio-rebalancer.onrender.com'
-        ]
-
-        // Check exact matches first
-        if (allowedOrigins.includes(origin)) {
-            return callback(null, true)
-        }
-
-        // Check Vercel pattern matches
-        if (origin.match(/^https:\/\/stellar-portfolio-rebalancer.*\.vercel\.app$/) ||
-            origin.match(/^https:\/\/.*-ritik4evers-projects\.vercel\.app$/)) {
-            return callback(null, true)
-        }
-
-        // For production debugging - log rejected origins
-        console.log('CORS rejected origin:', origin)
-        return callback(null, false)
-    },
+// SIMPLIFIED CORS - ALLOW ALL (for now)
+app.use(cors({
+    origin: true, // Allow all origins
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
-    allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'Accept',
-        'Origin',
-        'X-Requested-With',
-        'Cache-Control',
-        'Pragma'
-    ],
-    exposedHeaders: ['Content-Length', 'X-Requested-With'],
-    optionsSuccessStatus: 200,
-    preflightContinue: false
-}
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
+}))
 
-// Apply CORS
-app.use(cors(corsOptions))
+// Handle preflight requests
+app.options('*', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*')
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With')
+    res.status(200).end()
+})
 
-// Explicit preflight handler
-app.options('*', cors(corsOptions))
-
-// Trust proxy for proper IP detection when behind reverse proxy
+// Trust proxy
 app.set('trust proxy', 1)
 
-// Body parsing middleware
-app.use(express.json({
-    limit: '10mb',
-    strict: true,
-    type: 'application/json'
-}))
-app.use(express.urlencoded({
-    extended: true,
-    limit: '10mb',
-    parameterLimit: 1000
-}))
+// Body parsing
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
-// Security headers middleware
+// Basic logging
 app.use((req, res, next) => {
-    res.header('X-Content-Type-Options', 'nosniff')
-    res.header('X-Frame-Options', 'DENY')
-    res.header('X-XSS-Protection', '1; mode=block')
+    console.log(`${req.method} ${req.url}`)
     next()
 })
 
-// Request logging middleware
-app.use((req, res, next) => {
-    const start = Date.now()
-
-    res.on('finish', () => {
-        const duration = Date.now() - start
-        logger.info(`${req.method} ${req.url} ${res.statusCode}`, {
-            duration: `${duration}ms`,
-            userAgent: req.get('User-Agent'),
-            origin: req.get('Origin'),
-            ip: req.ip,
-            contentLength: res.get('Content-Length')
-        })
-    })
-
-    next()
-})
-
-// Health check endpoint (before routes)
+// CRITICAL: Test endpoints FIRST (before other routes)
 app.get('/health', (req, res) => {
-    res.status(200).json({
+    res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: {
-            used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-            total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
-        },
-        environment: process.env.NODE_ENV || 'development',
-        version: '1.0.0',
-        origin: req.get('Origin')
+        environment: process.env.NODE_ENV || 'development'
     })
 })
 
-// CORS test endpoint
 app.get('/test/cors', (req, res) => {
-    res.status(200).json({
+    res.json({
         success: true,
-        message: 'CORS is working perfectly!',
+        message: 'CORS working!',
         origin: req.get('Origin'),
-        timestamp: new Date().toISOString(),
-        headers: {
-            origin: req.get('Origin'),
-            userAgent: req.get('User-Agent'),
-            host: req.get('Host')
-        },
-        environment: process.env.NODE_ENV
+        timestamp: new Date().toISOString()
     })
 })
 
-// CoinGecko API test endpoint
 app.get('/test/coingecko', async (req, res) => {
     try {
-        console.log('[TEST] Testing CoinGecko API...')
-        console.log('[TEST] Environment check:', {
-            hasApiKey: !!process.env.COINGECKO_API_KEY,
-            nodeEnv: process.env.NODE_ENV,
-            apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0
-        })
-
-        // Dynamic import to ensure fresh instance
+        console.log('Testing CoinGecko API...')
         const { ReflectorService } = await import('./services/reflector.js')
         const reflector = new ReflectorService()
-
-        // Clear cache to force fresh request
         reflector.clearCache()
-
-        // Test the API
         const prices = await reflector.getCurrentPrices()
 
-        console.log('[TEST] CoinGecko test successful')
-
-        res.status(200).json({
+        res.json({
             success: true,
-            message: 'CoinGecko API is working!',
-            apiKey: !!process.env.COINGECKO_API_KEY,
-            apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0,
-            environment: process.env.NODE_ENV,
             prices,
-            priceCount: Object.keys(prices).length,
-            timestamp: new Date().toISOString()
+            hasApiKey: !!process.env.COINGECKO_API_KEY,
+            environment: process.env.NODE_ENV
         })
     } catch (error) {
-        console.error('[TEST] CoinGecko test failed:', error)
-        const errorMessage = error instanceof Error ? error.message : String(error)
-
         res.status(500).json({
             success: false,
-            message: 'CoinGecko API test failed',
-            error: errorMessage,
-            apiKey: !!process.env.COINGECKO_API_KEY,
-            apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0,
-            environment: process.env.NODE_ENV,
-            timestamp: new Date().toISOString()
+            error: error instanceof Error ? error.message : String(error),
+            hasApiKey: !!process.env.COINGECKO_API_KEY
         })
     }
 })
 
 // Root route
 app.get('/', (req, res) => {
-    res.status(200).json({
+    res.json({
         message: 'Stellar Portfolio Rebalancer API',
         status: 'running',
         version: '1.0.0',
-        timestamp: new Date().toISOString(),
-        origin: req.get('Origin'),
-        environment: process.env.NODE_ENV || 'development',
-        features: {
-            rebalancing: true,
-            riskManagement: true,
-            realTimePrices: true,
-            webSockets: true,
-            cors: true,
-            healthCheck: true
-        },
-        endpoints: {
-            health: '/health',
-            corsTest: '/test/cors',
-            coinGeckoTest: '/test/coingecko',
-            api: '/api/*'
-        }
+        timestamp: new Date().toISOString()
     })
 })
 
-// API Routes
+// MOUNT API ROUTES
 app.use('/api', portfolioRouter)
 
-// Mount routes at root level for backward compatibility
+// DUPLICATE ROUTES AT ROOT FOR COMPATIBILITY
 app.use('/', portfolioRouter)
 
-// 404 handler for unknown routes
-app.use(notFound)
+// 404 handler
+app.use((req, res) => {
+    console.log(`404 - Route not found: ${req.method} ${req.url}`)
+    res.status(404).json({
+        error: 'Route not found',
+        method: req.method,
+        url: req.url,
+        timestamp: new Date().toISOString()
+    })
+})
 
-// Global error handler
-app.use(errorHandler)
+// Error handler
+app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('Server error:', error)
+    res.status(500).json({
+        error: 'Internal server error',
+        message: error.message || 'Unknown error'
+    })
+})
 
-// Create HTTP server
+// Create server
 const server = createServer(app)
 
-// WebSocket server configuration
-const wss = new WebSocketServer({
-    server,
-    clientTracking: true,
-    maxPayload: 16 * 1024 * 1024, // 16MB
-    perMessageDeflate: {
-        zlibDeflateOptions: {
-            level: 3
-        }
-    }
-})
+// WebSocket (simplified)
+const wss = new WebSocketServer({ server })
 
-// WebSocket connection handling
-wss.on('connection', (ws, req) => {
-    const clientId = Math.random().toString(36).substring(7)
-    const clientIP = req.socket.remoteAddress
+wss.on('connection', (ws) => {
+    console.log('WebSocket connection established')
+    ws.send(JSON.stringify({ type: 'connection', message: 'Connected' }))
 
-    logger.info('WebSocket connection established', {
-        clientId,
-        ip: clientIP,
-        userAgent: req.headers['user-agent'],
-        origin: req.headers.origin
-    })
-
-    // Send welcome message
-    ws.send(JSON.stringify({
-        type: 'connection',
-        message: 'Connected to Stellar Portfolio Rebalancer',
-        clientId,
-        timestamp: new Date().toISOString(),
-        serverTime: Date.now()
-    }))
-
-    // Handle incoming messages
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message.toString())
-            logger.info('WebSocket message received', { clientId, type: data.type })
-
-            // Echo back with server timestamp
-            ws.send(JSON.stringify({
-                type: 'echo',
-                originalMessage: data,
-                serverTimestamp: new Date().toISOString(),
-                clientId
-            }))
-        } catch (error) {
-            logger.warn('Invalid WebSocket message', {
-                clientId,
-                error: error instanceof Error ? error.message : String(error)
-            })
-
-            ws.send(JSON.stringify({
-                type: 'error',
-                message: 'Invalid message format',
-                timestamp: new Date().toISOString()
-            }))
-        }
-    })
-
-    // Handle client disconnect
-    ws.on('close', (code, reason) => {
-        logger.info('WebSocket connection closed', {
-            clientId,
-            code,
-            reason: reason.toString()
-        })
-    })
-
-    // Handle WebSocket errors
     ws.on('error', (error) => {
-        logger.error('WebSocket client error', {
-            clientId,
-            error: error.message
-        })
-    })
-
-    // Send periodic heartbeat
-    const heartbeat = setInterval(() => {
-        if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({
-                type: 'heartbeat',
-                timestamp: new Date().toISOString(),
-                serverTime: Date.now()
-            }))
-        } else {
-            clearInterval(heartbeat)
-        }
-    }, 30000) // Every 30 seconds
-
-    // Cleanup on close
-    ws.on('close', () => {
-        clearInterval(heartbeat)
+        console.error('WebSocket error:', error)
     })
 })
 
-// WebSocket server error handling
-wss.on('error', (error) => {
-    logger.error('WebSocket server error:', error)
-})
-
-// Initialize rebalancing service
-let rebalancingService: RebalancingService
+// Start rebalancing service (with error handling)
 try {
-    rebalancingService = new RebalancingService(wss)
+    const rebalancingService = new RebalancingService(wss)
     rebalancingService.start()
-
-    logger.info('Rebalancing service initialized successfully', {
-        features: {
-            riskManagement: true,
-            automaticRebalancing: true,
-            circuitBreakers: true,
-            realTimeMonitoring: true
-        }
-    })
+    console.log('Rebalancing service started')
 } catch (error) {
-    logger.error('Failed to initialize rebalancing service:', error)
+    console.error('Failed to start rebalancing service:', error)
 }
 
 // Start server
 server.listen(port, () => {
-    logger.info('🚀 Stellar Portfolio Rebalancer API started successfully', {
-        port: Number(port),
-        environment: process.env.NODE_ENV || 'development',
-        timestamp: new Date().toISOString(),
-        nodeVersion: process.version,
-        features: [
-            'Portfolio Management',
-            'Risk Management',
-            'Automatic Rebalancing',
-            'Real-time Price Feeds',
-            'WebSocket Support',
-            'Circuit Breakers',
-            'CORS Enabled',
-            'Health Monitoring'
-        ],
-        endpoints: {
-            health: `http://localhost:${port}/health`,
-            corsTest: `http://localhost:${port}/test/cors`,
-            coinGeckoTest: `http://localhost:${port}/test/coingecko`
-        }
-    })
+    console.log(`🚀 Server running on port ${port}`)
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`)
+    console.log(`CoinGecko API Key: ${!!process.env.COINGECKO_API_KEY ? 'SET' : 'NOT SET'}`)
+    console.log('Test endpoints:')
+    console.log(`  Health: http://localhost:${port}/health`)
+    console.log(`  CORS: http://localhost:${port}/test/cors`)
+    console.log(`  CoinGecko: http://localhost:${port}/test/coingecko`)
 })
 
-// Graceful shutdown handling
-const gracefulShutdown = (signal: string) => {
-    logger.info(`${signal} received, initiating graceful shutdown...`)
-
-    // Close WebSocket connections gracefully
-    wss.clients.forEach(client => {
-        if (client.readyState === client.OPEN) {
-            client.send(JSON.stringify({
-                type: 'server_shutdown',
-                message: 'Server is shutting down gracefully',
-                timestamp: new Date().toISOString()
-            }))
-            client.close(1000, 'Server shutdown')
-        }
-    })
-
-    // Stop rebalancing service
-    if (rebalancingService) {
-        try {
-            // Assuming the service has a stop method
-            logger.info('Stopping rebalancing service...')
-        } catch (error) {
-            logger.error('Error stopping rebalancing service:', error)
-        }
-    }
-
-    // Close HTTP server
-    server.close((err) => {
-        if (err) {
-            logger.error('Error during server shutdown:', err)
-            process.exit(1)
-        }
-
-        logger.info('Server shut down successfully')
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully')
+    server.close(() => {
         process.exit(0)
     })
-
-    // Force exit after 15 seconds if graceful shutdown fails
-    setTimeout(() => {
-        logger.warn('Forcing shutdown after timeout')
-        process.exit(1)
-    }, 15000)
-}
-
-// Process signal handlers
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
-process.on('SIGINT', () => gracefulShutdown('SIGINT'))
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-    logger.error('Uncaught Exception - shutting down:', error)
-    gracefulShutdown('UNCAUGHT_EXCEPTION')
 })
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-    logger.error('Unhandled Promise Rejection - shutting down:', {
-        promise: String(promise),
-        reason: String(reason)
+process.on('SIGINT', () => {
+    console.log('SIGINT received, shutting down gracefully')
+    server.close(() => {
+        process.exit(0)
     })
-    gracefulShutdown('UNHANDLED_REJECTION')
 })
 
-// Export app for testing purposes
 export default app
