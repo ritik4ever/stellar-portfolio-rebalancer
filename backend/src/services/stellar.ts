@@ -136,51 +136,203 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { CircuitBreakers } = await import('./circuitBreakers.js')
             const { ReflectorService } = await import('./reflector.js')
+            const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
+            const { RiskManagementService } = await import('./riskManagements.js')
 
             const portfolio = portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 throw new Error('Portfolio not found')
             }
 
+            // Initialize services
+            const reflector = new ReflectorService()
+            const rebalanceHistory = new RebalanceHistoryService()
+            const riskService = new RiskManagementService()
+
+            // Get current prices
+            const prices = await reflector.getCurrentPrices()
+
+            // Enhanced risk checking
+            const riskCheck = riskService.shouldAllowRebalance(portfolio, prices)
+            if (!riskCheck.allowed) {
+                // Record failed attempt
+                await rebalanceHistory.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Risk Management Block',
+                    trades: 0,
+                    gasUsed: '0 XLM',
+                    status: 'failed',
+                    prices,
+                    portfolio
+                })
+
+                throw new Error(`Rebalance blocked: ${riskCheck.reason}`)
+            }
+
+            // Check cooldown period
             const lastRebalance = new Date(portfolio.lastRebalance).getTime()
             const now = Date.now()
             const hourInMs = 60 * 60 * 1000
 
             if (now - lastRebalance < hourInMs) {
+                await rebalanceHistory.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Cooldown Period Active',
+                    trades: 0,
+                    gasUsed: '0 XLM',
+                    status: 'failed',
+                    prices,
+                    portfolio
+                })
+
                 throw new Error('Cooldown period active. Please wait before rebalancing again.')
             }
 
-            const reflector = new ReflectorService()
-            const prices = await reflector.getCurrentPrices()
-
+            // Legacy market checks
             const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
             if (!marketCheck.safe) {
+                await rebalanceHistory.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Circuit Breaker Triggered',
+                    trades: 0,
+                    gasUsed: '0 XLM',
+                    status: 'failed',
+                    prices,
+                    portfolio
+                })
+
                 throw new Error(`Rebalance blocked: ${marketCheck.reason}`)
             }
 
+            // Check if rebalance is actually needed
             const needed = await this.checkRebalanceNeeded(portfolioId)
             if (!needed) {
+                await rebalanceHistory.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'No Rebalance Needed',
+                    trades: 0,
+                    gasUsed: '0 XLM',
+                    status: 'completed',
+                    prices,
+                    portfolio
+                })
+
                 throw new Error('Rebalance not needed at this time')
             }
 
+            // Calculate what assets need rebalancing
+            const { trades, trigger } = await this.calculateRebalanceTrades(portfolio, prices)
+
+            // Record rebalance start
+            await rebalanceHistory.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Rebalance Started',
+                trades: 0,
+                gasUsed: '0 XLM',
+                status: 'pending',
+                prices,
+                portfolio
+            })
+
+            // Simulate rebalance execution
+            console.log(`[INFO] Executing rebalance for portfolio ${portfolioId} with ${trades.length} trades`)
             await new Promise(resolve => setTimeout(resolve, 3000))
 
+            // Calculate new balances
             const updatedBalances = await this.calculateRebalancedBalances(portfolio, prices)
+
+            // Update portfolio
             portfolioStorage.updatePortfolio(portfolioId, {
                 lastRebalance: new Date().toISOString(),
                 balances: updatedBalances
             })
 
+            // Record successful rebalance
+            const event = await rebalanceHistory.recordRebalanceEvent({
+                portfolioId,
+                trigger,
+                trades: trades.length,
+                gasUsed: '0.0234 XLM',
+                status: 'completed',
+                fromAsset: trades[0]?.fromAsset,
+                toAsset: trades[0]?.toAsset,
+                amount: trades[0]?.amount,
+                prices,
+                portfolio
+            })
+
             return {
-                trades: Object.keys(portfolio.allocations).length - 1,
+                trades: trades.length,
                 gasUsed: '0.0234 XLM',
                 timestamp: new Date().toISOString(),
                 status: 'success',
-                newBalances: updatedBalances
+                newBalances: updatedBalances,
+                riskAlerts: riskCheck.alerts,
+                eventId: event.id
             }
         } catch (error) {
+            const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
+            const rebalanceHistory = new RebalanceHistoryService()
+
+            // Record failed rebalance
+            await rebalanceHistory.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Execution Failed',
+                trades: 0,
+                gasUsed: '0 XLM',
+                status: 'failed'
+            })
+
             throw new Error(`Rebalance failed: ${error}`)
         }
+    }
+
+    // Add this new method to calculate what trades are needed
+    private async calculateRebalanceTrades(portfolio: any, prices: PricesMap): Promise<{
+        trades: Array<{ fromAsset: string, toAsset: string, amount: number }>,
+        trigger: string
+    }> {
+        let totalValue = 0
+        const currentValues: Record<string, number> = {}
+        const currentPercentages: Record<string, number> = {}
+
+        // Calculate current portfolio state
+        for (const [asset, balance] of Object.entries(portfolio.balances as Record<string, number>)) {
+            const price = prices[asset]?.price || 0
+            const value = balance * price
+            currentValues[asset] = value
+            totalValue += value
+        }
+
+        // Calculate current percentages and find biggest drift
+        let maxDrift = 0
+        let driftAsset = ''
+
+        for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
+            const currentValue = currentValues[asset] || 0
+            const currentPercentage = totalValue > 0 ? (currentValue / totalValue) * 100 : 0
+            currentPercentages[asset] = currentPercentage
+
+            const drift = Math.abs(currentPercentage - (targetPercentage as number))
+            if (drift > maxDrift) {
+                maxDrift = drift
+                driftAsset = asset
+            }
+        }
+
+        // Generate trigger message
+        const trigger = `Threshold exceeded (${maxDrift.toFixed(1)}%)`
+
+        // Generate mock trades (in real implementation, calculate actual needed trades)
+        const trades = [
+            {
+                fromAsset: driftAsset,
+                toAsset: Object.keys(portfolio.allocations).find(a => a !== driftAsset) || 'USDC',
+                amount: Math.floor(totalValue * maxDrift / 100)
+            }
+        ]
+
+        return { trades, trigger }
     }
 
     private async calculateRebalancedBalances(portfolio: any, prices: PricesMap): Promise<Record<string, number>> {

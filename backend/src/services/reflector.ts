@@ -5,9 +5,9 @@ export class ReflectorService {
     private coinGeckoApiKey: string
     private coinGeckoIds: Record<string, string>
     private priceCache: Map<string, { data: PriceData, timestamp: number }>
-    private readonly CACHE_DURATION = 120000 // 2 minutes
+    private readonly CACHE_DURATION = 300000 // 5 minutes 
     private lastRequestTime = 0
-    private readonly MIN_REQUEST_INTERVAL = 10000 // 10 seconds between requests
+    private readonly MIN_REQUEST_INTERVAL = 60000 // 1 minute instead of 10 seconds
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
@@ -34,13 +34,29 @@ export class ReflectorService {
                 return cachedPrices
             }
 
-            // Get fresh data only if cache is stale
+            // Check rate limiting more strictly
+            const now = Date.now()
+            if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
+                console.log('Rate limiting - using cached prices only')
+                return Object.keys(cachedPrices).length > 0 ? cachedPrices : this.getFallbackPrices()
+            }
+
+            // Get fresh data only if cache is stale AND rate limit allows
             const freshPrices = await this.getFreshPrices(assets)
 
             // Merge cached and fresh data
             return { ...cachedPrices, ...freshPrices }
         } catch (error) {
             console.error('Price fetch failed:', error)
+
+            // Try to return cached data first before falling back
+            const assets = ['XLM', 'BTC', 'ETH', 'USDC']
+            const cachedPrices = this.getCachedPrices(assets)
+            if (Object.keys(cachedPrices).length > 0) {
+                console.log('Using cached prices due to API error')
+                return cachedPrices
+            }
+
             return this.getFallbackPrices()
         }
     }
