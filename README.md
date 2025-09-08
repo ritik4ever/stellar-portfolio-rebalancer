@@ -1,4 +1,4 @@
-markdown# Stellar Portfolio Rebalancer
+
 
 An intelligent DeFi portfolio management platform built on Stellar that automatically rebalances crypto portfolios using real-time price data from Reflector oracles.
 
