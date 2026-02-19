@@ -1,0 +1,320 @@
+import React, { useState, useEffect } from 'react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
+import { API_CONFIG } from '../config/api'
+
+interface PerformanceChartProps {
+    portfolioId: string | null
+}
+
+interface AnalyticsData {
+    portfolioId: string
+    timestamp: string
+    totalValue: number
+    allocations: Record<string, number>
+    balances: Record<string, number>
+}
+
+interface PerformanceSummary {
+    metrics: {
+        totalReturn: number
+        dailyChange: number
+        weeklyChange: number
+        maxDrawdown: number
+        bestDay: { date: string; change: number }
+        worstDay: { date: string; change: number }
+        sharpeRatio: number
+        volatility: number
+    }
+    dataPoints: number
+    period: string
+    lastUpdated: string | null
+}
+
+const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
+    const [analyticsData, setAnalyticsData] = useState<AnalyticsData[]>([])
+    const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
+    const [days, setDays] = useState(30)
+
+    useEffect(() => {
+        if (portfolioId && portfolioId !== 'demo') {
+            fetchAnalytics()
+        } else {
+            setLoading(false)
+        }
+    }, [portfolioId, days])
+
+    const fetchAnalytics = async () => {
+        if (!portfolioId || portfolioId === 'demo') {
+            setLoading(false)
+            return
+        }
+
+        try {
+            setLoading(true)
+            setError(null)
+
+            const [analyticsResponse, summaryResponse] = await Promise.all([
+                fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioId}/analytics?days=${days}`),
+                fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioId}/performance-summary`)
+            ])
+
+            if (!analyticsResponse.ok || !summaryResponse.ok) {
+                throw new Error('Failed to fetch analytics data')
+            }
+
+            const analyticsResult = await analyticsResponse.json()
+            const summaryResult = await summaryResponse.json()
+
+            if (analyticsResult.success) {
+                setAnalyticsData(analyticsResult.data || [])
+            }
+
+            if (summaryResult.success) {
+                setPerformanceSummary(summaryResult)
+            }
+        } catch (err) {
+            console.error('Failed to fetch analytics:', err)
+            setError('Failed to load performance data')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const formatChartData = () => {
+        return analyticsData.map(snapshot => ({
+            date: new Date(snapshot.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            value: Number(snapshot.totalValue.toFixed(2)),
+            timestamp: snapshot.timestamp
+        }))
+    }
+
+    const formatCurrency = (value: number) => {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }).format(value)
+    }
+
+    const formatPercentage = (value: number) => {
+        return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+    }
+
+    if (!portfolioId || portfolioId === 'demo') {
+        return (
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+                <div className="flex items-center justify-center h-64 text-gray-500">
+                    <div className="text-center">
+                        <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                        <p>Connect a wallet and create a portfolio to view performance analytics</p>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
+    if (loading) {
+        return (
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                </div>
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+                <div className="flex items-center justify-center h-64 text-red-500">
+                    <div className="text-center">
+                        <AlertCircle className="w-12 h-12 mx-auto mb-2" />
+                        <p>{error}</p>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
+    const chartData = formatChartData()
+    const metrics = performanceSummary?.metrics
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-semibold text-gray-900">Portfolio Performance</h2>
+                    <div className="flex items-center space-x-2">
+                        <select
+                            value={days}
+                            onChange={(e) => setDays(Number(e.target.value))}
+                            className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value={7}>7 days</option>
+                            <option value={30}>30 days</option>
+                            <option value={90}>90 days</option>
+                        </select>
+                    </div>
+                </div>
+
+                {chartData.length === 0 ? (
+                    <div className="flex items-center justify-center h-64 text-gray-500">
+                        <div className="text-center">
+                            <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                            <p>No performance data available yet</p>
+                            <p className="text-sm mt-1">Data will appear as your portfolio value changes</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                <XAxis
+                                    dataKey="date"
+                                    stroke="#666"
+                                    tick={{ fontSize: 12 }}
+                                    interval="preserveStartEnd"
+                                />
+                                <YAxis
+                                    stroke="#666"
+                                    tick={{ fontSize: 12 }}
+                                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                                />
+                                <Tooltip
+                                    contentStyle={{
+                                        backgroundColor: '#fff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '8px',
+                                        padding: '8px 12px'
+                                    }}
+                                    formatter={(value: number) => formatCurrency(value)}
+                                    labelFormatter={(label) => `Date: ${label}`}
+                                />
+                                <Legend />
+                                <Line
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke="#3B82F6"
+                                    strokeWidth={3}
+                                    dot={false}
+                                    name="Portfolio Value"
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                )}
+            </div>
+
+            {metrics && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm text-gray-600">Total Return</span>
+                            {metrics.totalReturn >= 0 ? (
+                                <TrendingUp className="w-4 h-4 text-green-500" />
+                            ) : (
+                                <TrendingDown className="w-4 h-4 text-red-500" />
+                            )}
+                        </div>
+                        <div className={`text-2xl font-bold ${metrics.totalReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatPercentage(metrics.totalReturn)}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm text-gray-600">Daily Change</span>
+                            {metrics.dailyChange >= 0 ? (
+                                <TrendingUp className="w-4 h-4 text-green-500" />
+                            ) : (
+                                <TrendingDown className="w-4 h-4 text-red-500" />
+                            )}
+                        </div>
+                        <div className={`text-2xl font-bold ${metrics.dailyChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatPercentage(metrics.dailyChange)}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm text-gray-600">Weekly Change</span>
+                            {metrics.weeklyChange >= 0 ? (
+                                <TrendingUp className="w-4 h-4 text-green-500" />
+                            ) : (
+                                <TrendingDown className="w-4 h-4 text-red-500" />
+                            )}
+                        </div>
+                        <div className={`text-2xl font-bold ${metrics.weeklyChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatPercentage(metrics.weeklyChange)}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm text-gray-600">Max Drawdown</span>
+                            <AlertCircle className="w-4 h-4 text-orange-500" />
+                        </div>
+                        <div className="text-2xl font-bold text-orange-600">
+                            {formatPercentage(metrics.maxDrawdown)}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="mb-2">
+                            <span className="text-sm text-gray-600">Best Day</span>
+                        </div>
+                        <div className="text-lg font-semibold text-green-600">
+                            {formatPercentage(metrics.bestDay.change)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                            {metrics.bestDay.date ? new Date(metrics.bestDay.date).toLocaleDateString() : 'N/A'}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="mb-2">
+                            <span className="text-sm text-gray-600">Worst Day</span>
+                        </div>
+                        <div className="text-lg font-semibold text-red-600">
+                            {formatPercentage(metrics.worstDay.change)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                            {metrics.worstDay.date ? new Date(metrics.worstDay.date).toLocaleDateString() : 'N/A'}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="mb-2">
+                            <span className="text-sm text-gray-600">Sharpe Ratio</span>
+                        </div>
+                        <div className="text-lg font-semibold text-gray-900">
+                            {metrics.sharpeRatio.toFixed(2)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                            {metrics.sharpeRatio > 1 ? 'Good' : metrics.sharpeRatio > 0 ? 'Fair' : 'Poor'}
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                        <div className="mb-2">
+                            <span className="text-sm text-gray-600">Volatility</span>
+                        </div>
+                        <div className="text-lg font-semibold text-gray-900">
+                            {formatPercentage(metrics.volatility)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                            Daily volatility
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+export default PerformanceChart
