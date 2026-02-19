@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS rebalance_history (
     FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id
+    ON rebalance_history (portfolio_id);
+
+CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id_timestamp
+    ON rebalance_history (portfolio_id, timestamp);
+
 CREATE TABLE IF NOT EXISTS price_snapshots (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     asset       TEXT NOT NULL,
@@ -192,13 +198,27 @@ function seedDemoData(db: Database.Database): void {
 // Helpers
 // ─────────────────────────────────────────────
 
+/**
+ * Safely parse a JSON string. Returns `fallback` instead of throwing
+ * when the stored value is null, empty, or malformed.
+ */
+function safeJsonParse<T>(value: string | null | undefined, fallback: T, context: string): T {
+    if (!value) return fallback
+    try {
+        return JSON.parse(value) as T
+    } catch {
+        console.error(`[DB] Failed to parse JSON for ${context}:`, value)
+        return fallback
+    }
+}
+
 function rowToPortfolio(row: PortfolioRow): Portfolio {
     return {
         id: row.id,
         userAddress: row.user_address,
-        allocations: JSON.parse(row.allocations),
+        allocations: safeJsonParse(row.allocations, {}, `portfolio(${row.id}).allocations`),
         threshold: row.threshold,
-        balances: JSON.parse(row.balances),
+        balances: safeJsonParse(row.balances, {}, `portfolio(${row.id}).balances`),
         totalValue: row.total_value,
         createdAt: row.created_at,
         lastRebalance: row.last_rebalance
@@ -215,9 +235,9 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
         gasUsed: row.gas_used,
         status: row.status as RebalanceEvent['status'],
         isAutomatic: row.is_automatic === 1,
-        riskAlerts: row.risk_alerts ? JSON.parse(row.risk_alerts) : [],
+        riskAlerts: safeJsonParse(row.risk_alerts, [], `event(${row.id}).risk_alerts`),
         error: row.error ?? undefined,
-        details: row.details ? JSON.parse(row.details) : undefined
+        details: safeJsonParse(row.details, undefined, `event(${row.id}).details`)
     }
 }
 
@@ -261,13 +281,17 @@ export class DatabaseService {
         allocations: Record<string, number>,
         threshold: number
     ): string {
-        const id = generateId()
-        const now = new Date().toISOString()
-        this.db.prepare(`
-            INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify({}), 0, now, now)
-        return id
+        try {
+            const id = generateId()
+            const now = new Date().toISOString()
+            this.db.prepare(`
+                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify({}), 0, now, now)
+            return id
+        } catch (err) {
+            throw new Error(`Failed to create portfolio for user '${userAddress}': ${err}`)
+        }
     }
 
     createPortfolioWithBalances(
@@ -276,68 +300,100 @@ export class DatabaseService {
         threshold: number,
         currentBalances: Record<string, number>
     ): string {
-        const id = generateId()
-        const now = new Date().toISOString()
-        const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
-        this.db.prepare(`
-            INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(currentBalances), totalValue, now, now)
-        return id
+        try {
+            const id = generateId()
+            const now = new Date().toISOString()
+            const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
+            this.db.prepare(`
+                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(currentBalances), totalValue, now, now)
+            return id
+        } catch (err) {
+            throw new Error(`Failed to create portfolio with balances for user '${userAddress}': ${err}`)
+        }
     }
 
     getPortfolio(id: string): Portfolio | undefined {
-        const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
-        return row ? rowToPortfolio(row) : undefined
+        try {
+            const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
+            return row ? rowToPortfolio(row) : undefined
+        } catch (err) {
+            throw new Error(`Failed to retrieve portfolio '${id}': ${err}`)
+        }
     }
 
     getUserPortfolios(userAddress: string): Portfolio[] {
-        const rows = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE user_address = ?').all(userAddress)
-        return rows.map(rowToPortfolio)
+        try {
+            const rows = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE user_address = ?').all(userAddress)
+            return rows.map(rowToPortfolio)
+        } catch (err) {
+            throw new Error(`Failed to retrieve portfolios for user '${userAddress}': ${err}`)
+        }
     }
 
     updatePortfolio(id: string, updates: Partial<Portfolio>): boolean {
-        const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
-        if (!row) return false
+        try {
+            const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
+            if (!row) return false
 
-        const current = rowToPortfolio(row)
-        const merged = { ...current, ...updates }
+            const current = rowToPortfolio(row)
+            const merged = { ...current, ...updates }
 
-        this.db.prepare(`
-            UPDATE portfolios
-            SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
-                total_value = ?, last_rebalance = ?
-            WHERE id = ?
-        `).run(
-            merged.userAddress,
-            JSON.stringify(merged.allocations),
-            merged.threshold,
-            JSON.stringify(merged.balances),
-            merged.totalValue,
-            merged.lastRebalance,
-            id
-        )
-        return true
+            this.db.prepare(`
+                UPDATE portfolios
+                SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
+                    total_value = ?, last_rebalance = ?
+                WHERE id = ?
+            `).run(
+                merged.userAddress,
+                JSON.stringify(merged.allocations),
+                merged.threshold,
+                JSON.stringify(merged.balances),
+                merged.totalValue,
+                merged.lastRebalance,
+                id
+            )
+            return true
+        } catch (err) {
+            throw new Error(`Failed to update portfolio '${id}': ${err}`)
+        }
     }
 
     getAllPortfolios(): Portfolio[] {
-        const rows = this.db.prepare<[], PortfolioRow>('SELECT * FROM portfolios').all()
-        return rows.map(rowToPortfolio)
+        try {
+            const rows = this.db.prepare<[], PortfolioRow>('SELECT * FROM portfolios').all()
+            return rows.map(rowToPortfolio)
+        } catch (err) {
+            throw new Error(`Failed to retrieve all portfolios: ${err}`)
+        }
     }
 
     getPortfolioCount(): number {
-        const result = this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }
-        return result.cnt
+        try {
+            const result = this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }
+            return result.cnt
+        } catch (err) {
+            throw new Error(`Failed to count portfolios: ${err}`)
+        }
     }
 
     deletePortfolio(id: string): boolean {
-        const result = this.db.prepare('DELETE FROM portfolios WHERE id = ?').run(id)
-        return result.changes > 0
+        try {
+            const result = this.db.prepare('DELETE FROM portfolios WHERE id = ?').run(id)
+            return result.changes > 0
+        } catch (err) {
+            throw new Error(`Failed to delete portfolio '${id}': ${err}`)
+        }
     }
 
     clearAll(): void {
-        this.db.prepare('DELETE FROM rebalance_history').run()
-        this.db.prepare('DELETE FROM portfolios').run()
+        try {
+            this.db.prepare('DELETE FROM rebalance_history').run()
+            this.db.prepare('DELETE FROM portfolios').run()
+        } catch (err) {
+            throw new Error(`Failed to clear all data: ${err}`)
+        }
     }
 
     // ──────────────────────────────────────────
@@ -355,158 +411,191 @@ export class DatabaseService {
         error?: string
         details?: any
     }): RebalanceEvent {
-        const event: RebalanceEvent = {
-            id: generateId(),
-            portfolioId: eventData.portfolioId,
-            timestamp: new Date().toISOString(),
-            trigger: eventData.trigger,
-            trades: eventData.trades,
-            gasUsed: eventData.gasUsed,
-            status: eventData.status,
-            isAutomatic: eventData.isAutomatic ?? false,
-            riskAlerts: eventData.riskAlerts ?? [],
-            error: eventData.error,
-            details: eventData.details
+        try {
+            const event: RebalanceEvent = {
+                id: generateId(),
+                portfolioId: eventData.portfolioId,
+                timestamp: new Date().toISOString(),
+                trigger: eventData.trigger,
+                trades: eventData.trades,
+                gasUsed: eventData.gasUsed,
+                status: eventData.status,
+                isAutomatic: eventData.isAutomatic ?? false,
+                riskAlerts: eventData.riskAlerts ?? [],
+                error: eventData.error,
+                details: eventData.details
+            }
+
+            this.db.prepare(`
+                INSERT INTO rebalance_history
+                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                event.id,
+                event.portfolioId,
+                event.timestamp,
+                event.trigger,
+                event.trades,
+                event.gasUsed,
+                event.status,
+                event.isAutomatic ? 1 : 0,
+                event.riskAlerts?.length ? JSON.stringify(event.riskAlerts) : null,
+                event.error ?? null,
+                event.details ? JSON.stringify(event.details) : null
+            )
+
+            return event
+        } catch (err) {
+            throw new Error(`Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`)
         }
-
-        this.db.prepare(`
-            INSERT INTO rebalance_history
-                (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            event.id,
-            event.portfolioId,
-            event.timestamp,
-            event.trigger,
-            event.trades,
-            event.gasUsed,
-            event.status,
-            event.isAutomatic ? 1 : 0,
-            event.riskAlerts?.length ? JSON.stringify(event.riskAlerts) : null,
-            event.error ?? null,
-            event.details ? JSON.stringify(event.details) : null
-        )
-
-        return event
     }
 
     getRebalanceHistory(portfolioId?: string, limit: number = 50): RebalanceEvent[] {
-        if (portfolioId) {
-            const rows = this.db.prepare<[string, number], RebalanceHistoryRow>(
-                'SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?'
-            ).all(portfolioId, limit)
-            return rows.map(rowToEvent)
-        }
+        try {
+            if (portfolioId) {
+                const rows = this.db.prepare<[string, number], RebalanceHistoryRow>(
+                    'SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?'
+                ).all(portfolioId, limit)
+                return rows.map(rowToEvent)
+            }
 
-        const rows = this.db.prepare<[number], RebalanceHistoryRow>(
-            'SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?'
-        ).all(limit)
-        return rows.map(rowToEvent)
+            const rows = this.db.prepare<[number], RebalanceHistoryRow>(
+                'SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?'
+            ).all(limit)
+            return rows.map(rowToEvent)
+        } catch (err) {
+            throw new Error(`Failed to retrieve rebalance history${portfolioId ? ` for portfolio '${portfolioId}'` : ''
+                }: ${err}`)
+        }
     }
 
     getRecentAutoRebalances(portfolioId: string, limit: number = 10): RebalanceEvent[] {
-        const rows = this.db.prepare<[string, number], RebalanceHistoryRow>(`
-            SELECT * FROM rebalance_history
-            WHERE portfolio_id = ? AND is_automatic = 1
-            ORDER BY timestamp DESC LIMIT ?
-        `).all(portfolioId, limit)
-        return rows.map(rowToEvent)
+        try {
+            const rows = this.db.prepare<[string, number], RebalanceHistoryRow>(`
+                SELECT * FROM rebalance_history
+                WHERE portfolio_id = ? AND is_automatic = 1
+                ORDER BY timestamp DESC LIMIT ?
+            `).all(portfolioId, limit)
+            return rows.map(rowToEvent)
+        } catch (err) {
+            throw new Error(`Failed to retrieve auto-rebalances for portfolio '${portfolioId}': ${err}`)
+        }
     }
 
     getAutoRebalancesSince(portfolioId: string, since: Date): RebalanceEvent[] {
-        const rows = this.db.prepare<[string, string], RebalanceHistoryRow>(`
-            SELECT * FROM rebalance_history
-            WHERE portfolio_id = ? AND is_automatic = 1 AND timestamp >= ?
-            ORDER BY timestamp DESC
-        `).all(portfolioId, since.toISOString())
-        return rows.map(rowToEvent)
+        try {
+            const rows = this.db.prepare<[string, string], RebalanceHistoryRow>(`
+                SELECT * FROM rebalance_history
+                WHERE portfolio_id = ? AND is_automatic = 1 AND timestamp >= ?
+                ORDER BY timestamp DESC
+            `).all(portfolioId, since.toISOString())
+            return rows.map(rowToEvent)
+        } catch (err) {
+            throw new Error(`Failed to retrieve auto-rebalances since ${since.toISOString()} for portfolio '${portfolioId}': ${err}`)
+        }
     }
 
     getAllAutoRebalances(): RebalanceEvent[] {
-        const rows = this.db.prepare<[], RebalanceHistoryRow>(
-            'SELECT * FROM rebalance_history WHERE is_automatic = 1 ORDER BY timestamp DESC'
-        ).all()
-        return rows.map(rowToEvent)
+        try {
+            const rows = this.db.prepare<[], RebalanceHistoryRow>(
+                'SELECT * FROM rebalance_history WHERE is_automatic = 1 ORDER BY timestamp DESC'
+            ).all()
+            return rows.map(rowToEvent)
+        } catch (err) {
+            throw new Error(`Failed to retrieve all auto-rebalances: ${err}`)
+        }
     }
 
     initializeDemoData(portfolioId: string): void {
-        // Check if there's already history for this portfolio
-        const existing = this.db.prepare<[string], { cnt: number }>(
-            'SELECT COUNT(*) as cnt FROM rebalance_history WHERE portfolio_id = ?'
-        ).get(portfolioId)
-        if (existing && existing.cnt > 0) return
+        try {
+            const existing = this.db.prepare<[string], { cnt: number }>(
+                'SELECT COUNT(*) as cnt FROM rebalance_history WHERE portfolio_id = ?'
+            ).get(portfolioId)
+            if (existing && existing.cnt > 0) return
 
-        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-        const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
-        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+            const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+            const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
 
-        const demoEvents = [
-            {
-                id: generateId(), portfolioId,
-                timestamp: twoHoursAgo, trigger: 'Threshold exceeded (8.2%)', trades: 3,
-                gasUsed: '0.0234 XLM', status: 'completed', isAutomatic: 0,
-                details: {
-                    fromAsset: 'XLM', toAsset: 'ETH', amount: 1200,
-                    reason: 'Portfolio allocation drift exceeded rebalancing threshold',
-                    riskLevel: 'medium', priceDirection: 'down', performanceImpact: 'neutral'
+            const demoEvents = [
+                {
+                    id: generateId(), portfolioId,
+                    timestamp: twoHoursAgo, trigger: 'Threshold exceeded (8.2%)', trades: 3,
+                    gasUsed: '0.0234 XLM', status: 'completed', isAutomatic: 0,
+                    details: {
+                        fromAsset: 'XLM', toAsset: 'ETH', amount: 1200,
+                        reason: 'Portfolio allocation drift exceeded rebalancing threshold',
+                        riskLevel: 'medium', priceDirection: 'down', performanceImpact: 'neutral'
+                    }
+                },
+                {
+                    id: generateId(), portfolioId,
+                    timestamp: twelveHoursAgo, trigger: 'Automatic Rebalancing', trades: 2,
+                    gasUsed: '0.0156 XLM', status: 'completed', isAutomatic: 1,
+                    details: {
+                        reason: 'Automated scheduled rebalancing executed',
+                        riskLevel: 'low', priceDirection: 'up', performanceImpact: 'positive'
+                    }
+                },
+                {
+                    id: generateId(), portfolioId,
+                    timestamp: threeDaysAgo, trigger: 'Volatility circuit breaker', trades: 1,
+                    gasUsed: '0.0089 XLM', status: 'completed', isAutomatic: 1,
+                    details: {
+                        reason: 'High market volatility detected, protective rebalance executed',
+                        volatilityDetected: true, riskLevel: 'high', priceDirection: 'down', performanceImpact: 'negative'
+                    }
                 }
-            },
-            {
-                id: generateId(), portfolioId,
-                timestamp: twelveHoursAgo, trigger: 'Automatic Rebalancing', trades: 2,
-                gasUsed: '0.0156 XLM', status: 'completed', isAutomatic: 1,
-                details: {
-                    reason: 'Automated scheduled rebalancing executed',
-                    riskLevel: 'low', priceDirection: 'up', performanceImpact: 'positive'
-                }
-            },
-            {
-                id: generateId(), portfolioId,
-                timestamp: threeDaysAgo, trigger: 'Volatility circuit breaker', trades: 1,
-                gasUsed: '0.0089 XLM', status: 'completed', isAutomatic: 1,
-                details: {
-                    reason: 'High market volatility detected, protective rebalance executed',
-                    volatilityDetected: true, riskLevel: 'high', priceDirection: 'down', performanceImpact: 'negative'
-                }
+            ]
+
+            const insert = this.db.prepare(`
+                INSERT INTO rebalance_history
+                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `)
+
+            for (const ev of demoEvents) {
+                insert.run(
+                    ev.id, ev.portfolioId, ev.timestamp, ev.trigger, ev.trades,
+                    ev.gasUsed, ev.status, ev.isAutomatic, null, null,
+                    ev.details ? JSON.stringify(ev.details) : null
+                )
             }
-        ]
-
-        const insert = this.db.prepare(`
-            INSERT INTO rebalance_history
-                (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `)
-
-        for (const ev of demoEvents) {
-            insert.run(
-                ev.id, ev.portfolioId, ev.timestamp, ev.trigger, ev.trades,
-                ev.gasUsed, ev.status, ev.isAutomatic, null, null,
-                ev.details ? JSON.stringify(ev.details) : null
-            )
+        } catch (err) {
+            throw new Error(`Failed to initialize demo data for portfolio '${portfolioId}': ${err}`)
         }
     }
 
     clearHistory(portfolioId?: string): void {
-        if (portfolioId) {
-            this.db.prepare('DELETE FROM rebalance_history WHERE portfolio_id = ?').run(portfolioId)
-        } else {
-            this.db.prepare('DELETE FROM rebalance_history').run()
+        try {
+            if (portfolioId) {
+                this.db.prepare('DELETE FROM rebalance_history WHERE portfolio_id = ?').run(portfolioId)
+            } else {
+                this.db.prepare('DELETE FROM rebalance_history').run()
+            }
+        } catch (err) {
+            throw new Error(`Failed to clear rebalance history${portfolioId ? ` for portfolio '${portfolioId}'` : ''
+                }: ${err}`)
         }
     }
 
     getHistoryStats(): { totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number } {
-        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        try {
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-        const total = (this.db.prepare('SELECT COUNT(*) as cnt FROM rebalance_history').get() as { cnt: number }).cnt
-        const portfolios = (this.db.prepare('SELECT COUNT(DISTINCT portfolio_id) as cnt FROM rebalance_history').get() as { cnt: number }).cnt
-        const recentActivity = (this.db.prepare<[string], { cnt: number }>(
-            'SELECT COUNT(*) as cnt FROM rebalance_history WHERE timestamp >= ?'
-        ).get(oneDayAgo) as { cnt: number }).cnt
-        const autoRebalances = (this.db.prepare(
-            'SELECT COUNT(*) as cnt FROM rebalance_history WHERE is_automatic = 1'
-        ).get() as { cnt: number }).cnt
+            const total = (this.db.prepare('SELECT COUNT(*) as cnt FROM rebalance_history').get() as { cnt: number }).cnt
+            const portfolios = (this.db.prepare('SELECT COUNT(DISTINCT portfolio_id) as cnt FROM rebalance_history').get() as { cnt: number }).cnt
+            const recentActivity = (this.db.prepare<[string], { cnt: number }>(
+                'SELECT COUNT(*) as cnt FROM rebalance_history WHERE timestamp >= ?'
+            ).get(oneDayAgo) as { cnt: number }).cnt
+            const autoRebalances = (this.db.prepare(
+                'SELECT COUNT(*) as cnt FROM rebalance_history WHERE is_automatic = 1'
+            ).get() as { cnt: number }).cnt
 
-        return { totalEvents: total, portfolios, recentActivity, autoRebalances }
+            return { totalEvents: total, portfolios, recentActivity, autoRebalances }
+        } catch (err) {
+            throw new Error(`Failed to retrieve history stats: ${err}`)
+        }
     }
 
     // ──────────────────────────────────────────
@@ -514,18 +603,26 @@ export class DatabaseService {
     // ──────────────────────────────────────────
 
     savePriceSnapshot(asset: string, price: number, change?: number, source?: string): void {
-        this.db.prepare(`
-            INSERT INTO price_snapshots (asset, price, change, source, captured_at)
-            VALUES (?, ?, ?, ?, ?)
-        `).run(asset, price, change ?? null, source ?? null, new Date().toISOString())
+        try {
+            this.db.prepare(`
+                INSERT INTO price_snapshots (asset, price, change, source, captured_at)
+                VALUES (?, ?, ?, ?, ?)
+            `).run(asset, price, change ?? null, source ?? null, new Date().toISOString())
+        } catch (err) {
+            throw new Error(`Failed to save price snapshot for asset '${asset}': ${err}`)
+        }
     }
 
     getLatestPriceSnapshot(asset: string): { price: number; change?: number; capturedAt: string } | undefined {
-        const row = this.db.prepare<[string], { price: number; change: number | null; captured_at: string }>(
-            'SELECT price, change, captured_at FROM price_snapshots WHERE asset = ? ORDER BY captured_at DESC LIMIT 1'
-        ).get(asset)
-        if (!row) return undefined
-        return { price: row.price, change: row.change ?? undefined, capturedAt: row.captured_at }
+        try {
+            const row = this.db.prepare<[string], { price: number; change: number | null; captured_at: string }>(
+                'SELECT price, change, captured_at FROM price_snapshots WHERE asset = ? ORDER BY captured_at DESC LIMIT 1'
+            ).get(asset)
+            if (!row) return undefined
+            return { price: row.price, change: row.change ?? undefined, capturedAt: row.captured_at }
+        } catch (err) {
+            throw new Error(`Failed to retrieve price snapshot for asset '${asset}': ${err}`)
+        }
     }
 
     close(): void {
