@@ -1,4 +1,5 @@
-import { RiskManagementService, RiskAlert } from './riskManagements.js'
+import { RiskManagementService } from './riskManagements.js'
+import { databaseService } from './databaseService.js'
 import type { PricesMap } from '../types/index.js'
 
 export interface RebalanceEvent {
@@ -27,8 +28,6 @@ export interface RebalanceEvent {
 }
 
 export class RebalanceHistoryService {
-    private history: Map<string, RebalanceEvent[]> = new Map()
-    private events: RebalanceEvent[] = [] // Global events array for auto-rebalancer
     private riskService: RiskManagementService
 
     constructor() {
@@ -50,129 +49,75 @@ export class RebalanceHistoryService {
         prices?: PricesMap
         portfolio?: any
     }): Promise<RebalanceEvent> {
-        const event: RebalanceEvent = {
-            id: this.generateEventId(),
-            portfolioId: eventData.portfolioId,
-            timestamp: new Date().toISOString(),
-            trigger: eventData.trigger,
-            trades: eventData.trades,
-            gasUsed: eventData.gasUsed,
-            status: eventData.status,
-            isAutomatic: eventData.isAutomatic || false,
-            riskAlerts: eventData.riskAlerts || [],
-            error: eventData.error || undefined,
-            details: {
-                fromAsset: eventData.fromAsset,
-                toAsset: eventData.toAsset,
-                amount: eventData.amount,
-                reason: this.generateReasonFromTrigger(eventData.trigger),
-                volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
-                riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
-                priceDirection: this.determinePriceDirection(eventData.prices),
-                performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger)
-            }
+        const details: RebalanceEvent['details'] = {
+            fromAsset: eventData.fromAsset,
+            toAsset: eventData.toAsset,
+            amount: eventData.amount,
+            reason: this.generateReasonFromTrigger(eventData.trigger),
+            volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
+            riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
+            priceDirection: this.determinePriceDirection(eventData.prices),
+            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger)
         }
 
         // Add risk metrics if available
         if (eventData.prices && eventData.portfolio) {
             try {
-                const riskMetrics = this.riskService.analyzePortfolioRisk(eventData.portfolio.allocations, eventData.prices)
-                event.details!.riskMetrics = riskMetrics
+                const riskMetrics = this.riskService.analyzePortfolioRisk(
+                    eventData.portfolio.allocations,
+                    eventData.prices
+                )
+                details.riskMetrics = riskMetrics
             } catch (error) {
                 console.warn('Failed to calculate risk metrics:', error)
             }
         }
 
-        // Store in portfolio-specific history
-        const portfolioHistory = this.history.get(eventData.portfolioId) || []
-        portfolioHistory.unshift(event) // Add to beginning
-
-        // Keep only last 100 events per portfolio
-        if (portfolioHistory.length > 100) {
-            portfolioHistory.splice(100)
-        }
-
-        this.history.set(eventData.portfolioId, portfolioHistory)
-
-        // Store in global events array
-        this.events.push(event)
-
-        // Keep only last 1000 events to prevent memory issues
-        if (this.events.length > 1000) {
-            this.events = this.events.slice(-1000)
-        }
+        const event = databaseService.recordRebalanceEvent({
+            portfolioId: eventData.portfolioId,
+            trigger: eventData.trigger,
+            trades: eventData.trades,
+            gasUsed: eventData.gasUsed,
+            status: eventData.status,
+            isAutomatic: eventData.isAutomatic ?? false,
+            riskAlerts: eventData.riskAlerts ?? [],
+            error: eventData.error,
+            details
+        })
 
         console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
         return event
     }
 
     async getRebalanceHistory(portfolioId?: string, limit: number = 50): Promise<RebalanceEvent[]> {
-        if (portfolioId) {
-            const portfolioHistory = this.history.get(portfolioId) || []
-            return portfolioHistory.slice(0, limit)
-        }
-
-        // Get history for all portfolios
-        const allEvents: RebalanceEvent[] = []
-        this.history.forEach(events => {
-            allEvents.push(...events)
-        })
-
-        // Sort by timestamp descending and limit
-        return allEvents
-            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-            .slice(0, limit)
+        return databaseService.getRebalanceHistory(portfolioId, limit)
     }
 
-    /**
-     * Get recent auto-rebalances for a portfolio
-     */
     getRecentAutoRebalances(portfolioId: string, limit: number = 10): RebalanceEvent[] {
-        try {
-            return this.events
-                .filter(event =>
-                    event.portfolioId === portfolioId &&
-                    event.isAutomatic === true
-                )
-                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                .slice(0, limit)
-        } catch (error) {
-            console.error('Error getting recent auto-rebalances:', error)
-            return []
-        }
+        return databaseService.getRecentAutoRebalances(portfolioId, limit)
     }
 
-    /**
-     * Get auto-rebalances since a specific date
-     */
     getAutoRebalancesSince(portfolioId: string, since: Date): RebalanceEvent[] {
-        try {
-            return this.events.filter(event =>
-                event.portfolioId === portfolioId &&
-                event.isAutomatic === true &&
-                new Date(event.timestamp) >= since
-            )
-        } catch (error) {
-            console.error('Error getting auto-rebalances since date:', error)
-            return []
-        }
+        return databaseService.getAutoRebalancesSince(portfolioId, since)
     }
 
-    /**
-     * Get all auto-rebalances across all portfolios
-     */
     getAllAutoRebalances(): RebalanceEvent[] {
-        try {
-            return this.events.filter(event => event.isAutomatic === true)
-        } catch (error) {
-            console.error('Error getting all auto-rebalances:', error)
-            return []
-        }
+        return databaseService.getAllAutoRebalances()
     }
 
-    private generateEventId(): string {
-        return Date.now().toString() + Math.random().toString(36).substr(2, 9)
+    initializeDemoData(portfolioId: string): void {
+        databaseService.initializeDemoData(portfolioId)
     }
+
+    clearHistory(): void {
+        databaseService.clearHistory()
+    }
+
+    getHistoryStats(): { totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number } {
+        return databaseService.getHistoryStats()
+    }
+
+    // ─── Private helpers (kept for semantic consistency) ───────────────────────
 
     private generateReasonFromTrigger(trigger: string): string {
         if (trigger.includes('Threshold exceeded')) {
@@ -195,9 +140,7 @@ export class RebalanceHistoryService {
 
     private checkVolatilityInTrigger(trigger: string): boolean {
         const volatilityKeywords = ['volatility', 'circuit breaker', 'risk', 'emergency']
-        return volatilityKeywords.some(keyword =>
-            trigger.toLowerCase().includes(keyword)
-        )
+        return volatilityKeywords.some(keyword => trigger.toLowerCase().includes(keyword))
     }
 
     private assessRiskLevel(trigger: string, status: string): 'low' | 'medium' | 'high' {
@@ -226,119 +169,16 @@ export class RebalanceHistoryService {
 
     private determinePriceDirection(prices?: PricesMap): 'up' | 'down' {
         if (!prices) return 'down'
-
         const changes = Object.values(prices).map((p: any) => p.change || 0)
         const averageChange = changes.reduce((sum, change) => sum + change, 0) / changes.length
-
         return averageChange >= 0 ? 'up' : 'down'
     }
 
     private assessPerformanceImpact(status: string, trigger: string): 'positive' | 'negative' | 'neutral' {
         if (status === 'failed') return 'negative'
-
-        if (trigger.includes('Volatility') || trigger.includes('circuit breaker')) {
-            return 'negative' // Protective action due to bad market conditions
-        }
-
-        if (trigger.includes('Scheduled') || trigger.includes('Automatic')) {
-            return 'positive' // Proactive maintenance
-        }
-
-        if (trigger.includes('Threshold exceeded')) {
-            return 'neutral' // Corrective action
-        }
-
+        if (trigger.includes('Volatility') || trigger.includes('circuit breaker')) return 'negative'
+        if (trigger.includes('Scheduled') || trigger.includes('Automatic')) return 'positive'
+        if (trigger.includes('Threshold exceeded')) return 'neutral'
         return 'neutral'
-    }
-
-    // Generate some initial demo data
-    initializeDemoData(portfolioId: string): void {
-        const demoEvents: RebalanceEvent[] = [
-            {
-                id: '1',
-                portfolioId,
-                timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Threshold exceeded (8.2%)',
-                trades: 3,
-                gasUsed: '0.0234 XLM',
-                status: 'completed',
-                isAutomatic: false,
-                details: {
-                    fromAsset: 'XLM',
-                    toAsset: 'ETH',
-                    amount: 1200,
-                    reason: 'Portfolio allocation drift exceeded rebalancing threshold',
-                    riskLevel: 'medium',
-                    priceDirection: 'down',
-                    performanceImpact: 'neutral'
-                }
-            },
-            {
-                id: '2',
-                portfolioId,
-                timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Automatic Rebalancing',
-                trades: 2,
-                gasUsed: '0.0156 XLM',
-                status: 'completed',
-                isAutomatic: true,
-                details: {
-                    reason: 'Automated scheduled rebalancing executed',
-                    riskLevel: 'low',
-                    priceDirection: 'up',
-                    performanceImpact: 'positive'
-                }
-            },
-            {
-                id: '3',
-                portfolioId,
-                timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Volatility circuit breaker',
-                trades: 1,
-                gasUsed: '0.0089 XLM',
-                status: 'completed',
-                isAutomatic: true,
-                details: {
-                    reason: 'High market volatility detected, protective rebalance executed',
-                    volatilityDetected: true,
-                    riskLevel: 'high',
-                    priceDirection: 'down',
-                    performanceImpact: 'negative'
-                }
-            }
-        ]
-
-        // Add to both storage methods
-        this.history.set(portfolioId, demoEvents)
-        this.events.push(...demoEvents)
-    }
-
-    // Clear all history (for testing)
-    clearHistory(): void {
-        this.history.clear()
-        this.events = []
-    }
-
-    // Get statistics
-    getHistoryStats(): { totalEvents: number, portfolios: number, recentActivity: number, autoRebalances: number } {
-        let totalEvents = 0
-        let recentActivity = 0
-        let autoRebalances = 0
-        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000)
-
-        this.history.forEach(events => {
-            totalEvents += events.length
-            recentActivity += events.filter(e =>
-                new Date(e.timestamp).getTime() > oneDayAgo
-            ).length
-            autoRebalances += events.filter(e => e.isAutomatic).length
-        })
-
-        return {
-            totalEvents,
-            portfolios: this.history.size,
-            recentActivity,
-            autoRebalances
-        }
     }
 }
