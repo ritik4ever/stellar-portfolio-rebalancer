@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink } from 'lucide-react'
 import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
+import PerformanceChart from './PerformanceChart'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
@@ -20,6 +21,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [loading, setLoading] = useState(true)
     const [rebalancing, setRebalancing] = useState(false)
     const [priceSource, setPriceSource] = useState<string>('loading...')
+    const [activeTab, setActiveTab] = useState<'overview' | 'analytics'>('overview')
 
     useEffect(() => {
         if (publicKey) {
@@ -283,7 +285,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             </div>
 
             <div className="p-6 max-w-7xl mx-auto">
-
+                {/* Tab Navigation */}
+                <div className="mb-6 border-b border-gray-200">
+                    <nav className="flex space-x-8">
+                        <button
+                            onClick={() => setActiveTab('overview')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                                activeTab === 'overview'
+                                    ? 'border-blue-500 text-blue-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                            }`}
+                        >
+                            Overview
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('analytics')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                                activeTab === 'analytics'
+                                    ? 'border-blue-500 text-blue-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                            }`}
+                        >
+                            Analytics
+                        </button>
+                    </nav>
+                </div>
 
                 {/* Debug Info */}
                 {(import.meta as any).env?.DEV && (
@@ -294,7 +320,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
                 )}
 
-                {/* Portfolio Overview */}
+                {activeTab === 'analytics' ? (
+                    <PerformanceChart portfolioId={portfolioData?.id || null} />
+                ) : (
+                    <>
+                        {/* Portfolio Overview */}
                 <div className="grid lg:grid-cols-3 gap-6 mb-8">
                     <div className="lg:col-span-2">
                         <div className="bg-white rounded-xl p-6 shadow-sm">
@@ -424,8 +454,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     ))}
                 </div>
 
-                {/* Rebalance History */}
-                <RebalanceHistory />
+                        {/* Rebalance History */}
+                        <RebalanceHistory />
+                    </>
+                )}
             </div>
         </div>
     )

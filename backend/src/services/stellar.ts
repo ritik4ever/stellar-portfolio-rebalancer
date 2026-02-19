@@ -19,8 +19,6 @@ export class StellarService {
 
             await this.checkConcentrationRisk(allocations)
 
-            const portfolioId = Date.now().toString()
-
             const mockBalances: Record<string, number> = {}
             const { ReflectorService } = await import('./reflector.js')
             const reflector = new ReflectorService()
@@ -35,13 +33,15 @@ export class StellarService {
             }
 
             const { portfolioStorage } = await import('./portfolioStorage.js')
-            portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
+            // Use the ID returned by the database — do NOT generate a separate one
+            const portfolioId = portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
 
             console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
             return portfolioId
         } catch (error) {
             throw new Error(`Failed to create portfolio: ${error}`)
         }
+
     }
 
     async checkConcentrationRisk(allocations: Record<string, number>, maxSingleAsset: number = 70): Promise<boolean> {

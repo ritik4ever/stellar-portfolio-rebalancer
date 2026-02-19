@@ -1,4 +1,3 @@
-// index.ts - COMPLETE VERSION WITH AUTO-REBALANCER
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'node:http'
@@ -8,6 +7,7 @@ import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
+import { databaseService } from './services/databaseService.js'
 
 const app = express()
 const port = process.env.PORT || 3001
@@ -234,6 +234,14 @@ const gracefulShutdown = (signal: string) => {
         console.log('[SHUTDOWN] Auto-rebalancer stopped')
     } catch (error) {
         console.error('[SHUTDOWN] Error stopping auto-rebalancer:', error)
+    }
+
+    // Close database connection
+    try {
+        databaseService.close()
+        console.log('[SHUTDOWN] Database connection closed')
+    } catch (error) {
+        console.error('[SHUTDOWN] Error closing database:', error)
     }
 
     // Close WebSocket connections
