@@ -47,6 +47,33 @@ const getPortfolioAllocationsAsRecord = (portfolio: any): Record<string, number>
     return portfolio.allocations as Record<string, number>
 }
 
+const parseOptionalNumber = (value: unknown): number | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
+const parseOptionalBoolean = (value: unknown): boolean | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'string') {
+        const lower = value.toLowerCase()
+        if (lower === 'true') return true
+        if (lower === 'false') return false
+    }
+    return undefined
+}
+
+const parseSlippageOverrides = (value: unknown): Record<string, number> | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const parsed: Record<string, number> = {}
+    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+        const num = parseOptionalNumber(raw)
+        if (num !== undefined) parsed[key] = num
+    }
+    return Object.keys(parsed).length > 0 ? parsed : undefined
+}
+
 // ================================
 // HEALTH CHECK ROUTES
 // ================================
@@ -237,7 +264,18 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
             })
         }
 
-        const result = await stellarService.executeRebalance(portfolioId)
+        const executionOptions = {
+            tradeSlippageBps: parseOptionalNumber(req.body?.tradeSlippageBps),
+            maxSlippageBpsPerRebalance: parseOptionalNumber(req.body?.maxSlippageBpsPerRebalance),
+            maxSpreadBps: parseOptionalNumber(req.body?.maxSpreadBps),
+            minLiquidityCoverage: parseOptionalNumber(req.body?.minLiquidityCoverage),
+            allowPartialFill: parseOptionalBoolean(req.body?.allowPartialFill),
+            rollbackOnFailure: parseOptionalBoolean(req.body?.rollbackOnFailure),
+            signerSecret: typeof req.body?.signerSecret === 'string' ? req.body.signerSecret : undefined,
+            tradeSlippageOverrides: parseSlippageOverrides(req.body?.tradeSlippageOverrides)
+        }
+
+        const result = await stellarService.executeRebalance(portfolioId, executionOptions)
 
         await analyticsService.captureSnapshot(portfolioId, prices)
 
@@ -246,40 +284,51 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
             trigger: 'Manual Rebalance',
             trades: result.trades || 0,
             gasUsed: result.gasUsed || '0 XLM',
-            status: 'completed',
+            status: result.status === 'failed' ? 'failed' : 'completed',
             isAutomatic: false,
-            riskAlerts: riskCheck.alerts
+            riskAlerts: riskCheck.alerts,
+            error: result.failureReasons?.join('; ')
         })
 
-        // Send notification for manual rebalance
-        try {
-            await notificationService.notify({
-                userId: portfolio.userAddress,
-                eventType: 'rebalance',
-                title: 'Portfolio Rebalanced',
-                message: `Your portfolio has been manually rebalanced. ${result.trades || 0} trades executed with ${result.gasUsed || '0 XLM'} gas used.`,
-                data: {
+        // Send notification for successful/partial manual rebalance
+        if (result.status !== 'failed') {
+            try {
+                await notificationService.notify({
+                    userId: portfolio.userAddress,
+                    eventType: 'rebalance',
+                    title: result.status === 'partial' ? 'Portfolio Partially Rebalanced' : 'Portfolio Rebalanced',
+                    message: `Your portfolio has been manually rebalanced. ${result.trades || 0} trades executed with ${result.gasUsed || '0 XLM'} gas used.`,
+                    data: {
+                        portfolioId,
+                        trades: result.trades,
+                        gasUsed: result.gasUsed,
+                        trigger: 'manual',
+                        status: result.status
+                    },
+                    timestamp: new Date().toISOString()
+                })
+            } catch (notificationError) {
+                logger.error('Failed to send rebalance notification', {
                     portfolioId,
-                    trades: result.trades,
-                    gasUsed: result.gasUsed,
-                    trigger: 'manual'
-                },
-                timestamp: new Date().toISOString()
-            })
-        } catch (notificationError) {
-            logger.error('Failed to send rebalance notification', {
-                portfolioId,
-                error: getErrorObject(notificationError)
-            })
+                    error: getErrorObject(notificationError)
+                })
+            }
         }
 
         logger.info('Rebalance executed successfully', { portfolioId, result })
-        res.json({
+        const responseStatus = result.status === 'failed' ? 409 : 200
+        res.status(responseStatus).json({
             result,
-            status: 'completed',
+            status: result.status === 'failed' ? 'failed' : 'completed',
             mode: 'demo',
-            message: 'Rebalance completed successfully',
-            riskAlerts: riskCheck.alerts
+            message: result.status === 'failed'
+                ? 'Rebalance execution failed safely'
+                : result.status === 'partial'
+                    ? 'Rebalance partially completed'
+                    : 'Rebalance completed successfully',
+            riskAlerts: riskCheck.alerts,
+            failureReasons: result.failureReasons || [],
+            partialFills: result.partialFills || []
         })
     } catch (error) {
         logger.error('Rebalance failed', { error: getErrorObject(error), portfolioId: req.params.id })

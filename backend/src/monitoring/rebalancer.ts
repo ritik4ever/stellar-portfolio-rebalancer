@@ -84,12 +84,21 @@ export class RebalancingService {
                     if (this.shouldAutoRebalance(portfolio, riskAlerts)) {
                         logger.info(`Auto-executing rebalance for portfolio ${portfolioId}`)
                         try {
-                            await this.stellarService.executeRebalance(portfolioId)
-
-                            this.notifyClients(portfolioId, 'rebalance_completed', {
-                                message: 'Automatic rebalancing completed successfully',
-                                riskLevel: 'low'
-                            })
+                            const rebalanceResult = await this.stellarService.executeRebalance(portfolioId)
+                            if (rebalanceResult.status === 'failed') {
+                                this.notifyClients(portfolioId, 'rebalance_failed', {
+                                    message: 'Automatic rebalancing failed safely',
+                                    reasons: rebalanceResult.failureReasons || []
+                                })
+                            } else {
+                                this.notifyClients(portfolioId, 'rebalance_completed', {
+                                    message: rebalanceResult.status === 'partial'
+                                        ? 'Automatic rebalancing partially completed'
+                                        : 'Automatic rebalancing completed successfully',
+                                    riskLevel: 'low',
+                                    status: rebalanceResult.status
+                                })
+                            }
                         } catch (rebalanceError) {
                             logger.error(`Auto-rebalance failed for ${portfolioId}:`, rebalanceError)
 
