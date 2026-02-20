@@ -201,6 +201,7 @@ export class AutoRebalancerService {
             })
 
             const rebalanceResult = await this.stellarService.executeRebalance(portfolioId)
+            const rebalanceSucceeded = rebalanceResult.status !== 'failed'
 
             // Record the auto-rebalance event
             await this.rebalanceHistoryService.recordRebalanceEvent({
@@ -208,23 +209,34 @@ export class AutoRebalancerService {
                 trigger: 'Automatic Rebalancing',
                 trades: rebalanceResult.trades || 0,
                 gasUsed: rebalanceResult.gasUsed || '0 XLM',
-                status: 'completed',
+                status: rebalanceSucceeded ? 'completed' : 'failed',
                 isAutomatic: true,
-                riskAlerts: riskCheck.alerts || []
+                riskAlerts: riskCheck.alerts || [],
+                error: rebalanceResult.failureReasons?.join('; ')
             })
+
+            if (!rebalanceSucceeded) {
+                return {
+                    rebalanced: false,
+                    reason: rebalanceResult.failureReasons?.[0] || 'Execution failed'
+                }
+            }
 
             // Send notification for successful auto-rebalance
             try {
                 await notificationService.notify({
                     userId: portfolio.userAddress,
                     eventType: 'rebalance',
-                    title: 'Portfolio Rebalanced',
+                    title: rebalanceResult.status === 'partial'
+                        ? 'Portfolio Partially Rebalanced'
+                        : 'Portfolio Rebalanced',
                     message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades || 0} trades executed with ${rebalanceResult.gasUsed || '0 XLM'} gas used.`,
                     data: {
                         portfolioId,
                         trades: rebalanceResult.trades,
                         gasUsed: rebalanceResult.gasUsed,
-                        trigger: 'automatic'
+                        trigger: 'automatic',
+                        status: rebalanceResult.status
                     },
                     timestamp: new Date().toISOString()
                 })
@@ -235,7 +247,12 @@ export class AutoRebalancerService {
                 })
             }
 
-            return { rebalanced: true, reason: 'Successfully auto-rebalanced' }
+            return {
+                rebalanced: true,
+                reason: rebalanceResult.status === 'partial'
+                    ? 'Partially auto-rebalanced'
+                    : 'Successfully auto-rebalanced'
+            }
 
         } catch (error) {
             logger.error('[AUTO-REBALANCER] Error executing rebalance', {
