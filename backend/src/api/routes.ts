@@ -6,6 +6,7 @@ import { RiskManagementService } from '../services/riskManagements.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { logger } from '../utils/logger.js'
+import { writeRateLimiter } from '../middleware/rateLimit.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -70,7 +71,7 @@ router.get('/health', (req, res) => {
 // ================================
 
 // Create portfolio with enhanced validation
-router.post('/portfolio', async (req, res) => {
+router.post('/portfolio', writeRateLimiter, async (req, res) => {
     try {
         const { userAddress, allocations, threshold } = req.body
 
@@ -184,7 +185,7 @@ router.get('/user/:address/portfolios', async (req, res) => {
 // ================================
 
 // Enhanced rebalance with comprehensive safety checks
-router.post('/portfolio/:id/rebalance', async (req, res) => {
+router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
     try {
         const portfolioId = req.params.id
 
