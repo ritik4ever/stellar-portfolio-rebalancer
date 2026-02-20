@@ -20,7 +20,7 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price }) => {
     const currentPrice = price?.price || 1
 
     return (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center">
                     <div
@@ -30,8 +30,8 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price }) => {
                         {asset.name.charAt(0)}
                     </div>
                     <div className="ml-3">
-                        <h3 className="font-semibold text-gray-900">{asset.name}</h3>
-                        <p className="text-sm text-gray-500">{asset.value}% allocation</p>
+                        <h3 className="font-semibold text-gray-900 dark:text-white">{asset.name}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{asset.value}% allocation</p>
                     </div>
                 </div>
                 <div className={`flex items-center ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
@@ -42,18 +42,18 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price }) => {
 
             <div className="space-y-2">
                 <div className="flex justify-between">
-                    <span className="text-sm text-gray-500">Value</span>
-                    <span className="font-medium">${asset.amount.toLocaleString()}</span>
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Value</span>
+                    <span className="font-medium dark:text-gray-200">${asset.amount.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                    <span className="text-sm text-gray-500">Price</span>
-                    <span className="text-sm text-gray-600">${currentPrice.toFixed(currentPrice < 1 ? 4 : 2)}</span>
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Price</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-300">${currentPrice.toFixed(currentPrice < 1 ? 4 : 2)}</span>
                 </div>
                 <div className="flex justify-between">
-                    <span className="text-sm text-gray-500">Target</span>
-                    <span className="text-sm text-gray-600">{asset.value}%</span>
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Target</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-300">{asset.value}%</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-2">
                     <div
                         className="h-2 rounded-full"
                         style={{

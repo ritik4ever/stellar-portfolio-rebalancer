@@ -288,12 +288,12 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
     if (loading) {
         return (
-            <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
                 <div className="animate-pulse">
-                    <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
+                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
                     <div className="space-y-3">
                         {[1, 2, 3].map(i => (
-                            <div key={i} className="h-16 bg-gray-100 rounded"></div>
+                            <div key={i} className="h-16 bg-gray-100 dark:bg-gray-700 rounded"></div>
                         ))}
                     </div>
                 </div>
@@ -302,12 +302,12 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
     }
 
     return (
-        <div className="bg-white rounded-xl shadow-sm">
-            <div className="p-6 border-b border-gray-200">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Rebalance History</h2>
-                        <p className="text-sm text-gray-500 mt-1">Recent portfolio rebalancing activities with risk management</p>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Rebalance History</h2>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Recent portfolio rebalancing activities with risk management</p>
                     </div>
 
                     {/*  NEW: Export button */}
@@ -315,13 +315,13 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         <button
                             onClick={exportHistoryCSV}
                             disabled={history.length === 0}
-                            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                            className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
                         >
                             Export CSV
                         </button>
 
                         {error && (
-                            <div className="text-sm text-red-600 bg-red-50 px-3 py-1 rounded">
+                            <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 px-3 py-1 rounded">
                                 {error}
                             </div>
                         )}
@@ -329,10 +329,10 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 </div>
             </div>
 
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
                 {history.length === 0 ? (
-                    <div className="p-6 text-center text-gray-500">
-                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                    <div className="p-6 text-center text-gray-500 dark:text-gray-400">
+                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
                         <p>No rebalancing history yet</p>
                         <p className="text-sm mt-1">Portfolio rebalances will appear here when they occur</p>
                     </div>
@@ -343,7 +343,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                             : formatDateTime(event.timestamp)
 
                         return (
-                            <div key={event.id} className="p-6 hover:bg-gray-50 transition-colors">
+                            <div key={event.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-start space-x-4">
                                         <div className="flex-shrink-0">
@@ -353,8 +353,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center space-x-2 mb-2">
-                                                <span className="font-medium text-gray-900">{event.trigger}</span>
-                                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                                                <span className="font-medium text-gray-900 dark:text-white">{event.trigger}</span>
+                                                <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded">
                                                     {event.trades} trade{event.trades > 1 ? 's' : ''}
                                                 </span>
                                                 {event.details?.riskLevel && (
@@ -370,7 +370,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                     </span>
                                                 )}
                                                 {event.details?.chain && (
-                                                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded flex items-center">
+                                                    <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-2 py-1 rounded flex items-center">
                                                         <Link className="w-3 h-3 mr-1" />
                                                         {event.details.chain}
                                                     </span>
@@ -378,21 +378,21 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                             </div>
 
                                             {/* Enhanced date and time display */}
-                                            <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
+                                            <div className="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400 mb-2">
                                                 <div className="flex items-center">
                                                     <Calendar className="w-4 h-4 mr-1" />
                                                     <span className="font-medium">{dateFormatted}</span>
                                                     <span className="mx-1">at</span>
                                                     <span>{timeFormatted}</span>
                                                 </div>
-                                                <span className="text-gray-300">•</span>
+                                                <span className="text-gray-300 dark:text-gray-600">•</span>
                                                 <div className="flex items-center">
                                                     <Clock className="w-4 h-4 mr-1" />
                                                     {formatTimestamp(event.timestamp)}
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
+                                            <div className="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400 mb-2">
                                                 <span>Gas: {event.gasUsed}</span>
                                                 {event.details?.executionTime && (
                                                     <span>Execution: {formatExecutionTime(event.details.executionTime)}</span>
@@ -405,17 +405,17 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                             {/* Enhanced badges */}
                                             <div className="flex items-center space-x-2 mb-2">
                                                 {event.details?.volatilityDetected && (
-                                                    <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded flex items-center">
+                                                    <span className="text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300 px-2 py-1 rounded flex items-center">
                                                         <TrendingDown className="w-3 h-3 mr-1" />
                                                         High Volatility
                                                     </span>
                                                 )}
                                                 {event.details?.performanceImpact && (
                                                     <span className={`text-xs px-2 py-1 rounded flex items-center ${event.details.performanceImpact === 'positive'
-                                                        ? 'bg-green-100 text-green-800'
+                                                        ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300'
                                                         : event.details.performanceImpact === 'negative'
-                                                            ? 'bg-red-100 text-red-800'
-                                                            : 'bg-gray-100 text-gray-800'
+                                                            ? 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300'
+                                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
                                                         }`}>
                                                         {event.details.performanceImpact === 'positive' ? (
                                                             <TrendingUp className="w-3 h-3 mr-1" />
@@ -427,8 +427,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                 )}
                                                 {event.details?.priceDirection && (
                                                     <span className={`text-xs px-2 py-1 rounded flex items-center ${event.details.priceDirection === 'up'
-                                                        ? 'bg-green-100 text-green-800'
-                                                        : 'bg-red-100 text-red-800'
+                                                        ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300'
+                                                        : 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300'
                                                         }`}>
                                                         {event.details.priceDirection === 'up' ? (
                                                             <TrendingUp className="w-3 h-3 mr-1" />
@@ -441,18 +441,18 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                             </div>
 
                                             {event.details?.reason && (
-                                                <div className="text-sm text-gray-600 italic mb-2">
+                                                <div className="text-sm text-gray-600 dark:text-gray-400 italic mb-2">
                                                     {event.details.reason}
                                                 </div>
                                             )}
 
                                             {event.details?.fromAsset && event.details?.toAsset && (
                                                 <div className="flex items-center text-sm">
-                                                    <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs mr-2">
+                                                    <span className="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded text-xs mr-2">
                                                         {event.details.fromAsset}
                                                     </span>
                                                     <ArrowRight className="w-3 h-3 text-gray-400 mx-1" />
-                                                    <span className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs ml-2">
+                                                    <span className="px-2 py-1 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded text-xs ml-2">
                                                         {event.details.toAsset}
                                                     </span>
                                                 </div>
@@ -468,8 +468,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             </div>
 
             {history.length > 0 && (
-                <div className="p-4 border-t border-gray-200 bg-gray-50">
-                    <div className="flex items-center justify-between text-sm text-gray-600">
+                <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                    <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
                         <span>Showing {history.length} recent rebalance{history.length > 1 ? 's' : ''}</span>
                         <div className="flex items-center space-x-4">
                             <div className="flex items-center">

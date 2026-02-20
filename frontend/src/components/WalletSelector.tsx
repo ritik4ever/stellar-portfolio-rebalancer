@@ -42,8 +42,8 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
 
     if (availableWallets.length === 0) {
         return (
-            <div className="p-4 border rounded-lg bg-yellow-50 border-yellow-200">
-                <p className="text-yellow-800 text-sm">
+            <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800">
+                <p className="text-yellow-800 dark:text-yellow-300 text-sm">
                     No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.
                 </p>
             </div>
@@ -57,7 +57,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                     key={wallet.type}
                     onClick={() => handleConnect(wallet.type)}
                     disabled={connecting === wallet.type}
-                    className="w-full flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:text-gray-200"
                 >
                     <span className="font-medium">{wallet.name}</span>
                     {connecting === wallet.type && (

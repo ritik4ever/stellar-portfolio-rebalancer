@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink } from 'lucide-react'
+import ThemeToggle from './ThemeToggle'
+import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
@@ -27,6 +29,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [rebalancing, setRebalancing] = useState(false)
     const [priceSource, setPriceSource] = useState<string>('loading...')
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'test-notifications'>('overview')
+    const { isDark } = useTheme()
 
     useEffect(() => {
         if (publicKey) {
@@ -238,40 +241,40 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-                    <p className="mt-4 text-gray-600">Loading portfolio data...</p>
+                    <p className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
                 </div>
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4">
+            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center">
                         <button
                             onClick={() => onNavigate('landing')}
-                            className="mr-4 p-2 text-gray-500 hover:text-gray-700 transition-colors"
+                            className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                         >
                             <ArrowLeft className="w-5 h-5" />
                         </button>
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-900">Portfolio Dashboard</h1>
+                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Portfolio Dashboard</h1>
                             {publicKey ? (
                                 <div className="flex items-center space-x-4 mt-1">
-                                    <div className="flex items-center space-x-2 text-sm text-gray-600">
+                                    <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">
                                             {walletType} Wallet
                                         </span>
                                         <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
                                     </div>
-                                    <div className="flex items-center space-x-1 text-xs text-gray-500">
+                                    <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-500">
                                         <span>Contract:</span>
-                                        <code className="bg-gray-100 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
+                                        <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
                                         <a
                                             href={`https://stellar.expert/explorer/testnet/contract/${contractAddress}`}
                                             target="_blank"
@@ -283,7 +286,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     </div>
                                 </div>
                             ) : (
-                                <span className="text-sm bg-yellow-100 text-yellow-800 px-2 py-1 rounded mt-1 inline-block">
+                                <span className="text-sm bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 px-2 py-1 rounded mt-1 inline-block">
                                     Demo Mode - Connect wallet for full functionality
                                 </span>
                             )}
@@ -291,19 +294,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
 
                     <div className="flex items-center space-x-4">
+                        <ThemeToggle />
                         {/*  NEW: Export buttons */}
                         <div className="flex items-center space-x-2">
                             <button
                                 onClick={exportPortfolioCSV}
                                 disabled={!portfolioData}
-                                className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
                             >
                                 Export CSV
                             </button>
                             <button
                                 onClick={exportPortfolioJSON}
                                 disabled={!portfolioData}
-                                className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
                             >
                                 Export JSON
                             </button>
@@ -319,7 +323,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </button>
                                 <button
                                     onClick={disconnectWallet}
-                                    className="text-red-600 hover:text-red-700 px-3 py-2 text-sm transition-colors"
+                                    className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-3 py-2 text-sm transition-colors"
                                 >
                                     Disconnect
                                 </button>
@@ -335,7 +339,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <button
                             onClick={refreshData}
                             disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
                         >
                             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
@@ -345,13 +349,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
             <div className="p-6 max-w-7xl mx-auto">
                 {/* Tab Navigation */}
-                <div className="mb-6 border-b border-gray-200">
+                <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
                     <nav className="flex space-x-8">
                         <button
                             onClick={() => setActiveTab('overview')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
-                                ? 'border-blue-500 text-blue-600'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
                             Overview
@@ -359,8 +363,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <button
                             onClick={() => setActiveTab('analytics')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'analytics'
-                                ? 'border-blue-500 text-blue-600'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
                             Analytics
@@ -368,8 +372,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <button
                             onClick={() => setActiveTab('notifications')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
-                                ? 'border-blue-500 text-blue-600'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
                             Notifications
@@ -380,7 +384,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                 {/* Debug Info */}
                 {(import.meta as any).env?.DEV && (
-                    <div className="bg-gray-100 p-2 rounded mb-4 text-xs">
+                    <div className="bg-gray-100 dark:bg-gray-800 p-2 rounded mb-4 text-xs dark:text-gray-300">
                         <div>Portfolio ID: {portfolioData?.id}</div>
                         <div>Allocations: {JSON.stringify(allocationData)}</div>
                         <div>Price Source: {priceSource}</div>
@@ -396,15 +400,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         {/* Portfolio Overview */}
                         <div className="grid lg:grid-cols-3 gap-6 mb-8">
                             <div className="lg:col-span-2">
-                                <div className="bg-white rounded-xl p-6 shadow-sm">
+                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                                     <div className="flex items-center justify-between mb-6">
-                                        <h2 className="text-lg font-semibold text-gray-900">Portfolio Value</h2>
-                                        <div className="flex items-center space-x-2 text-sm text-gray-500">
+                                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Portfolio Value</h2>
+                                        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
                                             <span>Last updated: just now</span>
                                             <span
                                                 className={`px-2 py-1 rounded text-xs ${priceSource.includes('Browser')
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : 'bg-yellow-100 text-yellow-700'
+                                                    ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
+                                                    : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'
                                                     }`}
                                             >
                                                 {priceSource}
@@ -412,26 +416,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </div>
                                     </div>
                                     <div className="mb-4">
-                                        <div className="text-3xl font-bold text-gray-900">
+                                        <div className="text-3xl font-bold text-gray-900 dark:text-white">
                                             ${portfolioData?.totalValue?.toLocaleString() || '0'}
                                         </div>
                                         <div className="flex items-center mt-1">
                                             <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
                                             <span className="text-green-500 font-medium">+{portfolioData?.dayChange || 0}%</span>
-                                            <span className="text-gray-500 ml-2">Today</span>
+                                            <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
                                         </div>
                                     </div>
                                     <div className="h-64">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <LineChart data={performanceData}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                                <XAxis dataKey="date" stroke="#666" />
-                                                <YAxis stroke="#666" />
+                                                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
+                                                <XAxis dataKey="date" stroke={isDark ? '#9CA3AF' : '#666'} />
+                                                <YAxis stroke={isDark ? '#9CA3AF' : '#666'} />
                                                 <Tooltip
                                                     contentStyle={{
-                                                        backgroundColor: '#fff',
-                                                        border: '1px solid #e5e7eb',
-                                                        borderRadius: '8px'
+                                                        backgroundColor: isDark ? '#1F2937' : '#fff',
+                                                        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                                                        borderRadius: '8px',
+                                                        color: isDark ? '#F9FAFB' : '#111827'
                                                     }}
                                                 />
                                                 <Line type="monotone" dataKey="value" stroke="#3B82F6" strokeWidth={3} />
@@ -447,19 +452,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <motion.div
                                         initial={{ opacity: 0, scale: 0.95 }}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        className="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-xl p-6"
+                                        className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
                                     >
                                         <div className="flex items-center mb-3">
                                             <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
-                                            <span className="font-medium text-orange-800">Rebalance Needed</span>
+                                            <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
                                         </div>
-                                        <p className="text-sm text-orange-700 mb-4">
+                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-4">
                                             Your portfolio has drifted from target allocation
                                         </p>
                                         <button
                                             onClick={executeRebalance}
                                             disabled={rebalancing || !publicKey || portfolioData?.id === 'demo'}
-                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
                                         >
                                             {rebalancing ? (
                                                 <>
@@ -471,7 +476,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             )}
                                         </button>
                                         {(!publicKey || portfolioData?.id === 'demo') && (
-                                            <p className="text-xs text-orange-600 mt-2 text-center">
+                                            <p className="text-xs text-orange-600 dark:text-orange-400 mt-2 text-center">
                                                 {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}
                                             </p>
                                         )}
@@ -479,8 +484,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
 
                                 {/* Allocation Chart */}
-                                <div className="bg-white rounded-xl p-6 shadow-sm">
-                                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Current Allocation</h3>
+                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Allocation</h3>
                                     <div className="h-48 flex items-center justify-center">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
@@ -505,9 +510,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             <div key={index} className="flex items-center justify-between">
                                                 <div className="flex items-center">
                                                     <div className={`w-3 h-3 rounded-full mr-2`} style={{ backgroundColor: asset.color }} />
-                                                    <span className="text-sm font-medium">{asset.name}</span>
+                                                    <span className="text-sm font-medium dark:text-gray-200">{asset.name}</span>
                                                 </div>
-                                                <span className="text-sm text-gray-600">{asset.value}%</span>
+                                                <span className="text-sm text-gray-600 dark:text-gray-400">{asset.value}%</span>
                                             </div>
                                         ))}
                                     </div>

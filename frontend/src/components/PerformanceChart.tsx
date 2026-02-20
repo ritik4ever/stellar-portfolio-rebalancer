@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
 import { API_CONFIG } from '../config/api'
+import { useTheme } from '../context/ThemeContext'
 
 interface PerformanceChartProps {
     portfolioId: string | null
@@ -37,6 +38,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(30)
+    const { isDark } = useTheme()
 
     useEffect(() => {
         if (portfolioId && portfolioId !== 'demo') {
@@ -106,10 +108,10 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
     if (!portfolioId || portfolioId === 'demo') {
         return (
-            <div className="bg-white rounded-xl p-6 shadow-sm">
-                <div className="flex items-center justify-center h-64 text-gray-500">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
                     <div className="text-center">
-                        <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                        <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
                         <p>Connect a wallet and create a portfolio to view performance analytics</p>
                     </div>
                 </div>
@@ -119,7 +121,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
     if (loading) {
         return (
-            <div className="bg-white rounded-xl p-6 shadow-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
                 </div>
@@ -129,7 +131,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
     if (error) {
         return (
-            <div className="bg-white rounded-xl p-6 shadow-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                 <div className="flex items-center justify-center h-64 text-red-500">
                     <div className="text-center">
                         <AlertCircle className="w-12 h-12 mx-auto mb-2" />
@@ -145,14 +147,14 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
     return (
         <div className="space-y-6">
-            <div className="bg-white rounded-xl p-6 shadow-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-semibold text-gray-900">Portfolio Performance</h2>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Portfolio Performance</h2>
                     <div className="flex items-center space-x-2">
                         <select
                             value={days}
                             onChange={(e) => setDays(Number(e.target.value))}
-                            className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         >
                             <option value={7}>7 days</option>
                             <option value={30}>30 days</option>
@@ -162,9 +164,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                 </div>
 
                 {chartData.length === 0 ? (
-                    <div className="flex items-center justify-center h-64 text-gray-500">
+                    <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
                         <div className="text-center">
-                            <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                            <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
                             <p>No performance data available yet</p>
                             <p className="text-sm mt-1">Data will appear as your portfolio value changes</p>
                         </div>
@@ -173,24 +175,25 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                     <div className="h-80">
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
                                 <XAxis
                                     dataKey="date"
-                                    stroke="#666"
-                                    tick={{ fontSize: 12 }}
+                                    stroke={isDark ? '#9CA3AF' : '#666'}
+                                    tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
                                     interval="preserveStartEnd"
                                 />
                                 <YAxis
-                                    stroke="#666"
-                                    tick={{ fontSize: 12 }}
+                                    stroke={isDark ? '#9CA3AF' : '#666'}
+                                    tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
                                     tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
                                 />
                                 <Tooltip
                                     contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e5e7eb',
+                                        backgroundColor: isDark ? '#1F2937' : '#fff',
+                                        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                                         borderRadius: '8px',
-                                        padding: '8px 12px'
+                                        padding: '8px 12px',
+                                        color: isDark ? '#F9FAFB' : '#111827'
                                     }}
                                     formatter={(value: number) => formatCurrency(value)}
                                     labelFormatter={(label) => `Date: ${label}`}
@@ -212,9 +215,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
             {metrics && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm text-gray-600">Total Return</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Total Return</span>
                             {metrics.totalReturn >= 0 ? (
                                 <TrendingUp className="w-4 h-4 text-green-500" />
                             ) : (
@@ -226,9 +229,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm text-gray-600">Daily Change</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Daily Change</span>
                             {metrics.dailyChange >= 0 ? (
                                 <TrendingUp className="w-4 h-4 text-green-500" />
                             ) : (
@@ -240,9 +243,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm text-gray-600">Weekly Change</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Weekly Change</span>
                             {metrics.weeklyChange >= 0 ? (
                                 <TrendingUp className="w-4 h-4 text-green-500" />
                             ) : (
@@ -254,9 +257,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm text-gray-600">Max Drawdown</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Max Drawdown</span>
                             <AlertCircle className="w-4 h-4 text-orange-500" />
                         </div>
                         <div className="text-2xl font-bold text-orange-600">
@@ -264,9 +267,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="mb-2">
-                            <span className="text-sm text-gray-600">Best Day</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Best Day</span>
                         </div>
                         <div className="text-lg font-semibold text-green-600">
                             {formatPercentage(metrics.bestDay.change)}
@@ -276,9 +279,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="mb-2">
-                            <span className="text-sm text-gray-600">Worst Day</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Worst Day</span>
                         </div>
                         <div className="text-lg font-semibold text-red-600">
                             {formatPercentage(metrics.worstDay.change)}
@@ -288,26 +291,26 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="mb-2">
-                            <span className="text-sm text-gray-600">Sharpe Ratio</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Sharpe Ratio</span>
                         </div>
-                        <div className="text-lg font-semibold text-gray-900">
+                        <div className="text-lg font-semibold text-gray-900 dark:text-white">
                             {metrics.sharpeRatio.toFixed(2)}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             {metrics.sharpeRatio > 1 ? 'Good' : metrics.sharpeRatio > 0 ? 'Fair' : 'Poor'}
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <div className="mb-2">
-                            <span className="text-sm text-gray-600">Volatility</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Volatility</span>
                         </div>
-                        <div className="text-lg font-semibold text-gray-900">
+                        <div className="text-lg font-semibold text-gray-900 dark:text-white">
                             {formatPercentage(metrics.volatility)}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Daily volatility
                         </div>
                     </div>

@@ -72,13 +72,13 @@ function App() {
     return (
         <div className="App">
             {error && (
-                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-50 border border-red-200 rounded-lg p-4 max-w-md">
-                    <div className="flex items-center text-red-800">
+                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md">
+                    <div className="flex items-center text-red-800 dark:text-red-300">
                         <span className="mr-2">⚠️</span>
                         <span>{error}</span>
                         <button
                             onClick={() => setError(null)}
-                            className="ml-4 text-red-600 hover:text-red-800"
+                            className="ml-4 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200"
                         >
                             ✕
                         </button>
