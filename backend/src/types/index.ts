@@ -26,6 +26,17 @@ export interface Portfolio {
     totalValue: number
     createdAt: string
     lastRebalance: string
+    version: number
+}
+
+// Thrown when an update targets a stale portfolio version
+export class ConflictError extends Error {
+    readonly currentVersion: number
+    constructor(currentVersion: number) {
+        super(`Portfolio was modified concurrently (current version: ${currentVersion})`)
+        this.name = 'ConflictError'
+        this.currentVersion = currentVersion
+    }
 }
 
 // Rebalance event interface

@@ -1,4 +1,5 @@
 import { query } from './client.js'
+import { ConflictError } from '../types/index.js'
 
 export interface PortfolioRow {
     id: string
@@ -9,6 +10,7 @@ export interface PortfolioRow {
     total_value: number
     created_at: Date
     last_rebalance: Date
+    version: number
 }
 
 function rowToPortfolio(r: PortfolioRow) {
@@ -20,7 +22,8 @@ function rowToPortfolio(r: PortfolioRow) {
         balances: r.balances || {},
         totalValue: Number(r.total_value),
         createdAt: r.created_at.toISOString(),
-        lastRebalance: r.last_rebalance.toISOString()
+        lastRebalance: r.last_rebalance.toISOString(),
+        version: r.version ?? 1
     }
 }
 
@@ -33,8 +36,8 @@ export async function dbCreatePortfolio(
     totalValue: number
 ) {
     await query(
-        `INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
+        `INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), 1)`,
         [id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(balances), totalValue]
     )
 }
@@ -61,9 +64,23 @@ export async function dbGetAllPortfolios() {
     return result.rows.map(rowToPortfolio)
 }
 
+/**
+ * Update a portfolio record.
+ *
+ * When `expectedVersion` is provided the update uses compare-and-set semantics:
+ * the row is only modified when its current version matches `expectedVersion`,
+ * and the version counter is incremented atomically.  A `ConflictError` is
+ * thrown when the match fails, signalling that a concurrent write has already
+ * advanced the version.
+ *
+ * Omitting `expectedVersion` performs an unchecked update (backward-compat)
+ * while still incrementing the version so that subsequent versioned callers
+ * detect the change.
+ */
 export async function dbUpdatePortfolio(
     id: string,
-    updates: { balances?: Record<string, number>; totalValue?: number; lastRebalance?: string }
+    updates: { balances?: Record<string, number>; totalValue?: number; lastRebalance?: string },
+    expectedVersion?: number
 ) {
     const sets: string[] = []
     const values: unknown[] = []
@@ -81,6 +98,36 @@ export async function dbUpdatePortfolio(
         values.push(updates.lastRebalance)
     }
     if (sets.length === 0) return false
+
+    // Always increment the version counter on every write
+    sets.push(`version = version + 1`)
+
+    if (expectedVersion !== undefined) {
+        // Compare-and-set: WHERE id = $n AND version = $m
+        values.push(id)
+        values.push(expectedVersion)
+        const result = await query(
+            `UPDATE portfolios SET ${sets.join(', ')} WHERE id = $${i} AND version = $${i + 1}`,
+            values
+        )
+        if ((result.rowCount ?? 0) === 0) {
+            // Distinguish not-found from conflict
+            const check = await query<{ id: string }>(
+                'SELECT id FROM portfolios WHERE id = $1',
+                [id]
+            )
+            if (check.rows.length === 0) return false
+            // Row exists but version didn't match — concurrent write detected
+            const current = await query<{ version: number }>(
+                'SELECT version FROM portfolios WHERE id = $1',
+                [id]
+            )
+            throw new ConflictError(current.rows[0]?.version ?? -1)
+        }
+        return true
+    }
+
+    // Unchecked update
     values.push(id)
     const result = await query(
         `UPDATE portfolios SET ${sets.join(', ')} WHERE id = $${i}`,

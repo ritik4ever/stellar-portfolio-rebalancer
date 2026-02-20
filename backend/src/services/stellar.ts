@@ -1,5 +1,6 @@
 import { Horizon } from '@stellar/stellar-sdk'
 import type { PricesMap } from '../types/index.js'
+import { ConflictError } from '../types/index.js'
 
 export class StellarService {
     private server: Horizon.Server
@@ -240,10 +241,12 @@ export class StellarService {
             // Calculate new balances
             const updatedBalances = await this.calculateRebalancedBalances(portfolio, prices)
 
-            await portfolioStorage.updatePortfolio(portfolioId, {
-                lastRebalance: new Date().toISOString(),
-                balances: updatedBalances
-            })
+            // Compare-and-set: only commit if no concurrent write advanced the version
+            portfolioStorage.updatePortfolio(
+                portfolioId,
+                { lastRebalance: new Date().toISOString(), balances: updatedBalances },
+                portfolio.version
+            )
 
             // Record successful rebalance
             const event = await rebalanceHistory.recordRebalanceEvent({
@@ -269,6 +272,10 @@ export class StellarService {
                 eventId: event.id
             }
         } catch (error) {
+            // Bubble up concurrency conflicts without wrapping so callers can
+            // distinguish a 409 Conflict from a generic 500 failure.
+            if (error instanceof ConflictError) throw error
+
             const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
             const rebalanceHistory = new RebalanceHistoryService()
 
