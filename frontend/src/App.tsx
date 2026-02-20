@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import PortfolioSetup from './components/PortfolioSetup'
-import { StellarWallet } from './utils/stellar'
+import { walletManager } from './utils/walletManager'
+import { WalletError } from './utils/walletAdapters'
 
 function App() {
     const [currentView, setCurrentView] = useState('landing')
@@ -16,11 +17,9 @@ function App() {
 
     const checkWalletConnection = async () => {
         try {
-            const savedKey = localStorage.getItem('stellar_public_key')
-            const walletConnected = localStorage.getItem('wallet_connected')
-
-            if (savedKey && walletConnected) {
-                setPublicKey(savedKey)
+            const publicKey = await walletManager.reconnect()
+            if (publicKey) {
+                setPublicKey(publicKey)
                 setCurrentView('dashboard')
             }
         } catch (error) {
@@ -33,18 +32,32 @@ function App() {
         setError(null)
 
         try {
-            const publicKey = await StellarWallet.connectWallet()
-            setPublicKey(publicKey)
-            setCurrentView('dashboard')
+            const publicKey = walletManager.getPublicKey()
+            if (publicKey) {
+                setPublicKey(publicKey)
+                setCurrentView('dashboard')
+            } else {
+                setError('No wallet connected. Please select a wallet first.')
+            }
         } catch (error: any) {
             console.error('Wallet connection error:', error)
 
-            if (error.message === 'NO_WALLET_FOUND') {
-                setError('No Stellar wallet detected. Please install Freighter, Rabet, or another Stellar wallet.')
-            } else if (error.message?.includes('declined') || error.message?.includes('rejected')) {
-                setError('Wallet connection was declined. Please try again and approve the connection.')
+            if (error instanceof WalletError) {
+                if (error.code === 'USER_DECLINED') {
+                    setError('Connection was declined. Please approve in your wallet.')
+                } else if (error.code === 'WALLET_NOT_INSTALLED') {
+                    setError(`${error.walletType || 'Wallet'} is not installed. Please install it and refresh.`)
+                } else if (error.code === 'NETWORK_MISMATCH') {
+                    setError('Network mismatch. Please check your wallet network settings.')
+                } else if (error.code === 'TIMEOUT') {
+                    setError('Connection timed out. Please try again.')
+                } else {
+                    setError(error.message || 'Failed to connect wallet.')
+                }
+            } else if (error.message === 'NO_WALLET_FOUND') {
+                setError('No Stellar wallet detected. Please install Freighter, Rabet, or xBull wallet.')
             } else {
-                setError('Failed to connect wallet. Please refresh the page and try again.')
+                setError(error.message || 'Failed to connect wallet. Please try again.')
             }
         } finally {
             setIsConnecting(false)
