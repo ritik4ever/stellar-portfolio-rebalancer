@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'docs/MIGRATION.md'
       - '.github/workflows/backend-tests.yml'
   push:
     branches:
@@ -11,6 +12,7 @@ on:
       - develop
     paths:
       - 'backend/**'
+      - 'docs/MIGRATION.md'
 
 jobs:
   test:
@@ -34,6 +36,10 @@ jobs:
       - name: Install dependencies
         working-directory: backend
         run: npm ci
+      
+      - name: Verify migrations (dry-run)
+        working-directory: backend
+        run: npm run db:migrate:dry-run
       
       - name: Run tests
         working-directory: backend
