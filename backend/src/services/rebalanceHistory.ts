@@ -1,8 +1,6 @@
 import { RiskManagementService } from './riskManagements.js'
 import { databaseService } from './databaseService.js'
 import type { PricesMap } from '../types/index.js'
-import { isDbConfigured } from '../db/client.js'
-import * as rebalanceDb from '../db/rebalanceHistoryDb.js'
 
 export interface RebalanceEvent {
     id: string
@@ -194,88 +192,15 @@ export class RebalanceHistoryService {
 
     // Generate some initial demo data
     initializeDemoData(portfolioId: string): void {
-        const demoEvents: RebalanceEvent[] = [
-            {
-                id: '1',
-                portfolioId,
-                timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Threshold exceeded (8.2%)',
-                trades: 3,
-                gasUsed: '0.0234 XLM',
-                status: 'completed',
-                isAutomatic: false,
-                details: {
-                    fromAsset: 'XLM',
-                    toAsset: 'ETH',
-                    amount: 1200,
-                    reason: 'Portfolio allocation drift exceeded rebalancing threshold',
-                    riskLevel: 'medium',
-                    priceDirection: 'down',
-                    performanceImpact: 'neutral'
-                }
-            },
-            {
-                id: '2',
-                portfolioId,
-                timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Automatic Rebalancing',
-                trades: 2,
-                gasUsed: '0.0156 XLM',
-                status: 'completed',
-                isAutomatic: true,
-                details: {
-                    reason: 'Automated scheduled rebalancing executed',
-                    riskLevel: 'low',
-                    priceDirection: 'up',
-                    performanceImpact: 'positive'
-                }
-            },
-            {
-                id: '3',
-                portfolioId,
-                timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-                trigger: 'Volatility circuit breaker',
-                trades: 1,
-                gasUsed: '0.0089 XLM',
-                status: 'completed',
-                isAutomatic: true,
-                details: {
-                    reason: 'High market volatility detected, protective rebalance executed',
-                    volatilityDetected: true,
-                    riskLevel: 'high',
-                    priceDirection: 'down',
-                    performanceImpact: 'negative'
-                }
-            }
-        ]
-
-        // Add to both storage methods
-        this.history.set(portfolioId, demoEvents)
-        this.events.push(...demoEvents)
+        databaseService.initializeDemoData(portfolioId)
     }
 
     // Clear all history (for testing)
     clearHistory(): void {
-        this.history.clear()
-        this.events = []
+        databaseService.clearHistory()
     }
 
     async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
-        if (isDbConfigured()) return rebalanceDb.dbGetHistoryStats()
-        let totalEvents = 0
-        let recentActivity = 0
-        let autoRebalances = 0
-        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000)
-        this.history.forEach(events => {
-            totalEvents += events.length
-            recentActivity += events.filter(e => new Date(e.timestamp).getTime() > oneDayAgo).length
-            autoRebalances += events.filter(e => e.isAutomatic).length
-        })
-        return {
-            totalEvents,
-            portfolios: this.history.size,
-            recentActivity,
-            autoRebalances
-        }
+        return databaseService.getHistoryStats()
     }
 }
