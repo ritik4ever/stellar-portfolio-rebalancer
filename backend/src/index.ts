@@ -11,14 +11,12 @@ import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
 import { databaseService } from './services/databaseService.js'
 
-const app = express()
-const port = process.env.PORT || 3001
 
-const isProduction = process.env.NODE_ENV === 'production'
-const allowedOrigins = (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean)
+const app = express()
+const port = startupConfig.port
+
+const isProduction = startupConfig.nodeEnv === 'production'
+const allowedOrigins = startupConfig.corsOrigins
 
 const corsOptions: cors.CorsOptions = {
     origin: isProduction
@@ -61,6 +59,9 @@ app.use((req, res, next) => {
 })
 
 app.use(globalRateLimiter)
+
+// Create auto-rebalancer instance
+const autoRebalancer = new AutoRebalancerService()
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -139,13 +140,11 @@ app.get('/', (req, res) => {
             health: '/health',
             corsTest: '/test/cors',
             coinGeckoTest: '/test/coingecko',
-            autoRebalancerStatus: '/api/auto-rebalancer/status'
+            autoRebalancerStatus: '/api/auto-rebalancer/status',
+            queueHealth: '/api/queue/health'
         }
     })
 })
-
-// Create auto-rebalancer instance
-const autoRebalancer = new AutoRebalancerService()
 
 // Mount API routes
 app.use('/api', portfolioRouter)
@@ -161,7 +160,8 @@ app.use((req, res) => {
         availableEndpoints: {
             health: '/health',
             api: '/api/*',
-            autoRebalancer: '/api/auto-rebalancer/*'
+            autoRebalancer: '/api/auto-rebalancer/*',
+            queueHealth: '/api/queue/health'
         }
     })
 })
@@ -194,22 +194,41 @@ wss.on('connection', (ws) => {
     })
 })
 
-// Start existing rebalancing service
+// Start existing rebalancing service (now queue-backed, no cron)
 try {
     const rebalancingService = new RebalancingService(wss)
     rebalancingService.start()
-    console.log('[LEGACY-REBALANCER] Legacy rebalancing service started')
+    console.log('[REBALANCING-SERVICE] Monitoring service started (queue-backed)')
 } catch (error) {
-    console.error('Failed to start legacy rebalancing service:', error)
+    console.error('Failed to start rebalancing service:', error)
 }
 
 // Start server
-server.listen(port, () => {
+server.listen(port, async () => {
     console.log(`🚀 Server running on port ${port}`)
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`)
     console.log(`CoinGecko API Key: ${!!process.env.COINGECKO_API_KEY ? 'SET' : 'NOT SET'}`)
 
-    // Start automatic rebalancing service
+    // ── BullMQ / Redis setup ────────────────────────────────────────────────
+    const redisAvailable = await isRedisAvailable()
+    logQueueStartup(redisAvailable)
+
+    if (redisAvailable) {
+        // Start all three workers
+        startPortfolioCheckWorker()
+        startRebalanceWorker()
+        startAnalyticsSnapshotWorker()
+
+        // Register repeatable jobs (scheduler)
+        try {
+            await startQueueScheduler()
+            console.log('[SCHEDULER] ✅ Queue scheduler registered')
+        } catch (err) {
+            console.error('[SCHEDULER] ❌ Failed to register scheduler:', err)
+        }
+    }
+
+    // ── Auto-rebalancer (queue-backed) ──────────────────────────────────────
     const shouldStartAutoRebalancer =
         process.env.NODE_ENV === 'production' ||
         process.env.ENABLE_AUTO_REBALANCER === 'true'
@@ -217,7 +236,7 @@ server.listen(port, () => {
     if (shouldStartAutoRebalancer) {
         try {
             console.log('[AUTO-REBALANCER] Starting automatic rebalancing service...')
-            autoRebalancer.start()
+            await autoRebalancer.start()
             console.log('[AUTO-REBALANCER] ✅ Automatic rebalancing service started successfully')
 
             // Broadcast to WebSocket clients
@@ -243,10 +262,11 @@ server.listen(port, () => {
     console.log(`  CORS Test: http://localhost:${port}/test/cors`)
     console.log(`  CoinGecko Test: http://localhost:${port}/test/coingecko`)
     console.log(`  Auto-Rebalancer Status: http://localhost:${port}/api/auto-rebalancer/status`)
+    console.log(`  Queue Health: http://localhost:${port}/api/queue/health`)
 })
 
 // Graceful shutdown
-const gracefulShutdown = (signal: string) => {
+const gracefulShutdown = async (signal: string) => {
     console.log(`\n[SHUTDOWN] ${signal} received, shutting down gracefully...`)
 
     // Stop auto-rebalancer
@@ -255,6 +275,26 @@ const gracefulShutdown = (signal: string) => {
         console.log('[SHUTDOWN] Auto-rebalancer stopped')
     } catch (error) {
         console.error('[SHUTDOWN] Error stopping auto-rebalancer:', error)
+    }
+
+    // Stop BullMQ workers
+    try {
+        await Promise.all([
+            stopPortfolioCheckWorker(),
+            stopRebalanceWorker(),
+            stopAnalyticsSnapshotWorker(),
+        ])
+        console.log('[SHUTDOWN] BullMQ workers stopped')
+    } catch (error) {
+        console.error('[SHUTDOWN] Error stopping BullMQ workers:', error)
+    }
+
+    // Close BullMQ queues
+    try {
+        await closeAllQueues()
+        console.log('[SHUTDOWN] BullMQ queues closed')
+    } catch (error) {
+        console.error('[SHUTDOWN] Error closing queues:', error)
     }
 
     // Close database connection
