@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { RebalanceEvent } from './rebalanceHistory.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
@@ -260,7 +261,7 @@ export class DatabaseService {
 
         // Seed demo data on first run (empty portfolios table)
         const count = (this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }).cnt
-        if (count === 0) {
+        if (count === 0 && getFeatureFlags().enableDemoDbSeed) {
             seedDemoData(this.db)
         }
 

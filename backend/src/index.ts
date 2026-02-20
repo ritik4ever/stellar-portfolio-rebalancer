@@ -10,10 +10,28 @@ import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
 import { databaseService } from './services/databaseService.js'
+import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
+import { getFeatureFlags, getPublicFeatureFlags } from './config/featureFlags.js'
+import { isRedisAvailable, logQueueStartup } from './queue/connection.js'
+import { startQueueScheduler } from './queue/scheduler.js'
+import { startPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
+import { startRebalanceWorker } from './queue/workers/rebalanceWorker.js'
+import { startAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
 
+let startupConfig: StartupConfig
+try {
+    startupConfig = validateStartupConfigOrThrow(process.env)
+    logger.info('[STARTUP-CONFIG] Validation successful', buildStartupSummary(startupConfig))
+} catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(message)
+    process.exit(1)
+}
 
 const app = express()
 const port = startupConfig.port
+const featureFlags = getFeatureFlags()
+const publicFeatureFlags = getPublicFeatureFlags()
 
 const isProduction = startupConfig.nodeEnv === 'production'
 const allowedOrigins = startupConfig.corsOrigins
@@ -75,6 +93,9 @@ app.get('/health', (req, res) => {
 
 // CORS test endpoint
 app.get('/test/cors', (req, res) => {
+    if (!featureFlags.enableDebugRoutes) {
+        return res.status(404).json({ error: 'Route not found' })
+    }
     res.json({
         success: true,
         message: 'CORS working!',
@@ -85,6 +106,9 @@ app.get('/test/cors', (req, res) => {
 
 // CoinGecko test endpoint with detailed debugging
 app.get('/test/coingecko', async (req, res) => {
+    if (!featureFlags.enableDebugRoutes) {
+        return res.status(404).json({ error: 'Route not found' })
+    }
     try {
         console.log('[TEST] Testing CoinGecko API...')
         const { ReflectorService } = await import('./services/reflector.js')
@@ -134,7 +158,8 @@ app.get('/', (req, res) => {
             automaticRebalancing: !!autoRebalancer?.getStatus().isRunning,
             priceFeeds: true,
             riskManagement: true,
-            portfolioManagement: true
+            portfolioManagement: true,
+            featureFlags: publicFeatureFlags
         },
         endpoints: {
             health: '/health',
