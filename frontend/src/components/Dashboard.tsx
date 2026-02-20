@@ -323,7 +323,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </button>
                                 <button
                                     onClick={disconnectWallet}
-                                    className="text-red-600 hover:text-red-700 px-3 py-2 text-sm transition-colors"
+                                    className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-3 py-2 text-sm transition-colors"
                                 >
                                     Disconnect
                                 </button>
@@ -339,7 +339,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <button
                             onClick={refreshData}
                             disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
                         >
                             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
@@ -452,19 +452,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <motion.div
                                         initial={{ opacity: 0, scale: 0.95 }}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        className="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-xl p-6"
+                                        className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
                                     >
                                         <div className="flex items-center mb-3">
                                             <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
-                                            <span className="font-medium text-orange-800">Rebalance Needed</span>
+                                            <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
                                         </div>
-                                        <p className="text-sm text-orange-700 mb-4">
+                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-4">
                                             Your portfolio has drifted from target allocation
                                         </p>
                                         <button
                                             onClick={executeRebalance}
                                             disabled={rebalancing || !publicKey || portfolioData?.id === 'demo'}
-                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
                                         >
                                             {rebalancing ? (
                                                 <>
@@ -476,7 +476,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             )}
                                         </button>
                                         {(!publicKey || portfolioData?.id === 'demo') && (
-                                            <p className="text-xs text-orange-600 mt-2 text-center">
+                                            <p className="text-xs text-orange-600 dark:text-orange-400 mt-2 text-center">
                                                 {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}
                                             </p>
                                         )}

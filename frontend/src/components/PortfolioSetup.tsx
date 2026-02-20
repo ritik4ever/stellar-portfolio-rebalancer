@@ -389,7 +389,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 <button
                   onClick={addAllocation}
                   disabled={allocations.length >= assetOptions.length}
-                  className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white text-sm rounded-lg transition-colors"
+                  className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white text-sm rounded-lg transition-colors"
                 >
                   <Plus className="w-4 h-4 mr-1" />
                   Add Asset
@@ -470,7 +470,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                         {allocations.length > 1 && (
                           <button
                             onClick={() => removeAllocation(index)}
-                            className="mt-6 p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            className="mt-6 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -679,7 +679,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             <button
               onClick={createPortfolio}
               disabled={!isValidTotal || hasAnyFieldError || isCreating}
-              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
             >
               {isCreating ? (
                 <>

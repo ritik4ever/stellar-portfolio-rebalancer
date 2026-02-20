@@ -343,7 +343,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                             : formatDateTime(event.timestamp)
 
                         return (
-                            <div key={event.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                            <div key={event.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-start space-x-4">
                                         <div className="flex-shrink-0">
@@ -468,7 +468,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             </div>
 
             {history.length > 0 && (
-                <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750">
+                <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                     <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
                         <span>Showing {history.length} recent rebalance{history.length > 1 ? 's' : ''}</span>
                         <div className="flex items-center space-x-4">
