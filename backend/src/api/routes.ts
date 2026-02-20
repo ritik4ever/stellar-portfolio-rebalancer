@@ -170,7 +170,7 @@ router.get('/portfolio/:id', async (req, res) => {
 router.get('/user/:address/portfolios', async (req, res) => {
     try {
         const userAddress = req.params.address
-        const portfolios = portfolioStorage.getUserPortfolios(userAddress)
+        const portfolios = await portfolioStorage.getUserPortfolios(userAddress)
 
         res.json(portfolios)
     } catch (error) {
@@ -312,8 +312,7 @@ router.get('/rebalance/history', async (req, res) => {
         console.log(`[DEBUG] Rebalance history request - portfolioId: ${portfolioId || 'all'}`)
 
         if (portfolioId) {
-            // Check if portfolio exists
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 console.log(`[DEBUG] Portfolio ${portfolioId} not found`)
                 return res.json({
@@ -585,7 +584,7 @@ router.get('/market/:asset/chart', async (req, res) => {
 // ================================
 
 // Get auto-rebalancer status
-router.get('/auto-rebalancer/status', (req, res) => {
+router.get('/auto-rebalancer/status', async (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.json({
@@ -596,7 +595,7 @@ router.get('/auto-rebalancer/status', (req, res) => {
         }
 
         const status = autoRebalancer.getStatus()
-        const statistics = autoRebalancer.getStatistics()
+        const statistics = await autoRebalancer.getStatistics()
 
         res.json({
             success: true,
@@ -697,9 +696,9 @@ router.get('/auto-rebalancer/history', async (req, res) => {
 
         let history
         if (portfolioId) {
-            history = rebalanceHistoryService.getRecentAutoRebalances(portfolioId, limit)
+            history = await rebalanceHistoryService.getRecentAutoRebalances(portfolioId, limit)
         } else {
-            history = rebalanceHistoryService.getAllAutoRebalances().slice(0, limit)
+            history = (await rebalanceHistoryService.getAllAutoRebalances(limit)).slice(0, limit)
         }
 
         res.json({
@@ -725,8 +724,8 @@ router.get('/auto-rebalancer/history', async (req, res) => {
 // Get comprehensive system status
 router.get('/system/status', async (req, res) => {
     try {
-        const portfolioCount = portfolioStorage.portfolios.size
-        const historyStats = rebalanceHistoryService.getHistoryStats()
+        const portfolioCount = await portfolioStorage.getPortfolioCount()
+        const historyStats = await rebalanceHistoryService.getHistoryStats()
         const circuitBreakers = riskManagementService.getCircuitBreakerStatus()
 
         // Check API health
@@ -735,7 +734,7 @@ router.get('/system/status', async (req, res) => {
 
         // Auto-rebalancer status
         const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
-        const autoRebalancerStats = autoRebalancer ? autoRebalancer.getStatistics() : null
+        const autoRebalancerStats = autoRebalancer ? await autoRebalancer.getStatistics() : null
 
         res.json({
             success: true,
@@ -921,8 +920,8 @@ router.get('/debug/auto-rebalancer-test', async (req, res) => {
         }
 
         const status = autoRebalancer.getStatus()
-        const statistics = autoRebalancer.getStatistics()
-        const portfolioCount = portfolioStorage.portfolios.size
+        const statistics = await autoRebalancer.getStatistics()
+        const portfolioCount = await portfolioStorage.getPortfolioCount()
 
         res.json({
             success: true,

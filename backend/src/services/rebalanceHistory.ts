@@ -1,5 +1,7 @@
-import { RiskManagementService, RiskAlert } from './riskManagements.js'
+import { RiskManagementService } from './riskManagements.js'
 import type { PricesMap } from '../types/index.js'
+import { isDbConfigured } from '../db/client.js'
+import * as rebalanceDb from '../db/rebalanceHistoryDb.js'
 
 export interface RebalanceEvent {
     id: string
@@ -93,13 +95,22 @@ export class RebalanceHistoryService {
         }
 
         this.history.set(eventData.portfolioId, portfolioHistory)
-
-        // Store in global events array
         this.events.push(event)
+        if (this.events.length > 1000) this.events = this.events.slice(-1000)
 
-        // Keep only last 1000 events to prevent memory issues
-        if (this.events.length > 1000) {
-            this.events = this.events.slice(-1000)
+        if (isDbConfigured()) {
+            await rebalanceDb.dbInsertRebalanceEvent({
+                id: event.id,
+                portfolioId: event.portfolioId,
+                trigger: event.trigger,
+                trades: event.trades,
+                gasUsed: event.gasUsed,
+                status: event.status,
+                isAutomatic: event.isAutomatic ?? false,
+                riskAlerts: event.riskAlerts,
+                error: event.error,
+                details: event.details
+            })
         }
 
         console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
@@ -107,33 +118,26 @@ export class RebalanceHistoryService {
     }
 
     async getRebalanceHistory(portfolioId?: string, limit: number = 50): Promise<RebalanceEvent[]> {
+        if (isDbConfigured()) {
+            if (portfolioId) return rebalanceDb.dbGetRebalanceHistoryByPortfolio(portfolioId, limit)
+            return rebalanceDb.dbGetRebalanceHistoryAll(limit)
+        }
         if (portfolioId) {
             const portfolioHistory = this.history.get(portfolioId) || []
             return portfolioHistory.slice(0, limit)
         }
-
-        // Get history for all portfolios
         const allEvents: RebalanceEvent[] = []
-        this.history.forEach(events => {
-            allEvents.push(...events)
-        })
-
-        // Sort by timestamp descending and limit
+        this.history.forEach(events => allEvents.push(...events))
         return allEvents
             .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
             .slice(0, limit)
     }
 
-    /**
-     * Get recent auto-rebalances for a portfolio
-     */
-    getRecentAutoRebalances(portfolioId: string, limit: number = 10): RebalanceEvent[] {
+    async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {
         try {
+            if (isDbConfigured()) return rebalanceDb.dbGetRecentAutoRebalances(portfolioId, limit)
             return this.events
-                .filter(event =>
-                    event.portfolioId === portfolioId &&
-                    event.isAutomatic === true
-                )
+                .filter(e => e.portfolioId === portfolioId && e.isAutomatic === true)
                 .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
                 .slice(0, limit)
         } catch (error) {
@@ -142,15 +146,11 @@ export class RebalanceHistoryService {
         }
     }
 
-    /**
-     * Get auto-rebalances since a specific date
-     */
-    getAutoRebalancesSince(portfolioId: string, since: Date): RebalanceEvent[] {
+    async getAutoRebalancesSince(portfolioId: string, since: Date): Promise<RebalanceEvent[]> {
         try {
-            return this.events.filter(event =>
-                event.portfolioId === portfolioId &&
-                event.isAutomatic === true &&
-                new Date(event.timestamp) >= since
+            if (isDbConfigured()) return rebalanceDb.dbGetAutoRebalancesSince(portfolioId, since)
+            return this.events.filter(e =>
+                e.portfolioId === portfolioId && e.isAutomatic === true && new Date(e.timestamp) >= since
             )
         } catch (error) {
             console.error('Error getting auto-rebalances since date:', error)
@@ -158,12 +158,10 @@ export class RebalanceHistoryService {
         }
     }
 
-    /**
-     * Get all auto-rebalances across all portfolios
-     */
-    getAllAutoRebalances(): RebalanceEvent[] {
+    async getAllAutoRebalances(limit: number = 1000): Promise<RebalanceEvent[]> {
         try {
-            return this.events.filter(event => event.isAutomatic === true)
+            if (isDbConfigured()) return rebalanceDb.dbGetAllAutoRebalances(limit)
+            return this.events.filter(e => e.isAutomatic === true)
         } catch (error) {
             console.error('Error getting all auto-rebalances:', error)
             return []
@@ -319,21 +317,17 @@ export class RebalanceHistoryService {
         this.events = []
     }
 
-    // Get statistics
-    getHistoryStats(): { totalEvents: number, portfolios: number, recentActivity: number, autoRebalances: number } {
+    async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
+        if (isDbConfigured()) return rebalanceDb.dbGetHistoryStats()
         let totalEvents = 0
         let recentActivity = 0
         let autoRebalances = 0
         const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000)
-
         this.history.forEach(events => {
             totalEvents += events.length
-            recentActivity += events.filter(e =>
-                new Date(e.timestamp).getTime() > oneDayAgo
-            ).length
+            recentActivity += events.filter(e => new Date(e.timestamp).getTime() > oneDayAgo).length
             autoRebalances += events.filter(e => e.isAutomatic).length
         })
-
         return {
             totalEvents,
             portfolios: this.history.size,

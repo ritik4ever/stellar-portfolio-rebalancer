@@ -27,7 +27,7 @@ export class RebalancingService {
 
     private async checkAllPortfolios() {
         try {
-            const portfolios = this.getActivePortfolios()
+            const portfolios = await this.getActivePortfolios()
 
             for (const portfolio of portfolios) {
                 try {
@@ -58,14 +58,11 @@ export class RebalancingService {
         }
     }
 
-    private getActivePortfolios(): Array<{ id: string, autoRebalance: boolean }> {
-        const allPortfolios = Array.from((portfolioStorage as any).portfolios.values()) as Portfolio[]
+    private async getActivePortfolios(): Promise<Array<{ id: string; autoRebalance: boolean }>> {
+        const allPortfolios = await portfolioStorage.getAllPortfolios()
         return allPortfolios
             .filter((p: Portfolio) => p.threshold > 0)
-            .map((p: Portfolio) => ({
-                id: p.id,
-                autoRebalance: true
-            }))
+            .map((p: Portfolio) => ({ id: p.id, autoRebalance: true }))
     }
 
     private notifyClients(portfolioId: string, event: string) {

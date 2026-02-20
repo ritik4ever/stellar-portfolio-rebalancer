@@ -1,4 +1,4 @@
-// index.ts - COMPLETE VERSION WITH AUTO-REBALANCER
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'node:http'
