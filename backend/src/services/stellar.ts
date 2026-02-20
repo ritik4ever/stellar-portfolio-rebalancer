@@ -33,6 +33,7 @@ export class StellarService {
             }
 
             const { portfolioStorage } = await import('./portfolioStorage.js')
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
             // Use the ID returned by the database — do NOT generate a separate one
             const portfolioId = portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
 
@@ -91,7 +92,7 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { ReflectorService } = await import('./reflector.js')
 
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) return false
 
             const reflector = new ReflectorService()
@@ -139,7 +140,7 @@ export class StellarService {
             const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
             const { RiskManagementService } = await import('./riskManagements.js')
 
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 throw new Error('Portfolio not found')
             }
@@ -241,8 +242,7 @@ export class StellarService {
             // Calculate new balances
             const updatedBalances = await this.calculateRebalancedBalances(portfolio, prices)
 
-            // Update portfolio
-            portfolioStorage.updatePortfolio(portfolioId, {
+            await portfolioStorage.updatePortfolio(portfolioId, {
                 lastRebalance: new Date().toISOString(),
                 balances: updatedBalances
             })
@@ -357,7 +357,7 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { ReflectorService } = await import('./reflector.js')
 
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 throw new Error('Portfolio not found')
             }

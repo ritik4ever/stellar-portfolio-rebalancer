@@ -76,8 +76,7 @@ export class AutoRebalancerService {
         try {
             logger.info('[AUTO-REBALANCER] Starting portfolio check cycle')
 
-            // Get all portfolios
-            const allPortfolios = portfolioStorage.getAllPortfolios()
+            const allPortfolios = await portfolioStorage.getAllPortfolios()
 
             if (allPortfolios.length === 0) {
                 logger.info('[AUTO-REBALANCER] No portfolios to check')
@@ -172,12 +171,12 @@ export class AutoRebalancerService {
             }
 
             // Check minimum time between auto-rebalances
-            if (this.isRecentlyAutoRebalanced(portfolioId)) {
+            if (await this.isRecentlyAutoRebalanced(portfolioId)) {
                 return { rebalanced: false, reason: 'Recently auto-rebalanced' }
             }
 
             // Check daily rebalance limit
-            if (this.hasExceededDailyLimit(portfolioId)) {
+            if (await this.hasExceededDailyLimit(portfolioId)) {
                 return { rebalanced: false, reason: 'Daily auto-rebalance limit exceeded' }
             }
 
@@ -239,9 +238,9 @@ export class AutoRebalancerService {
     /**
      * Check if portfolio was recently auto-rebalanced
      */
-    private isRecentlyAutoRebalanced(portfolioId: string): boolean {
+    private async isRecentlyAutoRebalanced(portfolioId: string): Promise<boolean> {
         try {
-            const recentHistory = this.rebalanceHistoryService.getRecentAutoRebalances(portfolioId, 1)
+            const recentHistory = await this.rebalanceHistoryService.getRecentAutoRebalances(portfolioId, 1)
 
             if (recentHistory.length === 0) {
                 return false
@@ -260,12 +259,11 @@ export class AutoRebalancerService {
     /**
      * Check if portfolio has exceeded daily auto-rebalance limit
      */
-    private hasExceededDailyLimit(portfolioId: string): boolean {
+    private async hasExceededDailyLimit(portfolioId: string): Promise<boolean> {
         try {
             const today = new Date()
             today.setHours(0, 0, 0, 0)
-
-            const todayRebalances = this.rebalanceHistoryService.getAutoRebalancesSince(portfolioId, today)
+            const todayRebalances = await this.rebalanceHistoryService.getAutoRebalancesSince(portfolioId, today)
 
             return todayRebalances.length >= this.MAX_AUTO_REBALANCES_PER_DAY
         } catch (error) {
@@ -309,14 +307,14 @@ export class AutoRebalancerService {
     /**
      * Get statistics about auto-rebalancing activity
      */
-    getStatistics(): {
+    async getStatistics(): Promise<{
         totalAutoRebalances: number
         rebalancesToday: number
         lastCheckTime: string | null
         averageRebalancesPerDay: number
-    } {
+    }> {
         try {
-            const allAutoRebalances = this.rebalanceHistoryService.getAllAutoRebalances()
+            const allAutoRebalances = await this.rebalanceHistoryService.getAllAutoRebalances()
 
             const today = new Date()
             today.setHours(0, 0, 0, 0)
