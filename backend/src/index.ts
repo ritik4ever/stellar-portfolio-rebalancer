@@ -10,15 +10,23 @@ import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
 import { databaseService } from './services/databaseService.js'
+import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
+
+let startupConfig: StartupConfig
+try {
+    startupConfig = validateStartupConfigOrThrow(process.env)
+    logger.info('[STARTUP-CONFIG] Validation successful', buildStartupSummary(startupConfig))
+} catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(message)
+    process.exit(1)
+}
 
 const app = express()
-const port = process.env.PORT || 3001
+const port = startupConfig.port
 
-const isProduction = process.env.NODE_ENV === 'production'
-const allowedOrigins = (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean)
+const isProduction = startupConfig.nodeEnv === 'production'
+const allowedOrigins = startupConfig.corsOrigins
 
 const corsOptions: cors.CorsOptions = {
     origin: isProduction
