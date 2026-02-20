@@ -10,21 +10,13 @@ import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
 import { databaseService } from './services/databaseService.js'
-import { isRedisAvailable, logQueueStartup } from './queue/connection.js'
-import { startQueueScheduler } from './queue/scheduler.js'
-import { startPortfolioCheckWorker, stopPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
-import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
-import { closeAllQueues } from './queue/queues.js'
+
 
 const app = express()
-const port = process.env.PORT || 3001
+const port = startupConfig.port
 
-const isProduction = process.env.NODE_ENV === 'production'
-const allowedOrigins = (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean)
+const isProduction = startupConfig.nodeEnv === 'production'
+const allowedOrigins = startupConfig.corsOrigins
 
 const corsOptions: cors.CorsOptions = {
     origin: isProduction
