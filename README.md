@@ -67,6 +67,8 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 # Edit with contract addresses
 
+**Database migrations** (when using PostgreSQL with `DATABASE_URL`): see [docs/MIGRATION.md](docs/MIGRATION.md). Apply with `cd backend && npm run db:migrate`; use `--dry-run` to preview.
+
 Configure SMTP for Email Notifications (Optional)
 
 To enable email notifications for rebalancing events:
