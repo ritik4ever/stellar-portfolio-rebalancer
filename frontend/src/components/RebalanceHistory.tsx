@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
 import { API_CONFIG } from '../config/api'
 
+//  NEW: export utils
+import { downloadCSV, toCSV } from '../utils/export'
+
 interface RebalanceEvent {
     id: string
     timestamp: string
@@ -67,6 +70,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             setError('Failed to load rebalance history')
             // Fallback to demo data
             setHistory(getDemoHistory())
+
         } finally {
             setLoading(false)
         }
@@ -238,6 +242,50 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
         }
     }
 
+    //  NEW: Export History as CSV (timestamps + trades + status)
+    const exportHistoryCSV = () => {
+        const rows = (history || []).map((event) => ({
+            timestamp: event.timestamp,
+            status: event.status,
+            trigger: event.trigger,
+            tradesCount: event.trades,
+            gasUsed: event.gasUsed,
+            portfolioId: event.portfolioId,
+            chain: event.details?.chain ?? '',
+            riskLevel: event.details?.riskLevel ?? '',
+            volatilityDetected: event.details?.volatilityDetected ? 'true' : 'false',
+            fromAsset: event.details?.fromAsset ?? '',
+            toAsset: event.details?.toAsset ?? '',
+            amount: event.details?.amount ?? '',
+            performanceImpact: event.details?.performanceImpact ?? '',
+            priceDirection: event.details?.priceDirection ?? '',
+            executionTimeMs: event.details?.executionTime ?? '',
+            reason: event.details?.reason ?? ''
+        }))
+
+        const csv = toCSV(rows, [
+            'timestamp',
+            'status',
+            'trigger',
+            'tradesCount',
+            'gasUsed',
+            'portfolioId',
+            'chain',
+            'riskLevel',
+            'volatilityDetected',
+            'fromAsset',
+            'toAsset',
+            'amount',
+            'performanceImpact',
+            'priceDirection',
+            'executionTimeMs',
+            'reason'
+        ])
+
+        const filename = `rebalance_history_${portfolioId ?? 'all'}_${new Date().toISOString()}.csv`
+        downloadCSV(filename, csv)
+    }
+
     if (loading) {
         return (
             <div className="bg-white rounded-xl shadow-sm p-6">
@@ -261,11 +309,23 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         <h2 className="text-lg font-semibold text-gray-900">Rebalance History</h2>
                         <p className="text-sm text-gray-500 mt-1">Recent portfolio rebalancing activities with risk management</p>
                     </div>
-                    {error && (
-                        <div className="text-sm text-red-600 bg-red-50 px-3 py-1 rounded">
-                            {error}
-                        </div>
-                    )}
+
+                    {/*  NEW: Export button */}
+                    <div className="flex items-center space-x-3">
+                        <button
+                            onClick={exportHistoryCSV}
+                            disabled={history.length === 0}
+                            className="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                        >
+                            Export CSV
+                        </button>
+
+                        {error && (
+                            <div className="text-sm text-red-600 bg-red-50 px-3 py-1 rounded">
+                                {error}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 

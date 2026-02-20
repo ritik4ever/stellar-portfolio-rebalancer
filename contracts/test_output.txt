@@ -1,0 +1,411 @@
+   Compiling portfolio-rebalancer v0.1.0 (/home/ayush99336/Desktop/BlockchainDev/drips/stellar-portfolio-rebalancer/contracts)
+warning: unused imports: `Symbol`, `Val`, and `Vec`
+ --> src/test.rs:4:73
+  |
+4 | ... Ledger}, Address, Env, Map, Vec, Symbol, Val};
+  |                                 ^^^  ^^^^^^  ^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Address`
+ --> src/test.rs:8:47
+  |
+8 |     use soroban_sdk::{contract, contractimpl, Address, Env, Vec, Symbol};
+  |                                               ^^^^^^^
+
+warning: unused import: `Address`
+   --> src/test.rs:303:51
+    |
+303 |         use soroban_sdk::{contract, contractimpl, Address, Env, Vec, Symbol};
+    |                                                   ^^^^^^^
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:55:38
+    |
+ 55 |     let reflector_address = Address::from_contract_id(&reflector_id);
+    |                                      ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:55:29
+    |
+ 55 |     let reflector_address = Address::from_contract_id(&reflector_id);
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                      ||
+    |                                                      |expected `&Env`, found `&Address`
+    |                                                      argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+ 55 -     let reflector_address = Address::from_contract_id(&reflector_id);
+ 55 +     let reflector_address = Address::from_contract_id(/* &Env */, /* [u8; 32] */);
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:84:41
+    |
+ 84 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:84:32
+    |
+ 84 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+ 84 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+ 84 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:108:41
+    |
+108 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:108:32
+    |
+108 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+108 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+108 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:134:41
+    |
+134 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:134:32
+    |
+134 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+134 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+134 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:166:41
+    |
+166 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:166:32
+    |
+166 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+166 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+166 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:201:41
+    |
+201 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:201:32
+    |
+201 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+201 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+201 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:235:41
+    |
+235 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:235:32
+    |
+235 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+235 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+235 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:262:41
+    |
+262 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:262:32
+    |
+262 |     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+262 -     client.initialize(&admin, &Address::from_contract_id(&reflector_id));
+262 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:329:41
+    |
+329 |     client.initialize(&admin, &Address::from_contract_id(&stale_reflector_id));
+    |                                         ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:329:32
+    |
+329 |     client.initialize(&admin, &Address::from_contract_id(&stale_reflector_id));
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^---------------------
+    |                                                         ||
+    |                                                         |expected `&Env`, found `&Address`
+    |                                                         argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+329 -     client.initialize(&admin, &Address::from_contract_id(&stale_reflector_id));
+329 +     client.initialize(&admin, &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/test.rs:351:59
+    |
+351 | ...v), &Address::from_contract_id(&reflector_id));
+    |                  ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/test.rs:351:50
+    |
+351 | ...rate(&env), &Address::from_contract_id(&reflector_id));
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^---------------
+    |                                          ||
+    |                                          |expected `&Env`, found `&Address`
+    |                                          argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&soroban_sdk::Address`
+note: associated function defined here
+   --> /home/ayush99336/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+351 -     client.initialize(&Address::generate(&env), &Address::from_contract_id(&reflector_id));
+351 +     client.initialize(&Address::generate(&env), &Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+warning: unused variable: `env`
+  --> src/test.rs:22:25
+   |
+22 |         pub fn decimals(env: Env) -> u32 {
+   |                         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `addr`
+  --> src/test.rs:27:32
+   |
+27 |                 Asset::Stellar(addr) => {
+   |                                ^^^^ help: if this is intentional, prefix it with an underscore: `_addr`
+
+warning: unused variable: `env`
+  --> src/test.rs:40:21
+   |
+40 |         pub fn twap(env: Env, asset: Asset, records: u32) -> Option<i128> {
+   |                     ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `asset`
+  --> src/test.rs:40:31
+   |
+40 |         pub fn twap(env: Env, asset: Asset, records: u32) -> Option<i128> {
+   |                               ^^^^^ help: if this is intentional, prefix it with an underscore: `_asset`
+
+warning: unused variable: `records`
+  --> src/test.rs:40:45
+   |
+40 |         pub fn twap(env: Env, asset: Asset, records: u32) -> Option<i128> {
+   |                                             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_records`
+
+warning: unused variable: `env`
+   --> src/test.rs:313:29
+    |
+313 |             pub fn decimals(env: Env) -> u32 { 14 }
+    |                             ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `env`
+   --> src/test.rs:322:25
+    |
+322 |             pub fn twap(env: Env, asset: Asset, records: u32) -> Option<i128...
+    |                         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `asset`
+   --> src/test.rs:322:35
+    |
+322 | ...     pub fn twap(env: Env, asset: Asset, records: u32) -> Option<i128> { ...
+    |                               ^^^^^ help: if this is intentional, prefix it with an underscore: `_asset`
+
+warning: unused variable: `records`
+   --> src/test.rs:322:49
+    |
+322 | ...ap(env: Env, asset: Asset, records: u32) -> Option<i128> { Some(0) }
+    |                               ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_records`
+
+Some errors have detailed explanations: E0061, E0624.
+For more information about an error, try `rustc --explain E0061`.
+warning: `portfolio-rebalancer` (lib test) generated 12 warnings
+error: could not compile `portfolio-rebalancer` (lib test) due to 20 previous errors; 12 warnings emitted

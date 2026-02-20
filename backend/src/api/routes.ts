@@ -5,7 +5,9 @@ import { RebalanceHistoryService } from '../services/rebalanceHistory.js'
 import { RiskManagementService } from '../services/riskManagements.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
+import { analyticsService } from '../services/analyticsService.js'
 import { logger } from '../utils/logger.js'
+import { writeRateLimiter } from '../middleware/rateLimit.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -70,7 +72,7 @@ router.get('/health', (req, res) => {
 // ================================
 
 // Create portfolio with enhanced validation
-router.post('/portfolio', async (req, res) => {
+router.post('/portfolio', writeRateLimiter, async (req, res) => {
     try {
         const { userAddress, allocations, threshold } = req.body
 
@@ -98,7 +100,10 @@ router.post('/portfolio', async (req, res) => {
 
         const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold)
 
-        // Record initial portfolio creation event
+        const reflector = new ReflectorService()
+        const prices = await reflector.getCurrentPrices()
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
         await rebalanceHistoryService.recordRebalanceEvent({
             portfolioId,
             trigger: 'Portfolio Created',
@@ -142,7 +147,8 @@ router.get('/portfolio/:id', async (req, res) => {
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
 
-        // Get risk analysis with proper type conversion
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
         let riskMetrics = null
         try {
             const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio)
@@ -184,7 +190,7 @@ router.get('/user/:address/portfolios', async (req, res) => {
 // ================================
 
 // Enhanced rebalance with comprehensive safety checks
-router.post('/portfolio/:id/rebalance', async (req, res) => {
+router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
     try {
         const portfolioId = req.params.id
 
@@ -230,7 +236,8 @@ router.post('/portfolio/:id/rebalance', async (req, res) => {
 
         const result = await stellarService.executeRebalance(portfolioId)
 
-        // Record manual rebalance event
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
         await rebalanceHistoryService.recordRebalanceEvent({
             portfolioId,
             trigger: 'Manual Rebalance',
@@ -773,6 +780,73 @@ router.get('/system/status', async (req, res) => {
             success: false,
             error: getErrorMessage(error),
             system: { status: 'error' }
+        })
+    }
+})
+
+// ================================
+// ANALYTICS ROUTES
+// ================================
+
+router.get('/portfolio/:id/analytics', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+        const days = parseInt(req.query.days as string) || 30
+
+        if (!portfolioId) {
+            return res.status(400).json({ error: 'Portfolio ID required' })
+        }
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return res.status(404).json({ error: 'Portfolio not found' })
+        }
+
+        const analytics = analyticsService.getAnalytics(portfolioId, days)
+
+        res.json({
+            success: true,
+            portfolioId,
+            data: analytics,
+            count: analytics.length,
+            period: `${days} days`,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to fetch analytics', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+router.get('/portfolio/:id/performance-summary', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+
+        if (!portfolioId) {
+            return res.status(400).json({ error: 'Portfolio ID required' })
+        }
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return res.status(404).json({ error: 'Portfolio not found' })
+        }
+
+        const summary = analyticsService.getPerformanceSummary(portfolioId)
+
+        res.json({
+            success: true,
+            portfolioId,
+            ...summary,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
         })
     }
 })
