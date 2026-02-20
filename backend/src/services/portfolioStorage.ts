@@ -147,9 +147,6 @@ class PortfolioStorage {
         this.portfolios.clear()
     }
 }
-
-export const portfolioStorage = new PortfolioStorage()
-export type { Portfolio }
 /**
  * portfolioStorage.ts
  *

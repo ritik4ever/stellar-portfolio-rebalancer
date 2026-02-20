@@ -4,6 +4,7 @@ import { RebalanceHistoryService } from './rebalanceHistory.js'
 import { RiskManagementService } from './riskManagements.js'
 import { portfolioStorage } from './portfolioStorage.js'
 import { CircuitBreakers } from './circuitBreakers.js'
+import { notificationService } from './notificationService.js'
 import { logger } from '../utils/logger.js'
 
 export class AutoRebalancerService {
@@ -211,6 +212,28 @@ export class AutoRebalancerService {
                 isAutomatic: true,
                 riskAlerts: riskCheck.alerts || []
             })
+
+            // Send notification for successful auto-rebalance
+            try {
+                await notificationService.notify({
+                    userId: portfolio.userAddress,
+                    eventType: 'rebalance',
+                    title: 'Portfolio Rebalanced',
+                    message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades || 0} trades executed with ${rebalanceResult.gasUsed || '0 XLM'} gas used.`,
+                    data: {
+                        portfolioId,
+                        trades: rebalanceResult.trades,
+                        gasUsed: rebalanceResult.gasUsed,
+                        trigger: 'automatic'
+                    },
+                    timestamp: new Date().toISOString()
+                })
+            } catch (notificationError) {
+                logger.error('Failed to send rebalance notification', {
+                    portfolioId,
+                    error: notificationError instanceof Error ? notificationError.message : String(notificationError)
+                })
+            }
 
             return { rebalanced: true, reason: 'Successfully auto-rebalanced' }
 

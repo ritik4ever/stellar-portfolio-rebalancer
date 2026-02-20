@@ -38,3 +38,19 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_analytics_portfolio_time ON analytics_snapshots(portfolio_id, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id VARCHAR(256) PRIMARY KEY,
+    email_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    email_address VARCHAR(512),
+    webhook_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    webhook_url VARCHAR(1024),
+    event_rebalance BOOLEAN NOT NULL DEFAULT TRUE,
+    event_circuit_breaker BOOLEAN NOT NULL DEFAULT TRUE,
+    event_price_movement BOOLEAN NOT NULL DEFAULT TRUE,
+    event_risk_change BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_preferences_user ON notification_preferences(user_id);
