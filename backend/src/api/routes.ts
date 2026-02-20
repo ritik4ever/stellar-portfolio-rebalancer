@@ -5,9 +5,11 @@ import { RebalanceHistoryService } from '../services/rebalanceHistory.js'
 import { RiskManagementService } from '../services/riskManagements.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
+import { analyticsService } from '../services/analyticsService.js'
 import { logger } from '../utils/logger.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
+import { writeRateLimiter } from '../middleware/rateLimit.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -72,7 +74,7 @@ router.get('/health', (req, res) => {
 // ================================
 
 // Create portfolio with enhanced validation
-router.post('/portfolio', async (req, res) => {
+router.post('/portfolio', writeRateLimiter, async (req, res) => {
     try {
         const { userAddress, allocations, threshold } = req.body
 
@@ -100,7 +102,10 @@ router.post('/portfolio', async (req, res) => {
 
         const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold)
 
-        // Record initial portfolio creation event
+        const reflector = new ReflectorService()
+        const prices = await reflector.getCurrentPrices()
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
         await rebalanceHistoryService.recordRebalanceEvent({
             portfolioId,
             trigger: 'Portfolio Created',
@@ -144,7 +149,8 @@ router.get('/portfolio/:id', async (req, res) => {
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
 
-        // Get risk analysis with proper type conversion
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
         let riskMetrics = null
         try {
             const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio)
@@ -172,7 +178,7 @@ router.get('/portfolio/:id', async (req, res) => {
 router.get('/user/:address/portfolios', async (req, res) => {
     try {
         const userAddress = req.params.address
-        const portfolios = portfolioStorage.getUserPortfolios(userAddress)
+        const portfolios = await portfolioStorage.getUserPortfolios(userAddress)
 
         res.json(portfolios)
     } catch (error) {
@@ -186,7 +192,7 @@ router.get('/user/:address/portfolios', async (req, res) => {
 // ================================
 
 // Enhanced rebalance with comprehensive safety checks
-router.post('/portfolio/:id/rebalance', async (req, res) => {
+router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
     try {
         const portfolioId = req.params.id
 
@@ -232,7 +238,8 @@ router.post('/portfolio/:id/rebalance', async (req, res) => {
 
         const result = await stellarService.executeRebalance(portfolioId)
 
-        // Record manual rebalance event
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
         await rebalanceHistoryService.recordRebalanceEvent({
             portfolioId,
             trigger: 'Manual Rebalance',
@@ -314,8 +321,7 @@ router.get('/rebalance/history', async (req, res) => {
         console.log(`[DEBUG] Rebalance history request - portfolioId: ${portfolioId || 'all'}`)
 
         if (portfolioId) {
-            // Check if portfolio exists
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 console.log(`[DEBUG] Portfolio ${portfolioId} not found`)
                 return res.json({
@@ -587,6 +593,8 @@ router.get('/market/:asset/chart', async (req, res) => {
 // ================================
 
 router.get('/auto-rebalancer/status', requireAdmin, async (req, res) => {
+// Get auto-rebalancer status
+router.get('/auto-rebalancer/status', async (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.json({
@@ -597,7 +605,7 @@ router.get('/auto-rebalancer/status', requireAdmin, async (req, res) => {
         }
 
         const status = autoRebalancer.getStatus()
-        const statistics = autoRebalancer.getStatistics()
+        const statistics = await autoRebalancer.getStatistics()
 
         res.json({
             success: true,
@@ -694,9 +702,9 @@ router.get('/auto-rebalancer/history', requireAdmin, async (req, res) => {
 
         let history
         if (portfolioId) {
-            history = rebalanceHistoryService.getRecentAutoRebalances(portfolioId, limit)
+            history = await rebalanceHistoryService.getRecentAutoRebalances(portfolioId, limit)
         } else {
-            history = rebalanceHistoryService.getAllAutoRebalances().slice(0, limit)
+            history = (await rebalanceHistoryService.getAllAutoRebalances(limit)).slice(0, limit)
         }
 
         res.json({
@@ -722,8 +730,8 @@ router.get('/auto-rebalancer/history', requireAdmin, async (req, res) => {
 // Get comprehensive system status
 router.get('/system/status', async (req, res) => {
     try {
-        const portfolioCount = portfolioStorage.portfolios.size
-        const historyStats = rebalanceHistoryService.getHistoryStats()
+        const portfolioCount = await portfolioStorage.getPortfolioCount()
+        const historyStats = await rebalanceHistoryService.getHistoryStats()
         const circuitBreakers = riskManagementService.getCircuitBreakerStatus()
 
         // Check API health
@@ -732,7 +740,7 @@ router.get('/system/status', async (req, res) => {
 
         // Auto-rebalancer status
         const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
-        const autoRebalancerStats = autoRebalancer ? autoRebalancer.getStatistics() : null
+        const autoRebalancerStats = autoRebalancer ? await autoRebalancer.getStatistics() : null
 
         res.json({
             success: true,
@@ -771,6 +779,73 @@ router.get('/system/status', async (req, res) => {
             success: false,
             error: getErrorMessage(error),
             system: { status: 'error' }
+        })
+    }
+})
+
+// ================================
+// ANALYTICS ROUTES
+// ================================
+
+router.get('/portfolio/:id/analytics', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+        const days = parseInt(req.query.days as string) || 30
+
+        if (!portfolioId) {
+            return res.status(400).json({ error: 'Portfolio ID required' })
+        }
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return res.status(404).json({ error: 'Portfolio not found' })
+        }
+
+        const analytics = analyticsService.getAnalytics(portfolioId, days)
+
+        res.json({
+            success: true,
+            portfolioId,
+            data: analytics,
+            count: analytics.length,
+            period: `${days} days`,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to fetch analytics', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+router.get('/portfolio/:id/performance-summary', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+
+        if (!portfolioId) {
+            return res.status(400).json({ error: 'Portfolio ID required' })
+        }
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return res.status(404).json({ error: 'Portfolio not found' })
+        }
+
+        const summary = analyticsService.getPerformanceSummary(portfolioId)
+
+        res.json({
+            success: true,
+            portfolioId,
+            ...summary,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
         })
     }
 })
@@ -905,8 +980,8 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req, re
         }
 
         const status = autoRebalancer.getStatus()
-        const statistics = autoRebalancer.getStatistics()
-        const portfolioCount = portfolioStorage.portfolios.size
+        const statistics = await autoRebalancer.getStatistics()
+        const portfolioCount = await portfolioStorage.getPortfolioCount()
 
         res.json({
             success: true,

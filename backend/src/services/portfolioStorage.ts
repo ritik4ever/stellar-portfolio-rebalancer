@@ -1,3 +1,6 @@
+import { isDbConfigured } from '../db/client.js'
+import * as portfolioDb from '../db/portfolioDb.js'
+
 interface Portfolio {
     id: string
     userAddress: string
@@ -9,10 +12,32 @@ interface Portfolio {
     lastRebalance: string
 }
 
-class PortfolioStorage {
-    public portfolios: Map<string, Portfolio> = new Map() // Make public for monitoring
+const useCache = process.env.USE_MEMORY_CACHE === 'true'
 
-    createPortfolio(userAddress: string, allocations: Record<string, number>, threshold: number): string {
+class PortfolioStorage {
+    public portfolios: Map<string, Portfolio> = new Map()
+
+    private async cacheGet(id: string): Promise<Portfolio | undefined> {
+        if (useCache && this.portfolios.has(id)) return this.portfolios.get(id)
+        if (!isDbConfigured()) return this.portfolios.get(id)
+        const p = await portfolioDb.dbGetPortfolio(id)
+        if (p && useCache) this.portfolios.set(id, p)
+        return p
+    }
+
+    private cacheSet(portfolio: Portfolio): void {
+        if (useCache || !isDbConfigured()) this.portfolios.set(portfolio.id, portfolio)
+    }
+
+    private cacheDelete(id: string): void {
+        this.portfolios.delete(id)
+    }
+
+    async createPortfolio(
+        userAddress: string,
+        allocations: Record<string, number>,
+        threshold: number
+    ): Promise<string> {
         const id = Date.now().toString()
         const portfolio: Portfolio = {
             id,
@@ -24,74 +49,100 @@ class PortfolioStorage {
             createdAt: new Date().toISOString(),
             lastRebalance: new Date().toISOString()
         }
-
-        this.portfolios.set(id, portfolio)
+        if (isDbConfigured()) {
+            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0)
+        }
+        this.cacheSet(portfolio)
         return id
     }
 
-    createPortfolioWithBalances(
+    async createPortfolioWithBalances(
         userAddress: string,
         allocations: Record<string, number>,
         threshold: number,
         currentBalances: Record<string, number>
-    ): string {
+    ): Promise<string> {
         const id = Date.now().toString()
+        const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
         const portfolio: Portfolio = {
             id,
             userAddress,
             allocations,
             threshold,
             balances: currentBalances,
-            totalValue: Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0),
+            totalValue,
             createdAt: new Date().toISOString(),
             lastRebalance: new Date().toISOString()
         }
-
-        this.portfolios.set(id, portfolio)
+        if (isDbConfigured()) {
+            await portfolioDb.dbCreatePortfolio(
+                id,
+                userAddress,
+                allocations,
+                threshold,
+                currentBalances,
+                totalValue
+            )
+        }
+        this.cacheSet(portfolio)
         return id
     }
 
-    getPortfolio(id: string): Portfolio | undefined {
-        return this.portfolios.get(id)
+    async getPortfolio(id: string): Promise<Portfolio | undefined> {
+        return this.cacheGet(id)
     }
 
-    getUserPortfolios(userAddress: string): Portfolio[] {
-        return Array.from(this.portfolios.values())
-            .filter(p => p.userAddress === userAddress)
+    async getUserPortfolios(userAddress: string): Promise<Portfolio[]> {
+        if (isDbConfigured()) {
+            const list = await portfolioDb.dbGetUserPortfolios(userAddress)
+            if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
+            return list
+        }
+        return Array.from(this.portfolios.values()).filter(p => p.userAddress === userAddress)
     }
 
-    updatePortfolio(id: string, updates: Partial<Portfolio>): boolean {
-        const portfolio = this.portfolios.get(id)
+    async updatePortfolio(id: string, updates: Partial<Portfolio>): Promise<boolean> {
+        const portfolio = await this.getPortfolio(id)
         if (!portfolio) return false
-
-        this.portfolios.set(id, { ...portfolio, ...updates })
+        const updated = { ...portfolio, ...updates }
+        if (isDbConfigured()) {
+            const ok = await portfolioDb.dbUpdatePortfolio(id, {
+                balances: updates.balances,
+                totalValue: updates.totalValue,
+                lastRebalance: updates.lastRebalance
+            })
+            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance)) return false
+        }
+        this.cacheSet(updated)
         return true
     }
 
-    /**
-     * Get all portfolios
-     */
-    getAllPortfolios(): Portfolio[] {
+    async getAllPortfolios(): Promise<Portfolio[]> {
+        if (isDbConfigured()) {
+            const list = await portfolioDb.dbGetAllPortfolios()
+            if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
+            return list
+        }
         return Array.from(this.portfolios.values())
     }
 
-    /**
-     * Get portfolio count
-     */
-    getPortfolioCount(): number {
+    async getPortfolioCount(): Promise<number> {
+        if (isDbConfigured()) {
+            const list = await portfolioDb.dbGetAllPortfolios()
+            return list.length
+        }
         return this.portfolios.size
     }
 
-    /**
-     * Delete a portfolio
-     */
-    deletePortfolio(id: string): boolean {
+    async deletePortfolio(id: string): Promise<boolean> {
+        if (isDbConfigured()) {
+            const ok = await portfolioDb.dbDeletePortfolio(id)
+            if (ok) this.cacheDelete(id)
+            return ok
+        }
         return this.portfolios.delete(id)
     }
 
-    /**
-     * Clear all portfolios (for testing)
-     */
     clearAll(): void {
         this.portfolios.clear()
     }
@@ -99,3 +150,10 @@ class PortfolioStorage {
 
 export const portfolioStorage = new PortfolioStorage()
 export type { Portfolio }
+/**
+ * portfolioStorage.ts
+ *
+ * Backward-compatible re-export: all callers that import `portfolioStorage`
+ * now transparently use the SQLite-backed DatabaseService singleton.
+ */
+export { databaseService as portfolioStorage, type Portfolio } from './databaseService.js'

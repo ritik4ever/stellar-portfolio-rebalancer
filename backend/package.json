@@ -5,23 +5,31 @@
     "scripts": {
         "dev": "tsx watch src/index.ts",
         "build": "tsc",
-        "start": "node dist/index.js"
+        "start": "node dist/index.js",
+        "db:migrate": "tsx src/db/migrate.ts",
+        "db:setup": "tsx src/db/migrate.ts"
     },
     "dependencies": {
         "@stellar/stellar-sdk": "^12.0.1",
+        "better-sqlite3": "^12.6.2",
         "cors": "^2.8.5",
         "dotenv": "^16.3.1",
         "express": "^4.18.2",
+        "express-rate-limit": "^7.4.1",
         "node-cron": "^3.0.3",
+        "pg": "^8.11.3",
         "ws": "^8.14.2"
     },
     "devDependencies": {
+        "@types/pg": "^8.10.9",
+        "@types/better-sqlite3": "^7.6.13",
         "@types/cors": "^2.8.19",
         "@types/express": "^4.17.23",
         "@types/node": "^20.19.13",
         "@types/node-cron": "^3.0.11",
         "@types/ws": "^8.18.1",
         "tsx": "^4.1.4",
-        "typescript": "^5.2.2"
+        "typescript": "^5.2.2",
+        "vitest": "^4.0.18"
     }
 }

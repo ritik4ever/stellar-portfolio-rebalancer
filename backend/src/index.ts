@@ -1,13 +1,15 @@
-// index.ts - COMPLETE VERSION WITH AUTO-REBALANCER
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
+import { globalRateLimiter } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
+import { databaseService } from './services/databaseService.js'
 
 const app = express()
 const port = process.env.PORT || 3001
@@ -57,6 +59,8 @@ app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`)
     next()
 })
+
+app.use(globalRateLimiter)
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -251,6 +255,14 @@ const gracefulShutdown = (signal: string) => {
         console.log('[SHUTDOWN] Auto-rebalancer stopped')
     } catch (error) {
         console.error('[SHUTDOWN] Error stopping auto-rebalancer:', error)
+    }
+
+    // Close database connection
+    try {
+        databaseService.close()
+        console.log('[SHUTDOWN] Database connection closed')
+    } catch (error) {
+        console.error('[SHUTDOWN] Error closing database:', error)
     }
 
     // Close WebSocket connections

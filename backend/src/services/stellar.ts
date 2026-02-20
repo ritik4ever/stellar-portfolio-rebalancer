@@ -19,8 +19,6 @@ export class StellarService {
 
             await this.checkConcentrationRisk(allocations)
 
-            const portfolioId = Date.now().toString()
-
             const mockBalances: Record<string, number> = {}
             const { ReflectorService } = await import('./reflector.js')
             const reflector = new ReflectorService()
@@ -35,13 +33,16 @@ export class StellarService {
             }
 
             const { portfolioStorage } = await import('./portfolioStorage.js')
-            portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
+            // Use the ID returned by the database — do NOT generate a separate one
+            const portfolioId = portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
 
             console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
             return portfolioId
         } catch (error) {
             throw new Error(`Failed to create portfolio: ${error}`)
         }
+
     }
 
     async checkConcentrationRisk(allocations: Record<string, number>, maxSingleAsset: number = 70): Promise<boolean> {
@@ -91,7 +92,7 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { ReflectorService } = await import('./reflector.js')
 
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) return false
 
             const reflector = new ReflectorService()
@@ -139,7 +140,7 @@ export class StellarService {
             const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
             const { RiskManagementService } = await import('./riskManagements.js')
 
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 throw new Error('Portfolio not found')
             }
@@ -241,8 +242,7 @@ export class StellarService {
             // Calculate new balances
             const updatedBalances = await this.calculateRebalancedBalances(portfolio, prices)
 
-            // Update portfolio
-            portfolioStorage.updatePortfolio(portfolioId, {
+            await portfolioStorage.updatePortfolio(portfolioId, {
                 lastRebalance: new Date().toISOString(),
                 balances: updatedBalances
             })
@@ -357,7 +357,7 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { ReflectorService } = await import('./reflector.js')
 
-            const portfolio = portfolioStorage.getPortfolio(portfolioId)
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) {
                 throw new Error('Portfolio not found')
             }
