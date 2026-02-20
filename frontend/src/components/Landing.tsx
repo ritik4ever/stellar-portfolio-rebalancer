@@ -1,6 +1,7 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 import { TrendingUp, Shield, Zap, ArrowRight } from 'lucide-react'
+import ThemeToggle from './ThemeToggle'
 
 interface LandingProps {
     onNavigate: (view: string) => void
@@ -19,16 +20,17 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
             {/* Header */}
             <nav className="flex items-center justify-between p-6 max-w-7xl mx-auto">
                 <div className="flex items-center space-x-2">
                     <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
                         <TrendingUp className="w-5 h-5 text-white" />
                     </div>
-                    <span className="text-xl font-bold text-gray-900">Portfolio Rebalancer</span>
+                    <span className="text-xl font-bold text-gray-900 dark:text-white">Portfolio Rebalancer</span>
                 </div>
                 <div className="flex items-center space-x-4">
+                    <ThemeToggle />
                     {publicKey ? (
                         <button
                             onClick={() => onNavigate('dashboard')}
@@ -63,10 +65,10 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.8 }}
                     >
-                        <h1 className="text-5xl md:text-7xl font-bold text-gray-900 mb-6">
+                        <h1 className="text-5xl md:text-7xl font-bold text-gray-900 dark:text-white mb-6">
                             Smart Portfolio <span className="text-blue-600">Rebalancing</span>
                         </h1>
-                        <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
+                        <p className="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto leading-relaxed">
                             Maintain optimal asset allocation automatically with our intelligent rebalancing
                             protocol. Powered by Stellar's ecosystem and Reflector's reliable price oracles.
                         </p>
@@ -97,7 +99,7 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                         </button>
                         <button
                             onClick={() => onNavigate('dashboard')}
-                            className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-8 py-4 rounded-xl font-semibold text-lg transition-colors"
+                            className="bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-8 py-4 rounded-xl font-semibold text-lg transition-colors"
                         >
                             View Demo
                         </button>
@@ -112,10 +114,10 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                     className="mt-32"
                 >
                     <div className="text-center mb-16">
-                        <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+                        <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">
                             Why Choose Our Platform?
                         </h2>
-                        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                        <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
                             Built for the next generation of DeFi with enterprise-grade security and user-friendly design
                         </p>
                     </div>
@@ -123,13 +125,13 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                     <div className="grid md:grid-cols-3 gap-8">
                         <motion.div
                             whileHover={{ y: -5 }}
-                            className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
+                            className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
                         >
-                            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-6">
-                                <TrendingUp className="w-6 h-6 text-blue-600" />
+                            <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/50 rounded-xl flex items-center justify-center mb-6">
+                                <TrendingUp className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                             </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-4">Smart Rebalancing</h3>
-                            <p className="text-gray-600 leading-relaxed">
+                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Smart Rebalancing</h3>
+                            <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
                                 Automatically maintain your target allocations with intelligent threshold-based rebalancing
                                 that saves you time and reduces emotional trading decisions.
                             </p>
@@ -137,13 +139,13 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
 
                         <motion.div
                             whileHover={{ y: -5 }}
-                            className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
+                            className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
                         >
-                            <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-6">
-                                <Shield className="w-6 h-6 text-green-600" />
+                            <div className="w-12 h-12 bg-green-100 dark:bg-green-900/50 rounded-xl flex items-center justify-center mb-6">
+                                <Shield className="w-6 h-6 text-green-600 dark:text-green-400" />
                             </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-4">Risk Management</h3>
-                            <p className="text-gray-600 leading-relaxed">
+                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Risk Management</h3>
+                            <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
                                 Built-in safeguards and circuit breakers protect your portfolio from extreme market
                                 conditions and prevent concentration risk.
                             </p>
@@ -151,13 +153,13 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
 
                         <motion.div
                             whileHover={{ y: -5 }}
-                            className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
+                            className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300"
                         >
-                            <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6">
-                                <Zap className="w-6 h-6 text-purple-600" />
+                            <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/50 rounded-xl flex items-center justify-center mb-6">
+                                <Zap className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                             </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-4">Real-time Oracle Data</h3>
-                            <p className="text-gray-600 leading-relaxed">
+                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Real-time Oracle Data</h3>
+                            <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
                                 Powered by Reflector's decentralized price feeds for accurate, manipulation-resistant
                                 pricing data from multiple sources.
                             </p>

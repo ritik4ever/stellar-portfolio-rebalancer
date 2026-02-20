@@ -19,6 +19,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { API_CONFIG } from "../config/api";
+import ThemeToggle from "./ThemeToggle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -262,29 +263,32 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
       <div className="max-w-4xl mx-auto px-6">
         {/* ── Page header with back navigation ── */}
-        <div className="flex items-center mb-8">
-          <button
-            onClick={() => onNavigate("dashboard")}
-            className="mr-4 p-2 text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">
-              Create Portfolio
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Set up your automated rebalancing strategy
-            </p>
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center">
+            <button
+              onClick={() => onNavigate("dashboard")}
+              className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                Create Portfolio
+              </h1>
+              <p className="text-gray-600 dark:text-gray-400 mt-1">
+                Set up your automated rebalancing strategy
+              </p>
+            </div>
           </div>
+          <ThemeToggle />
         </div>
 
         {/* ── Wallet connection status ── */}
-        <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Wallet Status
           </h3>
           {publicKey ? (
@@ -306,12 +310,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
         {/* ── Demo mode information banner ── */}
         {isDemoMode && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
             <div className="flex items-center">
               <div className="text-blue-600 mr-2">ℹ️</div>
               <div>
-                <h4 className="text-blue-800 font-medium">Demo Mode</h4>
-                <p className="text-blue-700 text-sm">
+                <h4 className="text-blue-800 dark:text-blue-300 font-medium">Demo Mode</h4>
+                <p className="text-blue-700 dark:text-blue-400 text-sm">
                   Using simulated $10,000 portfolio with real price data.
                   Perfect for testing and demonstrations.
                 </p>
@@ -355,8 +359,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           {/* ════ Left column: configuration inputs ════ */}
           <div className="space-y-6">
             {/* ── Preset portfolio quick-start buttons ── */}
-            <div className="bg-white rounded-xl p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Quick Start
               </h3>
               <div className="grid grid-cols-3 gap-3">
@@ -364,10 +368,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   <button
                     key={index}
                     onClick={() => applyPreset(preset)}
-                    className="p-3 text-sm bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors text-center"
+                    className="p-3 text-sm bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-lg transition-colors text-center"
                   >
                     <div className="font-medium">{preset.name}</div>
-                    <div className="text-xs text-gray-500 mt-1">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       {preset.allocations.length} assets
                     </div>
                   </button>
@@ -376,9 +380,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
 
             {/* ── Asset allocation rows with inline validation ── */}
-            <div className="bg-white rounded-xl p-6 shadow-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Asset Allocations
                 </h3>
                 {/* Disabled once all 4 supported assets have been added */}
@@ -412,7 +416,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       <div className="flex items-start space-x-3">
                         {/* Asset dropdown */}
                         <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Asset
                           </label>
                           <select
@@ -420,7 +424,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             onChange={(e) =>
                               updateAllocation(index, "asset", e.target.value)
                             }
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           >
                             {assetOptions.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -432,7 +436,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
                         {/* Percentage input — border and background turn red when invalid */}
                         <div className="w-28">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Percentage
                           </label>
                           <input
@@ -454,10 +458,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             aria-describedby={
                               fieldError ? `alloc-error-${index}` : undefined
                             }
-                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors ${
+                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
                               fieldError
-                                ? "border-red-500 focus:ring-red-400 bg-red-50" // invalid: red border + tinted background
-                                : "border-gray-300 focus:ring-blue-500 focus:border-blue-500" // default: gray border
+                                ? "border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30" // invalid
+                                : "border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500" // default
                             }`}
                           />
                         </div>
@@ -509,10 +513,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               </div>
 
               {/* ── Real-time total allocation summary ── */}
-              <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                 {/* Numeric total with colour indicating validity */}
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-gray-700">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Total Allocation:
                   </span>
                   <span
@@ -569,14 +573,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
 
             {/* ── Rebalance threshold and auto-rebalance toggle ── */}
-            <div className="bg-white rounded-xl p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Rebalance Settings
               </h3>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Rebalance Threshold (%)
                   </label>
                   <input
@@ -587,9 +591,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     onChange={(e) =>
                       setThreshold(parseInt(e.target.value) || 5)
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
-                  <p className="text-sm text-gray-500 mt-1">
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     Trigger rebalance when any asset drifts by this percentage
                   </p>
                 </div>
@@ -604,12 +608,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   />
                   <label
                     htmlFor="autoRebalance"
-                    className="ml-2 text-sm text-gray-700"
+                    className="ml-2 text-sm text-gray-700 dark:text-gray-300"
                   >
                     Enable automatic rebalancing
                   </label>
                 </div>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   Automatically execute rebalances when threshold is exceeded
                 </p>
               </div>
@@ -617,8 +621,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           </div>
 
           {/* ════ Right column: live preview + submit ════ */}
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
               Portfolio Preview
             </h3>
 
@@ -635,9 +639,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           "#6B7280",
                       }}
                     />
-                    <span className="font-medium">{allocation.asset}</span>
+                    <span className="font-medium dark:text-gray-200">{allocation.asset}</span>
                   </div>
-                  <span className="text-gray-600">
+                  <span className="text-gray-600 dark:text-gray-400">
                     {allocation.percentage}%
                   </span>
                 </div>
@@ -645,22 +649,22 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
 
             {/* Settings summary card */}
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-2">
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
                   Rebalance Threshold:
                 </span>
-                <span className="text-sm font-medium">{threshold}%</span>
+                <span className="text-sm font-medium dark:text-gray-200">{threshold}%</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Auto-Rebalance:</span>
-                <span className="text-sm font-medium">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Auto-Rebalance:</span>
+                <span className="text-sm font-medium dark:text-gray-200">
                   {autoRebalance ? "Enabled" : "Disabled"}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Portfolio Value:</span>
-                <span className="text-sm font-medium">$10,000 (Demo)</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">Portfolio Value:</span>
+                <span className="text-sm font-medium dark:text-gray-200">$10,000 (Demo)</span>
               </div>
             </div>
 

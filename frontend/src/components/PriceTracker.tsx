@@ -160,7 +160,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         return (
             <div className="flex items-center justify-center p-4">
                 <Activity className="w-5 h-5 animate-spin text-blue-500" />
-                <span className="ml-2 text-gray-600">Loading real-time prices...</span>
+                <span className="ml-2 text-gray-600 dark:text-gray-400">Loading real-time prices...</span>
             </div>
         )
     }
@@ -169,7 +169,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
     if (compact) {
         return (
-            <div className="flex items-center space-x-4 p-2 bg-gray-50 rounded-lg">
+            <div className="flex items-center space-x-4 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
                 <div className="flex items-center space-x-1">
                     {isConnected ?
                         <Wifi className="w-4 h-4 text-green-500" /> :
@@ -193,7 +193,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         </div>
                     )
                 })}
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-gray-500 dark:text-gray-400">
                     {lastUpdate}
                 </div>
             </div>
@@ -201,9 +201,9 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     }
 
     return (
-        <div className="bg-white rounded-xl p-6 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Real-time Prices</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Real-time Prices</h3>
                 <div className="flex items-center space-x-2">
                     <div className="flex items-center space-x-1">
                         {isConnected ?
@@ -215,12 +215,12 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         </span>
                     </div>
                     {error && (
-                        <div className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded cursor-pointer"
+                        <div className="text-xs text-red-500 bg-red-50 dark:bg-red-900/30 px-2 py-1 rounded cursor-pointer"
                             onClick={retryConnection}>
                             {error} (Click to retry)
                         </div>
                     )}
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
                         Last update: {lastUpdate}
                     </div>
                 </div>
@@ -230,15 +230,15 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                 {assets.map(asset => {
                     const data = prices[asset]
                     if (!data) return (
-                        <div key={asset} className="p-4 bg-gray-50 rounded-lg">
-                            <div className="text-sm text-gray-500">Loading {asset}...</div>
+                        <div key={asset} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div className="text-sm text-gray-500 dark:text-gray-400">Loading {asset}...</div>
                         </div>
                     )
 
                     return (
-                        <div key={asset} className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <div key={asset} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                             <div className="flex items-center justify-between mb-2">
-                                <span className="font-medium text-gray-900">{asset}</span>
+                                <span className="font-medium text-gray-900 dark:text-white">{asset}</span>
                                 <div className={`px-2 py-1 rounded text-xs ${data.source === 'coingecko_pro' ? 'bg-green-100 text-green-800' :
                                     data.source === 'coingecko_free' || data.source === 'coingecko' ? 'bg-blue-100 text-blue-800' :
                                         data.source === 'reflector' ? 'bg-purple-100 text-purple-800' :
@@ -251,7 +251,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                                 </div>
                             </div>
 
-                            <div className="text-2xl font-bold text-gray-900 mb-1">
+                            <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
                                 ${data.price < 1 ? data.price.toFixed(6) : data.price.toLocaleString()}
                             </div>
 
@@ -263,7 +263,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                             </div>
 
                             {data.volume && (
-                                <div className="text-xs text-gray-500 mt-1">
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                     Vol: ${data.volume.toLocaleString()}
                                 </div>
                             )}
@@ -273,17 +273,17 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
             </div>
 
             {!isConnected && (
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center">
-                            <WifiOff className="w-4 h-4 text-yellow-600 mr-2" />
-                            <span className="text-sm text-yellow-800">
+                            <WifiOff className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mr-2" />
+                            <span className="text-sm text-yellow-800 dark:text-yellow-300">
                                 Connection lost. Showing last known prices.
                             </span>
                         </div>
                         <button
                             onClick={retryConnection}
-                            className="text-sm bg-yellow-200 hover:bg-yellow-300 text-yellow-800 px-3 py-1 rounded transition-colors"
+                            className="text-sm bg-yellow-200 hover:bg-yellow-300 dark:bg-yellow-800 dark:hover:bg-yellow-700 text-yellow-800 dark:text-yellow-200 px-3 py-1 rounded transition-colors"
                         >
                             Retry
                         </button>
