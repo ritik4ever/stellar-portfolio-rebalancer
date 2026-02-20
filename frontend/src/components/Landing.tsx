@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { TrendingUp, Shield, Zap, ArrowRight } from 'lucide-react'
+import { TrendingUp, Shield, Zap, ArrowRight, X } from 'lucide-react'
+import { WalletSelector } from './WalletSelector'
 
 interface LandingProps {
     onNavigate: (view: string) => void
@@ -10,12 +11,21 @@ interface LandingProps {
 }
 
 const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnecting, publicKey }) => {
+    const [showWalletSelector, setShowWalletSelector] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+
     const handleConnectWallet = async () => {
-        try {
-            await onConnectWallet()
-        } catch (error) {
-            // Error is handled in App.tsx
-        }
+        setShowWalletSelector(true)
+        setError(null)
+    }
+
+    const handleWalletSelected = async (_publicKey: string) => {
+        setShowWalletSelector(false)
+        await onConnectWallet()
+    }
+
+    const handleWalletError = (errorMsg: string) => {
+        setError(errorMsg)
     }
 
     return (
@@ -42,14 +52,7 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                             disabled={isConnecting}
                             className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors flex items-center"
                         >
-                            {isConnecting ? (
-                                <>
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                    Connecting...
-                                </>
-                            ) : (
-                                'Connect Wallet'
-                            )}
+                            Connect Wallet
                         </button>
                     )}
                 </div>
@@ -165,6 +168,38 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                     </div>
                 </motion.div>
             </div>
+
+            {showWalletSelector && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl"
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-semibold text-gray-900">Select Wallet</h2>
+                            <button
+                                onClick={() => {
+                                    setShowWalletSelector(false)
+                                    setError(null)
+                                }}
+                                className="text-gray-400 hover:text-gray-600"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        {error && (
+                            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+                                {error}
+                            </div>
+                        )}
+                        <WalletSelector
+                            onConnect={handleWalletSelected}
+                            onError={handleWalletError}
+                        />
+                    </motion.div>
+                </div>
+            )}
         </div>
     )
 }
