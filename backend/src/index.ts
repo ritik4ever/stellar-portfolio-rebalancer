@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
+import { globalRateLimiter } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
@@ -40,6 +41,8 @@ app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`)
     next()
 })
+
+app.use(globalRateLimiter)
 
 // Health check endpoint
 app.get('/health', (req, res) => {
