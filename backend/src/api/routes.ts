@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { writeRateLimiter } from '../middleware/rateLimit.js'
+import { ConflictError } from '../types/index.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 
@@ -339,6 +340,16 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
             partialFills: result.partialFills || []
         })
     } catch (error) {
+        if (error instanceof ConflictError) {
+            logger.warn('Rebalance rejected — concurrent modification detected', {
+                portfolioId: req.params.id,
+                currentVersion: error.currentVersion
+            })
+            return res.status(409).json({
+                error: 'Portfolio was modified by a concurrent request. Fetch the latest version and retry.',
+                currentVersion: error.currentVersion
+            })
+        }
         logger.error('Rebalance failed', { error: getErrorObject(error), portfolioId: req.params.id })
         res.status(500).json({
             error: getErrorMessage(error),

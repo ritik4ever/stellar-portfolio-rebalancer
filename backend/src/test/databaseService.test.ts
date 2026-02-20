@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseService } from '../services/databaseService.js'
+import { ConflictError } from '../types/index.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -204,6 +205,107 @@ describe('DatabaseService – rebalance history', () => {
 
         const history = db.getRebalanceHistory(portfolioId, 3)
         expect(history.length).toBe(3)
+    })
+})
+
+// ─── Optimistic concurrency control ─────────────────────────────────────────
+
+describe('DatabaseService – optimistic concurrency control', () => {
+    let db: DatabaseService
+    let dbPath: string
+
+    beforeEach(() => {
+        const result = makeTempDb()
+        db = result.service
+        dbPath = result.dbPath
+    })
+
+    afterEach(() => {
+        db.close()
+        if (existsSync(dbPath)) rmSync(dbPath, { force: true })
+        delete process.env.DB_PATH
+    })
+
+    it('new portfolio starts at version 1', () => {
+        const id = db.createPortfolio('GVER1', { XLM: 100 }, 5)
+        const portfolio = db.getPortfolio(id)
+        expect(portfolio!.version).toBe(1)
+    })
+
+    it('unchecked update increments version', () => {
+        const id = db.createPortfolio('GVER2', { XLM: 100 }, 5)
+        db.updatePortfolio(id, { totalValue: 999 })
+        const portfolio = db.getPortfolio(id)
+        expect(portfolio!.version).toBe(2)
+    })
+
+    it('versioned update succeeds when expectedVersion matches', () => {
+        const id = db.createPortfolio('GVER3', { XLM: 100 }, 5)
+        const before = db.getPortfolio(id)!
+        expect(before.version).toBe(1)
+
+        const ok = db.updatePortfolio(id, { totalValue: 500 }, 1)
+        expect(ok).toBe(true)
+
+        const after = db.getPortfolio(id)!
+        expect(after.totalValue).toBe(500)
+        expect(after.version).toBe(2)
+    })
+
+    it('versioned update throws ConflictError when version is stale', () => {
+        const id = db.createPortfolio('GVER4', { XLM: 100 }, 5)
+
+        // First writer succeeds and bumps version to 2
+        db.updatePortfolio(id, { totalValue: 100 }, 1)
+
+        // Second writer still holds version 1 — must get a ConflictError
+        expect(() => db.updatePortfolio(id, { totalValue: 200 }, 1))
+            .toThrowError(ConflictError)
+    })
+
+    it('ConflictError carries the current version', () => {
+        const id = db.createPortfolio('GVER5', { XLM: 100 }, 5)
+
+        // Advance to version 3 via two unchecked updates
+        db.updatePortfolio(id, { totalValue: 1 })
+        db.updatePortfolio(id, { totalValue: 2 })
+
+        let caught: ConflictError | undefined
+        try {
+            db.updatePortfolio(id, { totalValue: 3 }, 1)
+        } catch (err) {
+            if (err instanceof ConflictError) caught = err
+        }
+
+        expect(caught).toBeInstanceOf(ConflictError)
+        expect(caught!.currentVersion).toBe(3)
+    })
+
+    it('simulates lost-update prevention: two concurrent writers, second is rejected', () => {
+        const id = db.createPortfolio('GVER6', { XLM: 100 }, 5)
+
+        // Both readers observe version 1 at the same time
+        const snapshotA = db.getPortfolio(id)!
+        const snapshotB = db.getPortfolio(id)!
+        expect(snapshotA.version).toBe(1)
+        expect(snapshotB.version).toBe(1)
+
+        // Writer A commits first — succeeds
+        const okA = db.updatePortfolio(id, { totalValue: 111 }, snapshotA.version)
+        expect(okA).toBe(true)
+        expect(db.getPortfolio(id)!.version).toBe(2)
+
+        // Writer B attempts to commit with stale version — must be rejected
+        expect(() => db.updatePortfolio(id, { totalValue: 222 }, snapshotB.version))
+            .toThrowError(ConflictError)
+
+        // Final value is the one committed by writer A, not silently overwritten by B
+        expect(db.getPortfolio(id)!.totalValue).toBe(111)
+    })
+
+    it('versioned update returns false when portfolio does not exist', () => {
+        const ok = db.updatePortfolio('nonexistent', { totalValue: 1 }, 1)
+        expect(ok).toBe(false)
     })
 })
 

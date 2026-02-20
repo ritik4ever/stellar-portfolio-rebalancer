@@ -1,4 +1,6 @@
 import { Horizon } from '@stellar/stellar-sdk'
+
+import { ConflictError } from '../types/index.js'
 import type { PricesMap, RebalanceResult } from '../types/index.js'
 import {
     StellarDEXService,
@@ -15,6 +17,8 @@ interface StoredPortfolio {
     threshold: number
     balances: Record<string, number>
     totalValue: number
+    // Optional version field used for compare-and-set updates
+    version?: number
     createdAt: string
     lastRebalance: string
 }
@@ -294,6 +298,12 @@ export class StellarService {
                 ? this.applyExecutionToBalances(portfolio.balances, dexResult.executedTrades)
                 : { ...portfolio.balances }
 
+            // Compare-and-set: only commit if no concurrent write advanced the version
+            portfolioStorage.updatePortfolio(
+                portfolioId,
+                { lastRebalance: new Date().toISOString(), balances: updatedBalances },
+                portfolio.version
+            )
             const updatedTotalValue = this.calculateTotalValue(updatedBalances, prices)
 
             if (dexResult.status !== 'failed') {
@@ -352,6 +362,10 @@ export class StellarService {
                 totalSlippageBps: dexResult.totalSlippageBps
             }
         } catch (error) {
+            // Bubble up concurrency conflicts without wrapping so callers can
+            // distinguish a 409 Conflict from a generic 500 failure.
+            if (error instanceof ConflictError) throw error
+
             const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
             const rebalanceHistory = new RebalanceHistoryService()
             const message = error instanceof Error ? error.message : String(error)

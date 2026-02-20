@@ -1,3 +1,7 @@
+-- Migration: 001_initial_schema (up)
+-- Description: Initial schema for portfolios, rebalance_events, analytics_snapshots, notification_preferences.
+-- Rollback: See 001_initial_schema.down.sql
+
 CREATE TABLE IF NOT EXISTS portfolios (
     id VARCHAR(64) PRIMARY KEY,
     user_address VARCHAR(256) NOT NULL,
@@ -6,8 +10,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
     balances JSONB NOT NULL DEFAULT '{}',
     total_value NUMERIC NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_rebalance TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    version INTEGER NOT NULL DEFAULT 1
+    last_rebalance TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_address);
