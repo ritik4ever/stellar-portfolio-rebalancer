@@ -104,6 +104,62 @@ describe('DatabaseService – portfolios', () => {
     })
 })
 
+// ─── Portfolio ID consistency ────────────────────────────────────────────────
+
+describe('DatabaseService – portfolio ID consistency', () => {
+    let db: DatabaseService
+    let dbPath: string
+
+    beforeEach(() => {
+        const result = makeTempDb()
+        db = result.service
+        dbPath = result.dbPath
+    })
+
+    afterEach(() => {
+        db.close()
+        if (existsSync(dbPath)) rmSync(dbPath, { force: true })
+        delete process.env.DB_PATH
+    })
+
+    it('returned ID matches the ID stored in the database', () => {
+        const id = db.createPortfolio('GCONS1', { XLM: 100 }, 5)
+        const stored = db.getPortfolio(id)
+        expect(stored).toBeDefined()
+        expect(stored!.id).toBe(id)
+    })
+
+    it('createPortfolioWithBalances returned ID matches stored ID', () => {
+        const id = db.createPortfolioWithBalances('GCONS2', { XLM: 100 }, 5, { XLM: 500 })
+        const stored = db.getPortfolio(id)
+        expect(stored).toBeDefined()
+        expect(stored!.id).toBe(id)
+    })
+
+    it('generated IDs are valid UUIDs', () => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        const id1 = db.createPortfolio('GUUID1', { XLM: 100 }, 5)
+        const id2 = db.createPortfolioWithBalances('GUUID2', { XLM: 100 }, 5, { XLM: 200 })
+        expect(id1).toMatch(uuidRegex)
+        expect(id2).toMatch(uuidRegex)
+    })
+
+    it('parallel creates produce unique IDs without collisions', () => {
+        const ids = Array.from({ length: 20 }, (_, i) =>
+            db.createPortfolio(`GPAR${i}`, { XLM: 100 }, 5)
+        )
+        const unique = new Set(ids)
+        expect(unique.size).toBe(20)
+    })
+
+    it('GET after POST always finds the portfolio', () => {
+        for (let i = 0; i < 10; i++) {
+            const id = db.createPortfolio(`GGET${i}`, { XLM: 100 }, 5)
+            expect(db.getPortfolio(id)).toBeDefined()
+        }
+    })
+})
+
 // ─── Persistence across instances ───────────────────────────────────────────
 
 describe('DatabaseService – persistence across instances', () => {

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 
 // ─────────────────────────────────────────────
@@ -242,7 +243,7 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
 }
 
 function generateId(): string {
-    return Date.now().toString() + Math.random().toString(36).substring(2, 9)
+    return randomUUID()
 }
 
 // ─────────────────────────────────────────────
