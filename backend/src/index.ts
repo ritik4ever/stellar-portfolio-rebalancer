@@ -12,20 +12,37 @@ import { logger } from './utils/logger.js'
 const app = express()
 const port = process.env.PORT || 3001
 
-// CORS configuration - Allow all origins to fix CORS issues
-app.use(cors({
-    origin: true, // Allow all origins
+const isProduction = process.env.NODE_ENV === 'production'
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean)
+
+const corsOptions: cors.CorsOptions = {
+    origin: isProduction
+        ? allowedOrigins.length > 0
+            ? (origin, cb) => {
+                if (!origin || allowedOrigins.includes(origin)) cb(null, origin || true)
+                else cb(new Error('Not allowed by CORS'))
+            }
+            : false
+        : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
-}))
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Public-Key', 'X-Message', 'X-Signature']
+}
+app.use(cors(corsOptions))
 
-// Handle preflight requests
 app.options('*', (req, res) => {
-    res.header('Access-Control-Allow-Origin', '*')
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With')
-    res.status(200).end()
+    const origin = req.get('Origin')
+    if (isProduction && allowedOrigins.length > 0) {
+        if (origin && allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin)
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*')
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-Public-Key, X-Message, X-Signature')
+    res.status(204).end()
 })
 
 // Trust proxy

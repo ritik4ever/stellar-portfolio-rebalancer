@@ -6,6 +6,8 @@ import { RiskManagementService } from '../services/riskManagements.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { logger } from '../utils/logger.js'
+import { requireAdmin } from '../middleware/auth.js'
+import { blockDebugInProduction } from '../middleware/debugGate.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -584,8 +586,7 @@ router.get('/market/:asset/chart', async (req, res) => {
 // AUTO-REBALANCER ROUTES
 // ================================
 
-// Get auto-rebalancer status
-router.get('/auto-rebalancer/status', (req, res) => {
+router.get('/auto-rebalancer/status', requireAdmin, async (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.json({
@@ -612,8 +613,7 @@ router.get('/auto-rebalancer/status', (req, res) => {
     }
 })
 
-// Start auto-rebalancer
-router.post('/auto-rebalancer/start', (req, res) => {
+router.post('/auto-rebalancer/start', requireAdmin, (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.status(500).json({
@@ -638,8 +638,7 @@ router.post('/auto-rebalancer/start', (req, res) => {
     }
 })
 
-// Stop auto-rebalancer
-router.post('/auto-rebalancer/stop', (req, res) => {
+router.post('/auto-rebalancer/stop', requireAdmin, (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.status(500).json({
@@ -664,8 +663,7 @@ router.post('/auto-rebalancer/stop', (req, res) => {
     }
 })
 
-// Force immediate check
-router.post('/auto-rebalancer/force-check', async (req, res) => {
+router.post('/auto-rebalancer/force-check', requireAdmin, async (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.status(500).json({
@@ -689,8 +687,7 @@ router.post('/auto-rebalancer/force-check', async (req, res) => {
     }
 })
 
-// Get auto-rebalancing history
-router.get('/auto-rebalancer/history', async (req, res) => {
+router.get('/auto-rebalancer/history', requireAdmin, async (req, res) => {
     try {
         const portfolioId = req.query.portfolioId as string
         const limit = parseInt(req.query.limit as string) || 50
@@ -782,13 +779,10 @@ router.get('/system/status', async (req, res) => {
 // DEBUG ROUTES
 // ================================
 
-// Test CoinGecko API directly
-router.get('/debug/coingecko-test', async (req, res) => {
+router.get('/debug/coingecko-test', blockDebugInProduction, async (req, res) => {
     try {
         const apiKey = process.env.COINGECKO_API_KEY
         console.log('[DEBUG] API Key exists:', !!apiKey)
-        console.log('[DEBUG] API Key length:', apiKey?.length || 0)
-        console.log('[DEBUG] API Key first 10 chars:', apiKey?.substring(0, 10) || 'None')
 
         // Test direct API call
         const testUrl = apiKey ?
@@ -805,19 +799,15 @@ router.get('/debug/coingecko-test', async (req, res) => {
         }
 
         console.log('[DEBUG] Test URL:', testUrl)
-        console.log('[DEBUG] Headers:', headers)
 
         const response = await fetch(testUrl, { headers })
         const data = await response.json()
 
         res.json({
             apiKeySet: !!apiKey,
-            apiKeyLength: apiKey?.length || 0,
-            apiKeyPreview: apiKey?.substring(0, 10) + '...' || 'None',
             testUrl,
             responseStatus: response.status,
             responseData: data,
-            responseHeaders: Object.fromEntries(response.headers.entries()),
             timestamp: new Date().toISOString()
         })
     } catch (error) {
@@ -829,8 +819,7 @@ router.get('/debug/coingecko-test', async (req, res) => {
     }
 })
 
-// Clear cache and force fresh call
-router.get('/debug/force-fresh-prices', async (req, res) => {
+router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req, res) => {
     try {
         console.log('[DEBUG] Clearing cache and forcing fresh prices...')
 
@@ -859,8 +848,7 @@ router.get('/debug/force-fresh-prices', async (req, res) => {
     }
 })
 
-// Test reflector service connectivity
-router.get('/debug/reflector-test', async (req, res) => {
+router.get('/debug/reflector-test', blockDebugInProduction, async (req, res) => {
     try {
         console.log('[DEBUG] Testing reflector service...')
 
@@ -887,14 +875,11 @@ router.get('/debug/reflector-test', async (req, res) => {
     }
 })
 
-// Get environment info
-router.get('/debug/env', async (req, res) => {
+router.get('/debug/env', blockDebugInProduction, async (req, res) => {
     try {
         res.json({
             environment: process.env.NODE_ENV,
             apiKeySet: !!process.env.COINGECKO_API_KEY,
-            apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0,
-            apiKeyPreview: process.env.COINGECKO_API_KEY?.substring(0, 15) + '...' || 'Not Set',
             autoRebalancerEnabled: !!autoRebalancer,
             autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
             enableAutoRebalancer: process.env.ENABLE_AUTO_REBALANCER,
@@ -909,8 +894,7 @@ router.get('/debug/env', async (req, res) => {
     }
 })
 
-// Test auto-rebalancer functionality
-router.get('/debug/auto-rebalancer-test', async (req, res) => {
+router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req, res) => {
     try {
         if (!autoRebalancer) {
             return res.json({
