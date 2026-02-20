@@ -18,6 +18,7 @@ pub enum DataKey {
     Admin,
     ReflectorAddress,
     EmergencyStop,
+    Initialized,
     Portfolio(u64),
 }
 
@@ -31,4 +32,6 @@ pub enum Error {
     CooldownActive = 4,
     StaleData = 5,
     ExcessiveDrift = 6,
+    AlreadyInitialized = 7,
+    InvalidThreshold = 8,
 }

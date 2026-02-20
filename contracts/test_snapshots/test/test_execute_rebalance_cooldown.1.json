@@ -204,6 +204,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "Initialized"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "ReflectorAddress"
                             }
                           ]
@@ -474,7 +486,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Cooldown active' from contract function 'Symbol(obj#55)'"
+                  "string": "caught panic 'Cooldown active' from contract function 'Symbol(obj#63)'"
                 },
                 {
                   "u64": 0

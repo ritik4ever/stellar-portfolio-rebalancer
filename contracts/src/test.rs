@@ -380,3 +380,70 @@ fn test_portfolio_validation() {
     invalid_allocations.set(Address::generate(&env), 30);
     assert!(!crate::portfolio::validate_allocations(&invalid_allocations));
 }
+
+#[test]
+#[should_panic]
+fn test_initialize_guard() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+    // Second call must fail
+    client.initialize(&admin, &reflector_id);
+}
+
+#[test]
+#[should_panic]
+fn test_create_portfolio_invalid_allocation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 60);
+    allocations.set(Address::generate(&env), 30); // sums to 90, not 100
+    client.create_portfolio(&user, &allocations, &5);
+}
+
+#[test]
+#[should_panic]
+fn test_create_portfolio_threshold_too_low() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+    client.create_portfolio(&user, &allocations, &0); // threshold 0 is invalid
+}
+
+#[test]
+#[should_panic]
+fn test_create_portfolio_threshold_too_high() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+    client.create_portfolio(&user, &allocations, &51); // threshold 51 is invalid
+}

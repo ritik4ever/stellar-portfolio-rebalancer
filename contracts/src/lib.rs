@@ -15,9 +15,14 @@ pub struct PortfolioRebalancer;
 
 #[contractimpl]
 impl PortfolioRebalancer {
-    pub fn initialize(env: Env, admin: Address, reflector_address: Address) {
+    pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Initialized) {
+            return Err(Error::AlreadyInitialized);
+        }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ReflectorAddress, &reflector_address);
+        env.storage().instance().set(&DataKey::Initialized, &true);
+        Ok(())
     }
 
     pub fn create_portfolio(
@@ -25,8 +30,16 @@ impl PortfolioRebalancer {
         user: Address,
         target_allocations: Map<Address, u32>,
         rebalance_threshold: u32,
-    ) -> u64 {
+    ) -> Result<u64, Error> {
         user.require_auth();
+
+        if !portfolio::validate_allocations(&target_allocations) {
+            return Err(Error::InvalidAllocation);
+        }
+
+        if rebalance_threshold < 1 || rebalance_threshold > 50 {
+            return Err(Error::InvalidThreshold);
+        }
         
         let portfolio_id = env.ledger().sequence() as u64; // Convert u32 to u64
         let portfolio = Portfolio {
@@ -40,7 +53,7 @@ impl PortfolioRebalancer {
         };
         
         env.storage().persistent().set(&DataKey::Portfolio(portfolio_id), &portfolio);
-        portfolio_id
+        Ok(portfolio_id)
     }
 
     pub fn get_portfolio(env: Env, portfolio_id: u64) -> Portfolio {

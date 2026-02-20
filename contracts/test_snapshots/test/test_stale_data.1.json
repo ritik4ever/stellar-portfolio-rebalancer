@@ -204,6 +204,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "Initialized"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "ReflectorAddress"
                             }
                           ]
@@ -550,7 +562,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Stale price data' from contract function 'Symbol(obj#55)'"
+                  "string": "caught panic 'Stale price data' from contract function 'Symbol(obj#63)'"
                 },
                 {
                   "u64": 0
