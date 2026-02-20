@@ -34,8 +34,6 @@ export class StellarService {
 
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
-            // Use the ID returned by the database — do NOT generate a separate one
-            const portfolioId = portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
 
             console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
             return portfolioId

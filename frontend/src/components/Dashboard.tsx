@@ -5,6 +5,8 @@ import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink } from 'luc
 import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
+import NotificationPreferences from './NotificationPreferences'
+import { NotificationTest } from './NotificationTest'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
@@ -24,7 +26,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [loading, setLoading] = useState(true)
     const [rebalancing, setRebalancing] = useState(false)
     const [priceSource, setPriceSource] = useState<string>('loading...')
-    const [activeTab, setActiveTab] = useState<'overview' | 'analytics'>('overview')
+    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'test-notifications'>('overview')
 
     useEffect(() => {
         if (publicKey) {
@@ -363,6 +365,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         >
                             Analytics
                         </button>
+                        <button
+                            onClick={() => setActiveTab('notifications')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
+                                ? 'border-blue-500 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                }`}
+                        >
+                            Notifications
+                        </button>
+                       
                     </nav>
                 </div>
 
@@ -377,7 +389,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                 {activeTab === 'analytics' ? (
                     <PerformanceChart portfolioId={portfolioData?.id || null} />
-                ) : (
+                ) : activeTab === 'notifications' ? (
+                    <NotificationPreferences userId={publicKey || 'demo'} />
+                ) :  (
                     <>
                         {/* Portfolio Overview */}
                         <div className="grid lg:grid-cols-3 gap-6 mb-8">

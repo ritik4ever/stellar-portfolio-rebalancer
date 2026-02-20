@@ -6,6 +6,7 @@ import { RiskManagementService } from '../services/riskManagements.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
+import { notificationService } from '../services/notificationService.js'
 import { logger } from '../utils/logger.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
@@ -249,6 +250,28 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
             isAutomatic: false,
             riskAlerts: riskCheck.alerts
         })
+
+        // Send notification for manual rebalance
+        try {
+            await notificationService.notify({
+                userId: portfolio.userAddress,
+                eventType: 'rebalance',
+                title: 'Portfolio Rebalanced',
+                message: `Your portfolio has been manually rebalanced. ${result.trades || 0} trades executed with ${result.gasUsed || '0 XLM'} gas used.`,
+                data: {
+                    portfolioId,
+                    trades: result.trades,
+                    gasUsed: result.gasUsed,
+                    trigger: 'manual'
+                },
+                timestamp: new Date().toISOString()
+            })
+        } catch (notificationError) {
+            logger.error('Failed to send rebalance notification', {
+                portfolioId,
+                error: getErrorObject(notificationError)
+            })
+        }
 
         logger.info('Rebalance executed successfully', { portfolioId, result })
         res.json({
@@ -849,6 +872,352 @@ router.get('/portfolio/:id/performance-summary', async (req, res) => {
         })
     }
 })
+
+// ================================
+// NOTIFICATION ROUTES
+// ================================
+
+// Subscribe to notifications
+router.post('/notifications/subscribe', writeRateLimiter, async (req, res) => {
+    try {
+        const { userId, emailEnabled, emailAddress, webhookEnabled, webhookUrl, events } = req.body
+
+        // Validation
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                error: 'userId is required'
+            })
+        }
+
+        if (emailEnabled === undefined || webhookEnabled === undefined || !events) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: emailEnabled, webhookEnabled, events'
+            })
+        }
+
+        // Validate events object
+        const requiredEvents = ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']
+        for (const event of requiredEvents) {
+            if (events[event] === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Missing event configuration: ${event}`
+                })
+            }
+        }
+
+        // Validate email address if email is enabled
+        if (emailEnabled && !emailAddress) {
+            return res.status(400).json({
+                success: false,
+                error: 'email address is required when emailEnabled is true'
+            })
+        }
+
+        // Validate webhook URL if webhook is enabled
+        if (webhookEnabled && !webhookUrl) {
+            return res.status(400).json({
+                success: false,
+                error: 'webhookUrl is required when webhookEnabled is true'
+            })
+        }
+
+        if (webhookUrl && !webhookUrl.match(/^https?:\/\/.+/)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid webhook URL format. Must start with http:// or https://'
+            })
+        }
+
+        // Subscribe user
+        notificationService.subscribe({
+            userId,
+            emailEnabled,
+            emailAddress,
+            webhookEnabled,
+            webhookUrl,
+            events
+        })
+
+        logger.info('User subscribed to notifications', { userId, emailEnabled, webhookEnabled })
+
+        res.json({
+            success: true,
+            message: 'Notification preferences saved successfully',
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to subscribe to notifications', { error: getErrorObject(error) })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Get notification preferences
+router.get('/notifications/preferences', async (req, res) => {
+    try {
+        const userId = req.query.userId as string
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                error: 'userId query parameter is required'
+            })
+        }
+
+        const preferences = notificationService.getPreferences(userId)
+
+        if (!preferences) {
+            return res.json({
+                success: true,
+                preferences: null,
+                message: 'No preferences found for this user'
+            })
+        }
+
+        res.json({
+            success: true,
+            preferences,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to get notification preferences', { error: getErrorObject(error) })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Unsubscribe from notifications
+router.delete('/notifications/unsubscribe', async (req, res) => {
+    try {
+        const userId = req.query.userId as string
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                error: 'userId query parameter is required'
+            })
+        }
+
+        notificationService.unsubscribe(userId)
+
+        logger.info('User unsubscribed from notifications', { userId })
+
+        res.json({
+            success: true,
+            message: 'Successfully unsubscribed from all notifications',
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to unsubscribe from notifications', { error: getErrorObject(error) })
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// ================================
+// NOTIFICATION TEST ROUTES
+// ================================
+
+// Test notification delivery
+// router.post('/notifications/test', async (req, res) => {
+//     try {
+//         const { userId, eventType } = req.body
+
+//         if (!userId) {
+//             return res.status(400).json({
+//                 success: false,
+//                 error: 'userId is required'
+//             })
+//         }
+
+//         if (!eventType || !['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange'].includes(eventType)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 error: 'eventType must be one of: rebalance, circuitBreaker, priceMovement, riskChange'
+//             })
+//         }
+
+//         // Check if user has preferences
+//         const preferences = notificationService.getPreferences(userId)
+//         if (!preferences) {
+//             return res.status(404).json({
+//                 success: false,
+//                 error: 'No notification preferences found for this user. Please subscribe first.'
+//             })
+//         }
+
+//         // Create test notification payload based on event type
+//         let payload: any = {
+//             userId,
+//             eventType,
+//             timestamp: new Date().toISOString()
+//         }
+
+//         switch (eventType) {
+//             case 'rebalance':
+//                 payload.title = 'Test: Portfolio Rebalanced'
+//                 payload.message = 'This is a test notification for a rebalance event. Your portfolio has been rebalanced with 3 trades executed.'
+//                 payload.data = {
+//                     portfolioId: 'test-portfolio-123',
+//                     trades: 3,
+//                     gasUsed: '0.0234 XLM',
+//                     trigger: 'manual'
+//                 }
+//                 break
+
+//             case 'circuitBreaker':
+//                 payload.title = 'Test: Circuit Breaker Triggered'
+//                 payload.message = 'This is a test notification for a circuit breaker event. Circuit breaker activated for BTC due to 22.5% price movement.'
+//                 payload.data = {
+//                     asset: 'BTC',
+//                     priceChange: '22.5',
+//                     cooldownMinutes: 5
+//                 }
+//                 break
+
+//             case 'priceMovement':
+//                 payload.title = 'Test: Large Price Movement Detected'
+//                 payload.message = 'This is a test notification for a price movement event. ETH price increased by 12.34% to $2,150.00'
+//                 payload.data = {
+//                     asset: 'ETH',
+//                     priceChange: '12.34',
+//                     currentPrice: 2150.00,
+//                     direction: 'increased'
+//                 }
+//                 break
+
+//             case 'riskChange':
+//                 payload.title = 'Test: Portfolio Risk Level Changed'
+//                 payload.message = 'This is a test notification for a risk level change. Your portfolio risk level has increased from medium to high.'
+//                 payload.data = {
+//                     portfolioId: 'test-portfolio-123',
+//                     oldLevel: 'medium',
+//                     newLevel: 'high',
+//                     severity: 'increased'
+//                 }
+//                 break
+//         }
+
+//         // Send the notification
+//         await notificationService.notify(payload)
+
+//         logger.info('Test notification sent', { userId, eventType })
+
+//         res.json({
+//             success: true,
+//             message: 'Test notification sent successfully',
+//             sentTo: {
+//                 email: preferences.emailEnabled ? preferences.emailAddress : null,
+//                 webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
+//             },
+//             eventType,
+//             timestamp: new Date().toISOString()
+//         })
+//     } catch (error) {
+//         logger.error('Failed to send test notification', { error: getErrorObject(error) })
+//         res.status(500).json({
+//             success: false,
+//             error: getErrorMessage(error)
+//         })
+//     }
+// })
+
+// Test all notification types at once
+// router.post('/notifications/test-all', async (req, res) => {
+//     try {
+//         const { userId } = req.body
+
+//         if (!userId) {
+//             return res.status(400).json({
+//                 success: false,
+//                 error: 'userId is required'
+//             })
+//         }
+
+//         const preferences = notificationService.getPreferences(userId)
+//         if (!preferences) {
+//             return res.status(404).json({
+//                 success: false,
+//                 error: 'No notification preferences found for this user. Please subscribe first.'
+//             })
+//         }
+
+//         const eventTypes = ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']
+//         const results = []
+
+//         for (const eventType of eventTypes) {
+//             try {
+//                 // Create test payload
+//                 let payload: any = {
+//                     userId,
+//                     eventType,
+//                     timestamp: new Date().toISOString()
+//                 }
+
+//                 switch (eventType) {
+//                     case 'rebalance':
+//                         payload.title = 'Test: Portfolio Rebalanced'
+//                         payload.message = 'Test rebalance notification - 3 trades executed'
+//                         payload.data = { portfolioId: 'test-123', trades: 3, gasUsed: '0.0234 XLM' }
+//                         break
+//                     case 'circuitBreaker':
+//                         payload.title = 'Test: Circuit Breaker Triggered'
+//                         payload.message = 'Test circuit breaker notification - BTC moved 22.5%'
+//                         payload.data = { asset: 'BTC', priceChange: '22.5' }
+//                         break
+//                     case 'priceMovement':
+//                         payload.title = 'Test: Large Price Movement'
+//                         payload.message = 'Test price movement notification - ETH up 12.34%'
+//                         payload.data = { asset: 'ETH', priceChange: '12.34', direction: 'increased' }
+//                         break
+//                     case 'riskChange':
+//                         payload.title = 'Test: Risk Level Changed'
+//                         payload.message = 'Test risk change notification - Risk increased to high'
+//                         payload.data = { oldLevel: 'medium', newLevel: 'high' }
+//                         break
+//                 }
+
+//                 await notificationService.notify(payload)
+//                 results.push({ eventType, status: 'sent' })
+//             } catch (error) {
+//                 results.push({ 
+//                     eventType, 
+//                     status: 'failed', 
+//                     error: error instanceof Error ? error.message : String(error) 
+//                 })
+//             }
+
+//             // Small delay between notifications
+//             await new Promise(resolve => setTimeout(resolve, 500))
+//         }
+
+//         res.json({
+//             success: true,
+//             message: 'Test notifications sent',
+//             results,
+//             sentTo: {
+//                 email: preferences.emailEnabled ? preferences.emailAddress : null,
+//                 webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
+//             },
+//             timestamp: new Date().toISOString()
+//         })
+//     } catch (error) {
+//         logger.error('Failed to send test notifications', { error: getErrorObject(error) })
+//         res.status(500).json({
+//             success: false,
+//             error: getErrorMessage(error)
+//         })
+//     }
+// })
 
 // ================================
 // DEBUG ROUTES

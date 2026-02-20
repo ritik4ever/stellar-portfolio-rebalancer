@@ -60,12 +60,42 @@ cd ../contracts && cargo build
 Environment setup
 
 bash# Backend
-cp .env.example .env
-# Edit .env with your configuration
+cp backend/.env.example backend/.env
+# Edit backend/.env with your configuration
 
 # Frontend
-cp .env.local.example .env.local
+cp frontend/.env.example frontend/.env
 # Edit with contract addresses
+
+Configure SMTP for Email Notifications (Optional)
+
+To enable email notifications for rebalancing events:
+
+1. **Using Gmail**:
+   - Enable 2-Factor Authentication on your Google account
+   - Generate an App Password: https://myaccount.google.com/apppasswords
+   - Update `backend/.env`:
+     ```env
+     SMTP_HOST=smtp.gmail.com
+     SMTP_PORT=587
+     SMTP_SECURE=false
+     SMTP_USER=your-email@gmail.com
+     SMTP_PASS=your-app-password
+     SMTP_FROM=your-email@gmail.com
+     ```
+
+2. **Using Other Providers**:
+   - **SendGrid**: `smtp.sendgrid.net` (port 587)
+   - **Mailgun**: `smtp.mailgun.org` (port 587)
+   - **AWS SES**: `email-smtp.region.amazonaws.com` (port 587)
+
+3. **Test Configuration**:
+   ```bash
+   # After starting the backend, test email delivery
+   curl -X POST http://localhost:3001/api/notifications/test \
+     -H "Content-Type: application/json" \
+     -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
+   ```
 
 Start development servers
 
@@ -127,6 +157,13 @@ Volatility Detection: Pauses rebalancing during extreme market conditions
 Concentration Limits: Prevents over-allocation to single assets
 Circuit Breakers: Multiple safety checks before trade execution
 
+Notification System
+
+Email Notifications: Get notified via email when portfolios are rebalanced
+Webhook Notifications: Integrate with external systems via webhooks
+Event Types: Rebalance, circuit breaker, price movement, risk changes
+Customizable: Configure which events to receive per user
+
 API Reference
 Portfolio Management
 bash# Create portfolio
@@ -145,6 +182,43 @@ POST /api/portfolio/:id/rebalance
 
 # Get rebalance status
 GET /api/portfolio/:id/rebalance-status
+
+Notification Management
+bash# Subscribe to notifications
+POST /api/notifications/subscribe
+{
+  "userId": "STELLAR_ADDRESS",
+  "emailEnabled": true,
+  "emailAddress": "user@example.com",
+  "webhookEnabled": false,
+  "webhookUrl": "",
+  "events": {
+    "rebalance": true,
+    "circuitBreaker": true,
+    "priceMovement": true,
+    "riskChange": true
+  }
+}
+
+# Get notification preferences
+GET /api/notifications/preferences?userId=STELLAR_ADDRESS
+
+# Unsubscribe from notifications
+DELETE /api/notifications/unsubscribe?userId=STELLAR_ADDRESS
+
+# Test notification delivery
+POST /api/notifications/test
+{
+  "userId": "STELLAR_ADDRESS",
+  "eventType": "rebalance"
+}
+
+# Test all notification types
+POST /api/notifications/test-all
+{
+  "userId": "STELLAR_ADDRESS"
+}
+
 Price Data
 bash# Current prices
 GET /api/prices
