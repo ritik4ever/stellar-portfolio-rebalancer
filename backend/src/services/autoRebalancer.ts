@@ -6,6 +6,8 @@ import { portfolioStorage } from './portfolioStorage.js'
 import { CircuitBreakers } from './circuitBreakers.js'
 import { notificationService } from './notificationService.js'
 import { logger } from '../utils/logger.js'
+import { getPortfolioCheckQueue } from '../queue/queues.js'
+import { isRedisAvailable } from '../queue/connection.js'
 
 export class AutoRebalancerService {
     private stellarService: StellarService
@@ -13,11 +15,10 @@ export class AutoRebalancerService {
     private rebalanceHistoryService: RebalanceHistoryService
     private riskManagementService: RiskManagementService
     private isRunning = false
-    private intervalId: NodeJS.Timeout | null = null
 
-    // Configuration
-    private readonly CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in milliseconds
-    private readonly MIN_REBALANCE_INTERVAL = 24 * 60 * 60 * 1000 // 24 hours minimum between rebalances
+    // Configuration (kept for getStatus() compatibility)
+    private readonly CHECK_INTERVAL = 30 * 60 * 1000        // 30 minutes
+    private readonly MIN_REBALANCE_INTERVAL = 24 * 60 * 60 * 1000
     private readonly MAX_AUTO_REBALANCES_PER_DAY = 3
 
     constructor() {
@@ -28,271 +29,58 @@ export class AutoRebalancerService {
     }
 
     /**
-     * Start the automatic monitoring service
+     * Start the automatic monitoring service.
+     * With BullMQ, this just flags the service as running – the scheduler
+     * already registered the repeatable job. We also enqueue an immediate
+     * check so the first run happens without waiting 30 min.
      */
-    start(): void {
+    async start(): Promise<void> {
         if (this.isRunning) {
-            logger.warn('Auto-rebalancer already running')
+            logger.warn('[AUTO-REBALANCER] Already running')
             return
         }
-
-        logger.info('Starting automatic portfolio rebalancer service', {
-            checkInterval: this.CHECK_INTERVAL / 1000 / 60, // minutes
-            minRebalanceInterval: this.MIN_REBALANCE_INTERVAL / 1000 / 60 / 60, // hours
-            maxRebalancesPerDay: this.MAX_AUTO_REBALANCES_PER_DAY
-        })
 
         this.isRunning = true
+        logger.info('[AUTO-REBALANCER] Service started (queue-backed)')
 
-        // Run initial check
-        this.checkAllPortfolios()
-
-        // Set up periodic checks
-        this.intervalId = setInterval(() => {
-            this.checkAllPortfolios()
-        }, this.CHECK_INTERVAL)
+        const redisUp = await isRedisAvailable()
+        if (redisUp) {
+            const queue = getPortfolioCheckQueue()
+            if (queue) {
+                await queue.add(
+                    'startup-portfolio-check',
+                    { triggeredBy: 'startup' },
+                    { priority: 1 }
+                )
+                logger.info('[AUTO-REBALANCER] Enqueued startup portfolio-check job')
+            }
+        } else {
+            logger.warn('[AUTO-REBALANCER] Redis not available – startup check skipped')
+        }
     }
 
     /**
-     * Stop the automatic monitoring service
+     * Stop the service flag (workers are stopped separately by index.ts).
      */
     stop(): void {
-        if (!this.isRunning) {
-            return
-        }
-
-        logger.info('Stopping automatic portfolio rebalancer service')
+        if (!this.isRunning) return
         this.isRunning = false
-
-        if (this.intervalId) {
-            clearInterval(this.intervalId)
-            this.intervalId = null
-        }
+        logger.info('[AUTO-REBALANCER] Service stopped')
     }
 
     /**
-      * Check all portfolios and execute rebalancing if needed
-      */
-    private async checkAllPortfolios(): Promise<void> {
-        try {
-            logger.info('[AUTO-REBALANCER] Starting portfolio check cycle')
-
-            const allPortfolios = await portfolioStorage.getAllPortfolios()
-
-            if (allPortfolios.length === 0) {
-                logger.info('[AUTO-REBALANCER] No portfolios to check')
-                return
-            }
-
-            // Get current market prices
-            const prices = await this.reflectorService.getCurrentPrices()
-
-            // Check if market conditions allow rebalancing
-            const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
-            if (!marketCheck.safe) {
-                logger.warn('[AUTO-REBALANCER] Market conditions unsafe, skipping rebalancing', {
-                    reason: marketCheck.reason
-                })
-                return
-            }
-
-            let checkedCount = 0
-            let rebalancedCount = 0
-            let skippedCount = 0
-
-            // Check each portfolio
-            for (const portfolio of allPortfolios) {
-                try {
-                    checkedCount++
-
-                    const result = await this.checkAndRebalancePortfolio(portfolio.id, prices)
-
-                    if (result.rebalanced) {
-                        rebalancedCount++
-                        logger.info('[AUTO-REBALANCER] Portfolio rebalanced', {
-                            portfolioId: portfolio.id,
-                            reason: result.reason
-                        })
-                    } else {
-                        skippedCount++
-                        logger.info('[AUTO-REBALANCER] Portfolio skipped', {
-                            portfolioId: portfolio.id,
-                            reason: result.reason
-                        })
-                    }
-                } catch (error) {
-                    logger.error('[AUTO-REBALANCER] Error checking portfolio', {
-                        portfolioId: portfolio.id,
-                        error: error instanceof Error ? error.message : String(error)
-                    })
-                    skippedCount++
-                }
-            }
-
-            logger.info('[AUTO-REBALANCER] Portfolio check cycle completed', {
-                totalPortfolios: allPortfolios.length,
-                checked: checkedCount,
-                rebalanced: rebalancedCount,
-                skipped: skippedCount
-            })
-
-        } catch (error) {
-            logger.error('[AUTO-REBALANCER] Error in check cycle', {
-                error: error instanceof Error ? error.message : String(error)
-            })
-        }
-    }
-
-    /**
-     * Check individual portfolio and rebalance if needed
+     * Force an immediate check of all portfolios.
      */
-    private async checkAndRebalancePortfolio(portfolioId: string, prices: any): Promise<{
-        rebalanced: boolean
-        reason: string
-    }> {
-        try {
-            // Get portfolio data
-            const portfolio = await this.stellarService.getPortfolio(portfolioId)
+    async forceCheck(): Promise<void> {
+        const queue = getPortfolioCheckQueue()
+        if (!queue) throw new Error('Redis unavailable – cannot force check')
 
-            // Skip demo portfolios in production
-            if (portfolio.id === 'demo') {
-                return { rebalanced: false, reason: 'Demo portfolio skipped' }
-            }
-
-            // Check if rebalancing is needed based on drift
-            const needsRebalance = await this.stellarService.checkRebalanceNeeded(portfolioId)
-            if (!needsRebalance) {
-                return { rebalanced: false, reason: 'No rebalancing needed - within thresholds' }
-            }
-
-            // Check cooldown period
-            const cooldownCheck = CircuitBreakers.checkCooldownPeriod(portfolio.lastRebalance)
-            if (!cooldownCheck.safe) {
-                return { rebalanced: false, reason: 'Cooldown period active' }
-            }
-
-            // Check minimum time between auto-rebalances
-            if (await this.isRecentlyAutoRebalanced(portfolioId)) {
-                return { rebalanced: false, reason: 'Recently auto-rebalanced' }
-            }
-
-            // Check daily rebalance limit
-            if (await this.hasExceededDailyLimit(portfolioId)) {
-                return { rebalanced: false, reason: 'Daily auto-rebalance limit exceeded' }
-            }
-
-            // Risk management checks
-            const riskCheck = this.riskManagementService.shouldAllowRebalance(portfolio, prices)
-            if (!riskCheck.allowed) {
-                return { rebalanced: false, reason: `Risk management: ${riskCheck.reason}` }
-            }
-
-            // Concentration risk check
-            const concentrationCheck = CircuitBreakers.checkConcentrationRisk(portfolio.allocations)
-            if (!concentrationCheck.safe) {
-                return { rebalanced: false, reason: 'Concentration risk too high' }
-            }
-
-            // All checks passed - execute rebalancing
-            logger.info('[AUTO-REBALANCER] Executing automatic rebalance', {
-                portfolioId,
-                portfolioValue: portfolio.totalValue,
-                trigger: 'automatic_drift_detection'
-            })
-
-            const rebalanceResult = await this.stellarService.executeRebalance(portfolioId)
-
-            // Record the auto-rebalance event
-            await this.rebalanceHistoryService.recordRebalanceEvent({
-                portfolioId,
-                trigger: 'Automatic Rebalancing',
-                trades: rebalanceResult.trades || 0,
-                gasUsed: rebalanceResult.gasUsed || '0 XLM',
-                status: 'completed',
-                isAutomatic: true,
-                riskAlerts: riskCheck.alerts || []
-            })
-
-            // Send notification for successful auto-rebalance
-            try {
-                await notificationService.notify({
-                    userId: portfolio.userAddress,
-                    eventType: 'rebalance',
-                    title: 'Portfolio Rebalanced',
-                    message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades || 0} trades executed with ${rebalanceResult.gasUsed || '0 XLM'} gas used.`,
-                    data: {
-                        portfolioId,
-                        trades: rebalanceResult.trades,
-                        gasUsed: rebalanceResult.gasUsed,
-                        trigger: 'automatic'
-                    },
-                    timestamp: new Date().toISOString()
-                })
-            } catch (notificationError) {
-                logger.error('Failed to send rebalance notification', {
-                    portfolioId,
-                    error: notificationError instanceof Error ? notificationError.message : String(notificationError)
-                })
-            }
-
-            return { rebalanced: true, reason: 'Successfully auto-rebalanced' }
-
-        } catch (error) {
-            logger.error('[AUTO-REBALANCER] Error executing rebalance', {
-                portfolioId,
-                error: error instanceof Error ? error.message : String(error)
-            })
-
-            // Record failed auto-rebalance
-            await this.rebalanceHistoryService.recordRebalanceEvent({
-                portfolioId,
-                trigger: 'Automatic Rebalancing (Failed)',
-                trades: 0,
-                gasUsed: '0 XLM',
-                status: 'failed',
-                isAutomatic: true,
-                error: error instanceof Error ? error.message : String(error)
-            })
-
-            throw error
-        }
-    }
-
-    /**
-     * Check if portfolio was recently auto-rebalanced
-     */
-    private async isRecentlyAutoRebalanced(portfolioId: string): Promise<boolean> {
-        try {
-            const recentHistory = await this.rebalanceHistoryService.getRecentAutoRebalances(portfolioId, 1)
-
-            if (recentHistory.length === 0) {
-                return false
-            }
-
-            const lastAutoRebalance = recentHistory[0]
-            const timeSinceLastRebalance = Date.now() - new Date(lastAutoRebalance.timestamp).getTime()
-
-            return timeSinceLastRebalance < this.MIN_REBALANCE_INTERVAL
-        } catch (error) {
-            logger.error('Error checking recent auto-rebalances', { portfolioId, error })
-            return false // Err on side of caution
-        }
-    }
-
-    /**
-     * Check if portfolio has exceeded daily auto-rebalance limit
-     */
-    private async hasExceededDailyLimit(portfolioId: string): Promise<boolean> {
-        try {
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            const todayRebalances = await this.rebalanceHistoryService.getAutoRebalancesSince(portfolioId, today)
-
-            return todayRebalances.length >= this.MAX_AUTO_REBALANCES_PER_DAY
-        } catch (error) {
-            logger.error('Error checking daily rebalance limit', { portfolioId, error })
-            return true // Err on side of caution
-        }
+        await queue.add(
+            'force-portfolio-check',
+            { triggeredBy: 'manual' },
+            { priority: 1 }
+        )
+        logger.info('[AUTO-REBALANCER] Force check job enqueued')
     }
 
     /**
@@ -303,28 +91,15 @@ export class AutoRebalancerService {
         checkInterval: number
         minRebalanceInterval: number
         maxRebalancesPerDay: number
-        nextCheckIn?: number
+        backend: string
     } {
-        const status = {
+        return {
             isRunning: this.isRunning,
             checkInterval: this.CHECK_INTERVAL,
             minRebalanceInterval: this.MIN_REBALANCE_INTERVAL,
-            maxRebalancesPerDay: this.MAX_AUTO_REBALANCES_PER_DAY
+            maxRebalancesPerDay: this.MAX_AUTO_REBALANCES_PER_DAY,
+            backend: 'bullmq',
         }
-
-        return status
-    }
-
-    /**
-     * Force an immediate check of all portfolios (for testing/manual trigger)
-     */
-    async forceCheck(): Promise<void> {
-        if (!this.isRunning) {
-            throw new Error('Auto-rebalancer service is not running')
-        }
-
-        logger.info('[AUTO-REBALANCER] Force check triggered')
-        await this.checkAllPortfolios()
     }
 
     /**
@@ -342,28 +117,27 @@ export class AutoRebalancerService {
             const today = new Date()
             today.setHours(0, 0, 0, 0)
             const todayRebalances = allAutoRebalances.filter(
-                rebalance => new Date(rebalance.timestamp) >= today
+                r => new Date(r.timestamp) >= today
             )
 
-            // Calculate average per day over last 30 days
             const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
             const recentRebalances = allAutoRebalances.filter(
-                rebalance => new Date(rebalance.timestamp) >= thirtyDaysAgo
+                r => new Date(r.timestamp) >= thirtyDaysAgo
             )
 
             return {
                 totalAutoRebalances: allAutoRebalances.length,
                 rebalancesToday: todayRebalances.length,
                 lastCheckTime: new Date().toISOString(),
-                averageRebalancesPerDay: recentRebalances.length / 30
+                averageRebalancesPerDay: recentRebalances.length / 30,
             }
         } catch (error) {
-            logger.error('Error getting auto-rebalancer statistics', { error })
+            logger.error('[AUTO-REBALANCER] Error getting statistics', { error })
             return {
                 totalAutoRebalances: 0,
                 rebalancesToday: 0,
                 lastCheckTime: null,
-                averageRebalancesPerDay: 0
+                averageRebalancesPerDay: 0,
             }
         }
     }

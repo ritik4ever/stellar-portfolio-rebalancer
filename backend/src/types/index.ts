@@ -180,10 +180,44 @@ export interface RebalanceRequest {
 
 export interface RebalanceResult {
     trades: number
+    plannedTrades?: number
     gasUsed: string
     timestamp: string
-    status: 'success' | 'failed'
+    status: 'success' | 'partial' | 'failed'
     newBalances: Record<string, number>
     riskAlerts?: RiskAlert[]
     eventId?: string
+    executedTrades?: RebalanceExecutionTrade[]
+    partialFills?: RebalanceExecutionTrade[]
+    failedTrades?: RebalanceExecutionTrade[]
+    failureReasons?: string[]
+    rollback?: RebalanceRollback
+    totalSlippageBps?: number
+}
+
+export interface RebalanceExecutionTrade {
+    tradeId: string
+    fromAsset: string
+    toAsset: string
+    requestedAmount: number
+    executedAmount: number
+    estimatedReceivedAmount: number
+    remainingAmount: number
+    referencePrice: number
+    priceLimit: number
+    spreadBps: number
+    slippageBps: number
+    liquidityCoverage: number
+    status: 'executed' | 'partial' | 'failed' | 'skipped'
+    txHash?: string
+    rollbackTxHash?: string
+    rolledBack?: boolean
+    failureReason?: string
+}
+
+export interface RebalanceRollback {
+    attempted: boolean
+    success: boolean
+    rolledBackTrades: number
+    failures: string[]
 }
