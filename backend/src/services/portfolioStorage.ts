@@ -1,5 +1,6 @@
 import { isDbConfigured } from '../db/client.js'
 import * as portfolioDb from '../db/portfolioDb.js'
+import { randomUUID } from 'node:crypto'
 
 interface Portfolio {
     id: string
@@ -38,7 +39,7 @@ class PortfolioStorage {
         allocations: Record<string, number>,
         threshold: number
     ): Promise<string> {
-        const id = Date.now().toString()
+        const id = randomUUID()
         const portfolio: Portfolio = {
             id,
             userAddress,
@@ -62,7 +63,7 @@ class PortfolioStorage {
         threshold: number,
         currentBalances: Record<string, number>
     ): Promise<string> {
-        const id = Date.now().toString()
+        const id = randomUUID()
         const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
         const portfolio: Portfolio = {
             id,
