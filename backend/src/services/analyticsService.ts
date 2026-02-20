@@ -23,25 +23,17 @@ interface PerformanceMetrics {
 
 class AnalyticsService {
     private snapshots: Map<string, PortfolioSnapshot[]> = new Map()
-    private snapshotInterval: NodeJS.Timeout | null = null
     private lastSnapshotTimes: Map<string, number> = new Map()
     private readonly MIN_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000
 
-    constructor() {
-        this.startPeriodicSnapshots()
-    }
+    // NOTE: No setInterval here. Periodic snapshots are driven by
+    // the BullMQ analytics-snapshot worker (src/queue/workers/analyticsSnapshotWorker.ts).
 
-    private startPeriodicSnapshots() {
-        const intervalMs = 60 * 60 * 1000
-
-        this.snapshotInterval = setInterval(async () => {
-            await this.captureAllPortfolios()
-        }, intervalMs)
-
-        this.captureAllPortfolios()
-    }
-
-    private async captureAllPortfolios() {
+    /**
+     * Capture snapshots for every portfolio.
+     * Called by the BullMQ analytics-snapshot worker.
+     */
+    async captureAllPortfolios() {
         try {
             const portfolios = portfolioStorage.getAllPortfolios()
             const reflector = new ReflectorService()
@@ -58,15 +50,11 @@ class AnalyticsService {
     async captureSnapshot(portfolioId: string, prices?: Record<string, any>) {
         try {
             const portfolio = portfolioStorage.getPortfolio(portfolioId)
-            if (!portfolio) {
-                return
-            }
+            if (!portfolio) return
 
             const now = Date.now()
             const lastSnapshotTime = this.lastSnapshotTimes.get(portfolioId) || 0
-            if (now - lastSnapshotTime < this.MIN_SNAPSHOT_INTERVAL_MS) {
-                return
-            }
+            if (now - lastSnapshotTime < this.MIN_SNAPSHOT_INTERVAL_MS) return
 
             if (!prices) {
                 const reflector = new ReflectorService()
@@ -93,20 +81,20 @@ class AnalyticsService {
                 timestamp: new Date().toISOString(),
                 totalValue,
                 allocations,
-                balances: { ...portfolio.balances }
+                balances: { ...portfolio.balances },
             }
 
             if (!this.snapshots.has(portfolioId)) {
                 this.snapshots.set(portfolioId, [])
             }
 
-            const snapshots = this.snapshots.get(portfolioId)!
-            snapshots.push(snapshot)
+            const snapshotsForPortfolio = this.snapshots.get(portfolioId)!
+            snapshotsForPortfolio.push(snapshot)
             this.lastSnapshotTimes.set(portfolioId, now)
 
             const maxSnapshots = 1000
-            if (snapshots.length > maxSnapshots) {
-                snapshots.shift()
+            if (snapshotsForPortfolio.length > maxSnapshots) {
+                snapshotsForPortfolio.shift()
             }
 
             logger.info('Portfolio snapshot captured', { portfolioId, totalValue })
@@ -128,7 +116,7 @@ class AnalyticsService {
 
     calculatePerformanceMetrics(portfolioId: string): PerformanceMetrics {
         const snapshots = this.getAnalytics(portfolioId, 90)
-        
+
         if (snapshots.length < 2) {
             return {
                 totalReturn: 0,
@@ -138,12 +126,12 @@ class AnalyticsService {
                 bestDay: { date: '', change: 0 },
                 worstDay: { date: '', change: 0 },
                 sharpeRatio: 0,
-                volatility: 0
+                volatility: 0,
             }
         }
 
-        const sortedSnapshots = [...snapshots].sort((a, b) => 
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        const sortedSnapshots = [...snapshots].sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         )
 
         const initialValue = sortedSnapshots[0].totalValue
@@ -158,10 +146,7 @@ class AnalyticsService {
             const currValue = sortedSnapshots[i].totalValue
             const change = prevValue > 0 ? ((currValue - prevValue) / prevValue) * 100 : 0
             dailyChanges.push(change)
-            dailyChangeData.push({
-                date: sortedSnapshots[i].timestamp,
-                change
-            })
+            dailyChangeData.push({ date: sortedSnapshots[i].timestamp, change })
         }
 
         const dailyChange = dailyChanges.length > 0 ? dailyChanges[dailyChanges.length - 1] : 0
@@ -173,37 +158,33 @@ class AnalyticsService {
         let maxDrawdown = 0
         let peak = initialValue
         for (const snapshot of sortedSnapshots) {
-            if (snapshot.totalValue > peak) {
-                peak = snapshot.totalValue
-            }
+            if (snapshot.totalValue > peak) peak = snapshot.totalValue
             const drawdown = peak > 0 ? ((peak - snapshot.totalValue) / peak) * 100 : 0
-            if (drawdown > maxDrawdown) {
-                maxDrawdown = drawdown
-            }
+            if (drawdown > maxDrawdown) maxDrawdown = drawdown
         }
 
-        const bestDay = dailyChangeData.reduce((best, current) => 
-            current.change > best.change ? current : best, 
+        const bestDay = dailyChangeData.reduce(
+            (best, curr) => (curr.change > best.change ? curr : best),
             { date: '', change: -Infinity }
         )
-
-        const worstDay = dailyChangeData.reduce((worst, current) => 
-            current.change < worst.change ? current : worst, 
+        const worstDay = dailyChangeData.reduce(
+            (worst, curr) => (curr.change < worst.change ? curr : worst),
             { date: '', change: Infinity }
         )
 
-        const meanChange = dailyChanges.length > 0 
-            ? dailyChanges.reduce((sum, change) => sum + change, 0) / dailyChanges.length 
-            : 0
-
-        const variance = dailyChanges.length > 0
-            ? dailyChanges.reduce((sum, change) => sum + Math.pow(change - meanChange, 2), 0) / dailyChanges.length
-            : 0
-
+        const meanChange =
+            dailyChanges.length > 0
+                ? dailyChanges.reduce((sum, c) => sum + c, 0) / dailyChanges.length
+                : 0
+        const variance =
+            dailyChanges.length > 0
+                ? dailyChanges.reduce((sum, c) => sum + Math.pow(c - meanChange, 2), 0) /
+                dailyChanges.length
+                : 0
         const volatility = Math.sqrt(variance)
 
         const riskFreeRate = 0.02 / 365
-        const excessReturn = (meanChange / 100) - riskFreeRate
+        const excessReturn = meanChange / 100 - riskFreeRate
         const sharpeRatio = volatility > 0 ? (excessReturn / (volatility / 100)) * Math.sqrt(365) : 0
 
         return {
@@ -214,27 +195,25 @@ class AnalyticsService {
             bestDay: bestDay.change !== -Infinity ? bestDay : { date: '', change: 0 },
             worstDay: worstDay.change !== Infinity ? worstDay : { date: '', change: 0 },
             sharpeRatio,
-            volatility
+            volatility,
         }
     }
 
     getPerformanceSummary(portfolioId: string) {
         const metrics = this.calculatePerformanceMetrics(portfolioId)
         const snapshots = this.getAnalytics(portfolioId, 30)
-        
+
         return {
             metrics,
             dataPoints: snapshots.length,
             period: '30 days',
-            lastUpdated: snapshots.length > 0 ? snapshots[snapshots.length - 1].timestamp : null
+            lastUpdated: snapshots.length > 0 ? snapshots[snapshots.length - 1].timestamp : null,
         }
     }
 
+    /** No-op – kept for API compatibility. Workers are stopped in index.ts. */
     stop() {
-        if (this.snapshotInterval) {
-            clearInterval(this.snapshotInterval)
-            this.snapshotInterval = null
-        }
+        // Nothing to clear; no setInterval is used.
     }
 }
 

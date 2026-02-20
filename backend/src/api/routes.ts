@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { writeRateLimiter } from '../middleware/rateLimit.js'
+import { getQueueMetrics } from '../queue/queueMetrics.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -1412,6 +1413,34 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req, re
             success: false,
             error: getErrorMessage(error),
             autoRebalancerAvailable: false
+        })
+    }
+})
+
+// ================================
+// QUEUE HEALTH ROUTE
+// ================================
+
+/**
+ * GET /api/queue/health
+ * Returns BullMQ queue depths and Redis connectivity status.
+ * Used for worker health monitoring and alerting (issue #38).
+ */
+router.get('/queue/health', async (req, res) => {
+    try {
+        const metrics = await getQueueMetrics()
+        const httpStatus = metrics.redisConnected ? 200 : 503
+        res.status(httpStatus).json({
+            success: metrics.redisConnected,
+            ...metrics,
+            timestamp: new Date().toISOString(),
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error),
+            redisConnected: false,
+            timestamp: new Date().toISOString(),
         })
     }
 })
