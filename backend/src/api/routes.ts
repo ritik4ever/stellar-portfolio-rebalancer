@@ -615,8 +615,6 @@ router.get('/market/:asset/chart', async (req, res) => {
 // AUTO-REBALANCER ROUTES
 // ================================
 
-router.get('/auto-rebalancer/status', requireAdmin, async (req, res) => {
-// Get auto-rebalancer status
 router.get('/auto-rebalancer/status', async (req, res) => {
     try {
         if (!autoRebalancer) {
