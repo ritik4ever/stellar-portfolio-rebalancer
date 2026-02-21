@@ -124,9 +124,7 @@ app.get('/test/coingecko', async (req, res) => {
         if (!testResult.success) {
             return res.status(500).json({
                 success: false,
-                error: testResult.error,
-                hasApiKey: !!process.env.COINGECKO_API_KEY,
-                apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0
+                error: testResult.error
             })
         }
 
@@ -137,16 +135,13 @@ app.get('/test/coingecko', async (req, res) => {
         res.json({
             success: true,
             prices,
-            hasApiKey: !!process.env.COINGECKO_API_KEY,
-            apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0,
             testResult,
             environment: process.env.NODE_ENV
         })
     } catch (error) {
         res.status(500).json({
             success: false,
-            error: error instanceof Error ? error.message : String(error),
-            hasApiKey: !!process.env.COINGECKO_API_KEY
+            error: error instanceof Error ? error.message : String(error)
         })
     }
 })
@@ -288,13 +283,6 @@ server.listen(port, async () => {
         console.log('[AUTO-REBALANCER] Set ENABLE_AUTO_REBALANCER=true to enable in development')
     }
 
-    // Contract event indexer (on-chain source-of-truth history)
-    try {
-        await contractEventIndexerService.start()
-    } catch (error) {
-        console.error('[CHAIN-INDEXER] Failed to start:', error)
-    }
-
     console.log('Available endpoints:')
     console.log(`  Health: http://localhost:${port}/health`)
     console.log(`  CORS Test: http://localhost:${port}/test/cors`)
@@ -337,13 +325,6 @@ const gracefulShutdown = async (signal: string) => {
     }
 
     // Close database connection
-    try {
-        await contractEventIndexerService.stop()
-        console.log('[SHUTDOWN] Contract event indexer stopped')
-    } catch (error) {
-        console.error('[SHUTDOWN] Error stopping contract event indexer:', error)
-    }
-
     try {
         databaseService.close()
         console.log('[SHUTDOWN] Database connection closed')
