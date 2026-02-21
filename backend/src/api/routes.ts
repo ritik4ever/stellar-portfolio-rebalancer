@@ -275,7 +275,9 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
             return res.status(400).json({
                 error: `Rebalance blocked by risk management: ${riskCheck.reason}`,
                 reason: 'risk_management',
+                reasonCode: riskCheck.reasonCode,
                 alerts: riskCheck.alerts,
+                riskMetrics: riskCheck.riskMetrics,
                 canRetry: true
             })
         }
@@ -538,7 +540,14 @@ router.get('/risk/metrics/:portfolioId', async (req, res) => {
                 concentrationRisk: 0,
                 liquidityRisk: 0,
                 correlationRisk: 0,
-                overallRiskLevel: 'low' as const
+                overallRiskLevel: 'low' as const,
+                ewmaVolatility: 0,
+                var95: 0,
+                cvar95: 0,
+                maxDrawdown: 0,
+                drawdownBand: 'normal' as const,
+                correlations: {},
+                sampleSize: 0
             }
         })
     }

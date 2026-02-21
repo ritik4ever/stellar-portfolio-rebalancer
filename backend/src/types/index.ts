@@ -66,6 +66,13 @@ export interface RiskMetrics {
     liquidityRisk: number
     correlationRisk: number
     overallRiskLevel: 'low' | 'medium' | 'high' | 'critical'
+    ewmaVolatility: number
+    var95: number
+    cvar95: number
+    maxDrawdown: number
+    drawdownBand: 'normal' | 'elevated' | 'critical'
+    correlations: Record<string, Record<string, number>>
+    sampleSize: number
 }
 
 export interface RiskAlert {
