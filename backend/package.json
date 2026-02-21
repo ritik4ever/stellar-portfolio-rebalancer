@@ -11,6 +11,7 @@
         "db:migrate:rollback": "tsx src/db/migrate.ts -- --rollback",
         "db:migrate:status": "tsx src/db/migrate.ts -- --status",
         "db:setup": "tsx src/db/migrate.ts",
+        "db:seed:e2e": "tsx src/db/seed.e2e.ts",
         "test": "vitest run",
         "test:watch": "vitest"
     },
