@@ -90,7 +90,7 @@ impl PortfolioRebalancer {
         }
 
         let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
-        portfolio.current_balances.set(asset, current_balance + amount);
+        portfolio.current_balances.set(asset.clone(), current_balance + amount);
         
         env.storage().persistent().set(&DataKey::Portfolio(portfolio_id), &portfolio);
         env.events().publish(
