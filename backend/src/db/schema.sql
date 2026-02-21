@@ -1,16 +1,3 @@
-CREATE TABLE IF NOT EXISTS portfolios (
-    id VARCHAR(64) PRIMARY KEY,
-    user_address VARCHAR(256) NOT NULL,
-    allocations JSONB NOT NULL DEFAULT '{}',
-    threshold INTEGER NOT NULL,
-    balances JSONB NOT NULL DEFAULT '{}',
-    total_value NUMERIC NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_rebalance TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    version INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_address);
 
 CREATE TABLE IF NOT EXISTS rebalance_events (
     id VARCHAR(64) PRIMARY KEY,
@@ -21,6 +8,14 @@ CREATE TABLE IF NOT EXISTS rebalance_events (
     gas_used VARCHAR(64) NOT NULL DEFAULT '',
     status VARCHAR(32) NOT NULL CHECK (status IN ('completed', 'failed', 'pending')),
     is_automatic BOOLEAN NOT NULL DEFAULT FALSE,
+    event_source VARCHAR(32) NOT NULL DEFAULT 'offchain',
+    on_chain_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    on_chain_event_type VARCHAR(128),
+    on_chain_tx_hash VARCHAR(128),
+    on_chain_ledger BIGINT,
+    on_chain_contract_id VARCHAR(128),
+    on_chain_paging_token VARCHAR(256),
+    is_simulated BOOLEAN NOT NULL DEFAULT FALSE,
     risk_alerts JSONB,
     error TEXT,
     details JSONB
@@ -28,6 +23,8 @@ CREATE TABLE IF NOT EXISTS rebalance_events (
 
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_portfolio ON rebalance_events(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_timestamp ON rebalance_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_rebalance_events_source ON rebalance_events(event_source, timestamp DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_events_chain_token ON rebalance_events(on_chain_paging_token);
 
 CREATE TABLE IF NOT EXISTS analytics_snapshots (
     id SERIAL PRIMARY KEY,

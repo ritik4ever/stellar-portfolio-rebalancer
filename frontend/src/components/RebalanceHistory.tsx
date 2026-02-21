@@ -15,6 +15,9 @@ interface RebalanceEvent {
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
     portfolioId: string
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    onChainConfirmed?: boolean
+    isSimulated?: boolean
     details?: {
         fromAsset?: string
         toAsset?: string
@@ -108,6 +111,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 gasUsed: '0.0234 XLM',
                 status: 'completed',
                 portfolioId: portfolioId || 'demo',
+                eventSource: 'simulated',
+                onChainConfirmed: false,
+                isSimulated: true,
                 details: {
                     fromAsset: 'XLM',
                     toAsset: 'ETH',
@@ -129,6 +135,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 gasUsed: '0.0156 XLM',
                 status: 'completed',
                 portfolioId: portfolioId || 'demo',
+                eventSource: 'simulated',
+                onChainConfirmed: false,
+                isSimulated: true,
                 details: {
                     reason: 'Automated scheduled rebalancing executed',
                     riskLevel: 'low',
@@ -147,6 +156,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 gasUsed: '0.0089 XLM',
                 status: 'completed',
                 portfolioId: portfolioId || 'demo',
+                eventSource: 'simulated',
+                onChainConfirmed: false,
+                isSimulated: true,
                 details: {
                     reason: 'High market volatility detected, protective rebalance executed',
                     volatilityDetected: true,
@@ -166,6 +178,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 gasUsed: '0.0298 XLM',
                 status: 'completed',
                 portfolioId: portfolioId || 'demo',
+                eventSource: 'simulated',
+                onChainConfirmed: false,
+                isSimulated: true,
                 details: {
                     fromAsset: 'BTC',
                     toAsset: 'USDC',
@@ -242,6 +257,29 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
         }
     }
 
+    const getSourceBadge = (event: RebalanceEvent) => {
+        if (event.onChainConfirmed || event.eventSource === 'onchain') {
+            return (
+                <span className="text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded flex items-center">
+                    <Link className="w-3 h-3 mr-1" />
+                    On-chain
+                </span>
+            )
+        }
+        if (event.isSimulated || event.eventSource === 'simulated') {
+            return (
+                <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-1 rounded">
+                    Simulated
+                </span>
+            )
+        }
+        return (
+            <span className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">
+                Off-chain
+            </span>
+        )
+    }
+
     //  NEW: Export History as CSV (timestamps + trades + status)
     const exportHistoryCSV = () => {
         const rows = (history || []).map((event) => ({
@@ -251,6 +289,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             tradesCount: event.trades,
             gasUsed: event.gasUsed,
             portfolioId: event.portfolioId,
+            eventSource: event.eventSource ?? '',
+            onChainConfirmed: event.onChainConfirmed ? 'true' : 'false',
             chain: event.details?.chain ?? '',
             riskLevel: event.details?.riskLevel ?? '',
             volatilityDetected: event.details?.volatilityDetected ? 'true' : 'false',
@@ -270,6 +310,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             'tradesCount',
             'gasUsed',
             'portfolioId',
+            'eventSource',
+            'onChainConfirmed',
             'chain',
             'riskLevel',
             'volatilityDetected',
@@ -375,6 +417,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                         {event.details.chain}
                                                     </span>
                                                 )}
+                                                {getSourceBadge(event)}
                                             </div>
 
                                             {/* Enhanced date and time display */}

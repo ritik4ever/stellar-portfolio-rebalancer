@@ -48,6 +48,14 @@ export interface RebalanceEvent {
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
     details?: {
         fromAsset?: string
         toAsset?: string
@@ -69,6 +77,13 @@ export interface RiskMetrics {
     liquidityRisk: number
     correlationRisk: number
     overallRiskLevel: 'low' | 'medium' | 'high' | 'critical'
+    ewmaVolatility: number
+    var95: number
+    cvar95: number
+    maxDrawdown: number
+    drawdownBand: 'normal' | 'elevated' | 'critical'
+    correlations: Record<string, Record<string, number>>
+    sampleSize: number
 }
 
 export interface RiskAlert {

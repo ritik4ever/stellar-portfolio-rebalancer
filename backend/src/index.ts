@@ -13,10 +13,12 @@ import { databaseService } from './services/databaseService.js'
 import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
 import { getFeatureFlags, getPublicFeatureFlags } from './config/featureFlags.js'
 import { isRedisAvailable, logQueueStartup } from './queue/connection.js'
+import { closeAllQueues } from './queue/queues.js'
 import { startQueueScheduler } from './queue/scheduler.js'
-import { startPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
-import { startRebalanceWorker } from './queue/workers/rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
+import { startPortfolioCheckWorker, stopPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
+import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebalanceWorker.js'
+import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
+import { contractEventIndexerService } from './services/contractEventIndexer.js'
 
 let startupConfig: StartupConfig
 try {
@@ -282,6 +284,13 @@ server.listen(port, async () => {
         console.log('[AUTO-REBALANCER] Set ENABLE_AUTO_REBALANCER=true to enable in development')
     }
 
+    // Contract event indexer (on-chain source-of-truth history)
+    try {
+        await contractEventIndexerService.start()
+    } catch (error) {
+        console.error('[CHAIN-INDEXER] Failed to start:', error)
+    }
+
     console.log('Available endpoints:')
     console.log(`  Health: http://localhost:${port}/health`)
     console.log(`  CORS Test: http://localhost:${port}/test/cors`)
@@ -323,6 +332,13 @@ const gracefulShutdown = async (signal: string) => {
     }
 
     // Close database connection
+    try {
+        await contractEventIndexerService.stop()
+        console.log('[SHUTDOWN] Contract event indexer stopped')
+    } catch (error) {
+        console.error('[SHUTDOWN] Error stopping contract event indexer:', error)
+    }
+
     try {
         databaseService.close()
         console.log('[SHUTDOWN] Database connection closed')
