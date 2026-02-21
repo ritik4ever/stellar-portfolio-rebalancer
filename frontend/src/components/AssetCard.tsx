@@ -12,6 +12,7 @@ interface AssetCardProps {
         price: number
         change: number
     }
+    isLoading?: boolean
 }
 
 const AssetCard: React.FC<AssetCardProps> = ({ asset, price }) => {
