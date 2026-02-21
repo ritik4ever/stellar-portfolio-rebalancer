@@ -7,77 +7,26 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
 import { notificationService } from '../services/notificationService.js'
+import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { logger } from '../utils/logger.js'
-import { requireAdmin } from '../middleware/auth.js'
-import { blockDebugInProduction } from '../middleware/debugGate.js'
-import { writeRateLimiter } from '../middleware/rateLimit.js'
-import { ConflictError } from '../types/index.js'
-import { getQueueMetrics } from '../queue/queueMetrics.js'
-import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 
-const router = Router()
-const stellarService = new StellarService()
-const reflectorService = new ReflectorService()
-const rebalanceHistoryService = new RebalanceHistoryService()
-const riskManagementService = new RiskManagementService()
-const featureFlags = getFeatureFlags()
-const publicFeatureFlags = getPublicFeatureFlags()
-const deploymentMode = featureFlags.demoMode ? 'demo' : 'production'
-
-// Import autoRebalancer from index.js (will be available after server starts)
-let autoRebalancer: any = null
-import('../index.js').then(module => {
-    autoRebalancer = module.autoRebalancer
-}).catch(console.error)
-
-// Helper function for error handling
-const getErrorMessage = (error: unknown): string => {
-    if (error instanceof Error) return error.message
-    return String(error)
 }
 
-const getErrorObject = (error: unknown) => ({
-    message: getErrorMessage(error),
-    type: error instanceof Error ? error.constructor.name : 'Unknown'
-})
-
-// Helper function to convert portfolio allocations to Record<string, number>
-const getPortfolioAllocationsAsRecord = (portfolio: any): Record<string, number> => {
-    if (Array.isArray(portfolio.allocations)) {
-        // Convert array format to object format
-        return portfolio.allocations.reduce((acc: Record<string, number>, item: any) => {
-            acc[item.asset] = item.target || item.percentage || 0
-            return acc
-        }, {})
-    }
-    return portfolio.allocations as Record<string, number>
-}
-
-const parseOptionalNumber = (value: unknown): number | undefined => {
+const parseOptionalTimestamp = (value: unknown): string | undefined => {
     if (value === undefined || value === null || value === '') return undefined
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : undefined
+    if (typeof value !== 'string') return undefined
+    const ts = new Date(value)
+    if (Number.isNaN(ts.getTime())) return undefined
+    return ts.toISOString()
 }
 
-const parseOptionalBoolean = (value: unknown): boolean | undefined => {
-    if (value === undefined || value === null || value === '') return undefined
-    if (typeof value === 'boolean') return value
-    if (typeof value === 'string') {
-        const lower = value.toLowerCase()
-        if (lower === 'true') return true
-        if (lower === 'false') return false
-    }
-    return undefined
-}
-
-const parseSlippageOverrides = (value: unknown): Record<string, number> | undefined => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-    const parsed: Record<string, number> = {}
-    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-        const num = parseOptionalNumber(raw)
-        if (num !== undefined) parsed[key] = num
-    }
-    return Object.keys(parsed).length > 0 ? parsed : undefined
+const parseHistorySource = (value: unknown): 'all' | 'offchain' | 'simulated' | 'onchain' => {
+    if (typeof value !== 'string') return 'all'
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'offchain') return 'offchain'
+    if (normalized === 'simulated') return 'simulated'
+    if (normalized === 'onchain') return 'onchain'
+    return 'all'
 }
 
 // ================================
@@ -258,204 +207,48 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
             return res.status(400).json({
                 error: `Rebalance blocked by risk management: ${riskCheck.reason}`,
                 reason: 'risk_management',
+                reasonCode: riskCheck.reasonCode,
                 alerts: riskCheck.alerts,
+                riskMetrics: riskCheck.riskMetrics,
                 canRetry: true
             })
         }
 
-        // Check if rebalance is needed
-        const needed = await stellarService.checkRebalanceNeeded(portfolioId)
-        if (!needed) {
-            return res.status(400).json({
-                error: 'Rebalance not needed at this time',
-                reason: 'not_needed',
-                suggestion: 'Portfolio is already within target allocations'
-            })
-        }
-
-        const executionOptions = {
-            tradeSlippageBps: parseOptionalNumber(req.body?.tradeSlippageBps),
-            maxSlippageBpsPerRebalance: parseOptionalNumber(req.body?.maxSlippageBpsPerRebalance),
-            maxSpreadBps: parseOptionalNumber(req.body?.maxSpreadBps),
-            minLiquidityCoverage: parseOptionalNumber(req.body?.minLiquidityCoverage),
-            allowPartialFill: parseOptionalBoolean(req.body?.allowPartialFill),
-            rollbackOnFailure: parseOptionalBoolean(req.body?.rollbackOnFailure),
-            signerSecret: typeof req.body?.signerSecret === 'string' ? req.body.signerSecret : undefined,
-            tradeSlippageOverrides: parseSlippageOverrides(req.body?.tradeSlippageOverrides)
-        }
-
-        const result = await stellarService.executeRebalance(portfolioId, executionOptions)
-
-        await analyticsService.captureSnapshot(portfolioId, prices)
-
-        await rebalanceHistoryService.recordRebalanceEvent({
-            portfolioId,
-            trigger: 'Manual Rebalance',
-            trades: result.trades || 0,
-            gasUsed: result.gasUsed || '0 XLM',
-            status: result.status === 'failed' ? 'failed' : 'completed',
-            isAutomatic: false,
-            riskAlerts: riskCheck.alerts,
-            error: result.failureReasons?.join('; ')
-        })
-
-        // Send notification for successful/partial manual rebalance
-        if (result.status !== 'failed') {
-            try {
-                await notificationService.notify({
-                    userId: portfolio.userAddress,
-                    eventType: 'rebalance',
-                    title: result.status === 'partial' ? 'Portfolio Partially Rebalanced' : 'Portfolio Rebalanced',
-                    message: `Your portfolio has been manually rebalanced. ${result.trades || 0} trades executed with ${result.gasUsed || '0 XLM'} gas used.`,
-                    data: {
-                        portfolioId,
-                        trades: result.trades,
-                        gasUsed: result.gasUsed,
-                        trigger: 'manual',
-                        status: result.status
-                    },
-                    timestamp: new Date().toISOString()
-                })
-            } catch (notificationError) {
-                logger.error('Failed to send rebalance notification', {
-                    portfolioId,
-                    error: getErrorObject(notificationError)
-                })
-            }
-        }
-
-        logger.info('Rebalance executed successfully', { portfolioId, result })
-        const responseStatus = result.status === 'failed' ? 409 : 200
-        res.status(responseStatus).json({
-            result,
-            status: result.status === 'failed' ? 'failed' : 'completed',
-            mode: deploymentMode,
-            message: result.status === 'failed'
-                ? 'Rebalance execution failed safely'
-                : result.status === 'partial'
-                    ? 'Rebalance partially completed'
-                    : 'Rebalance completed successfully',
-            riskAlerts: riskCheck.alerts,
-            failureReasons: result.failureReasons || [],
-            partialFills: result.partialFills || []
-        })
-    } catch (error) {
-        if (error instanceof ConflictError) {
-            logger.warn('Rebalance rejected — concurrent modification detected', {
-                portfolioId: req.params.id,
-                currentVersion: error.currentVersion
-            })
-            return res.status(409).json({
-                error: 'Portfolio was modified by a concurrent request. Fetch the latest version and retry.',
-                currentVersion: error.currentVersion
-            })
-        }
-        logger.error('Rebalance failed', { error: getErrorObject(error), portfolioId: req.params.id })
-        res.status(500).json({
-            error: getErrorMessage(error),
-            canRetry: !getErrorMessage(error).includes('Cooldown')
-        })
-    }
-})
-
-// Check rebalance status with detailed analysis
-router.get('/portfolio/:id/rebalance-status', async (req, res) => {
-    try {
-        const portfolioId = req.params.id
-        const portfolio = await stellarService.getPortfolio(portfolioId)
-        const prices = await reflectorService.getCurrentPrices()
-
-        // Check various conditions
-        const needed = await stellarService.checkRebalanceNeeded(portfolioId)
-        const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
-        const cooldownCheck = CircuitBreakers.checkCooldownPeriod(portfolio.lastRebalance)
-        const concentrationCheck = CircuitBreakers.checkConcentrationRisk(portfolio.allocations)
-
-        // Enhanced risk management checks with proper type conversion
-        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
-        const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio)
-        const riskMetrics = riskManagementService.analyzePortfolioRisk(allocationsRecord, prices)
-
-        res.json({
-            needsRebalance: needed,
-            canRebalance: needed && marketCheck.safe && cooldownCheck.safe && concentrationCheck.safe && riskCheck.allowed,
-            checks: {
-                market: marketCheck,
-                cooldown: cooldownCheck,
-                concentration: concentrationCheck,
-                riskManagement: riskCheck
-            },
-            riskMetrics,
-            portfolio: {
-                lastRebalance: portfolio.lastRebalance,
-                threshold: portfolio.threshold,
-                totalValue: portfolio.totalValue
-            },
-            timestamp: new Date().toISOString()
-        })
-    } catch (error) {
-        logger.error('Failed to check rebalance status', { error: getErrorObject(error) })
-        res.status(500).json({ error: 'Failed to check rebalance status' })
-    }
-})
-
-// ================================
-// REBALANCE HISTORY ROUTES
-// ================================
-
-// Get rebalance history - FIXED for portfolio-specific data
 router.get('/rebalance/history', async (req, res) => {
     try {
         const portfolioId = req.query.portfolioId as string
         const limit = parseInt(req.query.limit as string) || 50
+        const source = parseHistorySource(req.query.source)
+        const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp)
+        const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
+        const syncOnChain = parseOptionalBoolean(req.query.syncOnChain) === true
 
         console.log(`[DEBUG] Rebalance history request - portfolioId: ${portfolioId || 'all'}`)
-
-        if (portfolioId) {
-            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
-            if (!portfolio) {
-                console.log(`[DEBUG] Portfolio ${portfolioId} not found`)
-                return res.json({
-                    success: true,
-                    history: [],
-                    count: 0,
-                    message: 'No history found for this portfolio'
-                })
-            }
-
-            // Get history for this specific portfolio
-            let history = await rebalanceHistoryService.getRebalanceHistory(portfolioId, limit)
-
-            // If no history, create initial event
-            if (history.length === 0) {
-                console.log(`[DEBUG] Creating initial history for portfolio ${portfolioId}`)
-                await rebalanceHistoryService.recordRebalanceEvent({
-                    portfolioId,
-                    trigger: 'Portfolio Created',
-                    trades: 0,
-                    gasUsed: '0 XLM',
-                    status: 'completed',
-                    isAutomatic: false
-                })
-                history = await rebalanceHistoryService.getRebalanceHistory(portfolioId, limit)
-            }
-
-            console.log(`[DEBUG] Returning ${history.length} events for portfolio ${portfolioId}`)
-            return res.json({
-                success: true,
-                history,
-                count: history.length,
-                portfolioId
-            })
-        } else {
-            // Return general history for dashboard
-            const history = await rebalanceHistoryService.getRebalanceHistory(undefined, limit)
-            return res.json({
-                success: true,
-                history,
-                count: history.length
-            })
+        if (syncOnChain) {
+            await contractEventIndexerService.syncOnce()
         }
+
+        const history = await rebalanceHistoryService.getRebalanceHistory(
+            portfolioId || undefined,
+            limit,
+            {
+                eventSource: source,
+                startTimestamp,
+                endTimestamp
+            }
+        )
+
+        return res.json({
+            success: true,
+            history,
+            count: history.length,
+            portfolioId: portfolioId || undefined,
+            filters: {
+                source,
+                startTimestamp,
+                endTimestamp
+            }
+        })
 
     } catch (error) {
         console.error('[ERROR] Rebalance history failed:', error)
@@ -486,6 +279,23 @@ router.post('/rebalance/history', async (req, res) => {
         })
     } catch (error) {
         console.error('[ERROR] Failed to record rebalance event:', error)
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+router.post('/rebalance/history/sync-onchain', requireAdmin, async (req, res) => {
+    try {
+        const result = await contractEventIndexerService.syncOnce()
+        res.json({
+            success: true,
+            ...result,
+            indexer: contractEventIndexerService.getStatus(),
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
         res.status(500).json({
             success: false,
             error: getErrorMessage(error)
@@ -531,7 +341,14 @@ router.get('/risk/metrics/:portfolioId', async (req, res) => {
                 concentrationRisk: 0,
                 liquidityRisk: 0,
                 correlationRisk: 0,
-                overallRiskLevel: 'low' as const
+                overallRiskLevel: 'low' as const,
+                ewmaVolatility: 0,
+                var95: 0,
+                cvar95: 0,
+                maxDrawdown: 0,
+                drawdownBand: 'normal' as const,
+                correlations: {},
+                sampleSize: 0
             }
         })
     }
@@ -842,6 +659,7 @@ router.get('/system/status', async (req, res) => {
         // Auto-rebalancer status
         const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
         const autoRebalancerStats = autoRebalancer ? await autoRebalancer.getStatistics() : null
+        const onChainIndexerStatus = contractEventIndexerService.getStatus()
 
         res.json({
             success: true,
@@ -866,12 +684,14 @@ router.get('/system/status', async (req, res) => {
                 statistics: autoRebalancerStats,
                 enabled: !!autoRebalancer
             },
+            onChainIndexer: onChainIndexerStatus,
             services: {
                 priceFeeds: priceSourcesHealthy,
                 riskManagement: true,
                 webSockets: true,
                 autoRebalancing: autoRebalancerStatus.isRunning,
-                stellarNetwork: true
+                stellarNetwork: true,
+                contractEventIndexer: onChainIndexerStatus.enabled
             },
             featureFlags: publicFeatureFlags
         })
