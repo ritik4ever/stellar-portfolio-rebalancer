@@ -1,8 +1,7 @@
 import { Router } from 'express'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
-import { RebalanceHistoryService } from '../services/rebalanceHistory.js'
-import { RiskManagementService } from '../services/riskManagements.js'
+import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
@@ -17,8 +16,6 @@ import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.j
 const router = Router()
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
-const rebalanceHistoryService = new RebalanceHistoryService()
-const riskManagementService = new RiskManagementService()
 const featureFlags = getFeatureFlags()
 const publicFeatureFlags = getPublicFeatureFlags()
 const deploymentMode = featureFlags.demoMode ? 'demo' : 'production'

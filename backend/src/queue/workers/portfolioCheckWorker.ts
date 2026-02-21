@@ -2,8 +2,7 @@ import { Worker, Job } from 'bullmq'
 import { getConnectionOptions } from '../connection.js'
 import { StellarService } from '../../services/stellar.js'
 import { ReflectorService } from '../../services/reflector.js'
-import { RebalanceHistoryService } from '../../services/rebalanceHistory.js'
-import { RiskManagementService } from '../../services/riskManagements.js'
+import { riskManagementService } from '../../services/serviceContainer.js'
 import { portfolioStorage } from '../../services/portfolioStorage.js'
 import { CircuitBreakers } from '../../services/circuitBreakers.js'
 import { notificationService } from '../../services/notificationService.js'
@@ -27,7 +26,6 @@ export async function processPortfolioCheckJob(
 
     const stellarService = new StellarService()
     const reflectorService = new ReflectorService()
-    const riskManagementService = new RiskManagementService()
 
     const allPortfolios = await portfolioStorage.getAllPortfolios()
 

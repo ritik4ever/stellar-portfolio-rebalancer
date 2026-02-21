@@ -13,10 +13,11 @@ import { databaseService } from './services/databaseService.js'
 import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
 import { getFeatureFlags, getPublicFeatureFlags } from './config/featureFlags.js'
 import { isRedisAvailable, logQueueStartup } from './queue/connection.js'
+import { closeAllQueues } from './queue/queues.js'
 import { startQueueScheduler } from './queue/scheduler.js'
-import { startPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
-import { startRebalanceWorker } from './queue/workers/rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
+import { startPortfolioCheckWorker, stopPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
+import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebalanceWorker.js'
+import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
 
 let startupConfig: StartupConfig
 try {
