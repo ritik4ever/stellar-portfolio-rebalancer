@@ -1,3 +1,5 @@
+import { getFeatureFlags, type FeatureFlags } from './featureFlags.js'
+
 export interface StartupConfig {
     nodeEnv: 'development' | 'test' | 'production'
     port: number
@@ -7,6 +9,7 @@ export interface StartupConfig {
     autoRebalancerEnabled: boolean
     corsOrigins: string[]
     hasRebalanceSigner: boolean
+    featureFlags: FeatureFlags
 }
 
 const NODE_ENVS = new Set(['development', 'test', 'production'])
@@ -28,6 +31,23 @@ export function validateStartupConfigOrThrow(env: NodeJS.ProcessEnv = process.en
     const port = Number.parseInt(portRaw, 10)
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
         errors.push(`PORT '${env.PORT}' is invalid. Provide an integer between 1 and 65535.`)
+    }
+
+    const featureFlags = getFeatureFlags(env)
+    if (nodeEnv === 'production' && featureFlags.demoMode) {
+        errors.push('DEMO_MODE cannot be true in production.')
+    }
+    if (nodeEnv === 'production' && featureFlags.allowDemoBalanceFallback) {
+        warnings.push('ALLOW_DEMO_BALANCE_FALLBACK is enabled in production.')
+    }
+    if (nodeEnv === 'production' && featureFlags.enableDemoDbSeed) {
+        warnings.push('ENABLE_DEMO_DB_SEED is enabled in production.')
+    }
+    if (nodeEnv === 'production' && featureFlags.allowMockPriceHistory) {
+        warnings.push('ALLOW_MOCK_PRICE_HISTORY is enabled in production.')
+    }
+    if (nodeEnv === 'production' && featureFlags.allowFallbackPrices) {
+        warnings.push('ALLOW_FALLBACK_PRICES is enabled in production.')
     }
 
     const stellarNetworkRaw = (env.STELLAR_NETWORK || 'testnet').trim().toLowerCase()
@@ -71,9 +91,13 @@ export function validateStartupConfigOrThrow(env: NodeJS.ProcessEnv = process.en
     }
 
     const signerSecret = (env.STELLAR_REBALANCE_SECRET || env.STELLAR_SECRET_KEY || '').trim()
-    if (!signerSecret) {
-        errors.push('Set STELLAR_REBALANCE_SECRET (or STELLAR_SECRET_KEY) for signed DEX rebalance execution.')
-    } else if (!STELLAR_SECRET_REGEX.test(signerSecret)) {
+    if (!featureFlags.demoMode || !featureFlags.allowDemoBalanceFallback) {
+        if (!signerSecret) {
+            errors.push('Set STELLAR_REBALANCE_SECRET (or STELLAR_SECRET_KEY) for signed DEX rebalance execution.')
+        } else if (!STELLAR_SECRET_REGEX.test(signerSecret)) {
+            errors.push('STELLAR_REBALANCE_SECRET format is invalid. Expected a Stellar secret starting with S.')
+        }
+    } else if (signerSecret && !STELLAR_SECRET_REGEX.test(signerSecret)) {
         errors.push('STELLAR_REBALANCE_SECRET format is invalid. Expected a Stellar secret starting with S.')
     }
 
@@ -119,7 +143,8 @@ export function validateStartupConfigOrThrow(env: NodeJS.ProcessEnv = process.en
         stellarContractAddress: contractAddress,
         autoRebalancerEnabled,
         corsOrigins,
-        hasRebalanceSigner: true
+        hasRebalanceSigner: !!signerSecret,
+        featureFlags
     }
 }
 
@@ -132,7 +157,15 @@ export function buildStartupSummary(config: StartupConfig): Record<string, unkno
         contractAddress: maskValue(config.stellarContractAddress, 6, 4),
         autoRebalancerEnabled: config.autoRebalancerEnabled,
         rebalanceSignerConfigured: config.hasRebalanceSigner,
-        corsOriginsConfigured: config.corsOrigins.length
+        corsOriginsConfigured: config.corsOrigins.length,
+        featureFlags: {
+            demoMode: config.featureFlags.demoMode,
+            allowFallbackPrices: config.featureFlags.allowFallbackPrices,
+            enableDebugRoutes: config.featureFlags.enableDebugRoutes,
+            allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
+            allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
+            enableDemoDbSeed: config.featureFlags.enableDemoDbSeed
+        }
     }
 }
 

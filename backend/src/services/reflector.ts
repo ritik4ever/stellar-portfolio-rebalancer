@@ -1,5 +1,6 @@
 import { SorobanRpc } from '@stellar/stellar-sdk'
 import type { PricesMap, PriceData } from '../types/index.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 
 export class ReflectorService {
     private coinGeckoApiKey: string
@@ -38,7 +39,13 @@ export class ReflectorService {
             const now = Date.now()
             if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
                 console.log('[DEBUG] Rate limiting - using cached prices only')
-                return Object.keys(cachedPrices).length > 0 ? cachedPrices : this.getFallbackPrices()
+                if (Object.keys(cachedPrices).length > 0) {
+                    return cachedPrices
+                }
+                if (getFeatureFlags().allowFallbackPrices) {
+                    return this.getFallbackPrices()
+                }
+                throw new Error('Price request rate-limited and ALLOW_FALLBACK_PRICES is disabled')
             }
 
             // Get fresh data only if cache is stale AND rate limit allows
@@ -55,6 +62,10 @@ export class ReflectorService {
             if (Object.keys(cachedPrices).length > 0) {
                 console.log('[DEBUG] Using cached prices due to API error')
                 return cachedPrices
+            }
+
+            if (!getFeatureFlags().allowFallbackPrices) {
+                throw new Error('Price sources unavailable and ALLOW_FALLBACK_PRICES is disabled')
             }
 
             return this.getFallbackPrices()
@@ -308,6 +319,9 @@ export class ReflectorService {
             }))
         } catch (error) {
             console.error(`Failed to get price history for ${asset}:`, error)
+            if (!getFeatureFlags().allowMockPriceHistory) {
+                throw new Error(`Price history unavailable for ${asset} and ALLOW_MOCK_PRICE_HISTORY is disabled`)
+            }
             return this.generateMockHistory(asset, days * 24)
         }
     }

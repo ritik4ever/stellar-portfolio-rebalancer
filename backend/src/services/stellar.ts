@@ -8,6 +8,7 @@ import {
     type DEXTradeExecutionResult,
     type RebalanceExecutionConfig
 } from './dex.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 
 interface StoredPortfolio {
     id: string
@@ -54,23 +55,45 @@ export class StellarService {
 
             await this.checkConcentrationRisk(allocations)
 
-            const mockBalances: Record<string, number> = {}
             const { ReflectorService } = await import('./reflector.js')
+            const { portfolioStorage } = await import('./portfolioStorage.js')
             const reflector = new ReflectorService()
             const prices = await reflector.getCurrentPrices()
+            const flags = getFeatureFlags()
 
-            const totalValue = 10000
+            if (flags.demoMode) {
+                const mockBalances: Record<string, number> = {}
+                const totalValue = 10000
 
-            for (const [asset, percentage] of Object.entries(allocations)) {
-                const assetValue = (totalValue * percentage) / 100
-                const price = prices[asset]?.price || 1
-                mockBalances[asset] = assetValue / price
+                for (const [asset, percentage] of Object.entries(allocations)) {
+                    const assetValue = (totalValue * percentage) / 100
+                    const price = prices[asset]?.price || 1
+                    mockBalances[asset] = assetValue / price
+                }
+
+                const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
+
+                console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
+                return portfolioId
             }
 
-            const { portfolioStorage } = await import('./portfolioStorage.js')
-            const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
+            const realBalances = await this.getRealAssetBalances(userAddress, false)
+            const filteredBalances: Record<string, number> = {}
+            for (const asset of Object.keys(allocations)) {
+                filteredBalances[asset] = realBalances[asset] || 0
+            }
 
-            console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
+            const totalValue = Object.entries(filteredBalances).reduce((sum, [asset, amount]) => {
+                const price = prices[asset]?.price || 0
+                return sum + (amount * price)
+            }, 0)
+
+            if (totalValue <= 0) {
+                throw new Error('No real funded balances found for selected allocation assets')
+            }
+
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, filteredBalances)
+            console.log(`Portfolio ${portfolioId} created with real on-chain balances`)
             return portfolioId
         } catch (error) {
             throw new Error(`Failed to create portfolio: ${error}`)
@@ -92,7 +115,7 @@ export class StellarService {
         return true
     }
 
-    async getRealAssetBalances(userAddress: string): Promise<Record<string, number>> {
+    async getRealAssetBalances(userAddress: string, allowDemoFallback: boolean = getFeatureFlags().allowDemoBalanceFallback): Promise<Record<string, number>> {
         try {
             const account = await this.server.loadAccount(userAddress)
             const balances: Record<string, number> = {}
@@ -109,7 +132,10 @@ export class StellarService {
             return balances
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error)
-            console.warn('Could not fetch real balances, using demo mode:', errorMessage)
+            if (!allowDemoFallback) {
+                throw new Error(`Could not fetch real balances: ${errorMessage}`)
+            }
+            console.warn('Could not fetch real balances, using demo mode fallback:', errorMessage)
             return {
                 XLM: 25000,
                 USDC: 10000,

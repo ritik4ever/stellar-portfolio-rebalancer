@@ -13,12 +13,16 @@ import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { writeRateLimiter } from '../middleware/rateLimit.js'
 import { ConflictError } from '../types/index.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 
 const router = Router()
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const rebalanceHistoryService = new RebalanceHistoryService()
 const riskManagementService = new RiskManagementService()
+const featureFlags = getFeatureFlags()
+const publicFeatureFlags = getPublicFeatureFlags()
+const deploymentMode = featureFlags.demoMode ? 'demo' : 'production'
 
 // Import autoRebalancer from index.js (will be available after server starts)
 let autoRebalancer: any = null
@@ -85,16 +89,17 @@ router.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        mode: 'demo',
+        mode: deploymentMode,
         features: {
             contract_deployed: true,
             real_price_feeds: true,
             automatic_monitoring: true,
             circuit_breakers: true,
-            demo_portfolios: true,
+            demo_portfolios: featureFlags.demoMode,
             risk_management: true,
             rebalance_history: true,
-            auto_rebalancer: autoRebalancer ? autoRebalancer.getStatus().isRunning : false
+            auto_rebalancer: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
+            flags: publicFeatureFlags
         }
     })
 })
@@ -150,14 +155,16 @@ router.post('/portfolio', writeRateLimiter, async (req, res) => {
             userAddress,
             allocations,
             threshold,
-            mode: 'demo'
+            mode: deploymentMode
         })
 
         res.json({
             portfolioId,
             status: 'created',
-            mode: 'demo',
-            message: 'Portfolio created with simulated $10,000 balance'
+            mode: deploymentMode,
+            message: featureFlags.demoMode
+                ? 'Portfolio created with simulated $10,000 balance'
+                : 'Portfolio created with real on-chain balances'
         })
     } catch (error) {
         logger.error('Failed to create portfolio', { error: getErrorObject(error) })
@@ -193,7 +200,7 @@ router.get('/portfolio/:id', async (req, res) => {
             portfolio,
             prices,
             riskMetrics,
-            mode: 'demo',
+            mode: deploymentMode,
             lastUpdated: new Date().toISOString()
         })
     } catch (error) {
@@ -322,7 +329,7 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
         res.status(responseStatus).json({
             result,
             status: result.status === 'failed' ? 'failed' : 'completed',
-            mode: 'demo',
+            mode: deploymentMode,
             message: result.status === 'failed'
                 ? 'Rebalance execution failed safely'
                 : result.status === 'partial'
@@ -578,7 +585,14 @@ router.get('/prices', async (req, res) => {
     } catch (error) {
         console.error('[ERROR] Prices endpoint failed:', error)
 
-        // Always return valid fallback data in correct format
+        if (!featureFlags.allowFallbackPrices) {
+            return res.status(503).json({
+                success: false,
+                error: 'Price feeds unavailable and ALLOW_FALLBACK_PRICES is disabled'
+            })
+        }
+
+        // Return explicit fallback data only when feature flag allows it.
         const fallbackPrices = {
             XLM: { price: 0.358878, change: -0.60, timestamp: Date.now() / 1000, source: 'fallback' },
             BTC: { price: 111150, change: 0.23, timestamp: Date.now() / 1000, source: 'fallback' },
@@ -817,8 +831,13 @@ router.get('/system/status', async (req, res) => {
         const circuitBreakers = riskManagementService.getCircuitBreakerStatus()
 
         // Check API health
-        const prices = await reflectorService.getCurrentPrices()
-        const priceSourcesHealthy = Object.keys(prices).length > 0
+        let priceSourcesHealthy = false
+        try {
+            const prices = await reflectorService.getCurrentPrices()
+            priceSourcesHealthy = Object.keys(prices).length > 0
+        } catch {
+            priceSourcesHealthy = false
+        }
 
         // Auto-rebalancer status
         const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
@@ -827,14 +846,14 @@ router.get('/system/status', async (req, res) => {
         res.json({
             success: true,
             system: {
-                status: 'operational',
+                status: priceSourcesHealthy ? 'operational' : 'degraded',
                 uptime: process.uptime(),
                 timestamp: new Date().toISOString(),
                 version: '1.0.0'
             },
             portfolios: {
                 total: portfolioCount,
-                active: portfolioCount // Assuming all are active for demo
+                active: portfolioCount
             },
             rebalanceHistory: historyStats,
             riskManagement: {
@@ -853,7 +872,8 @@ router.get('/system/status', async (req, res) => {
                 webSockets: true,
                 autoRebalancing: autoRebalancerStatus.isRunning,
                 stellarNetwork: true
-            }
+            },
+            featureFlags: publicFeatureFlags
         })
     } catch (error) {
         console.error('[ERROR] Failed to get system status:', error)

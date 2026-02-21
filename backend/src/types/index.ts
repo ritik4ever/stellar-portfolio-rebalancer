@@ -166,6 +166,7 @@ export interface SystemStatus {
         autoRebalancing: boolean
         stellarNetwork: boolean
     }
+    featureFlags?: Record<string, boolean>
 }
 
 // Additional utility types
