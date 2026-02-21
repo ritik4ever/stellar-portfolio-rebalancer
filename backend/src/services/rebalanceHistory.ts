@@ -56,7 +56,8 @@ export class RebalanceHistoryService {
         toAsset?: string
         amount?: number
         prices?: PricesMap
-        portfolio?: any
+        /** Stored portfolio record. Must have `allocations` as a `Record<string, number>`. */
+        portfolio?: { allocations: Record<string, number> }
         eventSource?: RebalanceEvent['eventSource']
         onChainConfirmed?: boolean
         onChainEventType?: string

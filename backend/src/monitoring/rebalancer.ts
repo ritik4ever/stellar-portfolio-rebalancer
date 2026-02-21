@@ -69,7 +69,15 @@ export class RebalancingService {
 
             if (needsRebalance) {
                 logger.info(`Portfolio ${portfolioId} needs rebalancing – enqueueing job`)
-                const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
+
+                // Use the stored portfolio (Record<string, number> allocations) for risk checks,
+                // NOT the UI response from stellarService.getPortfolio() which has an array shape.
+                const storedPortfolio = await portfolioStorage.getPortfolio(portfolioId)
+                if (!storedPortfolio) {
+                    logger.warn(`Portfolio ${portfolioId} not found in storage during risk check`)
+                    return
+                }
+                const riskCheck = riskManagementService.shouldAllowRebalance(storedPortfolio, prices)
 
                 if (riskCheck.allowed) {
                     // Enqueue a rebalance job rather than executing inline
@@ -99,7 +107,7 @@ export class RebalancingService {
                         gasUsed: '0 XLM',
                         status: 'failed',
                         prices,
-                        portfolio,
+                        portfolio: storedPortfolio,
                     })
                 }
             }

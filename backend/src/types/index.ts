@@ -29,6 +29,24 @@ export interface Portfolio {
     version: number
 }
 
+
+/**
+ * Per-asset allocation item returned by the API / UI layer.
+ * This is the array-element shape produced by StellarService.getPortfolio()
+ * and MUST be converted via toStoredAllocations() before being passed to any
+ * risk-management method.
+ */
+export interface UIAllocation {
+    asset: string
+    /** Target weight as a percentage (0-100) */
+    target: number
+    /** Current weight as a percentage (0-100) */
+    current: number
+    amount?: number
+    balance?: number
+    price?: number
+}
+
 // Thrown when an update targets a stale portfolio version
 export class ConflictError extends Error {
     readonly currentVersion: number

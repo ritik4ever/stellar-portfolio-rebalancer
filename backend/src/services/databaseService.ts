@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { ConflictError } from '../types/index.js'
+import type { Portfolio } from '../types/index.js'
 
 // ─────────────────────────────────────────────
 // Exported type used by rebalanceHistory.ts
@@ -23,18 +24,6 @@ export interface RebalanceHistoryQueryOptions {
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
 // ─────────────────────────────────────────────
-
-export interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
-    lastRebalance: string
-    version: number
-}
 
 // Raw row shape as stored in SQLite
 interface PortfolioRow {

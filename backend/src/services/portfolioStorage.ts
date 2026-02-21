@@ -1,17 +1,7 @@
 import { isDbConfigured } from '../db/client.js'
 import * as portfolioDb from '../db/portfolioDb.js'
 import { randomUUID } from 'node:crypto'
-
-interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
-    lastRebalance: string
-}
+import type { Portfolio } from '../types/index.js'
 
 const useCache = process.env.USE_MEMORY_CACHE === 'true'
 
@@ -48,7 +38,8 @@ class PortfolioStorage {
             balances: {},
             totalValue: 0,
             createdAt: new Date().toISOString(),
-            lastRebalance: new Date().toISOString()
+            lastRebalance: new Date().toISOString(),
+            version: 1
         }
         if (isDbConfigured()) {
             await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0)
@@ -73,7 +64,8 @@ class PortfolioStorage {
             balances: currentBalances,
             totalValue,
             createdAt: new Date().toISOString(),
-            lastRebalance: new Date().toISOString()
+            lastRebalance: new Date().toISOString(),
+            version: 1
         }
         if (isDbConfigured()) {
             await portfolioDb.dbCreatePortfolio(
@@ -148,10 +140,5 @@ class PortfolioStorage {
         this.portfolios.clear()
     }
 }
-/**
- * portfolioStorage.ts
- *
- * Backward-compatible re-export: all callers that import `portfolioStorage`
- * now transparently use the SQLite-backed DatabaseService singleton.
- */
-export { databaseService as portfolioStorage, type Portfolio } from './databaseService.js'
+export { databaseService as portfolioStorage } from './databaseService.js'
+export type { Portfolio } from '../types/index.js'
