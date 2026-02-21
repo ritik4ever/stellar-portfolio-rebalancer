@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { Dec } from '../src/utils/decimal.js'
+import { Dec } from '../utils/decimal.js'
 
 // ─────────────────────────────────────────────
 // Regression tests: decimal-safe portfolio math

@@ -9,7 +9,75 @@ import { analyticsService } from '../services/analyticsService.js'
 import { notificationService } from '../services/notificationService.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { logger } from '../utils/logger.js'
+import { requireAdmin } from '../middleware/auth.js'
+import { blockDebugInProduction } from '../middleware/debugGate.js'
+import { writeRateLimiter } from '../middleware/rateLimit.js'
+import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 
+const router = Router()
+const stellarService = new StellarService()
+const reflectorService = new ReflectorService()
+const rebalanceHistoryService = new RebalanceHistoryService()
+const riskManagementService = new RiskManagementService()
+const featureFlags = getFeatureFlags()
+const publicFeatureFlags = getPublicFeatureFlags()
+const deploymentMode = featureFlags.demoMode ? 'demo' : 'production'
+
+// Import autoRebalancer from index.js (will be available after server starts)
+let autoRebalancer: any = null
+import('../index.js').then(module => {
+    autoRebalancer = module.autoRebalancer
+}).catch(console.error)
+
+// Helper function for error handling
+const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message
+    return String(error)
+}
+
+const getErrorObject = (error: unknown) => ({
+    message: getErrorMessage(error),
+    type: error instanceof Error ? error.constructor.name : 'Unknown'
+})
+
+// Helper function to convert portfolio allocations to Record<string, number>
+const getPortfolioAllocationsAsRecord = (portfolio: any): Record<string, number> => {
+    if (Array.isArray(portfolio.allocations)) {
+        // Convert array format to object format
+        return portfolio.allocations.reduce((acc: Record<string, number>, item: any) => {
+            acc[item.asset] = item.target || item.percentage || 0
+            return acc
+        }, {})
+    }
+    return portfolio.allocations as Record<string, number>
+}
+
+const parseOptionalNumber = (value: unknown): number | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
+const parseOptionalBoolean = (value: unknown): boolean | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'string') {
+        const lower = value.toLowerCase()
+        if (lower === 'true') return true
+        if (lower === 'false') return false
+    }
+    return undefined
+}
+
+const parseSlippageOverrides = (value: unknown): Record<string, number> | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const parsed: Record<string, number> = {}
+    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+        const num = parseOptionalNumber(raw)
+        if (num !== undefined) parsed[key] = num
+    }
+    return Object.keys(parsed).length > 0 ? parsed : undefined
 }
 
 const parseOptionalTimestamp = (value: unknown): string | undefined => {
@@ -29,7 +97,322 @@ const parseHistorySource = (value: unknown): 'all' | 'offchain' | 'simulated' | 
     return 'all'
 }
 
+// ================================
+// HEALTH CHECK ROUTES
+// ================================
 
+// Health check with enhanced status
+router.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        mode: deploymentMode,
+        features: {
+            contract_deployed: true,
+            real_price_feeds: true,
+            automatic_monitoring: true,
+            circuit_breakers: true,
+            demo_portfolios: featureFlags.demoMode,
+            risk_management: true,
+            rebalance_history: true,
+            auto_rebalancer: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
+            flags: publicFeatureFlags
+        }
+    })
+})
+
+// ================================
+// PORTFOLIO MANAGEMENT ROUTES
+// ================================
+
+// Create portfolio with enhanced validation
+router.post('/portfolio', writeRateLimiter, async (req, res) => {
+    try {
+        const { userAddress, allocations, threshold } = req.body
+
+        if (!userAddress || !allocations || threshold === undefined) {
+            return res.status(400).json({ error: 'Missing required fields: userAddress, allocations, threshold' })
+        }
+
+        // Enhanced validation
+        const total = Object.values(allocations as Record<string, number>).reduce((sum, val) => sum + val, 0)
+        if (Math.abs(total - 100) > 0.01) {
+            return res.status(400).json({ error: 'Allocations must sum to 100%' })
+        }
+
+        // Validate threshold range
+        if (threshold < 1 || threshold > 50) {
+            return res.status(400).json({ error: 'Threshold must be between 1% and 50%' })
+        }
+
+        // Validate asset allocations
+        for (const [asset, percentage] of Object.entries(allocations as Record<string, number>)) {
+            if (percentage < 0 || percentage > 100) {
+                return res.status(400).json({ error: `Invalid percentage for ${asset}: must be between 0-100%` })
+            }
+        }
+
+        const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold)
+
+        const reflector = new ReflectorService()
+        const prices = await reflector.getCurrentPrices()
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
+        await rebalanceHistoryService.recordRebalanceEvent({
+            portfolioId,
+            trigger: 'Portfolio Created',
+            trades: 0,
+            gasUsed: '0 XLM',
+            status: 'completed',
+            isAutomatic: false
+        })
+
+        logger.info('Portfolio created successfully', {
+            portfolioId,
+            userAddress,
+            allocations,
+            threshold,
+            mode: deploymentMode
+        })
+
+        res.json({
+            portfolioId,
+            status: 'created',
+            mode: deploymentMode,
+            message: featureFlags.demoMode
+                ? 'Portfolio created with simulated $10,000 balance'
+                : 'Portfolio created with real on-chain balances'
+        })
+    } catch (error) {
+        logger.error('Failed to create portfolio', { error: getErrorObject(error) })
+        res.status(500).json({
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Get portfolio with real-time data
+router.get('/portfolio/:id', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+
+        if (!portfolioId) {
+            return res.status(400).json({ error: 'Portfolio ID required' })
+        }
+
+        const portfolio = await stellarService.getPortfolio(portfolioId)
+        const prices = await reflectorService.getCurrentPrices()
+
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
+        let riskMetrics = null
+        try {
+            const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio)
+            riskMetrics = riskManagementService.analyzePortfolioRisk(allocationsRecord, prices)
+        } catch (riskError) {
+            console.warn('Risk analysis failed:', riskError)
+        }
+
+        res.json({
+            portfolio,
+            prices,
+            riskMetrics,
+            mode: deploymentMode,
+            lastUpdated: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to fetch portfolio', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+// Get user portfolios
+router.get('/user/:address/portfolios', async (req, res) => {
+    try {
+        const userAddress = req.params.address
+        const portfolios = await portfolioStorage.getUserPortfolios(userAddress)
+
+        res.json(portfolios)
+    } catch (error) {
+        logger.error('Failed to fetch user portfolios', { error: getErrorObject(error), userAddress: req.params.address })
+        res.status(500).json({ error: 'Failed to fetch portfolios' })
+    }
+})
+
+// ================================
+// REBALANCING ROUTES
+// ================================
+
+// Enhanced rebalance with comprehensive safety checks
+router.post('/portfolio/:id/rebalance', writeRateLimiter, async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+
+        if (!portfolioId) {
+            return res.status(400).json({ error: 'Portfolio ID required' })
+        }
+
+        // Get current prices for safety checks
+        const prices = await reflectorService.getCurrentPrices()
+
+        // Check circuit breakers before proceeding
+        const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
+        if (!marketCheck.safe) {
+            return res.status(400).json({
+                error: `Rebalance blocked by safety systems: ${marketCheck.reason}`,
+                reason: 'circuit_breaker',
+                canRetry: true
+            })
+        }
+
+        // Enhanced risk management check
+        const portfolio = await stellarService.getPortfolio(portfolioId)
+        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
+
+        if (!riskCheck.allowed) {
+            return res.status(400).json({
+                error: `Rebalance blocked by risk management: ${riskCheck.reason}`,
+                reason: 'risk_management',
+                reasonCode: riskCheck.reasonCode,
+                alerts: riskCheck.alerts,
+                riskMetrics: riskCheck.riskMetrics,
+                canRetry: true
+            })
+        }
+
+        // Check if rebalance is needed
+        const needed = await stellarService.checkRebalanceNeeded(portfolioId)
+        if (!needed) {
+            return res.status(400).json({
+                error: 'Rebalance not needed at this time',
+                reason: 'not_needed',
+                suggestion: 'Portfolio is already within target allocations'
+            })
+        }
+
+        const executionOptions = {
+            tradeSlippageBps: parseOptionalNumber(req.body?.tradeSlippageBps),
+            maxSlippageBpsPerRebalance: parseOptionalNumber(req.body?.maxSlippageBpsPerRebalance),
+            maxSpreadBps: parseOptionalNumber(req.body?.maxSpreadBps),
+            minLiquidityCoverage: parseOptionalNumber(req.body?.minLiquidityCoverage),
+            allowPartialFill: parseOptionalBoolean(req.body?.allowPartialFill),
+            rollbackOnFailure: parseOptionalBoolean(req.body?.rollbackOnFailure),
+            signerSecret: typeof req.body?.signerSecret === 'string' ? req.body.signerSecret : undefined,
+            tradeSlippageOverrides: parseSlippageOverrides(req.body?.tradeSlippageOverrides)
+        }
+
+        const result = await stellarService.executeRebalance(portfolioId, executionOptions)
+
+        await analyticsService.captureSnapshot(portfolioId, prices)
+
+        await rebalanceHistoryService.recordRebalanceEvent({
+            portfolioId,
+            trigger: 'Manual Rebalance',
+            trades: result.trades || 0,
+            gasUsed: result.gasUsed || '0 XLM',
+            status: result.status === 'failed' ? 'failed' : 'completed',
+            isAutomatic: false,
+            riskAlerts: riskCheck.alerts,
+            error: result.failureReasons?.join('; ')
+        })
+
+        // Send notification for successful/partial manual rebalance
+        if (result.status !== 'failed') {
+            try {
+                await notificationService.notify({
+                    userId: portfolio.userAddress,
+                    eventType: 'rebalance',
+                    title: result.status === 'partial' ? 'Portfolio Partially Rebalanced' : 'Portfolio Rebalanced',
+                    message: `Your portfolio has been manually rebalanced. ${result.trades || 0} trades executed with ${result.gasUsed || '0 XLM'} gas used.`,
+                    data: {
+                        portfolioId,
+                        trades: result.trades,
+                        gasUsed: result.gasUsed,
+                        trigger: 'manual',
+                        status: result.status
+                    },
+                    timestamp: new Date().toISOString()
+                })
+            } catch (notificationError) {
+                logger.error('Failed to send rebalance notification', {
+                    portfolioId,
+                    error: getErrorObject(notificationError)
+                })
+            }
+        }
+
+        logger.info('Rebalance executed successfully', { portfolioId, result })
+        const responseStatus = result.status === 'failed' ? 409 : 200
+        res.status(responseStatus).json({
+            result,
+            status: result.status === 'failed' ? 'failed' : 'completed',
+            mode: deploymentMode,
+            message: result.status === 'failed'
+                ? 'Rebalance execution failed safely'
+                : result.status === 'partial'
+                    ? 'Rebalance partially completed'
+                    : 'Rebalance completed successfully',
+            riskAlerts: riskCheck.alerts,
+            failureReasons: result.failureReasons || [],
+            partialFills: result.partialFills || []
+        })
+    } catch (error) {
+        logger.error('Rebalance failed', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({
+            error: getErrorMessage(error),
+            canRetry: !getErrorMessage(error).includes('Cooldown')
+        })
+    }
+})
+
+// Check rebalance status with detailed analysis
+router.get('/portfolio/:id/rebalance-status', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+        const portfolio = await stellarService.getPortfolio(portfolioId)
+        const prices = await reflectorService.getCurrentPrices()
+
+        // Check various conditions
+        const needed = await stellarService.checkRebalanceNeeded(portfolioId)
+        const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
+        const cooldownCheck = CircuitBreakers.checkCooldownPeriod(portfolio.lastRebalance)
+        const concentrationCheck = CircuitBreakers.checkConcentrationRisk(portfolio.allocations)
+
+        // Enhanced risk management checks with proper type conversion
+        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
+        const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio)
+        const riskMetrics = riskManagementService.analyzePortfolioRisk(allocationsRecord, prices)
+
+        res.json({
+            needsRebalance: needed,
+            canRebalance: needed && marketCheck.safe && cooldownCheck.safe && concentrationCheck.safe && riskCheck.allowed,
+            checks: {
+                market: marketCheck,
+                cooldown: cooldownCheck,
+                concentration: concentrationCheck,
+                riskManagement: riskCheck
+            },
+            riskMetrics,
+            portfolio: {
+                lastRebalance: portfolio.lastRebalance,
+                threshold: portfolio.threshold,
+                totalValue: portfolio.totalValue
+            },
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to check rebalance status', { error: getErrorObject(error) })
+        res.status(500).json({ error: 'Failed to check rebalance status' })
+    }
+})
+
+// ================================
+// REBALANCE HISTORY ROUTES
+// ================================
+
+// Get rebalance history - FIXED for portfolio-specific data
 router.get('/rebalance/history', async (req, res) => {
     try {
         const portfolioId = req.query.portfolioId as string
@@ -48,7 +431,7 @@ router.get('/rebalance/history', async (req, res) => {
             portfolioId || undefined,
             limit,
             {
-                eventSource: source,
+                eventSource: (source === 'all' ? undefined : source) as 'offchain' | 'simulated' | 'onchain' | undefined,
                 startTimestamp,
                 endTimestamp
             }
@@ -157,7 +540,14 @@ router.get('/risk/metrics/:portfolioId', async (req, res) => {
                 concentrationRisk: 0,
                 liquidityRisk: 0,
                 correlationRisk: 0,
-
+                overallRiskLevel: 'low' as const,
+                ewmaVolatility: 0,
+                var95: 0,
+                cvar95: 0,
+                maxDrawdown: 0,
+                drawdownBand: 'normal' as const,
+                correlations: {},
+                sampleSize: 0
             }
         })
     }
