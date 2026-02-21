@@ -59,6 +59,26 @@ vi.mock('../services/riskManagements.js', () => {
     return { RiskManagementService }
 })
 
+vi.mock('../services/serviceContainer.js', () => ({
+    rebalanceHistoryService: {
+        recordRebalanceEvent: vi.fn().mockResolvedValue({ id: 'hist-1' }),
+        getRecentAutoRebalances: vi.fn().mockResolvedValue([]),
+        getAutoRebalancesSince: vi.fn().mockResolvedValue([]),
+        getAllAutoRebalances: vi.fn().mockResolvedValue([]),
+        getHistoryStats: vi.fn().mockResolvedValue({
+            totalEvents: 0,
+            portfolios: 0,
+            recentActivity: 0,
+            autoRebalances: 0
+        })
+    },
+    riskManagementService: {
+        shouldAllowRebalance: vi.fn().mockReturnValue({ allowed: true, reason: 'OK', alerts: [] }),
+        updatePriceData: vi.fn().mockReturnValue([]),
+        getCircuitBreakerStatus: vi.fn().mockReturnValue({})
+    }
+}))
+
 vi.mock('../services/portfolioStorage.js', () => ({
     portfolioStorage: {
         getAllPortfolios: vi.fn().mockResolvedValue([{ id: 'test-portfolio-1', threshold: 5 }]),

@@ -167,9 +167,12 @@ Event Types: Rebalance, circuit breaker, price movement, risk changes
 Customizable: Configure which events to receive per user
 
 API Reference
+Canonical API namespace: `/api/v1/*`  
+Legacy compatibility namespace (deprecated, temporary): `/api/*`
+
 Portfolio Management
 bash# Create portfolio
-POST /api/portfolio
+POST /api/v1/portfolio
 {
   "userAddress": "STELLAR_ADDRESS",
   "allocations": {"XLM": 40, "USDC": 35, "BTC": 25},
@@ -177,17 +180,17 @@ POST /api/portfolio
 }
 
 # Get portfolio
-GET /api/portfolio/:id
+GET /api/v1/portfolio/:id
 
 # Execute rebalance
-POST /api/portfolio/:id/rebalance
+POST /api/v1/portfolio/:id/rebalance
 
 # Get rebalance status
-GET /api/portfolio/:id/rebalance-status
+GET /api/v1/portfolio/:id/rebalance-status
 
 Notification Management
 bash# Subscribe to notifications
-POST /api/notifications/subscribe
+POST /api/v1/notifications/subscribe
 {
   "userId": "STELLAR_ADDRESS",
   "emailEnabled": true,
@@ -203,30 +206,30 @@ POST /api/notifications/subscribe
 }
 
 # Get notification preferences
-GET /api/notifications/preferences?userId=STELLAR_ADDRESS
+GET /api/v1/notifications/preferences?userId=STELLAR_ADDRESS
 
 # Unsubscribe from notifications
-DELETE /api/notifications/unsubscribe?userId=STELLAR_ADDRESS
+DELETE /api/v1/notifications/unsubscribe?userId=STELLAR_ADDRESS
 
 # Test notification delivery
-POST /api/notifications/test
+POST /api/v1/notifications/test
 {
   "userId": "STELLAR_ADDRESS",
   "eventType": "rebalance"
 }
 
 # Test all notification types
-POST /api/notifications/test-all
+POST /api/v1/notifications/test-all
 {
   "userId": "STELLAR_ADDRESS"
 }
 
 Price Data
 bash# Current prices
-GET /api/prices
+GET /api/v1/prices
 
 # Portfolio analysis
-GET /api/portfolio/:id/rebalance-plan
+GET /api/v1/portfolio/:id/rebalance-plan
 Configuration
 Environment Variables
 Backend (.env):
@@ -263,6 +266,22 @@ cd backend && npm test
 
 # Smart contract tests
 cd contracts && cargo test
+
+Docker Deployment
+bash# Validate compose file
+docker compose -f deployment/docker-compose.yml config
+
+# Build deployable images
+docker compose -f deployment/docker-compose.yml build frontend backend
+
+# Start deployment stack
+docker compose -f deployment/docker-compose.yml up --build -d
+
+Deployment file layout:
+- deployment/docker-compose.yml
+- backend/Dockerfile
+- frontend/Dockerfile
+- frontend/nginx.conf
 Hackathon Submission
 This project was built for [Hackathon Name] and demonstrates:
 
