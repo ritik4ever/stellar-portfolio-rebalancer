@@ -2,6 +2,7 @@ import { Horizon } from '@stellar/stellar-sdk'
 
 import { ConflictError } from '../types/index.js'
 import type { PricesMap, RebalanceResult } from '../types/index.js'
+import { Dec } from '../utils/decimal.js'
 import {
     StellarDEXService,
     type DEXTradeRequest,
@@ -49,8 +50,7 @@ export class StellarService {
 
     async createPortfolio(userAddress: string, allocations: Record<string, number>, threshold: number) {
         try {
-            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0)
-            if (Math.abs(total - 100) > 0.01) {
+            if (!Dec.allocationsSumValid(allocations)) {
                 throw new Error('Allocations must sum to 100%')
             }
 
@@ -67,9 +67,9 @@ export class StellarService {
                 const totalValue = 10000
 
                 for (const [asset, percentage] of Object.entries(allocations)) {
-                    const assetValue = (totalValue * percentage) / 100
+                    const assetValue = Dec.targetValue(totalValue, percentage)
                     const price = prices[asset]?.price || 1
-                    mockBalances[asset] = assetValue / price
+                    mockBalances[asset] = Dec.assetQtyFromValue(assetValue, price)
                 }
 
                 const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
@@ -171,8 +171,8 @@ export class StellarService {
 
             for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
                 const currentValue = currentValues[asset] || 0
-                const currentPercentage = (currentValue / totalValue) * 100
-                const drift = Math.abs(currentPercentage - targetPercentage)
+                const currentPercentage = Dec.percentage(currentValue, totalValue)
+                const drift = Dec.drift(currentPercentage, targetPercentage)
 
                 if (drift > 50) {
                     console.warn(`Excessive drift detected for ${asset}: ${drift}%`)
@@ -401,12 +401,12 @@ export class StellarService {
 
         for (const [asset, targetPct] of Object.entries(portfolio.allocations)) {
             const currentValue = currentValues[asset] || 0
-            const currentPct = (currentValue / totalValue) * 100
+            const currentPct = Dec.percentage(currentValue, totalValue)
             currentPercents[asset] = currentPct
-            maxDrift = Math.max(maxDrift, Math.abs(currentPct - targetPct))
+            maxDrift = Math.max(maxDrift, Dec.drift(currentPct, targetPct))
 
-            const targetValue = (totalValue * targetPct) / 100
-            diffs.push({ asset, diffValue: currentValue - targetValue })
+            const targetValue = Dec.targetValue(totalValue, targetPct)
+            diffs.push({ asset, diffValue: Dec.sub(currentValue, targetValue) })
         }
 
         const minTradeUsd = this.readNumberEnv('MIN_TRADE_SIZE_USD', 10, 0.01, Number.MAX_SAFE_INTEGER)
@@ -433,7 +433,7 @@ export class StellarService {
                 const transferValue = Math.min(remainingOverValue, under.needed)
                 if (transferValue <= minTradeUsd) continue
 
-                const amountToSell = transferValue / fromPrice
+                const amountToSell = Dec.assetQtyFromValue(transferValue, fromPrice)
                 if (amountToSell <= 0) continue
 
                 const overrideKey = `${over.asset}->${under.asset}`
@@ -452,7 +452,7 @@ export class StellarService {
             }
         }
 
-        const trigger = `Threshold exceeded (${maxDrift.toFixed(1)}%)`
+        const trigger = `Threshold exceeded (${Dec.formatPct(maxDrift, 1)}%)`
         return { trades, trigger }
     }
 
@@ -500,8 +500,8 @@ export class StellarService {
             const fromBefore = balances[trade.fromAsset] || 0
             const toBefore = balances[trade.toAsset] || 0
 
-            balances[trade.fromAsset] = Math.max(0, this.roundAmount(fromBefore - trade.executedAmount))
-            balances[trade.toAsset] = this.roundAmount(toBefore + trade.estimatedReceivedAmount)
+            balances[trade.fromAsset] = Math.max(0, Dec.roundStellar(Dec.sub(fromBefore, trade.executedAmount)))
+            balances[trade.toAsset] = Dec.roundStellar(Dec.add(toBefore, trade.estimatedReceivedAmount))
         }
 
         return balances
@@ -582,7 +582,7 @@ export class StellarService {
     }
 
     private roundAmount(amount: number): number {
-        return Math.round(amount * 10000000) / 10000000
+        return Dec.roundStellar(amount)
     }
 
     private readNumberEnv(name: string, fallback: number, min: number, max: number): number {
