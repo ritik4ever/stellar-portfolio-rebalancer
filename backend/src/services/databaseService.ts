@@ -43,6 +43,14 @@ interface RebalanceHistoryRow {
     risk_alerts: string | null
     error: string | null
     details: string | null
+    event_source: string | null
+    on_chain_confirmed: number | null
+    on_chain_event_type: string | null
+    on_chain_tx_hash: string | null
+    on_chain_ledger: number | null
+    on_chain_contract_id: string | null
+    on_chain_paging_token: string | null
+    is_simulated: number | null
 }
 
 // ─────────────────────────────────────────────
@@ -76,6 +84,14 @@ CREATE TABLE IF NOT EXISTS rebalance_history (
     risk_alerts   TEXT,
     error         TEXT,
     details       TEXT,
+    event_source  TEXT NOT NULL DEFAULT 'offchain',
+    on_chain_confirmed INTEGER NOT NULL DEFAULT 0,
+    on_chain_event_type TEXT,
+    on_chain_tx_hash TEXT,
+    on_chain_ledger INTEGER,
+    on_chain_contract_id TEXT,
+    on_chain_paging_token TEXT,
+    is_simulated INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
 );
 
@@ -85,6 +101,12 @@ CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id
 CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id_timestamp
     ON rebalance_history (portfolio_id, timestamp);
 
+CREATE INDEX IF NOT EXISTS idx_rebalance_history_event_source
+    ON rebalance_history (event_source, timestamp);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_history_chain_paging_token
+    ON rebalance_history (on_chain_paging_token);
+
 CREATE TABLE IF NOT EXISTS price_snapshots (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     asset       TEXT NOT NULL,
@@ -92,6 +114,12 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     change      REAL,
     source      TEXT,
     captured_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS indexer_state (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 `
 
@@ -143,7 +171,10 @@ function seedDemoData(db: Database.Database): void {
                 fromAsset: 'XLM', toAsset: 'ETH', amount: 1200,
                 reason: 'Portfolio allocation drift exceeded rebalancing threshold',
                 riskLevel: 'medium', priceDirection: 'down', performanceImpact: 'neutral'
-            })
+            }),
+            eventSource: 'simulated',
+            onChainConfirmed: 0,
+            isSimulated: 1
         },
         {
             id: 'demo-evt-2',
@@ -159,7 +190,10 @@ function seedDemoData(db: Database.Database): void {
             details: JSON.stringify({
                 reason: 'Automated scheduled rebalancing executed',
                 riskLevel: 'low', priceDirection: 'up', performanceImpact: 'positive'
-            })
+            }),
+            eventSource: 'simulated',
+            onChainConfirmed: 0,
+            isSimulated: 1
         },
         {
             id: 'demo-evt-3',
@@ -175,20 +209,27 @@ function seedDemoData(db: Database.Database): void {
             details: JSON.stringify({
                 reason: 'High market volatility detected, protective rebalance executed',
                 volatilityDetected: true, riskLevel: 'high', priceDirection: 'down', performanceImpact: 'negative'
-            })
+            }),
+            eventSource: 'simulated',
+            onChainConfirmed: 0,
+            isSimulated: 1
         }
     ]
 
     const insertEvent = db.prepare(`
         INSERT INTO rebalance_history
-            (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (
+                id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details,
+                event_source, on_chain_confirmed, is_simulated
+            )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     for (const ev of historyRows) {
         insertEvent.run(
             ev.id, ev.portfolioId, ev.timestamp, ev.trigger, ev.trades,
-            ev.gasUsed, ev.status, ev.isAutomatic, ev.riskAlerts, ev.error, ev.details
+            ev.gasUsed, ev.status, ev.isAutomatic, ev.riskAlerts, ev.error, ev.details,
+            ev.eventSource, ev.onChainConfirmed, ev.isSimulated
         )
     }
 
@@ -238,12 +279,27 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
         isAutomatic: row.is_automatic === 1,
         riskAlerts: safeJsonParse(row.risk_alerts, [], `event(${row.id}).risk_alerts`),
         error: row.error ?? undefined,
-        details: safeJsonParse(row.details, undefined, `event(${row.id}).details`)
+        details: safeJsonParse(row.details, undefined, `event(${row.id}).details`),
+        eventSource: (row.event_source as RebalanceEvent['eventSource']) || 'offchain',
+        onChainConfirmed: row.on_chain_confirmed === 1,
+        onChainEventType: row.on_chain_event_type ?? undefined,
+        onChainTxHash: row.on_chain_tx_hash ?? undefined,
+        onChainLedger: row.on_chain_ledger ?? undefined,
+        onChainContractId: row.on_chain_contract_id ?? undefined,
+        onChainPagingToken: row.on_chain_paging_token ?? undefined,
+        isSimulated: row.is_simulated === 1
     }
 }
 
 function generateId(): string {
     return Date.now().toString() + Math.random().toString(36).substring(2, 9)
+}
+
+export interface RebalanceHistoryQueryOptions {
+    eventSource?: RebalanceEvent['eventSource'] | 'all'
+    startTimestamp?: string
+    endTimestamp?: string
+    onChainConfirmed?: boolean
 }
 
 // ─────────────────────────────────────────────
@@ -258,6 +314,8 @@ export class DatabaseService {
         mkdirSync(dirname(dbPath), { recursive: true })
         this.db = new Database(dbPath)
         this.db.exec(SCHEMA_SQL)
+        this.ensureRebalanceHistorySchema()
+        this.ensureIndexerStateSchema()
 
         // Seed demo data on first run (empty portfolios table)
         const count = (this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }).cnt
@@ -266,6 +324,39 @@ export class DatabaseService {
         }
 
         console.log(`[DB] SQLite database ready at: ${dbPath}`)
+    }
+
+    private ensureRebalanceHistorySchema(): void {
+        const columns = this.db.prepare(`PRAGMA table_info('rebalance_history')`).all() as Array<{ name: string }>
+        const names = new Set(columns.map(c => c.name))
+
+        const addColumn = (name: string, definition: string) => {
+            if (names.has(name)) return
+            this.db.exec(`ALTER TABLE rebalance_history ADD COLUMN ${name} ${definition}`)
+            names.add(name)
+        }
+
+        addColumn('event_source', "TEXT NOT NULL DEFAULT 'offchain'")
+        addColumn('on_chain_confirmed', 'INTEGER NOT NULL DEFAULT 0')
+        addColumn('on_chain_event_type', 'TEXT')
+        addColumn('on_chain_tx_hash', 'TEXT')
+        addColumn('on_chain_ledger', 'INTEGER')
+        addColumn('on_chain_contract_id', 'TEXT')
+        addColumn('on_chain_paging_token', 'TEXT')
+        addColumn('is_simulated', 'INTEGER NOT NULL DEFAULT 0')
+
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_rebalance_history_event_source ON rebalance_history (event_source, timestamp)')
+        this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_history_chain_paging_token ON rebalance_history (on_chain_paging_token)')
+    }
+
+    private ensureIndexerStateSchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS indexer_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        `)
     }
 
     // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -407,16 +498,28 @@ export class DatabaseService {
         trades: number
         gasUsed: string
         status: 'completed' | 'failed' | 'pending'
+        timestamp?: string
         isAutomatic?: boolean
         riskAlerts?: any[]
         error?: string
         details?: any
+        eventSource?: RebalanceEvent['eventSource']
+        onChainConfirmed?: boolean
+        onChainEventType?: string
+        onChainTxHash?: string
+        onChainLedger?: number
+        onChainContractId?: string
+        onChainPagingToken?: string
+        isSimulated?: boolean
     }): RebalanceEvent {
         try {
+            const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource || 'offchain'
+            const onChainConfirmed = eventData.onChainConfirmed ?? (eventSource === 'onchain')
+            const isSimulated = eventData.isSimulated ?? (eventSource === 'simulated')
             const event: RebalanceEvent = {
                 id: generateId(),
                 portfolioId: eventData.portfolioId,
-                timestamp: new Date().toISOString(),
+                timestamp: eventData.timestamp || new Date().toISOString(),
                 trigger: eventData.trigger,
                 trades: eventData.trades,
                 gasUsed: eventData.gasUsed,
@@ -424,13 +527,25 @@ export class DatabaseService {
                 isAutomatic: eventData.isAutomatic ?? false,
                 riskAlerts: eventData.riskAlerts ?? [],
                 error: eventData.error,
-                details: eventData.details
+                details: eventData.details,
+                eventSource,
+                onChainConfirmed,
+                onChainEventType: eventData.onChainEventType,
+                onChainTxHash: eventData.onChainTxHash,
+                onChainLedger: eventData.onChainLedger,
+                onChainContractId: eventData.onChainContractId,
+                onChainPagingToken: eventData.onChainPagingToken,
+                isSimulated
             }
 
             this.db.prepare(`
                 INSERT INTO rebalance_history
-                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (
+                        id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details,
+                        event_source, on_chain_confirmed, on_chain_event_type, on_chain_tx_hash, on_chain_ledger,
+                        on_chain_contract_id, on_chain_paging_token, is_simulated
+                    )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 event.id,
                 event.portfolioId,
@@ -442,27 +557,86 @@ export class DatabaseService {
                 event.isAutomatic ? 1 : 0,
                 event.riskAlerts?.length ? JSON.stringify(event.riskAlerts) : null,
                 event.error ?? null,
-                event.details ? JSON.stringify(event.details) : null
+                event.details ? JSON.stringify(event.details) : null,
+                event.eventSource,
+                event.onChainConfirmed ? 1 : 0,
+                event.onChainEventType ?? null,
+                event.onChainTxHash ?? null,
+                event.onChainLedger ?? null,
+                event.onChainContractId ?? null,
+                event.onChainPagingToken ?? null,
+                event.isSimulated ? 1 : 0
             )
 
             return event
         } catch (err) {
+            if (
+                eventData.onChainPagingToken &&
+                err instanceof Error &&
+                err.message.includes('UNIQUE constraint failed: rebalance_history.on_chain_paging_token')
+            ) {
+                const row = this.db.prepare<[string], RebalanceHistoryRow>(
+                    'SELECT * FROM rebalance_history WHERE on_chain_paging_token = ? LIMIT 1'
+                ).get(eventData.onChainPagingToken)
+                if (row) return rowToEvent(row)
+            }
             throw new Error(`Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`)
         }
     }
 
-    getRebalanceHistory(portfolioId?: string, limit: number = 50): RebalanceEvent[] {
+    ensurePortfolioExists(
+        id: string,
+        userAddress: string = 'ONCHAIN-INDEXER',
+        allocations: Record<string, number> = {},
+        threshold: number = 5
+    ): void {
+        const existing = this.getPortfolio(id)
+        if (existing) return
+        const now = new Date().toISOString()
+        this.db.prepare(`
+            INSERT OR IGNORE INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify({}), 0, now, now)
+    }
+
+    getRebalanceHistory(
+        portfolioId?: string,
+        limit: number = 50,
+        options: RebalanceHistoryQueryOptions = {}
+    ): RebalanceEvent[] {
         try {
+            const whereParts: string[] = []
+            const params: Array<string | number> = []
+
             if (portfolioId) {
-                const rows = this.db.prepare<[string, number], RebalanceHistoryRow>(
-                    'SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?'
-                ).all(portfolioId, limit)
-                return rows.map(rowToEvent)
+                whereParts.push('portfolio_id = ?')
+                params.push(portfolioId)
             }
 
-            const rows = this.db.prepare<[number], RebalanceHistoryRow>(
-                'SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?'
-            ).all(limit)
+            if (options.eventSource && options.eventSource !== 'all') {
+                whereParts.push('event_source = ?')
+                params.push(options.eventSource)
+            }
+
+            if (options.onChainConfirmed !== undefined) {
+                whereParts.push('on_chain_confirmed = ?')
+                params.push(options.onChainConfirmed ? 1 : 0)
+            }
+
+            if (options.startTimestamp) {
+                whereParts.push('timestamp >= ?')
+                params.push(options.startTimestamp)
+            }
+
+            if (options.endTimestamp) {
+                whereParts.push('timestamp <= ?')
+                params.push(options.endTimestamp)
+            }
+
+            const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''
+            const rows = this.db.prepare(
+                `SELECT * FROM rebalance_history ${whereSql} ORDER BY timestamp DESC LIMIT ?`
+            ).all(...params, limit) as RebalanceHistoryRow[]
             return rows.map(rowToEvent)
         } catch (err) {
             throw new Error(`Failed to retrieve rebalance history${portfolioId ? ` for portfolio '${portfolioId}'` : ''
@@ -551,15 +725,21 @@ export class DatabaseService {
 
             const insert = this.db.prepare(`
                 INSERT INTO rebalance_history
-                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (
+                        id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details,
+                        event_source, on_chain_confirmed, is_simulated
+                    )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `)
 
             for (const ev of demoEvents) {
                 insert.run(
                     ev.id, ev.portfolioId, ev.timestamp, ev.trigger, ev.trades,
                     ev.gasUsed, ev.status, ev.isAutomatic, null, null,
-                    ev.details ? JSON.stringify(ev.details) : null
+                    ev.details ? JSON.stringify(ev.details) : null,
+                    'simulated',
+                    0,
+                    1
                 )
             }
         } catch (err) {
@@ -597,6 +777,24 @@ export class DatabaseService {
         } catch (err) {
             throw new Error(`Failed to retrieve history stats: ${err}`)
         }
+    }
+
+    getIndexerState(key: string): string | undefined {
+        const row = this.db.prepare<[string], { value: string }>(
+            'SELECT value FROM indexer_state WHERE key = ? LIMIT 1'
+        ).get(key)
+        return row?.value
+    }
+
+    setIndexerState(key: string, value: string): void {
+        const now = new Date().toISOString()
+        this.db.prepare(`
+            INSERT INTO indexer_state (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+        `).run(key, value, now)
     }
 
     // ──────────────────────────────────────────

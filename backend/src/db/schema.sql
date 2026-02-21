@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS rebalance_events (
     gas_used VARCHAR(64) NOT NULL DEFAULT '',
     status VARCHAR(32) NOT NULL CHECK (status IN ('completed', 'failed', 'pending')),
     is_automatic BOOLEAN NOT NULL DEFAULT FALSE,
+    event_source VARCHAR(32) NOT NULL DEFAULT 'offchain',
+    on_chain_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    on_chain_event_type VARCHAR(128),
+    on_chain_tx_hash VARCHAR(128),
+    on_chain_ledger BIGINT,
+    on_chain_contract_id VARCHAR(128),
+    on_chain_paging_token VARCHAR(256),
+    is_simulated BOOLEAN NOT NULL DEFAULT FALSE,
     risk_alerts JSONB,
     error TEXT,
     details JSONB
@@ -27,6 +35,8 @@ CREATE TABLE IF NOT EXISTS rebalance_events (
 
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_portfolio ON rebalance_events(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_timestamp ON rebalance_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_rebalance_events_source ON rebalance_events(event_source, timestamp DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_events_chain_token ON rebalance_events(on_chain_paging_token);
 
 CREATE TABLE IF NOT EXISTS analytics_snapshots (
     id SERIAL PRIMARY KEY,

@@ -37,6 +37,14 @@ export interface RebalanceEvent {
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
     details?: {
         fromAsset?: string
         toAsset?: string

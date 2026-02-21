@@ -1,5 +1,6 @@
 import { RiskManagementService } from './riskManagements.js'
-import { databaseService } from './databaseService.js'
+import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
 
 export interface RebalanceEvent {
@@ -13,6 +14,14 @@ export interface RebalanceEvent {
     isAutomatic?: boolean
     riskAlerts?: any[]
     error?: string
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
     details?: {
         fromAsset?: string
         toAsset?: string
@@ -48,7 +57,18 @@ export class RebalanceHistoryService {
         amount?: number
         prices?: PricesMap
         portfolio?: any
+        eventSource?: RebalanceEvent['eventSource']
+        onChainConfirmed?: boolean
+        onChainEventType?: string
+        onChainTxHash?: string
+        onChainLedger?: number
+        onChainContractId?: string
+        onChainPagingToken?: string
+        isSimulated?: boolean
     }): Promise<RebalanceEvent> {
+        const featureFlags = getFeatureFlags()
+        const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
+            || (featureFlags.demoMode ? 'simulated' : 'offchain')
         const details: RebalanceEvent['details'] = {
             fromAsset: eventData.fromAsset,
             toAsset: eventData.toAsset,
@@ -83,16 +103,28 @@ export class RebalanceHistoryService {
             isAutomatic: eventData.isAutomatic ?? false,
             riskAlerts: eventData.riskAlerts ?? [],
             error: eventData.error,
-            details
+            details,
+            eventSource,
+            onChainConfirmed: eventData.onChainConfirmed,
+            onChainEventType: eventData.onChainEventType,
+            onChainTxHash: eventData.onChainTxHash,
+            onChainLedger: eventData.onChainLedger,
+            onChainContractId: eventData.onChainContractId,
+            onChainPagingToken: eventData.onChainPagingToken,
+            isSimulated: eventData.isSimulated
         })
 
         console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
         return event
     }
 
-    async getRebalanceHistory(portfolioId?: string, limit: number = 50): Promise<RebalanceEvent[]> {
+    async getRebalanceHistory(
+        portfolioId?: string,
+        limit: number = 50,
+        options: RebalanceHistoryQueryOptions = {}
+    ): Promise<RebalanceEvent[]> {
         // Always use databaseService (SQLite)
-        return databaseService.getRebalanceHistory(portfolioId, limit)
+        return databaseService.getRebalanceHistory(portfolioId, limit, options)
     }
 
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {

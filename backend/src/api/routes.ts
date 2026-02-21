@@ -7,6 +7,7 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
 import { notificationService } from '../services/notificationService.js'
+import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { logger } from '../utils/logger.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
@@ -77,6 +78,23 @@ const parseSlippageOverrides = (value: unknown): Record<string, number> | undefi
         if (num !== undefined) parsed[key] = num
     }
     return Object.keys(parsed).length > 0 ? parsed : undefined
+}
+
+const parseOptionalTimestamp = (value: unknown): string | undefined => {
+    if (value === undefined || value === null || value === '') return undefined
+    if (typeof value !== 'string') return undefined
+    const ts = new Date(value)
+    if (Number.isNaN(ts.getTime())) return undefined
+    return ts.toISOString()
+}
+
+const parseHistorySource = (value: unknown): 'all' | 'offchain' | 'simulated' | 'onchain' => {
+    if (typeof value !== 'string') return 'all'
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'offchain') return 'offchain'
+    if (normalized === 'simulated') return 'simulated'
+    if (normalized === 'onchain') return 'onchain'
+    return 'all'
 }
 
 // ================================
@@ -397,54 +415,37 @@ router.get('/rebalance/history', async (req, res) => {
     try {
         const portfolioId = req.query.portfolioId as string
         const limit = parseInt(req.query.limit as string) || 50
+        const source = parseHistorySource(req.query.source)
+        const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp)
+        const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
+        const syncOnChain = parseOptionalBoolean(req.query.syncOnChain) === true
 
         console.log(`[DEBUG] Rebalance history request - portfolioId: ${portfolioId || 'all'}`)
-
-        if (portfolioId) {
-            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
-            if (!portfolio) {
-                console.log(`[DEBUG] Portfolio ${portfolioId} not found`)
-                return res.json({
-                    success: true,
-                    history: [],
-                    count: 0,
-                    message: 'No history found for this portfolio'
-                })
-            }
-
-            // Get history for this specific portfolio
-            let history = await rebalanceHistoryService.getRebalanceHistory(portfolioId, limit)
-
-            // If no history, create initial event
-            if (history.length === 0) {
-                console.log(`[DEBUG] Creating initial history for portfolio ${portfolioId}`)
-                await rebalanceHistoryService.recordRebalanceEvent({
-                    portfolioId,
-                    trigger: 'Portfolio Created',
-                    trades: 0,
-                    gasUsed: '0 XLM',
-                    status: 'completed',
-                    isAutomatic: false
-                })
-                history = await rebalanceHistoryService.getRebalanceHistory(portfolioId, limit)
-            }
-
-            console.log(`[DEBUG] Returning ${history.length} events for portfolio ${portfolioId}`)
-            return res.json({
-                success: true,
-                history,
-                count: history.length,
-                portfolioId
-            })
-        } else {
-            // Return general history for dashboard
-            const history = await rebalanceHistoryService.getRebalanceHistory(undefined, limit)
-            return res.json({
-                success: true,
-                history,
-                count: history.length
-            })
+        if (syncOnChain) {
+            await contractEventIndexerService.syncOnce()
         }
+
+        const history = await rebalanceHistoryService.getRebalanceHistory(
+            portfolioId || undefined,
+            limit,
+            {
+                eventSource: source,
+                startTimestamp,
+                endTimestamp
+            }
+        )
+
+        return res.json({
+            success: true,
+            history,
+            count: history.length,
+            portfolioId: portfolioId || undefined,
+            filters: {
+                source,
+                startTimestamp,
+                endTimestamp
+            }
+        })
 
     } catch (error) {
         console.error('[ERROR] Rebalance history failed:', error)
@@ -475,6 +476,23 @@ router.post('/rebalance/history', async (req, res) => {
         })
     } catch (error) {
         console.error('[ERROR] Failed to record rebalance event:', error)
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+router.post('/rebalance/history/sync-onchain', requireAdmin, async (req, res) => {
+    try {
+        const result = await contractEventIndexerService.syncOnce()
+        res.json({
+            success: true,
+            ...result,
+            indexer: contractEventIndexerService.getStatus(),
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
         res.status(500).json({
             success: false,
             error: getErrorMessage(error)
@@ -831,6 +849,7 @@ router.get('/system/status', async (req, res) => {
         // Auto-rebalancer status
         const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
         const autoRebalancerStats = autoRebalancer ? await autoRebalancer.getStatistics() : null
+        const onChainIndexerStatus = contractEventIndexerService.getStatus()
 
         res.json({
             success: true,
@@ -855,12 +874,14 @@ router.get('/system/status', async (req, res) => {
                 statistics: autoRebalancerStats,
                 enabled: !!autoRebalancer
             },
+            onChainIndexer: onChainIndexerStatus,
             services: {
                 priceFeeds: priceSourcesHealthy,
                 riskManagement: true,
                 webSockets: true,
                 autoRebalancing: autoRebalancerStatus.isRunning,
-                stellarNetwork: true
+                stellarNetwork: true,
+                contractEventIndexer: onChainIndexerStatus.enabled
             },
             featureFlags: publicFeatureFlags
         })
