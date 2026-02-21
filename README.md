@@ -261,6 +261,22 @@ cd backend && npm test
 
 # Smart contract tests
 cd contracts && cargo test
+
+Docker Deployment
+bash# Validate compose file
+docker compose -f deployment/docker-compose.yml config
+
+# Build deployable images
+docker compose -f deployment/docker-compose.yml build frontend backend
+
+# Start deployment stack
+docker compose -f deployment/docker-compose.yml up --build -d
+
+Deployment file layout:
+- deployment/docker-compose.yml
+- backend/Dockerfile
+- frontend/Dockerfile
+- frontend/nginx.conf
 Hackathon Submission
 This project was built for [Hackathon Name] and demonstrates:
 

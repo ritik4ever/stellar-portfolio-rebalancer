@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'frontend/**'
+      - 'deployment/**'
       - '.github/workflows/backend-tests.yml'
   push:
     branches:
@@ -11,6 +13,8 @@ on:
       - develop
     paths:
       - 'backend/**'
+      - 'frontend/**'
+      - 'deployment/**'
 
 jobs:
   test:
@@ -46,3 +50,9 @@ jobs:
           name: test-results-${{ matrix.node-version }}
           path: backend/coverage/
           if-no-files-found: ignore
+
+      - name: Validate deployment compose config and build
+        if: matrix.node-version == '20.x'
+        run: |
+          docker compose -f deployment/docker-compose.yml config
+          docker compose -f deployment/docker-compose.yml build frontend backend
