@@ -69,16 +69,20 @@ export async function processPortfolioCheckJob(
                 continue
             }
 
-            // Check cooldown
-            const p = await stellarService.getPortfolio(portfolio.id)
-            const cooldownCheck = CircuitBreakers.checkCooldownPeriod(p.lastRebalance)
+            // Use the stored portfolio directly for risk checks.
+            // stellarService.getPortfolio() returns a UI response with allocations as an
+            // array, which would corrupt weight calculations in shouldAllowRebalance.
+            const storedPortfolio = portfolio  // already the stored shape from getAllPortfolios()
+
+            // Check cooldown using last-rebalance timestamp from stored portfolio
+            const cooldownCheck = CircuitBreakers.checkCooldownPeriod(storedPortfolio.lastRebalance)
             if (!cooldownCheck.safe) {
                 skipped++
                 continue
             }
 
-            // Risk management
-            const riskCheck = riskManagementService.shouldAllowRebalance(p, prices)
+            // Risk management — pass stored portfolio with Record<string, number> allocations
+            const riskCheck = riskManagementService.shouldAllowRebalance(storedPortfolio, prices)
             if (!riskCheck.allowed) {
                 logger.warn('[WORKER:portfolio-check] Rebalance blocked by risk management', {
                     portfolioId: portfolio.id,
@@ -89,7 +93,7 @@ export async function processPortfolioCheckJob(
             }
 
             // Concentration risk
-            const concentrationCheck = CircuitBreakers.checkConcentrationRisk(p.allocations)
+            const concentrationCheck = CircuitBreakers.checkConcentrationRisk(storedPortfolio.allocations)
             if (!concentrationCheck.safe) {
                 skipped++
                 continue
