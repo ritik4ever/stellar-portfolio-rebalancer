@@ -1,15 +1,3 @@
-CREATE TABLE IF NOT EXISTS portfolios (
-    id VARCHAR(64) PRIMARY KEY,
-    user_address VARCHAR(256) NOT NULL,
-    allocations JSONB NOT NULL DEFAULT '{}',
-    threshold INTEGER NOT NULL,
-    balances JSONB NOT NULL DEFAULT '{}',
-    total_value NUMERIC NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_rebalance TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_address);
 
 CREATE TABLE IF NOT EXISTS rebalance_events (
     id VARCHAR(64) PRIMARY KEY,

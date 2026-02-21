@@ -119,11 +119,31 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
         )
     }
 
+    // NEW: Show skeleton loading state for chart
     if (loading) {
         return (
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+            <div className="space-y-6">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="w-48 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
+                        <div className="w-32 h-8 bg-gray-300 dark:bg-gray-700 rounded" />
+                    </div>
+                    {/* Skeleton chart area */}
+                    <div className="h-80 bg-gray-200 dark:bg-gray-700 rounded" />
+                </div>
+
+                {/* Skeleton metrics grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                        <div key={i} className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm animate-pulse">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                                <div className="w-4 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
+                            </div>
+                            <div className="w-16 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-2" />
+                            <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                        </div>
+                    ))}
                 </div>
             </div>
         )

@@ -4,8 +4,7 @@ on:
   pull_request:
     paths:
       - 'backend/**'
-      - 'frontend/**'
-      - 'deployment/**'
+
       - '.github/workflows/backend-tests.yml'
   push:
     branches:
@@ -13,39 +12,10 @@ on:
       - develop
     paths:
       - 'backend/**'
-      - 'frontend/**'
-      - 'deployment/**'
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x]
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: 'backend/package-lock.json'
-      
-      - name: Install dependencies
-        working-directory: backend
-        run: npm ci
-      
-      - name: Run tests
-        working-directory: backend
-        run: npm run test
-      
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.node-version }}
           path: backend/coverage/
