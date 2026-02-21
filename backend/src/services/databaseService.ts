@@ -1,35 +1,3 @@
-import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
-import type { RebalanceEvent } from './rebalanceHistory.js'
-import { getFeatureFlags } from '../config/featureFlags.js'
-
-// ─────────────────────────────────────────────
-// Types (mirrored from portfolioStorage.ts)
-// ─────────────────────────────────────────────
-
-export interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
-    lastRebalance: string
-}
-
-// Raw row shape as stored in SQLite
-interface PortfolioRow {
-    id: string
-    user_address: string
-    allocations: string
-    threshold: number
-    balances: string
-    total_value: number
-    created_at: string
-    last_rebalance: string
-}
 
 interface RebalanceHistoryRow {
     id: string
@@ -52,25 +20,6 @@ interface RebalanceHistoryRow {
     on_chain_paging_token: string | null
     is_simulated: number | null
 }
-
-// ─────────────────────────────────────────────
-// Schema SQL
-// ─────────────────────────────────────────────
-
-const SCHEMA_SQL = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS portfolios (
-    id            TEXT PRIMARY KEY,
-    user_address  TEXT NOT NULL,
-    allocations   TEXT NOT NULL,
-    threshold     REAL NOT NULL,
-    balances      TEXT NOT NULL,
-    total_value   REAL NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL,
-    last_rebalance TEXT NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS rebalance_history (
     id            TEXT PRIMARY KEY,
@@ -116,57 +65,7 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     captured_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS indexer_state (
-    key         TEXT PRIMARY KEY,
-    value       TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-);
-`
 
-// ─────────────────────────────────────────────
-// Demo seed data
-// ─────────────────────────────────────────────
-
-const DEMO_PORTFOLIO_ID = 'demo-portfolio-1'
-
-function seedDemoData(db: Database.Database): void {
-    const existingDemo = db.prepare<[string], PortfolioRow>('SELECT id FROM portfolios WHERE id = ?').get(DEMO_PORTFOLIO_ID)
-    if (existingDemo) return  // already seeded
-
-    const now = new Date().toISOString()
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
-
-    const allocations = { XLM: 40, BTC: 30, ETH: 20, USDC: 10 }
-    const balances = { XLM: 11173.18, BTC: 0.02697, ETH: 0.68257, USDC: 1000 }
-
-    db.prepare(`
-        INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        DEMO_PORTFOLIO_ID,
-        'DEMO-USER',
-        JSON.stringify(allocations),
-        5,
-        JSON.stringify(balances),
-        10000,
-        now,
-        now
-    )
-
-    const historyRows = [
-        {
-            id: 'demo-evt-1',
-            portfolioId: DEMO_PORTFOLIO_ID,
-            timestamp: twoHoursAgo,
-            trigger: 'Threshold exceeded (8.2%)',
-            trades: 3,
-            gasUsed: '0.0234 XLM',
-            status: 'completed',
-            isAutomatic: 0,
-            riskAlerts: null,
-            error: null,
             details: JSON.stringify({
                 fromAsset: 'XLM', toAsset: 'ETH', amount: 1200,
                 reason: 'Portfolio allocation drift exceeded rebalancing threshold',
@@ -233,40 +132,6 @@ function seedDemoData(db: Database.Database): void {
         )
     }
 
-    console.log('[DB] Demo data seeded (portfolio + 3 history events)')
-}
-
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-
-/**
- * Safely parse a JSON string. Returns `fallback` instead of throwing
- * when the stored value is null, empty, or malformed.
- */
-function safeJsonParse<T>(value: string | null | undefined, fallback: T, context: string): T {
-    if (!value) return fallback
-    try {
-        return JSON.parse(value) as T
-    } catch {
-        console.error(`[DB] Failed to parse JSON for ${context}:`, value)
-        return fallback
-    }
-}
-
-function rowToPortfolio(row: PortfolioRow): Portfolio {
-    return {
-        id: row.id,
-        userAddress: row.user_address,
-        allocations: safeJsonParse(row.allocations, {}, `portfolio(${row.id}).allocations`),
-        threshold: row.threshold,
-        balances: safeJsonParse(row.balances, {}, `portfolio(${row.id}).balances`),
-        totalValue: row.total_value,
-        createdAt: row.created_at,
-        lastRebalance: row.last_rebalance
-    }
-}
-
 function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
     return {
         id: row.id,
@@ -292,7 +157,7 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
 }
 
 function generateId(): string {
-    return Date.now().toString() + Math.random().toString(36).substring(2, 9)
+    return randomUUID()
 }
 
 export interface RebalanceHistoryQueryOptions {
@@ -314,39 +179,10 @@ export class DatabaseService {
         mkdirSync(dirname(dbPath), { recursive: true })
         this.db = new Database(dbPath)
         this.db.exec(SCHEMA_SQL)
-        this.ensureRebalanceHistorySchema()
-        this.ensureIndexerStateSchema()
 
-        // Seed demo data on first run (empty portfolios table)
-        const count = (this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }).cnt
-        if (count === 0 && getFeatureFlags().enableDemoDbSeed) {
-            seedDemoData(this.db)
         }
 
-        console.log(`[DB] SQLite database ready at: ${dbPath}`)
-    }
 
-    private ensureRebalanceHistorySchema(): void {
-        const columns = this.db.prepare(`PRAGMA table_info('rebalance_history')`).all() as Array<{ name: string }>
-        const names = new Set(columns.map(c => c.name))
-
-        const addColumn = (name: string, definition: string) => {
-            if (names.has(name)) return
-            this.db.exec(`ALTER TABLE rebalance_history ADD COLUMN ${name} ${definition}`)
-            names.add(name)
-        }
-
-        addColumn('event_source', "TEXT NOT NULL DEFAULT 'offchain'")
-        addColumn('on_chain_confirmed', 'INTEGER NOT NULL DEFAULT 0')
-        addColumn('on_chain_event_type', 'TEXT')
-        addColumn('on_chain_tx_hash', 'TEXT')
-        addColumn('on_chain_ledger', 'INTEGER')
-        addColumn('on_chain_contract_id', 'TEXT')
-        addColumn('on_chain_paging_token', 'TEXT')
-        addColumn('is_simulated', 'INTEGER NOT NULL DEFAULT 0')
-
-        this.db.exec('CREATE INDEX IF NOT EXISTS idx_rebalance_history_event_source ON rebalance_history (event_source, timestamp)')
-        this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_history_chain_paging_token ON rebalance_history (on_chain_paging_token)')
     }
 
     private ensureIndexerStateSchema(): void {
@@ -410,87 +246,6 @@ export class DatabaseService {
         try {
             const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
             return row ? rowToPortfolio(row) : undefined
-        } catch (err) {
-            throw new Error(`Failed to retrieve portfolio '${id}': ${err}`)
-        }
-    }
-
-    getUserPortfolios(userAddress: string): Portfolio[] {
-        try {
-            const rows = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE user_address = ?').all(userAddress)
-            return rows.map(rowToPortfolio)
-        } catch (err) {
-            throw new Error(`Failed to retrieve portfolios for user '${userAddress}': ${err}`)
-        }
-    }
-
-    updatePortfolio(id: string, updates: Partial<Portfolio>): boolean {
-        try {
-            const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
-            if (!row) return false
-
-            const current = rowToPortfolio(row)
-            const merged = { ...current, ...updates }
-
-            this.db.prepare(`
-                UPDATE portfolios
-                SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
-                    total_value = ?, last_rebalance = ?
-                WHERE id = ?
-            `).run(
-                merged.userAddress,
-                JSON.stringify(merged.allocations),
-                merged.threshold,
-                JSON.stringify(merged.balances),
-                merged.totalValue,
-                merged.lastRebalance,
-                id
-            )
-            return true
-        } catch (err) {
-            throw new Error(`Failed to update portfolio '${id}': ${err}`)
-        }
-    }
-
-    getAllPortfolios(): Portfolio[] {
-        try {
-            const rows = this.db.prepare<[], PortfolioRow>('SELECT * FROM portfolios').all()
-            return rows.map(rowToPortfolio)
-        } catch (err) {
-            throw new Error(`Failed to retrieve all portfolios: ${err}`)
-        }
-    }
-
-    getPortfolioCount(): number {
-        try {
-            const result = this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }
-            return result.cnt
-        } catch (err) {
-            throw new Error(`Failed to count portfolios: ${err}`)
-        }
-    }
-
-    deletePortfolio(id: string): boolean {
-        try {
-            const result = this.db.prepare('DELETE FROM portfolios WHERE id = ?').run(id)
-            return result.changes > 0
-        } catch (err) {
-            throw new Error(`Failed to delete portfolio '${id}': ${err}`)
-        }
-    }
-
-    clearAll(): void {
-        try {
-            this.db.prepare('DELETE FROM rebalance_history').run()
-            this.db.prepare('DELETE FROM portfolios').run()
-        } catch (err) {
-            throw new Error(`Failed to clear all data: ${err}`)
-        }
-    }
-
-    // ──────────────────────────────────────────
-    // Rebalance history methods
-    // ──────────────────────────────────────────
 
     recordRebalanceEvent(eventData: {
         portfolioId: string
