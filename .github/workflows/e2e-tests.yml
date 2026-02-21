@@ -1,0 +1,76 @@
+name: Playwright E2E Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: stellartest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install Dependencies (All)
+      run: npm run install:all
+
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps chromium
+      working-directory: ./frontend
+
+    - name: Setup Backend Database
+      env:
+        DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
+      run: |
+        npm run db:migrate
+        npm run db:seed:e2e
+      working-directory: ./backend
+
+    - name: Start Backend Services
+      env:
+        PORT: 3001
+        DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
+      run: |
+        npm run build
+        npm start &
+        echo "Backend started"
+        sleep 5
+      working-directory: ./backend
+
+    - name: Run Playwright tests
+      env:
+        VITE_API_URL: http://localhost:3001
+        VITE_E2E_MOCK_WALLET: true
+      run: npx playwright test
+      working-directory: ./frontend
+
+    - name: Upload artifact on failure
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report
+        path: frontend/playwright-report/
+        retention-days: 30

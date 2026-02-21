@@ -1,6 +1,7 @@
 import { SorobanRpc } from '@stellar/stellar-sdk'
 import type { PricesMap, PriceData } from '../types/index.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
+import { logger } from '../utils/logger.js' // Added logger import
 
 export class ReflectorService {
     private coinGeckoApiKey: string
@@ -25,20 +26,20 @@ export class ReflectorService {
 
     async getCurrentPrices(): Promise<PricesMap> {
         try {
-            console.log('[DEBUG] Fetching prices from CoinGecko with smart caching')
+            logger.info('[DEBUG] Fetching prices from CoinGecko with smart caching')
             const assets = ['XLM', 'BTC', 'ETH', 'USDC']
 
             // Check if we have fresh cached data for all assets
             const cachedPrices = this.getCachedPrices(assets)
             if (Object.keys(cachedPrices).length === assets.length) {
-                console.log('[DEBUG] Using cached prices for all assets')
+                logger.info('[DEBUG] Using cached prices for all assets')
                 return cachedPrices
             }
 
             // Check rate limiting more strictly
             const now = Date.now()
             if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
-                console.log('[DEBUG] Rate limiting - using cached prices only')
+                logger.info('[DEBUG] Rate limiting - using cached prices only')
                 if (Object.keys(cachedPrices).length > 0) {
                     return cachedPrices
                 }
@@ -60,7 +61,7 @@ export class ReflectorService {
             const assets = ['XLM', 'BTC', 'ETH', 'USDC']
             const cachedPrices = this.getCachedPrices(assets)
             if (Object.keys(cachedPrices).length > 0) {
-                console.log('[DEBUG] Using cached prices due to API error')
+                logger.info('[DEBUG] Using cached prices due to API error')
                 return cachedPrices
             }
 
@@ -91,7 +92,7 @@ export class ReflectorService {
 
         // Rate limiting - don't make requests too frequently
         if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
-            console.log('[DEBUG] Rate limiting - using cached prices')
+            logger.info('[DEBUG] Rate limiting - using cached prices')
             return {}
         }
 
@@ -102,8 +103,8 @@ export class ReflectorService {
 
             // FIXED: Use correct API endpoints
             const baseUrl = 'https://api.coingecko.com/api/v3'
-            console.log('[DEBUG] Using API:', apiKey ? 'CoinGecko Pro' : 'CoinGecko Free')
-            console.log('[DEBUG] Base URL:', baseUrl)
+            logger.info('[DEBUG] Using API:', apiKey ? 'CoinGecko Pro' : 'CoinGecko Free')
+            logger.info('[DEBUG] Base URL:', baseUrl)
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -116,7 +117,7 @@ export class ReflectorService {
                 .filter(Boolean)
                 .join(',')
 
-            console.log('[DEBUG] Coin IDs:', coinIds)
+            logger.info('[DEBUG] Coin IDs:', coinIds)
 
             // FIXED: Correct API endpoint and parameters
             const endpoint = '/simple/price'
@@ -128,8 +129,8 @@ export class ReflectorService {
             })
 
             const url = `${baseUrl}${endpoint}?${params.toString()}`
-            console.log('[DEBUG] Full URL:', url)
-            console.log('[DEBUG] Headers:', headers)
+            logger.info('[DEBUG] Full URL:', url)
+            logger.info('[DEBUG] Headers:', headers)
 
             const controller = new AbortController()
             const timeoutId = setTimeout(() => controller.abort(), 15000)
@@ -142,8 +143,8 @@ export class ReflectorService {
 
             clearTimeout(timeoutId)
 
-            console.log('[DEBUG] Response status:', response.status)
-            console.log('[DEBUG] Response headers:', Object.fromEntries(response.headers.entries()))
+            logger.info('[DEBUG] Response status:', response.status)
+            logger.info('[DEBUG] Response headers:', Object.fromEntries(response.headers.entries()))
 
             if (!response.ok) {
                 // Get the actual error response
@@ -169,7 +170,7 @@ export class ReflectorService {
             }
 
             const data = await response.json()
-            console.log('[DEBUG] CoinGecko response data:', data)
+            logger.info('[DEBUG] CoinGecko response data:', data)
 
             const prices: PricesMap = {}
 
