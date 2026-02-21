@@ -1,33 +1,35 @@
-version: '3.8'
-
 services:
-  # Frontend service
   frontend:
     build:
       context: ../frontend
-      dockerfile: ../deployment/Dockerfile.frontend
+      dockerfile: Dockerfile
     container_name: portfolio-frontend
     restart: unless-stopped
+    ports:
+      - "3000:80"
     environment:
-      - NODE_ENV=production
-    volumes:
-      - frontend_dist:/app/dist
+      - NODE_ENV=${NODE_ENV:-development}
     depends_on:
       - backend
 
-  # Backend service
   backend:
     build:
       context: ../backend
-      dockerfile: ../deployment/Dockerfile.backend
+      dockerfile: Dockerfile
     container_name: portfolio-backend
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-development}
       - PORT=3001
-      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
-      - REFLECTOR_ADDRESS=${REFLECTOR_ADDRESS}
-      - STELLAR_NETWORK=${STELLAR_NETWORK}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I}
+      - REFLECTOR_ADDRESS=${REFLECTOR_ADDRESS:-}
+      - STELLAR_NETWORK=${STELLAR_NETWORK:-testnet}
+      - STELLAR_HORIZON_URL=${STELLAR_HORIZON_URL:-https://horizon-testnet.stellar.org}
+      - ENABLE_AUTO_REBALANCER=${ENABLE_AUTO_REBALANCER:-false}
+      - DEMO_MODE=${DEMO_MODE:-true}
+      - ALLOW_DEMO_BALANCE_FALLBACK=${ALLOW_DEMO_BALANCE_FALLBACK:-true}
+      - ALLOW_FALLBACK_PRICES=${ALLOW_FALLBACK_PRICES:-true}
+      - ENABLE_DEBUG_ROUTES=${ENABLE_DEBUG_ROUTES:-false}
     ports:
       - "3001:3001"
     depends_on:
@@ -35,7 +37,6 @@ services:
     volumes:
       - ./logs:/app/logs
 
-  # Redis for caching and session storage
   redis:
     image: redis:7-alpine
     container_name: portfolio-redis
@@ -46,40 +47,31 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
 
-  # Nginx reverse proxy
-  nginx:
-    image: nginx:alpine
-    container_name: portfolio-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - frontend_dist:/usr/share/nginx/html:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - frontend
-      - backend
-
-  # Monitoring service (optional)
   monitoring:
     build:
       context: ../backend
-      dockerfile: ../deployment/Dockerfile.monitoring
+      dockerfile: Dockerfile
     container_name: portfolio-monitoring
     restart: unless-stopped
+    profiles:
+      - monitoring
+    command: ["node", "dist/index.js"]
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3002
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I}
+      - STELLAR_NETWORK=${STELLAR_NETWORK:-testnet}
+      - STELLAR_HORIZON_URL=${STELLAR_HORIZON_URL:-https://horizon-testnet.stellar.org}
+      - DEMO_MODE=${DEMO_MODE:-true}
+      - ALLOW_DEMO_BALANCE_FALLBACK=${ALLOW_DEMO_BALANCE_FALLBACK:-true}
+      - ALLOW_FALLBACK_PRICES=${ALLOW_FALLBACK_PRICES:-true}
       - REDIS_URL=redis://redis:6379
     depends_on:
       - redis
       - backend
 
 volumes:
-  frontend_dist:
   redis_data:
-
 
 networks:
   default:

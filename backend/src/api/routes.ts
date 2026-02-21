@@ -29,6 +29,7 @@ const parseHistorySource = (value: unknown): 'all' | 'offchain' | 'simulated' | 
     return 'all'
 }
 
+
 router.get('/rebalance/history', async (req, res) => {
     try {
         const portfolioId = req.query.portfolioId as string
@@ -156,7 +157,7 @@ router.get('/risk/metrics/:portfolioId', async (req, res) => {
                 concentrationRisk: 0,
                 liquidityRisk: 0,
                 correlationRisk: 0,
-                overallRiskLevel: 'low' as const
+
             }
         })
     }
