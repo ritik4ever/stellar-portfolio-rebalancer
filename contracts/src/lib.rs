@@ -53,6 +53,10 @@ impl PortfolioRebalancer {
         };
         
         env.storage().persistent().set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        env.events().publish(
+            ("portfolio", "created"),
+            (portfolio_id, user)
+        );
         Ok(portfolio_id)
     }
 
@@ -89,6 +93,10 @@ impl PortfolioRebalancer {
         portfolio.current_balances.set(asset, current_balance + amount);
         
         env.storage().persistent().set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        env.events().publish(
+            ("portfolio", "deposit"),
+            (portfolio_id, asset, amount)
+        );
     }
 
     pub fn check_rebalance_needed(env: Env, portfolio_id: u64) -> bool {
@@ -168,7 +176,7 @@ impl PortfolioRebalancer {
         env.storage().persistent().set(&DataKey::Portfolio(portfolio_id), &portfolio);
         
         env.events().publish(
-            ("rebalance", "executed"),
+            ("portfolio", "rebalanced"),
             (portfolio_id, current_time)
         );
     }
