@@ -4,10 +4,13 @@ import cors from 'cors'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
+import { v1Router } from './api/v1Router.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { globalRateLimiter } from './middleware/rateLimit.js'
+import { legacyApiDeprecation } from './middleware/legacyApiDeprecation.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
+import { contractEventIndexerService } from './services/contractEventIndexer.js'
 import { logger } from './utils/logger.js'
 import { databaseService } from './services/databaseService.js'
 import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
@@ -161,15 +164,16 @@ app.get('/', (req, res) => {
             health: '/health',
             corsTest: '/test/cors',
             coinGeckoTest: '/test/coingecko',
-            autoRebalancerStatus: '/api/auto-rebalancer/status',
-            queueHealth: '/api/queue/health'
+            autoRebalancerStatus: '/api/v1/auto-rebalancer/status',
+            queueHealth: '/api/v1/queue/health'
         }
     })
 })
 
 // Mount API routes
-app.use('/api', portfolioRouter)
-app.use('/', portfolioRouter)
+app.use('/api/v1', v1Router)
+app.use('/api', legacyApiDeprecation, portfolioRouter)
+app.use('/', legacyApiDeprecation, portfolioRouter)
 
 // 404 handler
 app.use((req, res) => {
@@ -180,9 +184,10 @@ app.use((req, res) => {
         url: req.url,
         availableEndpoints: {
             health: '/health',
-            api: '/api/*',
-            autoRebalancer: '/api/auto-rebalancer/*',
-            queueHealth: '/api/queue/health'
+            api: '/api/v1/*',
+            legacyApi: '/api/*',
+            autoRebalancer: '/api/v1/auto-rebalancer/*',
+            queueHealth: '/api/v1/queue/health'
         }
     })
 })
@@ -282,8 +287,9 @@ server.listen(port, async () => {
     console.log(`  Health: http://localhost:${port}/health`)
     console.log(`  CORS Test: http://localhost:${port}/test/cors`)
     console.log(`  CoinGecko Test: http://localhost:${port}/test/coingecko`)
-    console.log(`  Auto-Rebalancer Status: http://localhost:${port}/api/auto-rebalancer/status`)
-    console.log(`  Queue Health: http://localhost:${port}/api/queue/health`)
+    console.log(`  Auto-Rebalancer Status: http://localhost:${port}/api/v1/auto-rebalancer/status`)
+    console.log(`  Queue Health: http://localhost:${port}/api/v1/queue/health`)
+    console.log(`  Legacy API (Deprecated): http://localhost:${port}/api/*`)
 })
 
 // Graceful shutdown
