@@ -1,14 +1,4 @@
 
-import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
-import { getFeatureFlags, getPublicFeatureFlags } from './config/featureFlags.js'
-import { isRedisAvailable, logQueueStartup } from './queue/connection.js'
-import { closeAllQueues } from './queue/queues.js'
-import { startQueueScheduler } from './queue/scheduler.js'
-import { startPortfolioCheckWorker, stopPortfolioCheckWorker } from './queue/workers/portfolioCheckWorker.js'
-import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
-
-    if (shouldStartAutoRebalancer) {
         try {
             console.log('[AUTO-REBALANCER] Starting automatic rebalancing service...')
             await autoRebalancer.start()
@@ -27,17 +17,7 @@ import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './que
         } catch (error) {
             console.error('[AUTO-REBALANCER] ❌ Failed to start automatic rebalancing service:', error)
         }
-    } else {
-        console.log('[AUTO-REBALANCER] Automatic rebalancing disabled in development mode')
-        console.log('[AUTO-REBALANCER] Set ENABLE_AUTO_REBALANCER=true to enable in development')
-    }
 
-
-    try {
-        await contractEventIndexerService.start()
-    } catch (error) {
-        console.error('[CHAIN-INDEXER] Failed to start:', error)
-    }
 
     console.log('Available endpoints:')
     console.log(`  Health: http://localhost:${port}/health`)
@@ -51,10 +31,7 @@ import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './que
 const gracefulShutdown = async (signal: string) => {
     console.log(`\n[SHUTDOWN] ${signal} received, shutting down gracefully...`)
 
-    // Stop auto-rebalancer
-    try {
-        autoRebalancer.stop()
-        console.log('[SHUTDOWN] Auto-rebalancer stopped')
+
     } catch (error) {
         console.error('[SHUTDOWN] Error stopping auto-rebalancer:', error)
     }
@@ -79,18 +56,7 @@ const gracefulShutdown = async (signal: string) => {
         console.error('[SHUTDOWN] Error closing queues:', error)
     }
 
-    // Close database connection
-    try {
-        await contractEventIndexerService.stop()
-        console.log('[SHUTDOWN] Contract event indexer stopped')
-    } catch (error) {
-        console.error('[SHUTDOWN] Error stopping contract event indexer:', error)
-    }
 
-    try {
-        databaseService.close()
-        console.log('[SHUTDOWN] Database connection closed')
-    } catch (error) {
         console.error('[SHUTDOWN] Error closing database:', error)
     }
 
