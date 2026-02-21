@@ -1,7 +1,7 @@
 import { Worker, Job } from 'bullmq'
 import { getConnectionOptions } from '../connection.js'
 import { StellarService } from '../../services/stellar.js'
-import { RebalanceHistoryService } from '../../services/rebalanceHistory.js'
+import { rebalanceHistoryService } from '../../services/serviceContainer.js'
 import { notificationService } from '../../services/notificationService.js'
 import { logger } from '../../utils/logger.js'
 import type { RebalanceJobData } from '../queues.js'
@@ -24,8 +24,6 @@ export async function processRebalanceJob(
     })
 
     const stellarService = new StellarService()
-    const rebalanceHistoryService = new RebalanceHistoryService()
-
     try {
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const rebalanceResult = await stellarService.executeRebalance(portfolioId)

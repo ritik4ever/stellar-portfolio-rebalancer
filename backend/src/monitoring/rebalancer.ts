@@ -1,8 +1,7 @@
 import { WebSocketServer } from 'ws'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
-import { RebalanceHistoryService } from '../services/rebalanceHistory.js'
-import { RiskManagementService } from '../services/riskManagements.js'
+import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { logger } from '../utils/logger.js'
@@ -11,15 +10,11 @@ import type { Portfolio, RiskAlert } from '../types/index.js'
 export class RebalancingService {
     private stellarService: StellarService
     private reflectorService: ReflectorService
-    private rebalanceHistoryService: RebalanceHistoryService
-    private riskManagementService: RiskManagementService
     private wss: WebSocketServer
 
     constructor(wss: WebSocketServer) {
         this.stellarService = new StellarService()
         this.reflectorService = new ReflectorService()
-        this.rebalanceHistoryService = new RebalanceHistoryService()
-        this.riskManagementService = new RiskManagementService()
         this.wss = wss
     }
 
@@ -51,8 +46,8 @@ export class RebalancingService {
     }
 
     async getStatus(): Promise<any> {
-        const stats = await this.rebalanceHistoryService.getHistoryStats()
-        const circuitBreakers = this.riskManagementService.getCircuitBreakerStatus()
+        const stats = await rebalanceHistoryService.getHistoryStats()
+        const circuitBreakers = riskManagementService.getCircuitBreakerStatus()
         const active = await this.getActivePortfolios()
         return {
             activePortfolios: active.length,
@@ -69,12 +64,12 @@ export class RebalancingService {
             const prices = await this.reflectorService.getCurrentPrices()
             const portfolio = await this.stellarService.getPortfolio(portfolioId)
 
-            const riskAlerts = this.riskManagementService.updatePriceData(prices)
+            const riskAlerts = riskManagementService.updatePriceData(prices)
             const needsRebalance = await this.stellarService.checkRebalanceNeeded(portfolioId)
 
             if (needsRebalance) {
                 logger.info(`Portfolio ${portfolioId} needs rebalancing – enqueueing job`)
-                const riskCheck = this.riskManagementService.shouldAllowRebalance(portfolio, prices)
+                const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
 
                 if (riskCheck.allowed) {
                     // Enqueue a rebalance job rather than executing inline
@@ -97,7 +92,7 @@ export class RebalancingService {
                         alerts: riskCheck.alerts,
                     })
 
-                    await this.rebalanceHistoryService.recordRebalanceEvent({
+                    await rebalanceHistoryService.recordRebalanceEvent({
                         portfolioId,
                         trigger: 'Automatic Check – Blocked',
                         trades: 0,

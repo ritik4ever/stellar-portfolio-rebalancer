@@ -39,8 +39,8 @@ export interface RebalanceEvent {
 export class RebalanceHistoryService {
     private riskService: RiskManagementService
 
-    constructor() {
-        this.riskService = new RiskManagementService()
+    constructor(riskService?: RiskManagementService) {
+        this.riskService = riskService ?? new RiskManagementService()
     }
 
     async recordRebalanceEvent(eventData: {

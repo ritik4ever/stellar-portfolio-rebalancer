@@ -9,6 +9,7 @@ import {
     type RebalanceExecutionConfig
 } from './dex.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
+import { rebalanceHistoryService, riskManagementService } from './serviceContainer.js'
 
 interface StoredPortfolio {
     id: string
@@ -195,8 +196,6 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { CircuitBreakers } = await import('./circuitBreakers.js')
             const { ReflectorService } = await import('./reflector.js')
-            const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
-            const { RiskManagementService } = await import('./riskManagements.js')
 
             const portfolio = await portfolioStorage.getPortfolio(portfolioId) as StoredPortfolio | undefined
             if (!portfolio) {
@@ -204,13 +203,11 @@ export class StellarService {
             }
 
             const reflector = new ReflectorService()
-            const rebalanceHistory = new RebalanceHistoryService()
-            const riskService = new RiskManagementService()
             const prices = await reflector.getCurrentPrices()
 
-            const riskCheck = riskService.shouldAllowRebalance(portfolio, prices)
+            const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
             if (!riskCheck.allowed) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Risk Management Block',
                     trades: 0,
@@ -228,7 +225,7 @@ export class StellarService {
             const hourInMs = 60 * 60 * 1000
 
             if (now - lastRebalance < hourInMs) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Cooldown Period Active',
                     trades: 0,
@@ -243,7 +240,7 @@ export class StellarService {
 
             const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
             if (!marketCheck.safe) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Circuit Breaker Triggered',
                     trades: 0,
@@ -258,7 +255,7 @@ export class StellarService {
 
             const needed = await this.checkRebalanceNeeded(portfolioId)
             if (!needed) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'No Rebalance Needed',
                     trades: 0,
@@ -276,7 +273,7 @@ export class StellarService {
                 throw new Error('No executable trades generated from current drift')
             }
 
-            await rebalanceHistory.recordRebalanceEvent({
+            await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Rebalance Started',
                 trades: 0,
@@ -323,7 +320,7 @@ export class StellarService {
             const failureReasons = dexResult.failedTrades.map(t => t.failureReason).filter(Boolean) as string[]
             const historyStatus = dexResult.status === 'failed' ? 'failed' : 'completed'
 
-            const event = await rebalanceHistory.recordRebalanceEvent({
+            const event = await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: dexResult.status === 'failed'
                     ? `Execution Failed: ${dexResult.failureReason || 'unknown reason'}`
@@ -362,15 +359,10 @@ export class StellarService {
                 totalSlippageBps: dexResult.totalSlippageBps
             }
         } catch (error) {
-            // Bubble up concurrency conflicts without wrapping so callers can
-            // distinguish a 409 Conflict from a generic 500 failure.
-            if (error instanceof ConflictError) throw error
 
-            const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
-            const rebalanceHistory = new RebalanceHistoryService()
             const message = error instanceof Error ? error.message : String(error)
 
-            await rebalanceHistory.recordRebalanceEvent({
+            await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Execution Failed',
                 trades: 0,
