@@ -156,11 +156,27 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         fetchPrices()
     }
 
+    // NEW: Show skeleton loading state
     if (loading && Object.keys(prices).length === 0) {
         return (
-            <div className="flex items-center justify-center p-4">
-                <Activity className="w-5 h-5 animate-spin text-blue-500" />
-                <span className="ml-2 text-gray-600 dark:text-gray-400">Loading real-time prices...</span>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4 animate-pulse">
+                    <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
+                    <div className="w-24 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
+                </div>
+                {/* Skeleton grid for price cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg animate-pulse">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="w-16 h-4 bg-gray-300 dark:bg-gray-600 rounded" />
+                                <div className="w-12 h-5 bg-gray-300 dark:bg-gray-600 rounded" />
+                            </div>
+                            <div className="w-24 h-6 bg-gray-300 dark:bg-gray-600 rounded mb-2" />
+                            <div className="w-16 h-4 bg-gray-300 dark:bg-gray-600 rounded" />
+                        </div>
+                    ))}
+                </div>
             </div>
         )
     }

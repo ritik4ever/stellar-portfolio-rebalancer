@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'docs/MIGRATION.md'
       - '.github/workflows/backend-tests.yml'
   push:
     branches:
@@ -11,6 +12,7 @@ on:
       - develop
     paths:
       - 'backend/**'
+      - 'docs/MIGRATION.md'
 
 jobs:
   test:
@@ -35,13 +37,17 @@ jobs:
         working-directory: backend
         run: npm ci
       
+      - name: Verify migrations (dry-run)
+        working-directory: backend
+        run: npm run db:migrate:dry-run
+      
       - name: Run tests
         working-directory: backend
         run: npm run test
       
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.node-version }}
           path: backend/coverage/

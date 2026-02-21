@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
-import { getFeatureFlags } from '../config/featureFlags.js'
+
 
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
@@ -17,6 +18,7 @@ export interface Portfolio {
     totalValue: number
     createdAt: string
     lastRebalance: string
+    version: number
 }
 
 // Raw row shape as stored in SQLite
@@ -29,6 +31,7 @@ interface PortfolioRow {
     total_value: number
     created_at: string
     last_rebalance: string
+    version: number
 }
 
 interface RebalanceHistoryRow {
@@ -61,7 +64,8 @@ CREATE TABLE IF NOT EXISTS portfolios (
     balances      TEXT NOT NULL,
     total_value   REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
-    last_rebalance TEXT NOT NULL
+    last_rebalance TEXT NOT NULL,
+    version       INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS rebalance_history (
@@ -114,8 +118,8 @@ function seedDemoData(db: Database.Database): void {
     const balances = { XLM: 11173.18, BTC: 0.02697, ETH: 0.68257, USDC: 1000 }
 
     db.prepare(`
-        INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
         DEMO_PORTFOLIO_ID,
         'DEMO-USER',
@@ -222,7 +226,8 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
         balances: safeJsonParse(row.balances, {}, `portfolio(${row.id}).balances`),
         totalValue: row.total_value,
         createdAt: row.created_at,
-        lastRebalance: row.last_rebalance
+        lastRebalance: row.last_rebalance,
+        version: row.version ?? 1
     }
 }
 
@@ -243,7 +248,7 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
 }
 
 function generateId(): string {
-    return Date.now().toString() + Math.random().toString(36).substring(2, 9)
+    return randomUUID()
 }
 
 // ─────────────────────────────────────────────
@@ -258,6 +263,7 @@ export class DatabaseService {
         mkdirSync(dirname(dbPath), { recursive: true })
         this.db = new Database(dbPath)
         this.db.exec(SCHEMA_SQL)
+        this._migrateSchema()
 
         // Seed demo data on first run (empty portfolios table)
         const count = (this.db.prepare('SELECT COUNT(*) as cnt FROM portfolios').get() as { cnt: number }).cnt
@@ -266,6 +272,14 @@ export class DatabaseService {
         }
 
         console.log(`[DB] SQLite database ready at: ${dbPath}`)
+    }
+
+    private _migrateSchema(): void {
+        const cols = this.db.prepare("PRAGMA table_info(portfolios)").all() as Array<{ name: string }>
+        if (!cols.some(c => c.name === 'version')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+            console.log('[DB] Migration: added version column to portfolios')
+        }
     }
 
     // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -286,8 +300,8 @@ export class DatabaseService {
             const id = generateId()
             const now = new Date().toISOString()
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify({}), 0, now, now)
             return id
         } catch (err) {
@@ -306,8 +320,8 @@ export class DatabaseService {
             const now = new Date().toISOString()
             const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(currentBalances), totalValue, now, now)
             return id
         } catch (err) {
@@ -333,7 +347,20 @@ export class DatabaseService {
         }
     }
 
-    updatePortfolio(id: string, updates: Partial<Portfolio>): boolean {
+    /**
+     * Update a portfolio record.
+     *
+     * When `expectedVersion` is supplied the update uses compare-and-set
+     * semantics: the row is only written when its stored version matches
+     * `expectedVersion`, and the version counter is incremented atomically.
+     * A `ConflictError` is thrown when the match fails, signalling that a
+     * concurrent write has already advanced the version ahead of the caller.
+     *
+     * Omitting `expectedVersion` performs an unchecked update (backward
+     * compatible) while still incrementing the version so that any subsequent
+     * versioned callers detect the change.
+     */
+    updatePortfolio(id: string, updates: Partial<Portfolio>, expectedVersion?: number): boolean {
         try {
             const row = this.db.prepare<[string], PortfolioRow>('SELECT * FROM portfolios WHERE id = ?').get(id)
             if (!row) return false
@@ -341,22 +368,52 @@ export class DatabaseService {
             const current = rowToPortfolio(row)
             const merged = { ...current, ...updates }
 
-            this.db.prepare(`
-                UPDATE portfolios
-                SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
-                    total_value = ?, last_rebalance = ?
-                WHERE id = ?
-            `).run(
-                merged.userAddress,
-                JSON.stringify(merged.allocations),
-                merged.threshold,
-                JSON.stringify(merged.balances),
-                merged.totalValue,
-                merged.lastRebalance,
-                id
-            )
+            if (expectedVersion !== undefined) {
+                // Compare-and-set: only update when version matches
+                const result = this.db.prepare(`
+                    UPDATE portfolios
+                    SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
+                        total_value = ?, last_rebalance = ?, version = version + 1
+                    WHERE id = ? AND version = ?
+                `).run(
+                    merged.userAddress,
+                    JSON.stringify(merged.allocations),
+                    merged.threshold,
+                    JSON.stringify(merged.balances),
+                    merged.totalValue,
+                    merged.lastRebalance,
+                    id,
+                    expectedVersion
+                )
+
+                if (result.changes === 0) {
+                    // Row exists but version didn't match — concurrent write detected
+                    const currentRow = this.db.prepare<[string], { version: number }>(
+                        'SELECT version FROM portfolios WHERE id = ?'
+                    ).get(id)
+                    throw new ConflictError(currentRow?.version ?? -1)
+                }
+            } else {
+                // Unchecked update — still increment version for future versioned callers
+                this.db.prepare(`
+                    UPDATE portfolios
+                    SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
+                        total_value = ?, last_rebalance = ?, version = version + 1
+                    WHERE id = ?
+                `).run(
+                    merged.userAddress,
+                    JSON.stringify(merged.allocations),
+                    merged.threshold,
+                    JSON.stringify(merged.balances),
+                    merged.totalValue,
+                    merged.lastRebalance,
+                    id
+                )
+            }
+
             return true
         } catch (err) {
+            if (err instanceof ConflictError) throw err
             throw new Error(`Failed to update portfolio '${id}': ${err}`)
         }
     }
