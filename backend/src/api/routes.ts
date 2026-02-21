@@ -9,8 +9,7 @@ import { analyticsService } from '../services/analyticsService.js'
 import { notificationService } from '../services/notificationService.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { logger } from '../utils/logger.js'
-
-}
+import { idempotencyMiddleware } from '../middleware/idempotency.js'
 
 const parseOptionalTimestamp = (value: unknown): string | undefined => {
     if (value === undefined || value === null || value === '') return undefined
@@ -77,7 +76,7 @@ router.get('/rebalance/history', async (req, res) => {
 })
 
 // Record new rebalance event
-router.post('/rebalance/history', async (req, res) => {
+router.post('/rebalance/history', idempotencyMiddleware, async (req, res) => {
     try {
         const eventData = req.body
 
@@ -586,7 +585,7 @@ router.get('/portfolio/:id/performance-summary', async (req, res) => {
 // ================================
 
 // Subscribe to notifications
-router.post('/notifications/subscribe', writeRateLimiter, async (req, res) => {
+router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware, async (req, res) => {
     try {
         const { userId, emailEnabled, emailAddress, webhookEnabled, webhookUrl, events } = req.body
 
