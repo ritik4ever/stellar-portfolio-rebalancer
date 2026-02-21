@@ -2,7 +2,7 @@ import React from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 interface AssetCardProps {
-    asset: {
+    asset?: {
         name: string
         value: number
         amount: number
@@ -12,10 +12,52 @@ interface AssetCardProps {
         price: number
         change: number
     }
+    // NEW: Loading skeleton prop
     isLoading?: boolean
 }
 
-const AssetCard: React.FC<AssetCardProps> = ({ asset, price }) => {
+const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }) => {
+    // NEW: Render skeleton loading state
+    if (isLoading) {
+        return (
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 animate-pulse">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center">
+                        {/* Skeleton circle avatar */}
+                        <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-700" />
+                        <div className="ml-3 space-y-2">
+                            <div className="w-24 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
+                            <div className="w-32 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                        </div>
+                    </div>
+                    {/* Skeleton trend indicator */}
+                    <div className="w-12 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
+                </div>
+
+                <div className="space-y-2">
+                    {/* Skeleton value rows */}
+                    <div className="flex justify-between">
+                        <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                    </div>
+                    <div className="flex justify-between">
+                        <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                    </div>
+                    <div className="flex justify-between">
+                        <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                    </div>
+                    {/* Skeleton progress bar */}
+                    <div className="w-full bg-gray-300 dark:bg-gray-700 rounded-full h-2 mt-2" />
+                </div>
+            </div>
+        )
+    }
+
+    if (!asset) {
+        return null
+    }
     const change = price?.change || (Math.random() * 10 - 5)
     const isPositive = change >= 0
     const currentPrice = price?.price || 1

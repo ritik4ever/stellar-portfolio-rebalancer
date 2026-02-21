@@ -345,31 +345,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </button>
                     </div>
                 </div>
-
-                {/* Price Tracker */}
-                <div className="mb-8">
-                    <PriceTracker />
-                </div>
-
-                {/* NEW: Asset Cards - with skeleton loading state */}
-                <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                    {loading ? (
-                        // Show skeleton cards while loading
-                        [1, 2, 3].map((i) => (
-                            <AssetCard key={`skeleton-${i}`} isLoading={true} asset={{
-                                name: '',
-                                value: 0,
-                                amount: 0,
-                                color: ''
-                            }} />
-                        ))
-                    ) : (
-                        // Show actual asset cards when data is loaded
-                        allocationData.map((asset: any, index: number) => (
-                            <AssetCard key={index} asset={asset} price={prices[asset.name]} />
-                        ))
-                    )}
-                </div>
             </div>
 
             <div className="p-6 max-w-7xl mx-auto">
@@ -422,10 +397,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     <NotificationPreferences userId={publicKey || 'demo'} />
                 ) :  (
                     <>
-                        {/* NEW: Portfolio Overview - with skeleton loading state */}
+                        {/* Portfolio Overview */}
                         <div className="grid lg:grid-cols-3 gap-6 mb-8">
                             <div className="lg:col-span-2">
-                                {/* NEW: Show skeleton card while loading */}
+                                {/* NEW: Portfolio Value Skeleton Loading State */}
                                 {loading ? (
                                     <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                         <div className="flex items-center justify-between mb-6">
@@ -489,7 +464,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
-                            {/* NEW: Skeleton or actual allocation card */}
                             <div className="space-y-6">
                                 {/* Rebalance Alert */}
                                 {portfolioData?.needsRebalance && (
@@ -527,15 +501,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     </motion.div>
                                 )}
 
-                                {/* NEW: Allocation Chart - with skeleton loading state */}
+                                {/* NEW: Allocation Chart Skeleton Loading State */}
                                 {loading ? (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
-                                        <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-4" />
-                                        <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded mb-4" />
-                                        <div className="space-y-2">
+                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                        <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-4 animate-pulse" />
+                                        <div className="h-48 flex items-center justify-center mb-4">
+                                            <div className="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                        </div>
+                                        <div className="space-y-3">
                                             {[1, 2, 3].map((i) => (
-                                                <div key={i} className="flex justify-between">
-                                                    <div className="w-16 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                                                <div key={i} className="flex items-center justify-between animate-pulse">
+                                                    <div className="flex items-center space-x-2">
+                                                        <div className="w-3 h-3 rounded-full bg-gray-300 dark:bg-gray-700" />
+                                                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
+                                                    </div>
                                                     <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
                                                 </div>
                                             ))}
@@ -543,38 +522,39 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     </div>
                                 ) : (
                                     <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Allocation</h3>
-                                    <div className="h-48 flex items-center justify-center">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <PieChart>
-                                                <Pie
-                                                    data={allocationData}
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    innerRadius={60}
-                                                    outerRadius={90}
-                                                    dataKey="value"
-                                                >
-                                                    {allocationData.map((entry: any, index: number) => (
-                                                        <Cell key={index} fill={entry.color} />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip />
-                                            </PieChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                    <div className="space-y-2 mt-4">
-                                        {allocationData.map((asset: any, index: number) => (
-                                            <div key={index} className="flex items-center justify-between">
-                                                <div className="flex items-center">
-                                                    <div className={`w-3 h-3 rounded-full mr-2`} style={{ backgroundColor: asset.color }} />
-                                                    <span className="text-sm font-medium dark:text-gray-200">{asset.name}</span>
+                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
+                                        <div className="h-48 flex items-center justify-center">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={allocationData}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={40}
+                                                        outerRadius={80}
+                                                        paddingAngle={2}
+                                                        dataKey="value"
+                                                    >
+                                                        {allocationData.map((entry: any, index: number) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                                        ))}
+                                                    </Pie>
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="mt-4 space-y-2">
+                                            {allocationData.map((asset: any, index: number) => (
+                                                <div key={index} className="flex items-center justify-between">
+                                                    <div className="flex items-center">
+                                                        <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
+                                                        <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
+                                                    </div>
+                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{asset.value.toFixed(1)}%</span>
                                                 </div>
-                                                <span className="text-sm text-gray-600 dark:text-gray-400">{asset.value}%</span>
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>)}
+                                )}
                             </div>
                         </div>
 
@@ -583,15 +563,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             <PriceTracker />
                         </div>
 
-                        {/* Asset Cards */}
+                        {/* NEW: Asset Cards Skeleton Loading State */}
                         <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                            {allocationData.map((asset: any, index: number) => (
-                                <AssetCard key={index} asset={asset} price={prices[asset.name]} />
-                            ))}
+                            {loading ? (
+                                // Show skeleton cards while loading
+                                [1, 2, 3].map((i) => {
+                                    console.log("Rendering asset card skeleton", i);
+                                    return <AssetCard key={`skeleton-${i}`} isLoading={true} />
+                                })
+                            ) : (
+                                // Show actual asset cards when data is loaded
+                                allocationData.map((asset: any, index: number) => (
+                                    <AssetCard key={index} asset={asset} price={prices[asset.name]} />
+                                ))
+                            )}
                         </div>
 
                         {/* Rebalance History */}
-                        <RebalanceHistory portfolioId={portfolioData?.id || undefined} />
+                        <RebalanceHistory portfolioId={portfolioData?.id || null} />
                     </>
                 )}
             </div>
