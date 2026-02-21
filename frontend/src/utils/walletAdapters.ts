@@ -1,4 +1,4 @@
-export type WalletType = 'freighter' | 'rabet' | 'xbull'
+export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
 
 export interface WalletAdapter {
     readonly name: string
@@ -198,11 +198,48 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
+export class MockAdapter implements WalletAdapter {
+    readonly name = 'Mock Wallet (Test)'
+    readonly type: WalletType = 'mock'
+    private connected = false;
+
+    // Fixed dummy keypair for deterministic E2E testing
+    private readonly mockPublicKey = 'GA2C5RFPE6GCKIG3EQRUUYYTQ27WXYVHTP73HZY4MDF4M7Q2W4M2OWH7'
+
+    isAvailable(): boolean {
+        return import.meta.env.VITE_E2E_MOCK_WALLET === 'true'
+    }
+
+    async connect(): Promise<string> {
+        this.connected = true;
+        return this.mockPublicKey;
+    }
+
+    async isConnected(): Promise<boolean> {
+        return this.connected;
+    }
+
+    async disconnect(): Promise<void> {
+        this.connected = false;
+    }
+
+    async signTransaction(xdr: string): Promise<string> {
+        // Return a dummy signed XDR payload. For true integration tests,
+        // we might actually sign with a testnet secret key here.
+        return xdr; 
+    }
+}
+
 export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
     new XBullAdapter()
 ]
+
+// Add the mock adapter if we're in E2E mode
+if (import.meta.env.VITE_E2E_MOCK_WALLET === 'true') {
+    walletAdapters.push(new MockAdapter());
+}
 
 export function getAdapter(type: WalletType): WalletAdapter | null {
     return walletAdapters.find(a => a.type === type) || null
