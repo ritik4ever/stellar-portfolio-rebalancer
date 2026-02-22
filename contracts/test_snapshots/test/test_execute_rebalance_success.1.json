@@ -49,7 +49,7 @@
               "function_name": "execute_rebalance",
               "args": [
                 {
-                  "u64": 0
+                  "u64": 1
                 }
               ]
             }
@@ -77,10 +77,49 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "NextPortfolioId"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "NextPortfolioId"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u64": 2
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
                   "symbol": "Portfolio"
                 },
                 {
-                  "u64": 0
+                  "u64": 1
                 }
               ]
             },
@@ -100,7 +139,7 @@
                       "symbol": "Portfolio"
                     },
                     {
-                      "u64": 0
+                      "u64": 1
                     }
                   ]
                 },
@@ -478,6 +517,36 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "string": "portfolio"
+              },
+              {
+                "string": "created"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 1
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -490,7 +559,7 @@
               }
             ],
             "data": {
-              "u64": 0
+              "u64": 1
             }
           }
         }
@@ -516,7 +585,7 @@
               }
             ],
             "data": {
-              "u64": 0
+              "u64": 1
             }
           }
         }
@@ -608,16 +677,16 @@
           "v0": {
             "topics": [
               {
-                "string": "rebalance"
+                "string": "portfolio"
               },
               {
-                "string": "executed"
+                "string": "rebalanced"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "u64": 0
+                  "u64": 1
                 },
                 {
                   "u64": 20000
@@ -669,7 +738,7 @@
               }
             ],
             "data": {
-              "u64": 0
+              "u64": 1
             }
           }
         }
