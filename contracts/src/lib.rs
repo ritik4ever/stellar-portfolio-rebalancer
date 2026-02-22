@@ -41,7 +41,9 @@ impl PortfolioRebalancer {
             return Err(Error::InvalidThreshold);
         }
         
-        let portfolio_id = env.ledger().sequence() as u64; // Convert u32 to u64
+        let portfolio_id: u64 = env.storage().persistent().get(&DataKey::NextPortfolioId).unwrap_or(1);
+        env.storage().persistent().set(&DataKey::NextPortfolioId, &(portfolio_id + 1));
+
         let portfolio = Portfolio {
             user: user.clone(),
             target_allocations,
