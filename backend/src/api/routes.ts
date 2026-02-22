@@ -1,5 +1,4 @@
-
-import { Router } from 'express'
+import express, { Router, Request, Response } from 'express'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { RebalanceHistoryService } from '../services/rebalanceHistory.js'
@@ -11,6 +10,49 @@ import { notificationService } from '../services/notificationService.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { logger } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
+import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { writeRateLimiter } from '../middleware/rateLimit.js'
+import { requireAdmin } from '../middleware/auth.js'
+import { blockDebugInProduction } from '../middleware/debugGate.js'
+import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
+import { autoRebalancer } from '../index.js'
+import { rebalanceLockService } from '../services/rebalanceLock.js'
+import { Portfolio } from '../types/index.js'
+
+const router = Router()
+
+// Initialize services used by routes
+const stellarService = new StellarService()
+const reflectorService = new ReflectorService()
+const riskManagementService = new RiskManagementService()
+const rebalanceHistoryService = new RebalanceHistoryService()
+
+// Configuration
+const featureFlags = getFeatureFlags()
+const publicFeatureFlags = getPublicFeatureFlags()
+
+// Utilities
+const getErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error);
+}
+
+const getErrorObject = (error: unknown): any => {
+    if (error instanceof Error) {
+        return { message: error.message, stack: error.stack, name: error.name };
+    }
+    return error;
+}
+
+const getPortfolioAllocationsAsRecord = (portfolio: Portfolio): Record<string, number> => {
+    return portfolio?.allocations || {};
+}
+
+// Ensure parseOptionalBoolean is defined
+const parseOptionalBoolean = (value: unknown): boolean | undefined => {
+    if (value === 'true') return true
+    if (value === 'false') return false
+    return undefined
+}
 
 const parseOptionalTimestamp = (value: unknown): string | undefined => {
     if (value === undefined || value === null || value === '') return undefined
@@ -30,7 +72,7 @@ const parseHistorySource = (value: unknown): 'all' | 'offchain' | 'simulated' | 
 }
 
 
-router.get('/rebalance/history', async (req, res) => {
+router.get('/rebalance/history', async (req: any, res: any) => {
     try {
         const portfolioId = req.query.portfolioId as string
         const limit = parseInt(req.query.limit as string) || 50
@@ -48,7 +90,7 @@ router.get('/rebalance/history', async (req, res) => {
             portfolioId || undefined,
             limit,
             {
-                eventSource: source,
+                eventSource: source === 'all' ? undefined : source,
                 startTimestamp,
                 endTimestamp
             }
@@ -77,7 +119,7 @@ router.get('/rebalance/history', async (req, res) => {
 })
 
 // Record new rebalance event
-router.post('/rebalance/history', idempotencyMiddleware, async (req, res) => {
+router.post('/rebalance/history', idempotencyMiddleware, async (req: any, res: any) => {
     try {
         const eventData = req.body
 
@@ -102,7 +144,7 @@ router.post('/rebalance/history', idempotencyMiddleware, async (req, res) => {
     }
 })
 
-router.post('/rebalance/history/sync-onchain', requireAdmin, async (req, res) => {
+router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: any, res: any) => {
     try {
         const result = await contractEventIndexerService.syncOnce()
         res.json({
@@ -119,12 +161,61 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req, res) =>
     }
 })
 
+// Manual portfolio rebalance
+router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware, async (req: any, res: any) => {
+    try {
+        const portfolioId = req.params.id;
+
+        console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
+
+        // Try to acquire lock
+        const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+        if (!lockAcquired) {
+            console.log(`[WARNING] Rebalance already in progress for portfolio: ${portfolioId}`);
+            return res.status(409).json({
+                success: false,
+                error: 'Rebalance already in progress for this portfolio'
+            });
+        }
+
+        try {
+            const portfolio = await stellarService.getPortfolio(portfolioId);
+            const prices = await reflectorService.getCurrentPrices();
+            const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices);
+
+            if (!riskCheck.allowed) {
+                return res.status(400).json({
+                    success: false,
+                    error: riskCheck.reason,
+                    alerts: riskCheck.alerts
+                });
+            }
+
+            const result = await stellarService.executeRebalance(portfolioId);
+
+            res.json({
+                success: true,
+                result,
+                timestamp: new Date().toISOString()
+            });
+        } finally {
+            await rebalanceLockService.releaseLock(portfolioId);
+        }
+    } catch (error) {
+        console.error('[ERROR] Manual rebalance failed:', error);
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        });
+    }
+});
+
 // ================================
 // RISK MANAGEMENT ROUTES
 // ================================
 
 // Get risk metrics for a portfolio
-router.get('/risk/metrics/:portfolioId', async (req, res) => {
+router.get('/risk/metrics/:portfolioId', async (req: any, res: any) => {
     try {
         const { portfolioId } = req.params
 
@@ -134,7 +225,7 @@ router.get('/risk/metrics/:portfolioId', async (req, res) => {
         const prices = await reflectorService.getCurrentPrices()
 
         // Calculate risk metrics with proper type conversion
-        const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio)
+        const allocationsRecord = getPortfolioAllocationsAsRecord(portfolio as unknown as Portfolio)
         const riskMetrics = riskManagementService.analyzePortfolioRisk(allocationsRecord, prices)
         const recommendations = riskManagementService.getRecommendations(riskMetrics, allocationsRecord)
         const circuitBreakers = riskManagementService.getCircuitBreakerStatus()
@@ -164,7 +255,7 @@ router.get('/risk/metrics/:portfolioId', async (req, res) => {
 })
 
 // Check if rebalancing should be allowed based on risk conditions
-router.get('/risk/check/:portfolioId', async (req, res) => {
+router.get('/risk/check/:portfolioId', async (req: any, res: any) => {
     try {
         const { portfolioId } = req.params
 
@@ -173,7 +264,7 @@ router.get('/risk/check/:portfolioId', async (req, res) => {
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
 
-        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
+        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices)
 
         res.json({
             success: true,
@@ -198,7 +289,7 @@ router.get('/risk/check/:portfolioId', async (req, res) => {
 // ================================
 
 // Get current prices - FIXED to return direct format for frontend
-router.get('/prices', async (req, res) => {
+router.get('/prices', async (req: any, res: any) => {
     try {
         console.log('[DEBUG] Fetching prices for frontend...')
         const prices = await reflectorService.getCurrentPrices()
@@ -232,7 +323,7 @@ router.get('/prices', async (req, res) => {
 })
 
 // Enhanced prices endpoint with risk analysis
-router.get('/prices/enhanced', async (req, res) => {
+router.get('/prices/enhanced', async (req: any, res: any) => {
     try {
         console.log('[INFO] Fetching enhanced prices with risk analysis')
 
@@ -275,7 +366,7 @@ router.get('/prices/enhanced', async (req, res) => {
 })
 
 // Get detailed market data for specific asset
-router.get('/market/:asset/details', async (req, res) => {
+router.get('/market/:asset/details', async (req: any, res: any) => {
     try {
         const asset = req.params.asset.toUpperCase()
         const reflector = new ReflectorService()
@@ -292,7 +383,7 @@ router.get('/market/:asset/details', async (req, res) => {
 })
 
 // Get price charts for frontend
-router.get('/market/:asset/chart', async (req, res) => {
+router.get('/market/:asset/chart', async (req: any, res: any) => {
     try {
         const asset = req.params.asset.toUpperCase()
         const days = parseInt(req.query.days as string) || 7
@@ -316,7 +407,7 @@ router.get('/market/:asset/chart', async (req, res) => {
 // AUTO-REBALANCER ROUTES
 // ================================
 
-router.get('/auto-rebalancer/status', async (req, res) => {
+router.get('/auto-rebalancer/status', async (req: any, res: any) => {
     try {
         if (!autoRebalancer) {
             return res.json({
@@ -343,7 +434,7 @@ router.get('/auto-rebalancer/status', async (req, res) => {
     }
 })
 
-router.post('/auto-rebalancer/start', requireAdmin, (req, res) => {
+router.post('/auto-rebalancer/start', requireAdmin, (req: any, res: any) => {
     try {
         if (!autoRebalancer) {
             return res.status(500).json({
@@ -368,7 +459,7 @@ router.post('/auto-rebalancer/start', requireAdmin, (req, res) => {
     }
 })
 
-router.post('/auto-rebalancer/stop', requireAdmin, (req, res) => {
+router.post('/auto-rebalancer/stop', requireAdmin, (req: any, res: any) => {
     try {
         if (!autoRebalancer) {
             return res.status(500).json({
@@ -393,7 +484,7 @@ router.post('/auto-rebalancer/stop', requireAdmin, (req, res) => {
     }
 })
 
-router.post('/auto-rebalancer/force-check', requireAdmin, async (req, res) => {
+router.post('/auto-rebalancer/force-check', requireAdmin, async (req: any, res: any) => {
     try {
         if (!autoRebalancer) {
             return res.status(500).json({
@@ -417,7 +508,7 @@ router.post('/auto-rebalancer/force-check', requireAdmin, async (req, res) => {
     }
 })
 
-router.get('/auto-rebalancer/history', requireAdmin, async (req, res) => {
+router.get('/auto-rebalancer/history', requireAdmin, async (req: any, res: any) => {
     try {
         const portfolioId = req.query.portfolioId as string
         const limit = parseInt(req.query.limit as string) || 50
@@ -450,7 +541,7 @@ router.get('/auto-rebalancer/history', requireAdmin, async (req, res) => {
 // ================================
 
 // Get comprehensive system status
-router.get('/system/status', async (req, res) => {
+router.get('/system/status', async (req: any, res: any) => {
     try {
         const portfolioCount = await portfolioStorage.getPortfolioCount()
         const historyStats = await rebalanceHistoryService.getHistoryStats()
@@ -474,7 +565,7 @@ router.get('/system/status', async (req, res) => {
             success: true,
             system: {
                 status: priceSourcesHealthy ? 'operational' : 'degraded',
-                uptime: process.uptime(),
+                uptime: global.process.uptime(),
                 timestamp: new Date().toISOString(),
                 version: '1.0.0'
             },
@@ -518,7 +609,7 @@ router.get('/system/status', async (req, res) => {
 // ANALYTICS ROUTES
 // ================================
 
-router.get('/portfolio/:id/analytics', async (req, res) => {
+router.get('/portfolio/:id/analytics', async (req: any, res: any) => {
     try {
         const portfolioId = req.params.id
         const days = parseInt(req.query.days as string) || 30
@@ -551,7 +642,7 @@ router.get('/portfolio/:id/analytics', async (req, res) => {
     }
 })
 
-router.get('/portfolio/:id/performance-summary', async (req, res) => {
+router.get('/portfolio/:id/performance-summary', async (req: any, res: any) => {
     try {
         const portfolioId = req.params.id
 
@@ -586,7 +677,7 @@ router.get('/portfolio/:id/performance-summary', async (req, res) => {
 // ================================
 
 // Subscribe to notifications
-router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware, async (req, res) => {
+router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware, async (req: any, res: any) => {
     try {
         const { userId, emailEnabled, emailAddress, webhookEnabled, webhookUrl, events } = req.body
 
@@ -666,7 +757,7 @@ router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware,
 })
 
 // Get notification preferences
-router.get('/notifications/preferences', async (req, res) => {
+router.get('/notifications/preferences', async (req: any, res: any) => {
     try {
         const userId = req.query.userId as string
 
@@ -702,7 +793,7 @@ router.get('/notifications/preferences', async (req, res) => {
 })
 
 // Unsubscribe from notifications
-router.delete('/notifications/unsubscribe', async (req, res) => {
+router.delete('/notifications/unsubscribe', async (req: any, res: any) => {
     try {
         const userId = req.query.userId as string
 
@@ -736,7 +827,7 @@ router.delete('/notifications/unsubscribe', async (req, res) => {
 // ================================
 
 // Test notification delivery
-// router.post('/notifications/test', async (req, res) => {
+// router.post('/notifications/test', async (req: any, res: any) => {
 //     try {
 //         const { userId, eventType } = req.body
 
@@ -840,7 +931,7 @@ router.delete('/notifications/unsubscribe', async (req, res) => {
 // })
 
 // Test all notification types at once
-// router.post('/notifications/test-all', async (req, res) => {
+// router.post('/notifications/test-all', async (req: any, res: any) => {
 //     try {
 //         const { userId } = req.body
 
@@ -931,9 +1022,9 @@ router.delete('/notifications/unsubscribe', async (req, res) => {
 // DEBUG ROUTES
 // ================================
 
-router.get('/debug/coingecko-test', blockDebugInProduction, async (req, res) => {
+router.get('/debug/coingecko-test', blockDebugInProduction, async (req: any, res: any) => {
     try {
-        const apiKey = process.env.COINGECKO_API_KEY
+        const apiKey = global.process.env.COINGECKO_API_KEY
         console.log('[DEBUG] API Key exists:', !!apiKey)
 
         // Test direct API call
@@ -971,7 +1062,7 @@ router.get('/debug/coingecko-test', blockDebugInProduction, async (req, res) => 
     }
 })
 
-router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req, res) => {
+router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req: any, res: any) => {
     try {
         console.log('[DEBUG] Clearing cache and forcing fresh prices...')
 
@@ -1000,7 +1091,7 @@ router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req, res)
     }
 })
 
-router.get('/debug/reflector-test', blockDebugInProduction, async (req, res) => {
+router.get('/debug/reflector-test', blockDebugInProduction, async (req: any, res: any) => {
     try {
         console.log('[DEBUG] Testing reflector service...')
 
@@ -1012,9 +1103,9 @@ router.get('/debug/reflector-test', blockDebugInProduction, async (req, res) => 
             apiConnectivityTest: testResult,
             cacheStatus,
             environment: {
-                nodeEnv: process.env.NODE_ENV,
-                apiKeySet: !!process.env.COINGECKO_API_KEY,
-                apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0
+                nodeEnv: global.process.env.NODE_ENV,
+                apiKeySet: !!global.process.env.COINGECKO_API_KEY,
+                apiKeyLength: global.process.env.COINGECKO_API_KEY?.length || 0
             },
             timestamp: new Date().toISOString()
         })
@@ -1027,15 +1118,15 @@ router.get('/debug/reflector-test', blockDebugInProduction, async (req, res) => 
     }
 })
 
-router.get('/debug/env', blockDebugInProduction, async (req, res) => {
+router.get('/debug/env', blockDebugInProduction, async (req: any, res: any) => {
     try {
         res.json({
-            environment: process.env.NODE_ENV,
-            apiKeySet: !!process.env.COINGECKO_API_KEY,
+            environment: global.process.env.NODE_ENV,
+            apiKeySet: !!global.process.env.COINGECKO_API_KEY,
             autoRebalancerEnabled: !!autoRebalancer,
             autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
-            enableAutoRebalancer: process.env.ENABLE_AUTO_REBALANCER,
-            port: process.env.PORT,
+            enableAutoRebalancer: global.process.env.ENABLE_AUTO_REBALANCER,
+            port: global.process.env.PORT,
             timestamp: new Date().toISOString()
         })
     } catch (error) {
@@ -1046,7 +1137,7 @@ router.get('/debug/env', blockDebugInProduction, async (req, res) => {
     }
 })
 
-router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req, res) => {
+router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: any, res: any) => {
     try {
         if (!autoRebalancer) {
             return res.json({
@@ -1086,7 +1177,7 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req, re
  * Returns BullMQ queue depths and Redis connectivity status.
  * Used for worker health monitoring and alerting (issue #38).
  */
-router.get('/queue/health', async (req, res) => {
+router.get('/queue/health', async (req: any, res: any) => {
     try {
         const metrics = await getQueueMetrics()
         const httpStatus = metrics.redisConnected ? 200 : 503
