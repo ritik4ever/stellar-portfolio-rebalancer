@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Map, contracterror};
+use soroban_sdk::{contracterror, contracttype, Address, Map};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,6 +20,7 @@ pub enum DataKey {
     EmergencyStop,
     Initialized,
     Portfolio(u64),
+    NextPortfolioId,
 }
 
 #[contracterror]
