@@ -26,6 +26,7 @@ pub fn calculate_portfolio_value(
     total_value
 }
 
+#[allow(dead_code)]
 pub fn calculate_rebalance_trades(
     env: &Env,
     portfolio: &Portfolio,

@@ -1,11 +1,11 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env, Map, Vec, Symbol, Val};
+use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env, Map};
 
 // Mock Reflector Contract
 mod reflector_contract {
-    use soroban_sdk::{contract, contractimpl, Address, Env, Vec, Symbol};
+    use soroban_sdk::{contract, contractimpl, Env, Vec, Symbol};
     use crate::reflector::{Asset, PriceData};
 
     #[contract]
@@ -304,7 +304,7 @@ fn test_stale_data() {
     // Let's create a separate StaleMockReflector for this test.
     
     mod stale_reflector {
-        use soroban_sdk::{contract, contractimpl, Address, Env, Vec, Symbol};
+        use soroban_sdk::{contract, contractimpl, Env, Vec, Symbol};
         use crate::reflector::{Asset, PriceData};
 
         #[contract]
@@ -447,3 +447,32 @@ fn test_create_portfolio_threshold_too_high() {
     allocations.set(Address::generate(&env), 100);
     client.create_portfolio(&user, &allocations, &51); // threshold 51 is invalid
 }
+
+#[test]
+fn test_create_portfolio_multiple_same_ledger() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Simulate same ledger
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+
+    // Call twice in same sequence state
+    let pid1 = client.create_portfolio(&user, &allocations, &5);
+    let pid2 = client.create_portfolio(&user, &allocations, &5);
+
+    assert_eq!(pid1, 1, "First portfolio ID should start at 1");
+    assert_eq!(pid2, 2, "Second portfolio ID should be 2");
+    assert_ne!(pid1, pid2, "Portfolio IDs must be unique even in the same ledger");
+}
+

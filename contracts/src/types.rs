@@ -20,6 +20,7 @@ pub enum DataKey {
     EmergencyStop,
     Initialized,
     Portfolio(u64),
+    NextPortfolioId,
 }
 
 #[contracterror]
