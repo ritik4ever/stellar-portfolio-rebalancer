@@ -71,7 +71,7 @@ fn test_create_portfolio() {
     allocations.set(asset1, 50);
     allocations.set(asset2, 50);
 
-    let portfolio_id = client.create_portfolio(&user, &allocations, &5);
+    let portfolio_id = client.create_portfolio(&user, &allocations, &5, &50);
 
     assert!(portfolio_id > 0);
 }
@@ -91,7 +91,7 @@ fn test_deposit_valid() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     client.deposit(&pid, &asset, &1000);
 
@@ -115,7 +115,7 @@ fn test_deposit_invalid_amount() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     client.deposit(&pid, &asset, &0);
 }
@@ -144,7 +144,7 @@ fn test_check_rebalance_needed_no_drift() {
     allocations.set(asset1.clone(), 50);
     allocations.set(asset2.clone(), 50);
 
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     // Deposit equal amounts to have 50/50 split (allocations 50/50)
     // Both mocked assets have price 100
@@ -176,7 +176,7 @@ fn test_check_rebalance_needed_with_drift() {
     allocations.set(asset1.clone(), 50);
     allocations.set(asset2.clone(), 50);
 
-    let pid = client.create_portfolio(&user, &allocations, &5); // 5% threshold
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     // Create significant drift
     // Asset1: 200 units * 100 price = 20000 val
@@ -209,14 +209,15 @@ fn test_execute_rebalance_success() {
     let asset = Address::generate(&env);
     allocations.set(asset, 100);
 
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     // Set timestamp way past last_rebalance (which was 10000 at creation)
     env.ledger().with_mut(|li| {
         li.timestamp = 20000;
     });
 
-    client.execute_rebalance(&pid);
+    let actual_balances = Map::new(&env);
+    client.execute_rebalance(&pid, &actual_balances);
 
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.last_rebalance, 20000);
@@ -242,15 +243,15 @@ fn test_execute_rebalance_cooldown() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset, 100);
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     // Try to rebalance immediately (default last_rebalance is timestamp at creation)
-    // Current time 10000 + 10s < 10000 + 3600
     env.ledger().with_mut(|li| {
         li.timestamp = 10010;
     });
 
-    client.execute_rebalance(&pid);
+    let actual_balances = Map::new(&env);
+    client.execute_rebalance(&pid, &actual_balances);
 }
 
 #[test]
@@ -272,10 +273,7 @@ fn test_emergency_stop() {
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
 
-    // Try deposit (should panic)
-    // Note: creating portfolio might work depending on implementation,
-    // but deposit/rebalance should fail. Validating deposit fail here.
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
     client.deposit(&pid, &asset, &100);
 }
 
@@ -344,14 +342,15 @@ fn test_stale_data() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset, 100);
-    let pid = client.create_portfolio(&user, &allocations, &5);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
     // Advance time to pass cooldown so that's not the error
     env.ledger().with_mut(|li| {
         li.timestamp = 20000;
     });
 
-    client.execute_rebalance(&pid);
+    let actual_balances = Map::new(&env);
+    client.execute_rebalance(&pid, &actual_balances);
 }
 
 #[test]
@@ -367,7 +366,7 @@ fn test_edge_case_single_asset() {
     let asset = Address::generate(&env);
     allocations.set(asset, 100);
 
-    let pid = client.create_portfolio(&Address::generate(&env), &allocations, &5);
+    let pid = client.create_portfolio(&Address::generate(&env), &allocations, &5, &50);
     // Single asset should never need rebalancing if it's 100%?
     // Well, technically drift is 0.
     assert!(!client.check_rebalance_needed(&pid));
@@ -422,7 +421,7 @@ fn test_create_portfolio_invalid_allocation() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 60);
     allocations.set(Address::generate(&env), 30); // sums to 90, not 100
-    client.create_portfolio(&user, &allocations, &5);
+    client.create_portfolio(&user, &allocations, &5, &50);
 }
 
 #[test]
@@ -439,7 +438,7 @@ fn test_create_portfolio_threshold_too_low() {
 
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
-    client.create_portfolio(&user, &allocations, &0); // threshold 0 is invalid
+    client.create_portfolio(&user, &allocations, &0, &50);
 }
 
 #[test]
@@ -456,7 +455,7 @@ fn test_create_portfolio_threshold_too_high() {
 
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
-    client.create_portfolio(&user, &allocations, &51); // threshold 51 is invalid
+    client.create_portfolio(&user, &allocations, &51, &50);
 }
 
 #[test]
@@ -479,8 +478,8 @@ fn test_create_portfolio_multiple_same_ledger() {
     allocations.set(Address::generate(&env), 100);
 
     // Call twice in same sequence state
-    let pid1 = client.create_portfolio(&user, &allocations, &5);
-    let pid2 = client.create_portfolio(&user, &allocations, &5);
+    let pid1 = client.create_portfolio(&user, &allocations, &5, &50);
+    let pid2 = client.create_portfolio(&user, &allocations, &5, &50);
 
     assert_eq!(pid1, 1, "First portfolio ID should start at 1");
     assert_eq!(pid2, 2, "Second portfolio ID should be 2");
@@ -488,4 +487,34 @@ fn test_create_portfolio_multiple_same_ledger() {
         pid1, pid2,
         "Portfolio IDs must be unique even in the same ledger"
     );
+}
+
+#[test]
+#[should_panic]
+fn test_create_portfolio_slippage_too_low() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    client.initialize(&Address::generate(&env), &reflector_id);
+    let user = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+    client.create_portfolio(&user, &allocations, &5, &9);
+}
+
+#[test]
+#[should_panic]
+fn test_create_portfolio_slippage_too_high() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    client.initialize(&Address::generate(&env), &reflector_id);
+    let user = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+    client.create_portfolio(&user, &allocations, &5, &501);
 }

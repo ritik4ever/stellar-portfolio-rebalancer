@@ -31,6 +31,9 @@
                 },
                 {
                   "u32": 5
+                },
+                {
+                  "u32": 50
                 }
               ]
             }
@@ -157,6 +160,14 @@
                       },
                       "val": {
                         "u32": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "slippage_tolerance"
+                      },
+                      "val": {
+                        "u32": 50
                       }
                     },
                     {
@@ -453,6 +464,9 @@
                 },
                 {
                   "u32": 5
+                },
+                {
+                  "u32": 50
                 }
               ]
             }
@@ -533,7 +547,14 @@
               }
             ],
             "data": {
-              "u64": 1
+              "vec": [
+                {
+                  "u64": 1
+                },
+                {
+                  "map": []
+                }
+              ]
             }
           }
         }
@@ -555,10 +576,13 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Cooldown active' from contract function 'Symbol(obj#81)'"
+                  "string": "caught panic 'Cooldown active' from contract function 'Symbol(obj#85)'"
                 },
                 {
                   "u64": 1
+                },
+                {
+                  "map": []
                 }
               ]
             }
@@ -621,6 +645,9 @@
                   "vec": [
                     {
                       "u64": 1
+                    },
+                    {
+                      "map": []
                     }
                   ]
                 }

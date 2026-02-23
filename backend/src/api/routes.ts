@@ -16,6 +16,9 @@ import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/helpers.js'
+import { createPortfolioSchema } from './validation.js'
+import { rebalanceLockService } from '../services/rebalanceLock.js'
+import type { Portfolio } from '../types/index.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -128,6 +131,93 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
             success: false,
             error: getErrorMessage(error)
         })
+    }
+})
+
+router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const parsed = createPortfolioSchema.safeParse(req.body)
+        if (!parsed.success) {
+            const first = parsed.error.errors[0]
+            const message = first?.message ?? 'Validation failed'
+            const fullMessage = parsed.error.errors.some(e => e.path.join('.') !== '')
+                ? message
+                : req.body?.userAddress == null
+                    ? 'Missing required fields: userAddress, allocations, threshold'
+                    : req.body?.allocations == null
+                        ? 'Missing required fields: allocations, threshold'
+                        : req.body?.threshold == null
+                            ? 'Missing required fields: threshold'
+                            : message
+            return res.status(400).json({ success: false, error: fullMessage })
+        }
+        const { userAddress, allocations, threshold, slippageTolerance } = parsed.data
+        const slippageTolerancePercent = slippageTolerance ?? 1
+        const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold, slippageTolerancePercent)
+        const mode = featureFlags.demoMode ? 'demo' : 'onchain'
+        return res.status(201).json({
+            success: true,
+            portfolioId,
+            status: 'created',
+            mode,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('[ERROR] Create portfolio failed', { error: getErrorObject(error) })
+        return res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        })
+    }
+})
+
+router.get('/portfolio/:id', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return res.status(400).json({ success: false, error: 'Portfolio ID required' })
+        const portfolio = await stellarService.getPortfolio(portfolioId)
+        if (!portfolio) return res.status(404).json({ success: false, error: 'Portfolio not found' })
+        return res.json({ success: true, portfolio, timestamp: new Date().toISOString() })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
+        return res.status(500).json({ success: false, error: getErrorMessage(error) })
+    }
+})
+
+router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
+    try {
+        const address = req.params.address
+        if (!address) return res.status(400).json({ success: false, error: 'User address required' })
+        const list = portfolioStorage.getUserPortfolios(address)
+        return res.json(list)
+    } catch (error) {
+        logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
+        return res.status(500).json({ success: false, error: getErrorMessage(error) })
+    }
+})
+
+router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return res.status(400).json({ success: false, error: 'Portfolio ID required' })
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
+        if (!portfolio) return res.status(404).json({ success: false, error: 'Portfolio not found' })
+        const prices = await reflectorService.getCurrentPrices()
+        const totalValue = Object.entries(portfolio.balances || {}).reduce((sum, [asset, bal]) => sum + (bal * (prices[asset]?.price ?? 0)), 0)
+        const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? 1
+        const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
+        return res.json({
+            success: true,
+            portfolioId,
+            totalValue,
+            maxSlippagePercent: slippageTolerancePercent,
+            estimatedSlippageBps,
+            prices: Object.keys(prices).length > 0 ? prices : undefined,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })
+        return res.status(500).json({ success: false, error: getErrorMessage(error) })
     }
 })
 
