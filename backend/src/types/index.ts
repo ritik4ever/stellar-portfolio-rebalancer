@@ -103,11 +103,18 @@ export interface CircuitBreakerStatus {
 }
 
 // API response interfaces
+export interface ApiErrorResponseBody {
+    code: string
+    message: string
+    details?: unknown
+}
+
 export interface ApiResponse<T = any> {
     success: boolean
-    data?: T
-    error?: string
+    data: T | null
+    error: ApiErrorResponseBody | null
     timestamp: string
+    meta?: Record<string, unknown>
 }
 
 export interface PortfolioApiResponse extends ApiResponse {

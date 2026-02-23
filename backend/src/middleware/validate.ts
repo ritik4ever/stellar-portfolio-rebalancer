@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError } from 'zod';
 import { logger } from '../utils/logger.js';
+import { fail } from '../utils/apiResponse.js';
 
 /**
  * Express middleware to validate request body entirely against a Zod schema.
@@ -24,10 +25,7 @@ export const validateRequest = (schema: ZodSchema) => {
                     errors: formattedErrors
                 });
 
-                return res.status(400).json({
-                    error: 'Invalid request payload',
-                    details: formattedErrors
-                });
+                return fail(res, 400, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
             }
 
             // Optional: Re-assign exactly the strict parsed payload (dropping unknown keys)
@@ -35,7 +33,7 @@ export const validateRequest = (schema: ZodSchema) => {
             next();
         } catch (error) {
             logger.error('Unexpected validation error', { error });
-            res.status(500).json({ error: 'Internal validation exception' });
+            fail(res, 500, 'INTERNAL_ERROR', 'Internal validation exception');
         }
     };
 };
