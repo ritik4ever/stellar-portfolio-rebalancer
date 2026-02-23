@@ -125,9 +125,9 @@ router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: R
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
         if (!parsed.success) {
-            const first = parsed.error.errors[0]
+            const first = parsed.error.issues[0]
             const message = first?.message ?? 'Validation failed'
-            const fullMessage = parsed.error.errors.some(e => e.path.join('.') !== '')
+            const fullMessage = parsed.error.issues.some((e) => e.path.join('.') !== '')
                 ? message
                 : req.body?.userAddress == null
                     ? 'Missing required fields: userAddress, allocations, threshold'
@@ -221,7 +221,7 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware,
             const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices);
 
             if (!riskCheck.allowed) {
-                return fail(res, 400, 'BAD_REQUEST', riskCheck.reason, { alerts: riskCheck.alerts });
+                return fail(res, 400, 'BAD_REQUEST', riskCheck.reason ?? 'Rebalance blocked by risk checks', { alerts: riskCheck.alerts });
             }
 
             const result = await stellarService.executeRebalance(portfolioId);

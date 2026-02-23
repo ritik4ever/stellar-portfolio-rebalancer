@@ -22,6 +22,7 @@ export interface Portfolio {
     userAddress: string
     allocations: Record<string, number>
     threshold: number
+    slippageTolerancePercent?: number
     balances: Record<string, number>
     totalValue: number
     createdAt: string
