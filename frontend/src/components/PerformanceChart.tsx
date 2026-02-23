@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+import { api, ENDPOINTS } from '../config/api'
 import { useTheme } from '../context/ThemeContext'
 
 interface PerformanceChartProps {
@@ -58,25 +58,13 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
             setLoading(true)
             setError(null)
 
-            const [analyticsResponse, summaryResponse] = await Promise.all([
-                fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioId}/analytics?days=${days}`),
-                fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioId}/performance-summary`)
+            const [analyticsResult, summaryResult] = await Promise.all([
+                api.get<{ portfolioId: string; data: AnalyticsData[] }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId) + `/analytics`, { days: String(days) }),
+                api.get<{ portfolioId: string } & PerformanceSummary>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId) + `/performance-summary`)
             ])
 
-            if (!analyticsResponse.ok || !summaryResponse.ok) {
-                throw new Error('Failed to fetch analytics data')
-            }
-
-            const analyticsResult = await analyticsResponse.json()
-            const summaryResult = await summaryResponse.json()
-
-            if (analyticsResult.success) {
-                setAnalyticsData(analyticsResult.data || [])
-            }
-
-            if (summaryResult.success) {
-                setPerformanceSummary(summaryResult)
-            }
+            setAnalyticsData(analyticsResult.data || [])
+            setPerformanceSummary(summaryResult)
         } catch (err) {
             console.error('Failed to fetch analytics:', err)
             setError('Failed to load performance data')

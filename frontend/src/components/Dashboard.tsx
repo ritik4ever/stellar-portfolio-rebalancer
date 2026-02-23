@@ -8,10 +8,9 @@ import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
 import NotificationPreferences from './NotificationPreferences'
-import { NotificationTest } from './NotificationTest'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
-import { API_CONFIG } from '../config/api'
+import { api, ENDPOINTS } from '../config/api'
 import { browserPriceService } from '../services/browserPriceService'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
@@ -47,32 +46,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const fetchPortfolioData = async () => {
         try {
             console.log('Fetching portfolio data for:', publicKey)
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/user/${publicKey}/portfolios`)
+            if (!publicKey) {
+                console.log('Portfolio list fetch failed, loading demo data')
+                loadDemoData()
+                return
+            }
 
-            if (response.ok) {
-                const portfolios = await response.json()
-                console.log('Found portfolios:', portfolios)
+            const userPortfolios = await api.get<{ portfolios: any[] }>(ENDPOINTS.USER_PORTFOLIOS(publicKey))
+            const portfolios = userPortfolios.portfolios ?? []
+            console.log('Found portfolios:', portfolios)
 
-                if (portfolios.length > 0) {
-                    // Use the most recent portfolio (last in array)
-                    const latestPortfolio = portfolios[portfolios.length - 1]
-                    console.log('Using portfolio:', latestPortfolio)
+            if (portfolios.length > 0) {
+                // Use the most recent portfolio (last in array)
+                const latestPortfolio = portfolios[portfolios.length - 1]
+                console.log('Using portfolio:', latestPortfolio)
 
-                    const portfolioResponse = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${latestPortfolio.id}`)
-                    if (portfolioResponse.ok) {
-                        const data = await portfolioResponse.json()
-                        console.log('Portfolio data:', data)
-                        setPortfolioData(data.portfolio || data)
-                    } else {
-                        console.log('Portfolio details fetch failed, using list data')
-                        setPortfolioData(latestPortfolio)
-                    }
-                } else {
-                    console.log('No portfolios found, loading demo data')
-                    loadDemoData()
+                try {
+                    const detail = await api.get<{ portfolio: any }>(ENDPOINTS.PORTFOLIO_DETAIL(latestPortfolio.id))
+                    console.log('Portfolio data:', detail)
+                    setPortfolioData(detail.portfolio || latestPortfolio)
+                } catch {
+                    console.log('Portfolio details fetch failed, using list data')
+                    setPortfolioData(latestPortfolio)
                 }
             } else {
-                console.log('Portfolio list fetch failed, loading demo data')
+                console.log('No portfolios found, loading demo data')
                 loadDemoData()
             }
         } catch (error) {
@@ -143,23 +141,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         setRebalancing(true)
 
         try {
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioData.id}/rebalance`, {
-                method: 'POST'
-            })
-
-            if (response.ok) {
-                const result = await response.json()
-                alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
-                fetchPortfolioData()
-            } else {
-                const errData = await response.json().catch(() => ({}))
-                const msg = errData?.error ?? 'Rebalance failed. Please try again.'
-                const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-                alert(isSlippage ? `Slippage too high: ${msg}` : msg)
-            }
+            const result = await api.post<{ result: any }>(ENDPOINTS.PORTFOLIO_REBALANCE(portfolioData.id))
+            alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
+            fetchPortfolioData()
         } catch (error) {
             console.error('Rebalance failed:', error)
-            alert('Rebalance failed. Please try again.')
+            const msg = error instanceof Error ? error.message : 'Rebalance failed. Please try again.'
+            const isSlippage = msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance')
+            alert(isSlippage ? `Slippage too high: ${msg}` : msg)
         } finally {
             setRebalancing(false)
         }

@@ -1,5 +1,33 @@
 import { browserPriceService } from '../services/browserPriceService'
 
+export interface ApiErrorPayload {
+    code: string
+    message: string
+    details?: unknown
+}
+
+export interface ApiEnvelope<T> {
+    success: boolean
+    data: T | null
+    error: ApiErrorPayload | null
+    timestamp: string
+    meta?: Record<string, unknown>
+}
+
+export class ApiClientError extends Error {
+    status: number
+    code: string
+    details?: unknown
+
+    constructor(message: string, status: number, code: string, details?: unknown) {
+        super(message)
+        this.name = 'ApiClientError'
+        this.status = status
+        this.code = code
+        this.details = details
+    }
+}
+
 const getBaseUrl = (): string => {
     // In Vite, environment variables need VITE_ prefix to be available in browser
     const viteEnv = (import.meta as any).env
@@ -95,6 +123,7 @@ export const apiRequest = async <T>(
     }
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_CONFIG.BASE_URL}${endpoint}`
+    const isApiRequest = url.includes('/api/')
 
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -132,34 +161,41 @@ export const apiRequest = async <T>(
         console.log(`API Response: ${response.status} ${response.statusText}`)
         console.log('Response headers:', Object.fromEntries(response.headers.entries()))
 
-        if (!response.ok) {
-            let errorMessage = `HTTP ${response.status}: ${response.statusText}`
-            try {
-                const errorData = await response.json()
-                errorMessage = errorData.error || errorData.message || errorMessage
-            } catch {
-                // Use status text if can't parse error
-            }
-            throw new Error(errorMessage)
-        }
-
         const contentType = response.headers.get('content-type')
-        if (contentType && contentType.includes('application/json')) {
-            const data = await response.json()
-            console.log('API Response Data:', data)
-            return data
-        } else {
+        if (!contentType || !contentType.includes('application/json')) {
             const text = await response.text()
             return text as unknown as T
         }
 
+        const body = await response.json()
+        console.log('API Response Data:', body)
+
+        if (isApiRequest) {
+            const envelope = body as ApiEnvelope<T>
+
+            if (!response.ok || !envelope.success || envelope.data === null) {
+                const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`
+                const message = envelope.error?.message || fallbackMessage
+                const code = envelope.error?.code || (response.ok ? 'INTERNAL_ERROR' : 'HTTP_ERROR')
+                throw new ApiClientError(message, response.status, code, envelope.error?.details)
+            }
+
+            return envelope.data
+        }
+
+        if (!response.ok) {
+            const errorMessage = (body?.error?.message || body?.error || body?.message || `HTTP ${response.status}: ${response.statusText}`) as string
+            throw new ApiClientError(errorMessage, response.status, 'HTTP_ERROR')
+        }
+
+        return body as T
     } catch (error) {
         clearTimeout(timeoutId)
 
         if (error instanceof Error) {
             if (error.name === 'AbortError') {
                 console.error(`API Request timeout: ${url}`)
-                throw new Error(`Request timeout after ${API_CONFIG.TIMEOUT}ms`)
+                throw new ApiClientError(`Request timeout after ${API_CONFIG.TIMEOUT}ms`, 408, 'REQUEST_TIMEOUT')
             }
 
             console.error(`API Request failed: ${url}`, error.message)

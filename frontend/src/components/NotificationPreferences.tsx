@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader, Send } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader } from 'lucide-react'
+import { api } from '../config/api'
 
 interface NotificationPreferencesProps {
     userId: string
@@ -54,17 +54,12 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setLoading(true)
             setError(null)
 
-            const response = await fetch(
-                `${API_CONFIG.BASE_URL}/api/notifications/preferences?userId=${encodeURIComponent(userId)}`
+            const data = await api.get<{ preferences: Preferences | null; message?: string }>(
+                '/api/notifications/preferences',
+                { userId }
             )
-            
-            if (!response.ok) {
-                throw new Error('Failed to fetch preferences')
-            }
 
-            const data = await response.json()
-
-            if (data.success && data.preferences) {
+            if (data.preferences) {
                 setPreferences(data.preferences)
                 setOriginalPreferences(data.preferences)
             } else {
@@ -141,21 +136,10 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         setSaveSuccess(false)
 
         try {
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/notifications/subscribe`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    userId,
-                    ...preferences
-                })
+            await api.post('/api/notifications/subscribe', {
+                userId,
+                ...preferences
             })
-
-            if (!response.ok) {
-                const data = await response.json()
-                throw new Error(data.error || 'Failed to save preferences')
-            }
 
             setOriginalPreferences(preferences)
             setSaveSuccess(true)
@@ -178,14 +162,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         setError(null)
 
         try {
-            const response = await fetch(
-                `${API_CONFIG.BASE_URL}/api/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
-                { method: 'DELETE' }
-            )
-
-            if (!response.ok) {
-                throw new Error('Failed to unsubscribe')
-            }
+            await api.delete(`/api/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`)
 
             // Update local state
             setPreferences(prev => ({

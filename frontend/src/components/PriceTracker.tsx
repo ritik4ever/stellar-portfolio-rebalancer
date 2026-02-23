@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { TrendingUp, TrendingDown, Activity, Wifi, WifiOff } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+import { api, API_CONFIG, ENDPOINTS } from '../config/api'
 
 interface PriceTrackerProps {
     compact?: boolean
@@ -32,38 +32,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
     const fetchPrices = async () => {
         try {
-            const url = `${API_CONFIG.BASE_URL}/api/prices`
-            console.log('Fetching prices from:', url)
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                // Add timeout to prevent hanging requests
-                signal: AbortSignal.timeout(10000)
-            })
-
-            console.log('Response status:', response.status)
-            console.log('Response headers:', Object.fromEntries(response.headers.entries()))
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-            }
-
-            const rawData = await response.text()
-            console.log('Raw response:', rawData)
-
-            // Parse JSON safely
-            let data
-            try {
-                data = JSON.parse(rawData)
-            } catch (parseError) {
-                console.error('JSON parse error:', parseError)
-                throw new Error('Invalid JSON response from server')
-            }
-
+            const data = await api.get<Record<string, any>>(ENDPOINTS.PRICES)
             console.log('Parsed price data:', data)
 
             // Transform the data to match expected format
