@@ -7,6 +7,7 @@ pub struct Portfolio {
     pub target_allocations: Map<Address, u32>,
     pub current_balances: Map<Address, i128>,
     pub rebalance_threshold: u32,
+    pub slippage_tolerance: u32,
     pub last_rebalance: u64,
     pub total_value: i128,
     pub is_active: bool,
@@ -35,4 +36,6 @@ pub enum Error {
     ExcessiveDrift = 6,
     AlreadyInitialized = 7,
     InvalidThreshold = 8,
+    InvalidSlippageTolerance = 9,
+    SlippageExceeded = 10,
 }

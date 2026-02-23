@@ -30,6 +30,7 @@ export interface Portfolio {
     userAddress: string
     allocations: Record<string, number>
     threshold: number
+    slippageTolerancePercent?: number
     balances: Record<string, number>
     totalValue: number
     createdAt: string
@@ -37,12 +38,12 @@ export interface Portfolio {
     version: number
 }
 
-// Raw row shape as stored in SQLite
 interface PortfolioRow {
     id: string
     user_address: string
     allocations: string
     threshold: number
+    slippage_tolerance_percent?: number
     balances: string
     total_value: number
     created_at: string
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
     user_address  TEXT NOT NULL,
     allocations   TEXT NOT NULL,
     threshold     REAL NOT NULL,
+    slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
     balances      TEXT NOT NULL,
     total_value   REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
@@ -139,13 +141,14 @@ function seedDemoData(db: Database.Database): void {
     const balances = { XLM: 11173.18, BTC: 0.02697, ETH: 0.68257, USDC: 1000 }
 
     db.prepare(`
-        INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
         DEMO_PORTFOLIO_ID,
         'DEMO-USER',
         JSON.stringify(allocations),
         5,
+        1,
         JSON.stringify(balances),
         10000,
         now,
@@ -244,6 +247,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
         userAddress: row.user_address,
         allocations: safeJsonParse(row.allocations, {}, `portfolio(${row.id}).allocations`),
         threshold: row.threshold,
+        slippageTolerancePercent: row.slippage_tolerance_percent ?? 1,
         balances: safeJsonParse(row.balances, {}, `portfolio(${row.id}).balances`),
         totalValue: row.total_value,
         createdAt: row.created_at,
@@ -301,6 +305,10 @@ export class DatabaseService {
             this.db.exec("ALTER TABLE portfolios ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
             logger.info('[DB] Migration: added version column to portfolios')
         }
+        if (!cols.some(c => c.name === 'slippage_tolerance_percent')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN slippage_tolerance_percent REAL NOT NULL DEFAULT 1")
+            logger.info('[DB] Migration: added slippage_tolerance_percent column to portfolios')
+        }
     }
 
     // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -315,15 +323,16 @@ export class DatabaseService {
     createPortfolio(
         userAddress: string,
         allocations: Record<string, number>,
-        threshold: number
+        threshold: number,
+        slippageTolerancePercent: number = 1
     ): string {
         try {
             const id = generateId()
             const now = new Date().toISOString()
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify({}), 0, now, now)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify({}), 0, now, now)
             return id
         } catch (err) {
             throw new Error(`Failed to create portfolio for user '${userAddress}': ${err}`)
@@ -334,16 +343,17 @@ export class DatabaseService {
         userAddress: string,
         allocations: Record<string, number>,
         threshold: number,
-        currentBalances: Record<string, number>
+        currentBalances: Record<string, number>,
+        slippageTolerancePercent: number = 1
     ): string {
         try {
             const id = generateId()
             const now = new Date().toISOString()
             const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(currentBalances), totalValue, now, now)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify(currentBalances), totalValue, now, now)
             return id
         } catch (err) {
             throw new Error(`Failed to create portfolio with balances for user '${userAddress}': ${err}`)

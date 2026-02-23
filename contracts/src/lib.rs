@@ -32,6 +32,7 @@ impl PortfolioRebalancer {
         user: Address,
         target_allocations: Map<Address, u32>,
         rebalance_threshold: u32,
+        slippage_tolerance: u32,
     ) -> Result<u64, Error> {
         user.require_auth();
 
@@ -41,6 +42,10 @@ impl PortfolioRebalancer {
 
         if !(1..=50).contains(&rebalance_threshold) {
             return Err(Error::InvalidThreshold);
+        }
+
+        if !(10..=500).contains(&slippage_tolerance) {
+            return Err(Error::InvalidSlippageTolerance);
         }
 
         let portfolio_id: u64 = env
@@ -57,6 +62,7 @@ impl PortfolioRebalancer {
             target_allocations,
             current_balances: Map::new(&env),
             rebalance_threshold,
+            slippage_tolerance,
             last_rebalance: env.ledger().timestamp(),
             total_value: 0,
             is_active: true,
@@ -163,8 +169,7 @@ impl PortfolioRebalancer {
         false
     }
 
-    pub fn execute_rebalance(env: Env, portfolio_id: u64) {
-        // Check for emergency stop
+    pub fn execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             panic!("Emergency stop active");
         }
@@ -177,13 +182,11 @@ impl PortfolioRebalancer {
 
         portfolio.user.require_auth();
 
-        // Check cooldown (e.g., 1 hour = 3600 seconds)
         let current_time = env.ledger().timestamp();
         if current_time < portfolio.last_rebalance + 3600 {
             panic!("Cooldown active");
         }
 
-        // Reflector check for stale data
         let reflector_address: Address = env
             .storage()
             .instance()
@@ -191,7 +194,6 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
-        // Verify prices satisfy freshness requirement (e.g., 1 hour)
         for (asset, _) in portfolio.target_allocations.iter() {
             if let Some(price_data) =
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
@@ -200,13 +202,47 @@ impl PortfolioRebalancer {
                     panic!("Stale price data");
                 }
             } else {
-                // If price is missing, we can't safely rebalance
                 panic!("Missing price data");
             }
         }
 
-        // Perform rebalance logic (simplified: update last_rebalance and emit event)
-        // In a real contract, this would execute trades or generate instructions
+        let mut has_actual_balances = false;
+        for (_, _) in actual_balances.iter() {
+            has_actual_balances = true;
+            break;
+        }
+        if has_actual_balances {
+            let total_value = portfolio::calculate_portfolio_value(
+                &env,
+                &portfolio.current_balances,
+                &reflector_client,
+            );
+            if total_value > 0 {
+                for (asset, target_pct) in portfolio.target_allocations.iter() {
+                    let price_data = reflector_client
+                        .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+                        .unwrap();
+                    let price = price_data.price;
+                    let expected_value = (total_value * target_pct as i128) / 100;
+                    let expected_balance = (expected_value * 10i128.pow(14)) / price;
+                    let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);
+                    let expected_abs = if expected_balance >= 0 {
+                        expected_balance
+                    } else {
+                        -expected_balance
+                    };
+                    if expected_abs > 0 {
+                        let diff = expected_balance - actual_balance;
+                        let diff_abs = if diff >= 0 { diff } else { -diff };
+                        let slippage_bps = (diff_abs * 10000) / expected_abs;
+                        if slippage_bps > portfolio.slippage_tolerance as i128 {
+                            return Err(Error::SlippageExceeded);
+                        }
+                    }
+                }
+            }
+        }
+
         portfolio.last_rebalance = current_time;
         env.storage()
             .persistent()
@@ -214,6 +250,7 @@ impl PortfolioRebalancer {
 
         env.events()
             .publish(("portfolio", "rebalanced"), (portfolio_id, current_time));
+        Ok(())
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {

@@ -44,8 +44,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [allocations, setAllocations] = useState<Allocation[]>([
     { asset: "XLM", percentage: 40 },
   ]);
-  const [threshold, setThreshold] = useState(5); // % drift that triggers a rebalance
-  const [autoRebalance, setAutoRebalance] = useState(true); // whether to auto-execute rebalances
+  const [threshold, setThreshold] = useState(5);
+  const [slippageTolerance, setSlippageTolerance] = useState(1);
+  const [autoRebalance, setAutoRebalance] = useState(true);
   const [isCreating, setIsCreating] = useState(false); // loading state for submit
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
@@ -236,9 +237,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userAddress: publicKey || "demo-user", // fall back to demo identifier
+          userAddress: publicKey || "demo-user",
           allocations: allocationsMap,
           threshold,
+          slippageTolerance,
         }),
       });
 
@@ -598,6 +600,25 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   </p>
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Max Slippage (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="5"
+                    step="0.1"
+                    value={slippageTolerance}
+                    onChange={(e) =>
+                      setSlippageTolerance(parseFloat(e.target.value) || 1)
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Trades will be rejected if price moves beyond this (0.1% - 5%)
+                  </p>
+                </div>
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -661,6 +682,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 <span className="text-sm font-medium dark:text-gray-200">
                   {autoRebalance ? "Enabled" : "Disabled"}
                 </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Max Slippage:</span>
+                <span className="text-sm font-medium dark:text-gray-200">{slippageTolerance}%</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600 dark:text-gray-400">Portfolio Value:</span>

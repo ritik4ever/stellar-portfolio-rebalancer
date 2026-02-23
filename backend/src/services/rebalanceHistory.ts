@@ -34,6 +34,9 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
     }
 }
 
@@ -66,6 +69,9 @@ export class RebalanceHistoryService {
         onChainContractId?: string
         onChainPagingToken?: string
         isSimulated?: boolean
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -78,10 +84,12 @@ export class RebalanceHistoryService {
             volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
             riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
             priceDirection: this.determinePriceDirection(eventData.prices),
-            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger)
+            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger),
+            estimatedSlippageBps: eventData.estimatedSlippageBps,
+            actualSlippageBps: eventData.actualSlippageBps,
+            slippageExceededTolerance: eventData.slippageExceededTolerance
         }
 
-        // Add risk metrics if available
         if (eventData.prices && eventData.portfolio) {
             try {
                 const riskMetrics = this.riskService.analyzePortfolioRisk(
