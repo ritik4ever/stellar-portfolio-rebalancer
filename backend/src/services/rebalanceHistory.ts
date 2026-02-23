@@ -65,6 +65,8 @@ export class RebalanceHistoryService {
         onChainContractId?: string
         onChainPagingToken?: string
         isSimulated?: boolean
+        /** Slippage in basis points (tracked in rebalance history). */
+        totalSlippageBps?: number
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -77,7 +79,8 @@ export class RebalanceHistoryService {
             volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
             riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
             priceDirection: this.determinePriceDirection(eventData.prices),
-            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger)
+            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger),
+            ...(eventData.totalSlippageBps != null && { totalSlippageBps: eventData.totalSlippageBps })
         }
 
         // Add risk metrics if available

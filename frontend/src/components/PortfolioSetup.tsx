@@ -45,6 +45,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     { asset: "XLM", percentage: 40 },
   ]);
   const [threshold, setThreshold] = useState(5); // % drift that triggers a rebalance
+  const [slippageTolerance, setSlippageTolerance] = useState(1); // max slippage % for trades (0.5–5)
   const [autoRebalance, setAutoRebalance] = useState(true); // whether to auto-execute rebalances
   const [isCreating, setIsCreating] = useState(false); // loading state for submit
   const [error, setError] = useState<string | null>(null); // submit-level error message
@@ -239,6 +240,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           userAddress: publicKey || "demo-user", // fall back to demo identifier
           allocations: allocationsMap,
           threshold,
+          slippageTolerance: Math.max(0.5, Math.min(5, slippageTolerance)),
         }),
       });
 
@@ -595,6 +597,26 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     Trigger rebalance when any asset drifts by this percentage
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Slippage tolerance (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.5"
+                    max="5"
+                    step="0.5"
+                    value={slippageTolerance}
+                    onChange={(e) =>
+                      setSlippageTolerance(parseFloat(e.target.value) || 1)
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Trades exceeding this slippage will be rejected (0.5–5%)
                   </p>
                 </div>
 
