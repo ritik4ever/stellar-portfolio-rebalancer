@@ -11,6 +11,7 @@ import {
 } from './dex.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { rebalanceHistoryService, riskManagementService } from './serviceContainer.js'
+import { logger, logAudit } from '../utils/logger.js'
 
 interface StoredPortfolio {
     id: string
@@ -62,6 +63,11 @@ export class StellarService {
             const prices = await reflector.getCurrentPrices()
             const flags = getFeatureFlags()
 
+            logAudit('portfolio_create_started', {
+                userAddress,
+                mode: flags.demoMode ? 'demo' : 'onchain'
+            })
+
             if (flags.demoMode) {
                 const mockBalances: Record<string, number> = {}
                 const totalValue = 10000
@@ -74,7 +80,12 @@ export class StellarService {
 
                 const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
 
-                console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
+                logger.info('Demo portfolio created', { portfolioId, totalValue })
+                logAudit('portfolio_create_completed', {
+                    portfolioId,
+                    mode: 'demo',
+                    totalValue
+                })
                 return portfolioId
             }
 
@@ -94,7 +105,12 @@ export class StellarService {
             }
 
             const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, filteredBalances)
-            console.log(`Portfolio ${portfolioId} created with real on-chain balances`)
+            logger.info('Portfolio created with real on-chain balances', { portfolioId, totalValue })
+            logAudit('portfolio_create_completed', {
+                portfolioId,
+                mode: 'onchain',
+                totalValue
+            })
             return portfolioId
         } catch (error) {
             throw new Error(`Failed to create portfolio: ${error}`)
@@ -136,7 +152,7 @@ export class StellarService {
             if (!allowDemoFallback) {
                 throw new Error(`Could not fetch real balances: ${errorMessage}`)
             }
-            console.warn('Could not fetch real balances, using demo mode fallback:', errorMessage)
+            logger.warn('Could not fetch real balances, using demo mode fallback', { error: errorMessage })
             return {
                 XLM: 25000,
                 USDC: 10000,
@@ -175,7 +191,7 @@ export class StellarService {
                 const drift = Dec.drift(currentPercentage, targetPercentage)
 
                 if (drift > 50) {
-                    console.warn(`Excessive drift detected for ${asset}: ${drift}%`)
+                    logger.warn('Excessive drift detected', { asset, drift })
                     return false
                 }
 
@@ -186,7 +202,7 @@ export class StellarService {
 
             return false
         } catch (error) {
-            console.error('Error checking rebalance need:', error)
+            logger.error('Error checking rebalance need', { error })
             return false
         }
     }
@@ -217,6 +233,12 @@ export class StellarService {
                     portfolio
                 })
 
+                logAudit('rebalance_blocked', {
+                    portfolioId,
+                    reason: riskCheck.reason,
+                    stage: 'risk_management'
+                })
+
                 throw new Error(`Rebalance blocked: ${riskCheck.reason}`)
             }
 
@@ -235,6 +257,12 @@ export class StellarService {
                     portfolio
                 })
 
+                logAudit('rebalance_blocked', {
+                    portfolioId,
+                    reason: 'Cooldown period active',
+                    stage: 'cooldown'
+                })
+
                 throw new Error('Cooldown period active. Please wait before rebalancing again.')
             }
 
@@ -248,6 +276,12 @@ export class StellarService {
                     status: 'failed',
                     prices,
                     portfolio
+                })
+
+                logAudit('rebalance_blocked', {
+                    portfolioId,
+                    reason: marketCheck.reason,
+                    stage: 'market_conditions'
                 })
 
                 throw new Error(`Rebalance blocked: ${marketCheck.reason}`)
@@ -265,6 +299,11 @@ export class StellarService {
                     portfolio
                 })
 
+                logAudit('rebalance_skipped', {
+                    portfolioId,
+                    reason: 'No rebalance needed'
+                })
+
                 throw new Error('Rebalance not needed at this time')
             }
 
@@ -272,6 +311,12 @@ export class StellarService {
             if (trades.length === 0) {
                 throw new Error('No executable trades generated from current drift')
             }
+
+            logAudit('rebalance_started', {
+                portfolioId,
+                trigger,
+                plannedTrades: trades.length
+            })
 
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
@@ -342,6 +387,15 @@ export class StellarService {
                     ? 'partial'
                     : 'failed'
 
+            logAudit('rebalance_completed', {
+                portfolioId,
+                status: historyStatus,
+                overallStatus,
+                trades: dexResult.executedTrades.filter(t => t.executedAmount > 0 && !t.rolledBack).length,
+                eventId: event.id,
+                gasUsed: `${dexResult.totalEstimatedFeeXLM.toFixed(7)} XLM`
+            })
+
             return {
                 trades: dexResult.executedTrades.filter(t => t.executedAmount > 0 && !t.rolledBack).length,
                 plannedTrades: trades.length,
@@ -368,6 +422,11 @@ export class StellarService {
                 trades: 0,
                 gasUsed: '0 XLM',
                 status: 'failed',
+                error: message
+            })
+
+            logAudit('rebalance_failed', {
+                portfolioId,
                 error: message
             })
 

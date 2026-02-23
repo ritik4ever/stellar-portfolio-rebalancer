@@ -12,6 +12,34 @@ const QUERY_PARAM_KEY_REGEX = /([?&](?:api_key|apikey|x_cg_pro_api_key|x_cg_demo
 
 const REDACTED_HINT = '[REDACTED]';
 
+const SENSITIVE_KEY_TOKENS = [
+    'secret',
+    'secretkey',
+    'signersecret',
+    'privatekey',
+    'seed',
+    'apikey',
+    'api_key',
+    'authorization',
+    'token',
+    'password',
+    'x-cg-pro-api-key',
+    'x-cg-demo-api-key',
+];
+
+const normalizeKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const isSensitiveKey = (key: string): boolean => {
+    const normalized = normalizeKey(key);
+    return SENSITIVE_KEY_TOKENS.some(token => normalized.includes(normalizeKey(token)));
+};
+
+const toPlainError = (error: Error): { name: string; message: string; stack?: string } => ({
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+});
+
 /**
  * Redacts sensitive tokens from a given string.
  */
@@ -36,6 +64,10 @@ export function redactString(str: string): string {
 export function redactObject<T>(obj: T): T {
     if (obj === null || obj === undefined) return obj;
 
+    if (obj instanceof Error) {
+        return toPlainError(obj) as unknown as T;
+    }
+
     if (typeof obj === 'string') {
         return redactString(obj) as unknown as T;
     }
@@ -51,7 +83,7 @@ export function redactObject<T>(obj: T): T {
             const safeKey = redactString(key);
 
             // Mask header objects explicitly if they contain API keys
-            if (safeKey.toLowerCase() === 'x-cg-pro-api-key' || safeKey.toLowerCase() === 'x-cg-demo-api-key' || safeKey.toLowerCase() === 'authorization') {
+            if (isSensitiveKey(safeKey)) {
                 redactedObj[safeKey] = REDACTED_HINT;
             } else {
                 redactedObj[safeKey] = redactObject(value);

@@ -55,7 +55,7 @@ export class ReflectorService {
             // Merge cached and fresh data
             return { ...cachedPrices, ...freshPrices }
         } catch (error) {
-            console.error('[ERROR] Price fetch failed:', error)
+            logger.error('[ERROR] Price fetch failed', { error })
 
             // Try to return cached data first before falling back
             const assets = ['XLM', 'BTC', 'ETH', 'USDC']
@@ -103,8 +103,8 @@ export class ReflectorService {
 
             // FIXED: Use correct API endpoints
             const baseUrl = 'https://api.coingecko.com/api/v3'
-            logger.info('[DEBUG] Using API:', apiKey ? 'CoinGecko Pro' : 'CoinGecko Free')
-            logger.info('[DEBUG] Base URL:', baseUrl)
+            logger.info('[DEBUG] Using API', { api: apiKey ? 'CoinGecko Pro' : 'CoinGecko Free' })
+            logger.info('[DEBUG] Base URL', { baseUrl })
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -117,7 +117,7 @@ export class ReflectorService {
                 .filter(Boolean)
                 .join(',')
 
-            logger.info('[DEBUG] Coin IDs:', coinIds)
+            logger.info('[DEBUG] Coin IDs', { coinIds })
 
             // FIXED: Correct API endpoint and parameters
             const endpoint = '/simple/price'
@@ -129,8 +129,8 @@ export class ReflectorService {
             })
 
             const url = `${baseUrl}${endpoint}?${params.toString()}`
-            logger.info('[DEBUG] Full URL:', url)
-            logger.info('[DEBUG] Headers:', headers)
+            logger.info('[DEBUG] Full URL', { url })
+            logger.info('[DEBUG] Headers', { headers })
 
             const controller = new AbortController()
             const timeoutId = setTimeout(() => controller.abort(), 15000)
@@ -143,26 +143,26 @@ export class ReflectorService {
 
             clearTimeout(timeoutId)
 
-            logger.info('[DEBUG] Response status:', response.status)
-            logger.info('[DEBUG] Response headers:', Object.fromEntries(response.headers.entries()))
+            logger.info('[DEBUG] Response status', { status: response.status })
+            logger.info('[DEBUG] Response headers', { headers: Object.fromEntries(response.headers.entries()) })
 
             if (!response.ok) {
                 // Get the actual error response
                 const errorText = await response.text()
-                console.error('[ERROR] CoinGecko API error response:', errorText)
+                logger.error('[ERROR] CoinGecko API error response', { error: errorText })
 
                 if (response.status === 429) {
-                    console.warn('[ERROR] CoinGecko rate limit exceeded')
+                    logger.warn('[ERROR] CoinGecko rate limit exceeded')
                     throw new Error('Rate limit exceeded')
                 }
 
                 if (response.status === 401) {
-                    console.error('[ERROR] CoinGecko API key invalid')
+                    logger.error('[ERROR] CoinGecko API key invalid')
                     throw new Error('Invalid API key')
                 }
 
                 if (response.status === 400) {
-                    console.error('[ERROR] CoinGecko bad request - check parameters')
+                    logger.error('[ERROR] CoinGecko bad request - check parameters')
                     throw new Error(`Bad request: ${errorText}`)
                 }
 
@@ -170,7 +170,7 @@ export class ReflectorService {
             }
 
             const data = await response.json()
-            logger.info('[DEBUG] CoinGecko response data:', data)
+            logger.info('[DEBUG] CoinGecko response data', { data })
 
             const prices: PricesMap = {}
 
@@ -195,9 +195,13 @@ export class ReflectorService {
                         timestamp: Date.now()
                     })
 
-                    console.log(`[SUCCESS] Fresh ${asset} price: $${priceData.price} (${priceData.change > 0 ? '+' : ''}${priceData.change.toFixed(2)}%)`)
+                    logger.info('[SUCCESS] Fresh price', {
+                        asset,
+                        price: priceData.price,
+                        change: priceData.change
+                    })
                 } else {
-                    console.warn(`[WARNING] No data received for ${asset} (coinId: ${coinId})`)
+                    logger.warn('[WARNING] No data received for asset', { asset, coinId })
                 }
             })
 
@@ -207,7 +211,7 @@ export class ReflectorService {
 
             return prices
         } catch (error) {
-            console.error('[ERROR] Fresh price fetch failed:', error)
+            logger.error('[ERROR] Fresh price fetch failed', { error })
             throw error
         }
     }
@@ -267,7 +271,7 @@ export class ReflectorService {
                 last_updated: data.last_updated
             }
         } catch (error) {
-            console.error(`Failed to get detailed data for ${asset}:`, error)
+            logger.error('Failed to get detailed data for asset', { asset, error })
             throw error
         }
     }
@@ -319,7 +323,7 @@ export class ReflectorService {
                 price
             }))
         } catch (error) {
-            console.error(`Failed to get price history for ${asset}:`, error)
+            logger.error('Failed to get price history for asset', { asset, error })
             if (!getFeatureFlags().allowMockPriceHistory) {
                 throw new Error(`Price history unavailable for ${asset} and ALLOW_MOCK_PRICE_HISTORY is disabled`)
             }
@@ -356,7 +360,7 @@ export class ReflectorService {
     }
 
     private getFallbackPrices(): PricesMap {
-        console.warn('[FALLBACK] Using fallback prices - all sources failed')
+        logger.warn('[FALLBACK] Using fallback prices - all sources failed')
 
         // Add some randomness to make fallback prices look more realistic
         const addVariation = (basePrice: number) => {
@@ -443,7 +447,7 @@ export class ReflectorService {
 
     clearCache(): void {
         this.priceCache.clear()
-        console.log('[DEBUG] Price cache cleared')
+        logger.info('[DEBUG] Price cache cleared')
     }
 
     getCacheStatus(): Record<string, any> {

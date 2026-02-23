@@ -4,7 +4,7 @@ import { rebalanceHistoryService } from './serviceContainer.js'
 import { portfolioStorage } from './portfolioStorage.js'
 import { CircuitBreakers } from './circuitBreakers.js'
 import { notificationService } from './notificationService.js'
-import { logger } from '../utils/logger.js'
+import { logger, logAudit } from '../utils/logger.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { isRedisAvailable } from '../queue/connection.js'
 
@@ -37,6 +37,7 @@ export class AutoRebalancerService {
 
         this.isRunning = true
         logger.info('[AUTO-REBALANCER] Service started (queue-backed)')
+        logAudit('auto_rebalancer_started', { backend: 'bullmq' })
 
         const redisUp = await isRedisAvailable()
         if (redisUp) {
@@ -61,6 +62,7 @@ export class AutoRebalancerService {
         if (!this.isRunning) return
         this.isRunning = false
         logger.info('[AUTO-REBALANCER] Service stopped')
+        logAudit('auto_rebalancer_stopped', { backend: 'bullmq' })
     }
 
     /**
@@ -76,6 +78,7 @@ export class AutoRebalancerService {
             { priority: 1 }
         )
         logger.info('[AUTO-REBALANCER] Force check job enqueued')
+        logAudit('auto_rebalancer_force_check_enqueued', { backend: 'bullmq' })
     }
 
     /**

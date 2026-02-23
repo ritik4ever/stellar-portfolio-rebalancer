@@ -2,6 +2,7 @@ import { RiskManagementService } from './riskManagements.js'
 import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
+import { logger } from '../utils/logger.js'
 
 export interface RebalanceEvent {
     id: string
@@ -89,7 +90,7 @@ export class RebalanceHistoryService {
                 )
                 details.riskMetrics = riskMetrics
             } catch (error) {
-                console.warn('Failed to calculate risk metrics:', error)
+                logger.warn('Failed to calculate risk metrics', { error })
             }
         }
 
@@ -114,7 +115,10 @@ export class RebalanceHistoryService {
             isSimulated: eventData.isSimulated
         })
 
-        console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
+        logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
+            eventId: event.id,
+            isAutomatic: eventData.isAutomatic ?? false
+        })
         return event
     }
 
@@ -132,7 +136,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getRecentAutoRebalances(portfolioId, limit)
         } catch (error) {
-            console.error('Error getting recent auto-rebalances:', error)
+            logger.error('Error getting recent auto-rebalances', { error })
             return []
         }
     }
@@ -142,7 +146,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getAutoRebalancesSince(portfolioId, since)
         } catch (error) {
-            console.error('Error getting auto-rebalances since date:', error)
+            logger.error('Error getting auto-rebalances since date', { error })
             return []
         }
     }
@@ -152,7 +156,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getAllAutoRebalances()
         } catch (error) {
-            console.error('Error getting all auto-rebalances:', error)
+            logger.error('Error getting all auto-rebalances', { error })
             return []
         }
     }

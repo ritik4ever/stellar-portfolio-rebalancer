@@ -19,6 +19,7 @@ import { startPortfolioCheckWorker, stopPortfolioCheckWorker } from './queue/wor
 import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebalanceWorker.js'
 import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
 import { contractEventIndexerService } from './services/contractEventIndexer.js'
+import { requestContextMiddleware } from './middleware/requestContext.js'
 
 let startupConfig: StartupConfig
 try {
@@ -26,7 +27,7 @@ try {
     logger.info('[STARTUP-CONFIG] Validation successful', buildStartupSummary(startupConfig))
 } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error(message)
+    logger.error(message)
     process.exit(1)
 }
 
@@ -72,11 +73,8 @@ app.set('trust proxy', 1)
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
-// Basic logging
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`)
-    next()
-})
+// Request context + structured request logging
+app.use(requestContextMiddleware)
 
 app.use(globalRateLimiter)
 
@@ -112,7 +110,7 @@ app.get('/test/coingecko', async (req, res) => {
         return res.status(404).json({ error: 'Route not found' })
     }
     try {
-        console.log('[TEST] Testing CoinGecko API...')
+        logger.info('[TEST] Testing CoinGecko API...')
         const { ReflectorService } = await import('./services/reflector.js')
         const reflector = new ReflectorService()
 
@@ -217,7 +215,7 @@ app.use((req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-    console.log(`404 - Route not found: ${req.method} ${req.url}`)
+    logger.warn('Route not found', { method: req.method, url: req.url })
     res.status(404).json({
         error: 'Route not found',
         method: req.method,
@@ -233,7 +231,7 @@ app.use((req, res) => {
 
 // Error handler
 app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error('Server error:', error)
+    logger.error('Server error', { error })
     res.status(500).json({
         error: 'Internal server error',
         message: error.message || 'Unknown error'
@@ -247,7 +245,7 @@ const server = createServer(app)
 const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws) => {
-    console.log('WebSocket connection established')
+    logger.info('WebSocket connection established')
     ws.send(JSON.stringify({
         type: 'connection',
         message: 'Connected',
@@ -255,7 +253,7 @@ wss.on('connection', (ws) => {
     }))
 
     ws.on('error', (error) => {
-        console.error('WebSocket error:', error)
+        logger.error('WebSocket error', { error })
     })
 })
 
@@ -263,16 +261,18 @@ wss.on('connection', (ws) => {
 try {
     const rebalancingService = new RebalancingService(wss)
     rebalancingService.start()
-    console.log('[REBALANCING-SERVICE] Monitoring service started (queue-backed)')
+    logger.info('[REBALANCING-SERVICE] Monitoring service started (queue-backed)')
 } catch (error) {
-    console.error('Failed to start rebalancing service:', error)
+    logger.error('Failed to start rebalancing service', { error })
 }
 
 // Start server
 server.listen(port, async () => {
-    console.log(`🚀 Server running on port ${port}`)
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`)
-    console.log(`CoinGecko API Key: ${!!process.env.COINGECKO_API_KEY ? 'SET' : 'NOT SET'}`)
+    logger.info('Server listening', {
+        port,
+        environment: process.env.NODE_ENV || 'development',
+        coinGeckoApiKeySet: !!process.env.COINGECKO_API_KEY
+    })
 
     // ── BullMQ / Redis setup ────────────────────────────────────────────────
     const redisAvailable = await isRedisAvailable()
@@ -287,9 +287,9 @@ server.listen(port, async () => {
         // Register repeatable jobs (scheduler)
         try {
             await startQueueScheduler()
-            console.log('[SCHEDULER] ✅ Queue scheduler registered')
+            logger.info('[SCHEDULER] Queue scheduler registered')
         } catch (err) {
-            console.error('[SCHEDULER] ❌ Failed to register scheduler:', err)
+            logger.error('[SCHEDULER] Failed to register scheduler', { error: err })
         }
     }
 
@@ -300,9 +300,9 @@ server.listen(port, async () => {
 
     if (shouldStartAutoRebalancer) {
         try {
-            console.log('[AUTO-REBALANCER] Starting automatic rebalancing service...')
+            logger.info('[AUTO-REBALANCER] Starting automatic rebalancing service...')
             await autoRebalancer.start()
-            console.log('[AUTO-REBALANCER] ✅ Automatic rebalancing service started successfully')
+            logger.info('[AUTO-REBALANCER] Automatic rebalancing service started successfully')
 
             // Broadcast to WebSocket clients
             wss.clients.forEach(client => {
@@ -315,38 +315,39 @@ server.listen(port, async () => {
                 }
             })
         } catch (error) {
-            console.error('[AUTO-REBALANCER] ❌ Failed to start automatic rebalancing service:', error)
+            logger.error('[AUTO-REBALANCER] Failed to start automatic rebalancing service', { error })
         }
     } else {
-        console.log('[AUTO-REBALANCER] Automatic rebalancing disabled in development mode')
-        console.log('[AUTO-REBALANCER] Set ENABLE_AUTO_REBALANCER=true to enable in development')
+        logger.info('[AUTO-REBALANCER] Automatic rebalancing disabled in development mode')
+        logger.info('[AUTO-REBALANCER] Set ENABLE_AUTO_REBALANCER=true to enable in development')
     }
 
     // Contract event indexer (on-chain source-of-truth history)
     try {
         await contractEventIndexerService.start()
     } catch (error) {
-        console.error('[CHAIN-INDEXER] Failed to start:', error)
+        logger.error('[CHAIN-INDEXER] Failed to start', { error })
     }
 
-    console.log('Available endpoints:')
-    console.log(`  Health: http://localhost:${port}/health`)
-    console.log(`  CORS Test: http://localhost:${port}/test/cors`)
-    console.log(`  CoinGecko Test: http://localhost:${port}/test/coingecko`)
-    console.log(`  Auto-Rebalancer Status: http://localhost:${port}/api/auto-rebalancer/status`)
-    console.log(`  Queue Health: http://localhost:${port}/api/queue/health`)
+    logger.info('Available endpoints', {
+        health: `/health`,
+        corsTest: `/test/cors`,
+        coinGeckoTest: `/test/coingecko`,
+        autoRebalancerStatus: `/api/auto-rebalancer/status`,
+        queueHealth: `/api/queue/health`,
+    })
 })
 
 // Graceful shutdown
 const gracefulShutdown = async (signal: string) => {
-    console.log(`\n[SHUTDOWN] ${signal} received, shutting down gracefully...`)
+    logger.info('[SHUTDOWN] Signal received, shutting down gracefully', { signal })
 
     // Stop auto-rebalancer
     try {
         autoRebalancer.stop()
-        console.log('[SHUTDOWN] Auto-rebalancer stopped')
+        logger.info('[SHUTDOWN] Auto-rebalancer stopped')
     } catch (error) {
-        console.error('[SHUTDOWN] Error stopping auto-rebalancer:', error)
+        logger.error('[SHUTDOWN] Error stopping auto-rebalancer', { error })
     }
 
     // Stop BullMQ workers
@@ -356,32 +357,32 @@ const gracefulShutdown = async (signal: string) => {
             stopRebalanceWorker(),
             stopAnalyticsSnapshotWorker(),
         ])
-        console.log('[SHUTDOWN] BullMQ workers stopped')
+        logger.info('[SHUTDOWN] BullMQ workers stopped')
     } catch (error) {
-        console.error('[SHUTDOWN] Error stopping BullMQ workers:', error)
+        logger.error('[SHUTDOWN] Error stopping BullMQ workers', { error })
     }
 
     // Close BullMQ queues
     try {
         await closeAllQueues()
-        console.log('[SHUTDOWN] BullMQ queues closed')
+        logger.info('[SHUTDOWN] BullMQ queues closed')
     } catch (error) {
-        console.error('[SHUTDOWN] Error closing queues:', error)
+        logger.error('[SHUTDOWN] Error closing queues', { error })
     }
 
     // Close database connection
     try {
         await contractEventIndexerService.stop()
-        console.log('[SHUTDOWN] Contract event indexer stopped')
+        logger.info('[SHUTDOWN] Contract event indexer stopped')
     } catch (error) {
-        console.error('[SHUTDOWN] Error stopping contract event indexer:', error)
+        logger.error('[SHUTDOWN] Error stopping contract event indexer', { error })
     }
 
     try {
         databaseService.close()
-        console.log('[SHUTDOWN] Database connection closed')
+        logger.info('[SHUTDOWN] Database connection closed')
     } catch (error) {
-        console.error('[SHUTDOWN] Error closing database:', error)
+        logger.error('[SHUTDOWN] Error closing database', { error })
     }
 
     // Close WebSocket connections
@@ -397,16 +398,16 @@ const gracefulShutdown = async (signal: string) => {
     // Close server
     server.close((err) => {
         if (err) {
-            console.error('[SHUTDOWN] Error closing server:', err)
+            logger.error('[SHUTDOWN] Error closing server', { error: err })
             process.exit(1)
         }
-        console.log('[SHUTDOWN] Server closed successfully')
+        logger.info('[SHUTDOWN] Server closed successfully')
         process.exit(0)
     })
 
     // Force exit after 10 seconds
     setTimeout(() => {
-        console.log('[SHUTDOWN] Force exit after timeout')
+        logger.warn('[SHUTDOWN] Force exit after timeout')
         process.exit(1)
     }, 10000)
 }
@@ -416,13 +417,12 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'))
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-    console.error('[UNCAUGHT-EXCEPTION] Uncaught exception:', error)
+    logger.error('[UNCAUGHT-EXCEPTION] Uncaught exception', { error })
     gracefulShutdown('UNCAUGHT_EXCEPTION')
 })
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('[UNHANDLED-REJECTION] Unhandled promise rejection:', reason)
-    console.error('Promise:', promise)
+    logger.error('[UNHANDLED-REJECTION] Unhandled promise rejection', { reason, promise })
 })
 
 // Export instances for use in routes

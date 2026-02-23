@@ -1,4 +1,5 @@
 import { getFeatureFlags, type FeatureFlags } from './featureFlags.js'
+import { logger } from '../utils/logger.js'
 
 export interface StartupConfig {
     nodeEnv: 'development' | 'test' | 'production'
@@ -132,7 +133,7 @@ export function validateStartupConfigOrThrow(env: NodeJS.ProcessEnv = process.en
 
     if (warnings.length > 0) {
         const numberedWarnings = warnings.map((msg, idx) => `${idx + 1}. ${msg}`).join('\n')
-        console.warn(`[STARTUP-CONFIG] Warnings:\n${numberedWarnings}`)
+        logger.warn('[STARTUP-CONFIG] Warnings', { warnings })
     }
 
     return {
