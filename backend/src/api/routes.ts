@@ -60,7 +60,7 @@ router.get('/rebalance/history', async (req: Request, res: Response) => {
             portfolioId || undefined,
             limit,
             {
-                eventSource: source,
+                eventSource: source === 'all' ? undefined : source,
                 startTimestamp,
                 endTimestamp
             }
@@ -131,6 +131,55 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
     }
 })
 
+// Manual portfolio rebalance
+router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+
+        console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
+
+        // Try to acquire lock
+        const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+        if (!lockAcquired) {
+            console.log(`[WARNING] Rebalance already in progress for portfolio: ${portfolioId}`);
+            return res.status(409).json({
+                success: false,
+                error: 'Rebalance already in progress for this portfolio'
+            });
+        }
+
+        try {
+            const portfolio = await stellarService.getPortfolio(portfolioId);
+            const prices = await reflectorService.getCurrentPrices();
+            const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices);
+
+            if (!riskCheck.allowed) {
+                return res.status(400).json({
+                    success: false,
+                    error: riskCheck.reason,
+                    alerts: riskCheck.alerts
+                });
+            }
+
+            const result = await stellarService.executeRebalance(portfolioId);
+
+            res.json({
+                success: true,
+                result,
+                timestamp: new Date().toISOString()
+            });
+        } finally {
+            await rebalanceLockService.releaseLock(portfolioId);
+        }
+    } catch (error) {
+        console.error('[ERROR] Manual rebalance failed:', error);
+        res.status(500).json({
+            success: false,
+            error: getErrorMessage(error)
+        });
+    }
+});
+
 // ================================
 // RISK MANAGEMENT ROUTES
 // ================================
@@ -192,7 +241,7 @@ router.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
 
-        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
+        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices)
 
         res.json({
             success: true,
@@ -493,7 +542,7 @@ router.get('/system/status', async (req: Request, res: Response) => {
             success: true,
             system: {
                 status: priceSourcesHealthy ? 'operational' : 'degraded',
-                uptime: process.uptime(),
+                uptime: global.process.uptime(),
                 timestamp: new Date().toISOString(),
                 version: '1.0.0'
             },
@@ -952,8 +1001,7 @@ router.delete('/notifications/unsubscribe', async (req: Request, res: Response) 
 
 router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
-        const apiKey = process.env.COINGECKO_API_KEY
-        logger.info('[DEBUG] API Key exists', { apiKeySet: !!apiKey })
+
 
         // Test direct API call
         const testUrl = apiKey ?
@@ -1031,9 +1079,9 @@ router.get('/debug/reflector-test', blockDebugInProduction, async (req: Request,
             apiConnectivityTest: testResult,
             cacheStatus,
             environment: {
-                nodeEnv: process.env.NODE_ENV,
-                apiKeySet: !!process.env.COINGECKO_API_KEY,
-                apiKeyLength: process.env.COINGECKO_API_KEY?.length || 0
+                nodeEnv: global.process.env.NODE_ENV,
+                apiKeySet: !!global.process.env.COINGECKO_API_KEY,
+                apiKeyLength: global.process.env.COINGECKO_API_KEY?.length || 0
             },
             timestamp: new Date().toISOString()
         })
@@ -1049,12 +1097,12 @@ router.get('/debug/reflector-test', blockDebugInProduction, async (req: Request,
 router.get('/debug/env', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
         res.json({
-            environment: process.env.NODE_ENV,
-            apiKeySet: !!process.env.COINGECKO_API_KEY,
+            environment: global.process.env.NODE_ENV,
+            apiKeySet: !!global.process.env.COINGECKO_API_KEY,
             autoRebalancerEnabled: !!autoRebalancer,
             autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
-            enableAutoRebalancer: process.env.ENABLE_AUTO_REBALANCER,
-            port: process.env.PORT,
+            enableAutoRebalancer: global.process.env.ENABLE_AUTO_REBALANCER,
+            port: global.process.env.PORT,
             timestamp: new Date().toISOString()
         })
     } catch (error) {
@@ -1064,7 +1112,6 @@ router.get('/debug/env', blockDebugInProduction, async (req: Request, res: Respo
         })
     }
 })
-
 router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {

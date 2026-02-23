@@ -3,7 +3,7 @@ import { getConnectionOptions } from '../connection.js'
 import { StellarService } from '../../services/stellar.js'
 import { rebalanceHistoryService } from '../../services/serviceContainer.js'
 import { notificationService } from '../../services/notificationService.js'
-import { logger, logAudit } from '../../utils/logger.js'
+
 import type { RebalanceJobData } from '../queues.js'
 
 let worker: Worker | null = null
@@ -27,6 +27,14 @@ export async function processRebalanceJob(
             portfolioId,
             jobId: job.id,
         })
+    }
+
+    // Try to acquire the concurrency lock
+    const lockAcquired = await rebalanceLockService.acquireLock(portfolioId)
+
+    if (!lockAcquired) {
+        logger.info('[WORKER:rebalance] Rebalance already in progress. Aborting.', { portfolioId })
+        return // Gracefully skip execution
     }
 
     const stellarService = new StellarService()
@@ -112,6 +120,9 @@ export async function processRebalanceJob(
 
         // Re-throw so BullMQ can retry with backoff
         throw err
+    } finally {
+        // Always release the lock to prevent deadlocks
+        await rebalanceLockService.releaseLock(portfolioId)
     }
 }
 
@@ -137,14 +148,14 @@ export function startRebalanceWorker(): Worker | null {
         return null
     }
 
-    worker.on('completed', (job) => {
+    worker.on('completed', (job: Job) => {
         logger.info('[WORKER:rebalance] Job completed', {
             jobId: job.id,
             portfolioId: job.data.portfolioId,
         })
     })
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', (job: Job | undefined, err: Error) => {
         logger.error('[WORKER:rebalance] Job failed', {
             jobId: job?.id,
             portfolioId: job?.data.portfolioId,
