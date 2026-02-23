@@ -501,6 +501,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                 'Execute Rebalance'
                                             )}
                                         </button>
+                                        {(portfolioData as any)?.slippageTolerance != null && (
+                                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
+                                                Max slippage: {(portfolioData as any).slippageTolerance}% — trades above this will be rejected
+                                            </p>
+                                        )}
                                         {(!publicKey || portfolioData?.id === 'demo') && (
                                             <p className="text-xs text-orange-600 dark:text-orange-400 mt-2 text-center">
                                                 {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}

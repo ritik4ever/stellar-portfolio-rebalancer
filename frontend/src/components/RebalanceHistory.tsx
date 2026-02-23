@@ -32,6 +32,7 @@ interface RebalanceEvent {
         estimatedSlippageBps?: number
         actualSlippageBps?: number
         slippageExceededTolerance?: boolean
+        totalSlippageBps?: number
     }
 }
 
@@ -303,7 +304,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             performanceImpact: event.details?.performanceImpact ?? '',
             priceDirection: event.details?.priceDirection ?? '',
             executionTimeMs: event.details?.executionTime ?? '',
-            reason: event.details?.reason ?? ''
+            reason: event.details?.reason ?? '',
+            totalSlippageBps: event.details?.totalSlippageBps ?? '',
+            slippagePct: event.details?.totalSlippageBps != null ? (event.details.totalSlippageBps / 100).toFixed(2) + '%' : ''
         }))
 
         const csv = toCSV(rows, [
@@ -445,6 +448,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                 )}
                                                 {event.details?.amount && (
                                                     <span>Amount: ${event.details.amount.toLocaleString()}</span>
+                                                )}
+                                                {event.details?.totalSlippageBps != null && (
+                                                    <span>Slippage: {(event.details.totalSlippageBps / 100).toFixed(2)}%</span>
                                                 )}
                                             </div>
 
