@@ -175,7 +175,45 @@ app.get('/', (req, res) => {
 
 // Mount API routes
 app.use('/api', portfolioRouter)
-app.use('/', portfolioRouter)
+
+// Legacy non-/api compatibility (redirect only)
+const LEGACY_API_PREFIXES = [
+    '/portfolio',
+    '/user',
+    '/prices',
+    '/prices/enhanced',
+    '/market',
+    '/rebalance',
+    '/risk',
+    '/auto-rebalancer',
+    '/notifications',
+    '/system',
+    '/queue',
+    '/debug'
+]
+
+const PUBLIC_ROOT_PATHS = new Set(['/', '/health', '/test/cors', '/test/coingecko'])
+
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next()
+    if (PUBLIC_ROOT_PATHS.has(req.path)) return next()
+
+    const matchesLegacy = LEGACY_API_PREFIXES.some((prefix) =>
+        req.path === prefix || req.path.startsWith(`${prefix}/`)
+    )
+
+    if (!matchesLegacy) return next()
+
+    const target = `/api${req.originalUrl}`
+    if (process.env.LEGACY_API_REDIRECT === 'false') {
+        return res.status(410).json({
+            error: 'Legacy API path removed. Use /api/* endpoints.',
+            target
+        })
+    }
+
+    return res.redirect(308, target)
+})
 
 // 404 handler
 app.use((req, res) => {
