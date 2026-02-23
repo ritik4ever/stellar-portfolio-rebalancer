@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { ConflictError } from '../types/index.js'
+import { logger } from '../utils/logger.js'
 
 // ─────────────────────────────────────────────
 // Exported type used by rebalanceHistory.ts
@@ -216,7 +217,7 @@ function seedDemoData(db: Database.Database): void {
         )
     }
 
-    console.log('[DB] Demo data seeded (portfolio + 3 history events)')
+    logger.info('[DB] Demo data seeded (portfolio + 3 history events)')
 }
 
 // ─────────────────────────────────────────────
@@ -232,7 +233,7 @@ function safeJsonParse<T>(value: string | null | undefined, fallback: T, context
     try {
         return JSON.parse(value) as T
     } catch {
-        console.error(`[DB] Failed to parse JSON for ${context}:`, value)
+        logger.error('[DB] Failed to parse JSON', { context, value })
         return fallback
     }
 }
@@ -291,14 +292,14 @@ export class DatabaseService {
             seedDemoData(this.db)
         }
 
-        console.log(`[DB] SQLite database ready at: ${dbPath}`)
+        logger.info('[DB] SQLite database ready', { dbPath })
     }
 
     private _migrateSchema(): void {
         const cols = this.db.prepare("PRAGMA table_info(portfolios)").all() as Array<{ name: string }>
         if (!cols.some(c => c.name === 'version')) {
             this.db.exec("ALTER TABLE portfolios ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
-            console.log('[DB] Migration: added version column to portfolios')
+            logger.info('[DB] Migration: added version column to portfolios')
         }
     }
 

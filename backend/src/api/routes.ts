@@ -51,7 +51,7 @@ router.get('/rebalance/history', async (req: Request, res: Response) => {
         const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
         const syncOnChain = parseOptionalBoolean(req.query.syncOnChain) === true
 
-        console.log(`[DEBUG] Rebalance history request - portfolioId: ${portfolioId || 'all'}`)
+        logger.info('Rebalance history request', { portfolioId: portfolioId || 'all' })
         if (syncOnChain) {
             await contractEventIndexerService.syncOnce()
         }
@@ -79,7 +79,7 @@ router.get('/rebalance/history', async (req: Request, res: Response) => {
         })
 
     } catch (error) {
-        console.error('[ERROR] Rebalance history failed:', error)
+        logger.error('[ERROR] Rebalance history failed', { error: getErrorObject(error) })
         res.json({
             success: false,
             error: getErrorMessage(error),
@@ -93,7 +93,7 @@ router.post('/rebalance/history', idempotencyMiddleware, async (req: Request, re
     try {
         const eventData = req.body
 
-        console.log('[INFO] Recording new rebalance event:', eventData)
+        logger.info('Recording new rebalance event', { eventData })
 
         const event = await rebalanceHistoryService.recordRebalanceEvent({
             ...eventData,
@@ -106,7 +106,7 @@ router.post('/rebalance/history', idempotencyMiddleware, async (req: Request, re
             timestamp: new Date().toISOString()
         })
     } catch (error) {
-        console.error('[ERROR] Failed to record rebalance event:', error)
+        logger.error('[ERROR] Failed to record rebalance event', { error: getErrorObject(error) })
         res.status(500).json({
             success: false,
             error: getErrorMessage(error)
@@ -140,7 +140,7 @@ router.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) => 
     try {
         const { portfolioId } = req.params
 
-        console.log(`[INFO] Calculating risk metrics for portfolio: ${portfolioId}`)
+        logger.info('Calculating risk metrics for portfolio', { portfolioId })
 
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
@@ -167,7 +167,7 @@ router.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) => 
             timestamp: new Date().toISOString()
         })
     } catch (error) {
-        console.error('[ERROR] Failed to get risk metrics:', error)
+        logger.error('[ERROR] Failed to get risk metrics', { error: getErrorObject(error) })
         res.status(500).json({
             success: false,
             error: getErrorMessage(error),
@@ -187,7 +187,7 @@ router.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
     try {
         const { portfolioId } = req.params
 
-        console.log(`[INFO] Checking risk conditions for portfolio: ${portfolioId}`)
+        logger.info('Checking risk conditions for portfolio', { portfolioId })
 
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
@@ -201,7 +201,7 @@ router.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
             timestamp: new Date().toISOString()
         })
     } catch (error) {
-        console.error('[ERROR] Failed to check risk conditions:', error)
+        logger.error('[ERROR] Failed to check risk conditions', { error: getErrorObject(error) })
         res.status(500).json({
             success: false,
             allowed: false,
@@ -219,16 +219,16 @@ router.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
 // Get current prices - FIXED to return direct format for frontend
 router.get('/prices', async (req: Request, res: Response) => {
     try {
-        console.log('[DEBUG] Fetching prices for frontend...')
+        logger.info('[DEBUG] Fetching prices for frontend...')
         const prices = await reflectorService.getCurrentPrices()
 
-        console.log('[DEBUG] Raw prices from service:', prices)
+        logger.info('[DEBUG] Raw prices from service', { prices })
 
         // Return prices directly in the format frontend expects
         res.json(prices)
 
     } catch (error) {
-        console.error('[ERROR] Prices endpoint failed:', error)
+        logger.error('[ERROR] Prices endpoint failed', { error: getErrorObject(error) })
 
         if (!featureFlags.allowFallbackPrices) {
             return res.status(503).json({
@@ -245,7 +245,7 @@ router.get('/prices', async (req: Request, res: Response) => {
             USDC: { price: 0.999781, change: -0.002, timestamp: Date.now() / 1000, source: 'fallback' }
         }
 
-        console.log('[DEBUG] Sending fallback prices:', fallbackPrices)
+        logger.info('[DEBUG] Sending fallback prices', { fallbackPrices })
         res.json(fallbackPrices)
     }
 })
@@ -253,7 +253,7 @@ router.get('/prices', async (req: Request, res: Response) => {
 // Enhanced prices endpoint with risk analysis
 router.get('/prices/enhanced', async (req: Request, res: Response) => {
     try {
-        console.log('[INFO] Fetching enhanced prices with risk analysis')
+        logger.info('[INFO] Fetching enhanced prices with risk analysis')
 
         const prices = await reflectorService.getCurrentPrices()
 
@@ -282,7 +282,7 @@ router.get('/prices/enhanced', async (req: Request, res: Response) => {
             timestamp: new Date().toISOString()
         })
     } catch (error) {
-        console.error('[ERROR] Failed to fetch enhanced prices:', error)
+        logger.error('[ERROR] Failed to fetch enhanced prices', { error: getErrorObject(error) })
         res.status(500).json({
             success: false,
             error: getErrorMessage(error),
@@ -524,7 +524,7 @@ router.get('/system/status', async (req: Request, res: Response) => {
             featureFlags: publicFeatureFlags
         })
     } catch (error) {
-        console.error('[ERROR] Failed to get system status:', error)
+        logger.error('[ERROR] Failed to get system status', { error: getErrorObject(error) })
         res.status(500).json({
             success: false,
             error: getErrorMessage(error),
@@ -953,7 +953,7 @@ router.delete('/notifications/unsubscribe', async (req: Request, res: Response) 
 router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
         const apiKey = process.env.COINGECKO_API_KEY
-        console.log('[DEBUG] API Key exists:', !!apiKey)
+        logger.info('[DEBUG] API Key exists', { apiKeySet: !!apiKey })
 
         // Test direct API call
         const testUrl = apiKey ?
@@ -969,7 +969,7 @@ router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request,
             headers['x-cg-pro-api-key'] = apiKey
         }
 
-        console.log('[DEBUG] Test URL:', testUrl)
+        logger.info('[DEBUG] Test URL', { testUrl })
 
         const response = await fetch(testUrl, { headers })
         const data = await response.json()
@@ -992,7 +992,7 @@ router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request,
 
 router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
-        console.log('[DEBUG] Clearing cache and forcing fresh prices...')
+        logger.info('[DEBUG] Clearing cache and forcing fresh prices...')
 
         // Clear cache first
         reflectorService.clearCache()
@@ -1021,7 +1021,7 @@ router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req: Requ
 
 router.get('/debug/reflector-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
-        console.log('[DEBUG] Testing reflector service...')
+        logger.info('[DEBUG] Testing reflector service...')
 
         const testResult = await reflectorService.testApiConnectivity()
         const cacheStatus = reflectorService.getCacheStatus()
