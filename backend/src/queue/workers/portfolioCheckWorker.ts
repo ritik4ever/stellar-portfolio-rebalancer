@@ -7,7 +7,7 @@ import { portfolioStorage } from '../../services/portfolioStorage.js'
 import { CircuitBreakers } from '../../services/circuitBreakers.js'
 import { notificationService } from '../../services/notificationService.js'
 import { getRebalanceQueue } from '../queues.js'
-import { logger } from '../../utils/logger.js'
+import { logger, logAudit } from '../../utils/logger.js'
 import type { PortfolioCheckJobData } from '../queues.js'
 
 let worker: Worker | null = null
@@ -97,14 +97,20 @@ export async function processPortfolioCheckJob(
 
             // Enqueue a rebalance job for this portfolio
             if (rebalanceQueue) {
+                const jobId = `rebalance-${portfolio.id}-${Date.now()}`
                 await rebalanceQueue.add(
                     `rebalance-${portfolio.id}`,
                     { portfolioId: portfolio.id, triggeredBy: 'auto' },
-                    { jobId: `rebalance-${portfolio.id}-${Date.now()}` }
+                    { jobId }
                 )
                 queued++
                 logger.info('[WORKER:portfolio-check] Enqueued rebalance job', {
                     portfolioId: portfolio.id,
+                    jobId,
+                })
+                logAudit('auto_rebalance_enqueued', {
+                    portfolioId: portfolio.id,
+                    jobId,
                 })
             }
         } catch (err) {

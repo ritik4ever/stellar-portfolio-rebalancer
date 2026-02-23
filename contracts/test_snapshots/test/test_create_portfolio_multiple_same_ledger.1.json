@@ -42,11 +42,47 @@
         }
       ]
     ],
-    []
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "create_portfolio",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 100
+                      }
+                    }
+                  ]
+                },
+                {
+                  "u32": 5
+                },
+                {
+                  "u32": 50
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ]
   ],
   "ledger": {
     "protocol_version": 21,
-    "sequence_number": 0,
+    "sequence_number": 1,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -84,13 +120,13 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u64": 2
+                  "u64": 3
                 }
               }
             },
             "ext": "v0"
           },
-          4095
+          4096
         ]
       ],
       [
@@ -212,7 +248,129 @@
             },
             "ext": "v0"
           },
-          4095
+          4096
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Portfolio"
+                },
+                {
+                  "u64": 2
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Portfolio"
+                    },
+                    {
+                      "u64": 2
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "current_balances"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "is_active"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_rebalance"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "rebalance_threshold"
+                      },
+                      "val": {
+                        "u32": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "slippage_tolerance"
+                      },
+                      "val": {
+                        "u32": 50
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "target_allocations"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            },
+                            "val": {
+                              "u32": 100
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_value"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 0
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "user"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4096
         ]
       ],
       [
@@ -281,7 +439,7 @@
             },
             "ext": "v0"
           },
-          4095
+          4096
         ]
       ],
       [
@@ -313,7 +471,7 @@
             },
             "ext": "v0"
           },
-          4095
+          4096
         ]
       ],
       [
@@ -346,7 +504,40 @@
             },
             "ext": "v0"
           },
-          6311999
+          6312000
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5541220902715666415
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5541220902715666415
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6312000
         ]
       ],
       [
@@ -367,7 +558,7 @@
             },
             "ext": "v0"
           },
-          4095
+          4096
         ]
       ]
     ]
@@ -543,131 +734,31 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "deposit"
+                "symbol": "create_portfolio"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "u64": 1
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "log"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "caught panic 'Amount must be positive' from contract function 'Symbol(deposit)'"
-                },
-                {
-                  "u64": 1
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "string": "caught error from function"
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract call failed"
-                },
-                {
-                  "symbol": "deposit"
-                },
-                {
-                  "vec": [
+                  "map": [
                     {
-                      "u64": 1
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                    },
-                    {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 0
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 100
                       }
                     }
                   ]
+                },
+                {
+                  "u32": 5
+                },
+                {
+                  "u32": 50
                 }
               ]
             }
@@ -679,22 +770,50 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": null,
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "string": "portfolio"
+              },
+              {
+                "string": "created"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 2
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
         "type_": "diagnostic",
         "body": {
           "v0": {
             "topics": [
               {
-                "symbol": "error"
+                "symbol": "fn_return"
               },
               {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
+                "symbol": "create_portfolio"
               }
             ],
             "data": {
-              "string": "escalating error to panic"
+              "u64": 2
             }
           }
         }

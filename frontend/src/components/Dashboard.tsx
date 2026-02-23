@@ -150,9 +150,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             if (response.ok) {
                 const result = await response.json()
                 alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
-                fetchPortfolioData() // Refresh data
+                fetchPortfolioData()
             } else {
-                alert('Rebalance failed. Please try again.')
+                const errData = await response.json().catch(() => ({}))
+                const msg = errData?.error ?? 'Rebalance failed. Please try again.'
+                const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
+                alert(isSlippage ? `Slippage too high: ${msg}` : msg)
             }
         } catch (error) {
             console.error('Rebalance failed:', error)
@@ -476,9 +479,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
                                             <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
                                         </div>
-                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-4">
+                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">
                                             Your portfolio has drifted from target allocation
                                         </p>
+                                        {(portfolioData as any)?.slippageTolerancePercent != null && (
+                                            <p className="text-xs text-orange-600 dark:text-orange-400 mb-4">
+                                                Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
+                                            </p>
+                                        )}
                                         <button
                                             onClick={executeRebalance}
                                             disabled={rebalancing || !publicKey || portfolioData?.id === 'demo'}

@@ -29,7 +29,9 @@ interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         executionTime?: number
         chain?: string
-        /** Slippage in basis points (tracked in rebalance history). */
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
         totalSlippageBps?: number
     }
 }
@@ -490,6 +492,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                 )}
                                             </div>
 
+                                            {(event.details?.actualSlippageBps != null || event.details?.estimatedSlippageBps != null) && (
+                                                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                                    Slippage: {event.details.actualSlippageBps != null ? `${(event.details.actualSlippageBps / 100).toFixed(2)}%` : '—'} actual
+                                                    {event.details.estimatedSlippageBps != null && ` (${(event.details.estimatedSlippageBps / 100).toFixed(2)}% max)`}
+                                                    {event.details?.slippageExceededTolerance && (
+                                                        <span className="ml-1 text-red-600 dark:text-red-400 font-medium">— exceeded tolerance</span>
+                                                    )}
+                                                </div>
+                                            )}
                                             {event.details?.reason && (
                                                 <div className="text-sm text-gray-600 dark:text-gray-400 italic mb-2">
                                                     {event.details.reason}
