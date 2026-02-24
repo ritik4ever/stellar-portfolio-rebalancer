@@ -6,6 +6,7 @@ import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { ConflictError } from '../types/index.js'
 import { logger } from '../utils/logger.js'
+import type { Portfolio } from '../types/index.js'
 
 // ─────────────────────────────────────────────
 // Exported type used by rebalanceHistory.ts
@@ -24,20 +25,6 @@ export interface RebalanceHistoryQueryOptions {
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
 // ─────────────────────────────────────────────
-
-export interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    slippageTolerancePercent?: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
-    lastRebalance: string
-    version: number
-}
-
 interface PortfolioRow {
     id: string
     user_address: string
@@ -247,7 +234,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
         userAddress: row.user_address,
         allocations: safeJsonParse(row.allocations, {}, `portfolio(${row.id}).allocations`),
         threshold: row.threshold,
-        slippageTolerancePercent: row.slippage_tolerance_percent ?? 1,
+        slippageTolerance: row.slippage_tolerance_percent ?? 1,
         balances: safeJsonParse(row.balances, {}, `portfolio(${row.id}).balances`),
         totalValue: row.total_value,
         createdAt: row.created_at,
