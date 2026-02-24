@@ -17,15 +17,7 @@ export interface HistoricalPrice {
 }
 
 // Portfolio interface
-export interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    slippageTolerancePercent?: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
+
     lastRebalance: string
     version: number
 }
@@ -68,6 +60,8 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
+        /** Slippage in basis points for this rebalance (tracked in history). */
+        totalSlippageBps?: number
     }
 }
 

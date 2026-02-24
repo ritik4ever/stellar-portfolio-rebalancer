@@ -230,6 +230,28 @@ GET /api/v1/prices
 
 # Portfolio analysis
 GET /api/v1/portfolio/:id/rebalance-plan
+
+### Stellar DEX integration
+
+The rebalancer now executes **real trades on the Stellar DEX** (testnet or mainnet, depending on configuration) using the `@stellar/stellar-sdk`:
+
+- **Price discovery & risk checks**:  
+  - `StellarDEXService` reads live **orderbooks** to derive reference prices, spreads, and liquidity coverage.  
+  - Trades are rejected up‑front when spread or liquidity are outside configurable bounds (see `REBALANCE_MAX_SPREAD_BPS`, `REBALANCE_MIN_LIQUIDITY_COVERAGE`).
+- **Slippage‑aware execution**:  
+  - Each rebalance trade is submitted as a real `manageSellOffer` transaction with a limit price derived from the portfolio’s **slippage tolerance**.  
+  - During execution, the service tracks per‑trade and cumulative slippage and aborts the rebalance if configured limits are exceeded.
+- **Partial fills, rollbacks and failures**:  
+  - After submission, the engine compares open offers before/after the transaction to infer filled vs remaining amounts, marking trades as `executed`, `partial`, or `failed`.  
+  - Optional rollback trades attempt to unwind partially executed sequences when a rebalance fails mid‑way.  
+  - All outcomes (including slippage metrics and failure reasons) are recorded in **rebalance history** for observability.
+
+This behavior satisfies the core goals of issue **#82 (Complete DEX integration for real trade execution)**:
+
+- Real trades execute on Stellar testnet via Horizon transactions.  
+- Path selection and slippage controls optimize for price within configured risk limits.  
+- Failed or partially filled trades are handled and surfaced cleanly in history and API responses.
+
 Configuration
 Environment Variables
 Backend (.env):
@@ -308,7 +330,7 @@ Phase 1 (Current)
 
 Phase 2 (Next)
 
-🔄 Real DEX integration
+✅ Real DEX integration (live DEX trades with slippage & risk controls)
 🔄 Advanced rebalancing strategies
 🔄 Portfolio analytics and backtesting
 🔄 Mobile application

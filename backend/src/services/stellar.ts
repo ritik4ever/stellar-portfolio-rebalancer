@@ -49,13 +49,20 @@ export class StellarService {
         this.dexService = new StellarDEXService()
     }
 
-    async createPortfolio(userAddress: string, allocations: Record<string, number>, threshold: number, slippageTolerancePercent: number = 1) {
+    async createPortfolio(
+        userAddress: string,
+        allocations: Record<string, number>,
+        threshold: number,
+        slippageTolerancePercent: number = 1
+    ) {
         try {
             if (!Dec.allocationsSumValid(allocations)) {
                 throw new Error('Allocations must sum to 100%')
             }
 
             await this.checkConcentrationRisk(allocations)
+
+            const slippageTolerance = Math.max(0.5, Math.min(5, Number(slippageTolerancePercent) || 1))
 
             const { ReflectorService } = await import('./reflector.js')
             const { portfolioStorage } = await import('./portfolioStorage.js')
@@ -78,7 +85,13 @@ export class StellarService {
                     mockBalances[asset] = Dec.assetQtyFromValue(assetValue, price)
                 }
 
-                const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances, slippageTolerancePercent)
+                const portfolioId = await portfolioStorage.createPortfolioWithBalances(
+                    userAddress,
+                    allocations,
+                    threshold,
+                    mockBalances,
+                    slippageTolerance
+                )
 
                 logger.info('Demo portfolio created', { portfolioId, totalValue })
                 logAudit('portfolio_create_completed', {
@@ -104,7 +117,13 @@ export class StellarService {
                 throw new Error('No real funded balances found for selected allocation assets')
             }
 
-            const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, filteredBalances, slippageTolerancePercent)
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(
+                userAddress,
+                allocations,
+                threshold,
+                filteredBalances,
+                slippageTolerance
+            )
             logger.info('Portfolio created with real on-chain balances', { portfolioId, totalValue })
             logAudit('portfolio_create_completed', {
                 portfolioId,
@@ -307,8 +326,15 @@ export class StellarService {
                 throw new Error('Rebalance not needed at this time')
             }
 
-            const slippageBps = options.tradeSlippageBps ?? Math.round((portfolio.slippageTolerancePercent ?? 1) * 100)
-            const { trades, trigger } = this.calculateRebalanceTrades(portfolio, prices, options.tradeSlippageOverrides, slippageBps)
+            const portfolioSlippagePct = (portfolio as { slippageTolerancePercent?: number; slippageTolerance?: number }).slippageTolerancePercent
+                ?? (portfolio as { slippageTolerance?: number }).slippageTolerance ?? 1
+            const slippageBps = options.tradeSlippageBps ?? Math.round(portfolioSlippagePct * 100)
+            const { trades, trigger } = this.calculateRebalanceTrades(
+                portfolio,
+                prices,
+                options.tradeSlippageOverrides,
+                slippageBps
+            )
             if (trades.length === 0) {
                 throw new Error('No executable trades generated from current drift')
             }
@@ -370,7 +396,7 @@ export class StellarService {
             const historyStatus = dexResult.status === 'failed' ? 'failed' : 'completed'
 
             const actualSlippageBps = dexResult.totalSlippageBps ?? 0
-            const maxAllowedBps = Math.round((portfolio.slippageTolerancePercent ?? 1) * 100)
+            const maxAllowedBps = Math.round(portfolioSlippagePct * 100)
             const event = await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: dexResult.status === 'failed'
@@ -387,7 +413,8 @@ export class StellarService {
                 error: failureReasons.join('; ') || undefined,
                 estimatedSlippageBps: slippageBps,
                 actualSlippageBps: actualSlippageBps,
-                slippageExceededTolerance: actualSlippageBps > maxAllowedBps
+                slippageExceededTolerance: actualSlippageBps > maxAllowedBps,
+                totalSlippageBps: dexResult.totalSlippageBps
             })
 
             const overallStatus = dexResult.status === 'success'
@@ -628,7 +655,7 @@ export class StellarService {
                 needsRebalance,
                 lastRebalance: portfolio.lastRebalance,
                 threshold: portfolio.threshold,
-                slippageTolerancePercent: portfolio.slippageTolerancePercent ?? 1,
+                slippageTolerancePercent: (portfolio as { slippageTolerancePercent?: number; slippageTolerance?: number }).slippageTolerancePercent ?? (portfolio as { slippageTolerance?: number }).slippageTolerance ?? 1,
                 dayChange: this.calculateDayChange(allocations)
             }
         } catch (error) {

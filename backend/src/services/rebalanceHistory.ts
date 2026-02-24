@@ -37,6 +37,7 @@ export interface RebalanceEvent {
         estimatedSlippageBps?: number
         actualSlippageBps?: number
         slippageExceededTolerance?: boolean
+        totalSlippageBps?: number
     }
 }
 
@@ -72,6 +73,8 @@ export class RebalanceHistoryService {
         estimatedSlippageBps?: number
         actualSlippageBps?: number
         slippageExceededTolerance?: boolean
+        /** Optional aggregate slippage in basis points for backwards compatibility. */
+        totalSlippageBps?: number
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -87,7 +90,8 @@ export class RebalanceHistoryService {
             performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger),
             estimatedSlippageBps: eventData.estimatedSlippageBps,
             actualSlippageBps: eventData.actualSlippageBps,
-            slippageExceededTolerance: eventData.slippageExceededTolerance
+            slippageExceededTolerance: eventData.slippageExceededTolerance,
+            ...(eventData.totalSlippageBps != null && { totalSlippageBps: eventData.totalSlippageBps })
         }
 
         if (eventData.prices && eventData.portfolio) {

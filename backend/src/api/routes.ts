@@ -561,6 +561,70 @@ router.get('/system/status', async (req: Request, res: Response) => {
 })
 
 // ================================
+// PORTFOLIO CRUD AND REBALANCE
+// ================================
+
+router.post('/portfolio', async (req, res) => {
+    try {
+        const { userAddress, allocations, threshold, slippageTolerance } = req.body
+        if (!userAddress || !allocations || threshold === undefined) {
+            return res.status(400).json({ error: 'Missing required fields: userAddress, allocations, threshold' })
+        }
+        const total = Object.values(allocations).reduce((sum: number, val: number) => sum + val, 0)
+        if (Math.abs(total - 100) > 0.01) {
+            return res.status(400).json({ error: 'Allocations must sum to 100%' })
+        }
+        if (threshold < 1 || threshold > 50) {
+            return res.status(400).json({ error: 'Threshold must be between 1 and 50' })
+        }
+        const stellarService = new StellarService()
+        const portfolioId = await stellarService.createPortfolio(
+            userAddress,
+            allocations,
+            threshold,
+            slippageTolerance != null ? Math.max(0.5, Math.min(5, Number(slippageTolerance))) : 1
+        )
+        const mode = process.env.DEMO_MODE === 'true' ? 'demo' : 'live'
+        res.status(201).json({ portfolioId, status: 'created', mode })
+    } catch (error) {
+        logger.error('Failed to create portfolio', { error: getErrorObject(error) })
+        res.status(500).json({ error: getErrorMessage(error) })
+    }
+})
+
+router.get('/portfolio/:id', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return res.status(400).json({ error: 'Portfolio ID required' })
+        const stellarService = new StellarService()
+        const portfolio = await stellarService.getPortfolio(portfolioId)
+        if (!portfolio) return res.status(404).json({ error: 'Portfolio not found' })
+        res.json({ portfolio })
+    } catch (error) {
+        logger.error('Failed to fetch portfolio', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({ error: getErrorMessage(error) })
+    }
+})
+
+router.post('/portfolio/:id/rebalance', async (req, res) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return res.status(400).json({ error: 'Portfolio ID required' })
+        const stellarService = new StellarService()
+        const result = await stellarService.executeRebalance(portfolioId)
+        res.json({
+            success: true,
+            portfolioId,
+            ...result,
+            timestamp: new Date().toISOString()
+        })
+    } catch (error) {
+        logger.error('Failed to execute rebalance', { error: getErrorObject(error), portfolioId: req.params.id })
+        res.status(500).json({ error: getErrorMessage(error) })
+    }
+})
+
+// ================================
 // ANALYTICS ROUTES
 // ================================
 
