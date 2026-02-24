@@ -20,6 +20,7 @@ import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebal
 import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
 import { contractEventIndexerService } from './services/contractEventIndexer.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
+import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 
 let startupConfig: StartupConfig
 try {
@@ -173,6 +174,7 @@ app.get('/', (req, res) => {
 
 // Mount API routes
 app.use('/api', portfolioRouter)
+app.use('/api', apiErrorHandler)
 
 // Legacy non-/api compatibility (redirect only)
 const LEGACY_API_PREFIXES = [

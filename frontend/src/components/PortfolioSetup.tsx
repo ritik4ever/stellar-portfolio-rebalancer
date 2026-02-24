@@ -18,7 +18,7 @@ import {
   AlertCircle,
   CheckCircle,
 } from "lucide-react";
-import { API_CONFIG } from "../config/api";
+import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -233,27 +233,18 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         {} as Record<string, number>,
       );
 
-      const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await api.post(ENDPOINTS.PORTFOLIO, {
           userAddress: publicKey || "demo-user",
           allocations: allocationsMap,
           threshold,
           slippageTolerance,
-        }),
       });
 
-      if (response.ok) {
-        setSuccess(true);
-        // Brief pause so the user sees the success banner before being redirected
-        setTimeout(() => onNavigate("dashboard"), 2000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Failed to create portfolio");
-      }
+      setSuccess(true);
+      // Brief pause so the user sees the success banner before being redirected
+      setTimeout(() => onNavigate("dashboard"), 2000);
     } catch (err) {
-      setError("Network error. Please try again.");
+      setError(err instanceof Error ? err.message : "Network error. Please try again.");
     } finally {
       setIsCreating(false);
     }

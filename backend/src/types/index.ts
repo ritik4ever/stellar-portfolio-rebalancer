@@ -17,16 +17,7 @@ export interface HistoricalPrice {
 }
 
 // Portfolio interface
-export interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    /** Slippage tolerance in percent (0.5–5). Trades exceeding this are rejected. */
-    slippageTolerance?: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
+
     lastRebalance: string
     version: number
 }
@@ -107,11 +98,18 @@ export interface CircuitBreakerStatus {
 }
 
 // API response interfaces
+export interface ApiErrorResponseBody {
+    code: string
+    message: string
+    details?: unknown
+}
+
 export interface ApiResponse<T = any> {
     success: boolean
-    data?: T
-    error?: string
+    data: T | null
+    error: ApiErrorResponseBody | null
     timestamp: string
+    meta?: Record<string, unknown>
 }
 
 export interface PortfolioApiResponse extends ApiResponse {

@@ -4,7 +4,7 @@ import { getRequestId } from './requestContext.js'
 
 const isProduction = process.env.NODE_ENV === 'production'
 
-const logger = pino({
+const baseLogger = pino({
     level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
     base: {
         service: 'stellar-portfolio-backend',
@@ -31,6 +31,19 @@ const logger = pino({
         },
     },
 })
+
+type LoggerMethod = (...args: unknown[]) => void
+
+type AppLogger = Omit<typeof baseLogger, 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace'> & {
+    fatal: LoggerMethod
+    error: LoggerMethod
+    warn: LoggerMethod
+    info: LoggerMethod
+    debug: LoggerMethod
+    trace: LoggerMethod
+}
+
+const logger = baseLogger as AppLogger
 
 const logAudit = (action: string, fields: Record<string, unknown> = {}): void => {
     logger.info({ event: 'audit', action, ...fields }, 'audit')
