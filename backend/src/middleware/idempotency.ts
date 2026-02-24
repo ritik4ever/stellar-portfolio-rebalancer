@@ -4,6 +4,7 @@ import {
     dbGetIdempotencyResult,
     dbStoreIdempotencyResult
 } from '../db/idempotencyDb.js'
+import { fail } from '../utils/apiResponse.js'
 
 export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
     const key = req.headers['idempotency-key'] as string | undefined
@@ -12,9 +13,7 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
     if (!key) return next()
 
     if (key.length < 1 || key.length > 255) {
-        res.status(400).json({
-            error: 'Idempotency-Key must be between 1 and 255 characters'
-        })
+        fail(res, 400, 'VALIDATION_ERROR', 'Idempotency-Key must be between 1 and 255 characters')
         return
     }
 
@@ -30,10 +29,13 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
     if (existing) {
         if (existing.requestHash !== requestHash) {
             // Same key, different payload → reject
-            res.status(409).json({
-                error: 'Idempotency-Key already used with a different request payload',
-                idempotencyKey: key
-            })
+            fail(
+                res,
+                409,
+                'CONFLICT',
+                'Idempotency-Key already used with a different request payload',
+                { idempotencyKey: key }
+            )
             return
         }
         // Same key, same payload → safe replay

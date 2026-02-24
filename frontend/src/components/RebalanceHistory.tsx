@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+import { api, ENDPOINTS } from '../config/api'
 
 //  NEW: export utils
 import { downloadCSV, toCSV } from '../utils/export'
@@ -55,23 +55,11 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
     const fetchRebalanceHistory = async () => {
         try {
-            let url = `${API_CONFIG.BASE_URL}/api/rebalance/history`
-            if (portfolioId) {
-                url += `?portfolioId=${portfolioId}`
-            }
-
-            console.log('Fetching rebalance history from:', url)
-            const response = await fetch(url)
-
-            if (response.ok) {
-                const data = await response.json()
-                console.log('Rebalance history data:', data)
-                setHistory(data.history || [])
-                setError(null)
-            } else {
-                console.warn('API failed, using demo data')
-                setHistory(getDemoHistory())
-            }
+            const params = portfolioId ? { portfolioId } : undefined
+            const payload = await api.get<{ history: RebalanceEvent[] }>(ENDPOINTS.REBALANCE_HISTORY, params)
+            console.log('Rebalance history data:', payload)
+            setHistory(payload.history || [])
+            setError(null)
         } catch (err) {
             console.error('Failed to fetch rebalance history:', err)
             setError('Failed to load rebalance history')

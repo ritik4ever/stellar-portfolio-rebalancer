@@ -70,7 +70,7 @@ export class RebalanceLockService {
                 // SET resource_name my_random_value PX ttl
                 // NX = set if not exist
                 // PX = expire time in milliseconds
-                const result = await this.redis.set(lockKey, 'locked', 'PX', ttlMs)
+
                 return result === 'OK'
             } catch (error) {
                 logger.error(`[LOCK_SERVICE] Failed to acquire Redis lock for ${portfolioId}`, {
