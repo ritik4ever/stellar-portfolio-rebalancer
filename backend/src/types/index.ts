@@ -22,6 +22,8 @@ export interface Portfolio {
     userAddress: string
     allocations: Record<string, number>
     threshold: number
+    /** Slippage tolerance in percent (0.5–5). Trades exceeding this are rejected. */
+    slippageTolerance?: number
     balances: Record<string, number>
     totalValue: number
     createdAt: string
@@ -85,6 +87,8 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
+        /** Slippage in basis points for this rebalance (tracked in history). */
+        totalSlippageBps?: number
     }
 }
 

@@ -29,6 +29,10 @@ interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         executionTime?: number
         chain?: string
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
+        totalSlippageBps?: number
     }
 }
 
@@ -300,7 +304,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             performanceImpact: event.details?.performanceImpact ?? '',
             priceDirection: event.details?.priceDirection ?? '',
             executionTimeMs: event.details?.executionTime ?? '',
-            reason: event.details?.reason ?? ''
+            reason: event.details?.reason ?? '',
+            totalSlippageBps: event.details?.totalSlippageBps ?? '',
+            slippagePct: event.details?.totalSlippageBps != null ? (event.details.totalSlippageBps / 100).toFixed(2) + '%' : ''
         }))
 
         const csv = toCSV(rows, [
@@ -443,6 +449,9 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                 {event.details?.amount && (
                                                     <span>Amount: ${event.details.amount.toLocaleString()}</span>
                                                 )}
+                                                {event.details?.totalSlippageBps != null && (
+                                                    <span>Slippage: {(event.details.totalSlippageBps / 100).toFixed(2)}%</span>
+                                                )}
                                             </div>
 
                                             {/* Enhanced badges */}
@@ -483,6 +492,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                 )}
                                             </div>
 
+                                            {(event.details?.actualSlippageBps != null || event.details?.estimatedSlippageBps != null) && (
+                                                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                                    Slippage: {event.details.actualSlippageBps != null ? `${(event.details.actualSlippageBps / 100).toFixed(2)}%` : '—'} actual
+                                                    {event.details.estimatedSlippageBps != null && ` (${(event.details.estimatedSlippageBps / 100).toFixed(2)}% max)`}
+                                                    {event.details?.slippageExceededTolerance && (
+                                                        <span className="ml-1 text-red-600 dark:text-red-400 font-medium">— exceeded tolerance</span>
+                                                    )}
+                                                </div>
+                                            )}
                                             {event.details?.reason && (
                                                 <div className="text-sm text-gray-600 dark:text-gray-400 italic mb-2">
                                                     {event.details.reason}

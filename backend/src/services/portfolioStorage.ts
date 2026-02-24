@@ -3,6 +3,15 @@ import * as portfolioDb from '../db/portfolioDb.js'
 import { randomUUID } from 'node:crypto'
 import type { Portfolio } from '../types/index.js'
 
+const SLIPPAGE_MIN = 0.5
+const SLIPPAGE_MAX = 5
+function clampSlippageTolerance(p: number): number {
+    if (typeof p !== 'number' || Number.isNaN(p)) return 1
+    return Math.max(SLIPPAGE_MIN, Math.min(SLIPPAGE_MAX, p))
+}
+
+
+
 const useCache = process.env.USE_MEMORY_CACHE === 'true'
 
 class PortfolioStorage {
@@ -52,7 +61,8 @@ class PortfolioStorage {
         userAddress: string,
         allocations: Record<string, number>,
         threshold: number,
-        currentBalances: Record<string, number>
+        currentBalances: Record<string, number>,
+        slippageTolerance: number = 1
     ): Promise<string> {
         const id = randomUUID()
         const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
@@ -61,6 +71,7 @@ class PortfolioStorage {
             userAddress,
             allocations,
             threshold,
+            slippageTolerance: clampSlippageTolerance(slippageTolerance),
             balances: currentBalances,
             totalValue,
             createdAt: new Date().toISOString(),
@@ -74,7 +85,8 @@ class PortfolioStorage {
                 allocations,
                 threshold,
                 currentBalances,
-                totalValue
+                totalValue,
+                portfolio.slippageTolerance ?? 1
             )
         }
         this.cacheSet(portfolio)

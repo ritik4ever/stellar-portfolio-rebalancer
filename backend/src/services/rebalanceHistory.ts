@@ -2,6 +2,7 @@ import { RiskManagementService } from './riskManagements.js'
 import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
+import { logger } from '../utils/logger.js'
 
 export interface RebalanceEvent {
     id: string
@@ -33,6 +34,10 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
+        totalSlippageBps?: number
     }
 }
 
@@ -66,6 +71,11 @@ export class RebalanceHistoryService {
         onChainContractId?: string
         onChainPagingToken?: string
         isSimulated?: boolean
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
+        /** Optional aggregate slippage in basis points for backwards compatibility. */
+        totalSlippageBps?: number
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -78,10 +88,13 @@ export class RebalanceHistoryService {
             volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
             riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
             priceDirection: this.determinePriceDirection(eventData.prices),
-            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger)
+            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger),
+            estimatedSlippageBps: eventData.estimatedSlippageBps,
+            actualSlippageBps: eventData.actualSlippageBps,
+            slippageExceededTolerance: eventData.slippageExceededTolerance,
+            ...(eventData.totalSlippageBps != null && { totalSlippageBps: eventData.totalSlippageBps })
         }
 
-        // Add risk metrics if available
         if (eventData.prices && eventData.portfolio) {
             try {
                 const riskMetrics = this.riskService.analyzePortfolioRisk(
@@ -90,7 +103,7 @@ export class RebalanceHistoryService {
                 )
                 details.riskMetrics = riskMetrics
             } catch (error) {
-                console.warn('Failed to calculate risk metrics:', error)
+                logger.warn('Failed to calculate risk metrics', { error })
             }
         }
 
@@ -115,7 +128,10 @@ export class RebalanceHistoryService {
             isSimulated: eventData.isSimulated
         })
 
-        console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
+        logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
+            eventId: event.id,
+            isAutomatic: eventData.isAutomatic ?? false
+        })
         return event
     }
 
@@ -133,7 +149,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getRecentAutoRebalances(portfolioId, limit)
         } catch (error) {
-            console.error('Error getting recent auto-rebalances:', error)
+            logger.error('Error getting recent auto-rebalances', { error })
             return []
         }
     }
@@ -143,7 +159,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getAutoRebalancesSince(portfolioId, since)
         } catch (error) {
-            console.error('Error getting auto-rebalances since date:', error)
+            logger.error('Error getting auto-rebalances since date', { error })
             return []
         }
     }
@@ -153,7 +169,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getAllAutoRebalances()
         } catch (error) {
-            console.error('Error getting all auto-rebalances:', error)
+            logger.error('Error getting all auto-rebalances', { error })
             return []
         }
     }
