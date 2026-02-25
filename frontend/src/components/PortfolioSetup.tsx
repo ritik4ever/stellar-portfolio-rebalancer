@@ -46,6 +46,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   ]);
   const [threshold, setThreshold] = useState(5);
   const [slippageTolerance, setSlippageTolerance] = useState(1);
+  const [strategy, setStrategy] = useState<string>("threshold");
+  const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>({});
   const [autoRebalance, setAutoRebalance] = useState(true);
   const [isCreating, setIsCreating] = useState(false); // loading state for submit
   const [error, setError] = useState<string | null>(null); // submit-level error message
@@ -238,6 +240,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           allocations: allocationsMap,
           threshold,
           slippageTolerance,
+          strategy: strategy || "threshold",
+          strategyConfig: Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
       });
 
       setSuccess(true);
@@ -572,6 +576,85 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               </h3>
 
               <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Rebalancing Strategy
+                  </label>
+                  <select
+                    value={strategy}
+                    onChange={(e) => {
+                      setStrategy(e.target.value);
+                      setStrategyConfig({});
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="threshold">Threshold-based</option>
+                    <option value="periodic">Periodic (time-based)</option>
+                    <option value="volatility">Volatility-based</option>
+                    <option value="custom">Custom rules</option>
+                  </select>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {strategy === "threshold" && "Rebalance when allocation drift exceeds the threshold."}
+                    {strategy === "periodic" && "Rebalance on a fixed schedule (e.g. every 7 or 30 days)."}
+                    {strategy === "volatility" && "Rebalance when market volatility exceeds a percentage threshold."}
+                    {strategy === "custom" && "Minimum days between rebalances plus threshold check."}
+                  </p>
+                </div>
+
+                {strategy === "periodic" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Interval (days)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      value={strategyConfig.intervalDays ?? 7}
+                      onChange={(e) =>
+                        setStrategyConfig((c) => ({ ...c, intervalDays: parseInt(e.target.value) || 7 }))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                )}
+
+                {strategy === "volatility" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Volatility threshold (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={strategyConfig.volatilityThresholdPct ?? 10}
+                      onChange={(e) =>
+                        setStrategyConfig((c) => ({ ...c, volatilityThresholdPct: parseInt(e.target.value) || 10 }))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                )}
+
+                {strategy === "custom" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Min days between rebalances
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="365"
+                      value={strategyConfig.minDaysBetweenRebalance ?? 1}
+                      onChange={(e) =>
+                        setStrategyConfig((c) => ({ ...c, minDaysBetweenRebalance: parseInt(e.target.value) || 1 }))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Rebalance Threshold (%)

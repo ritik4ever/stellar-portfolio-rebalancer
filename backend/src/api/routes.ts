@@ -18,6 +18,7 @@ import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/helpers.js'
 import { createPortfolioSchema } from './validation.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
+import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
 
@@ -45,6 +46,10 @@ const parseHistorySource = (value: unknown): 'offchain' | 'simulated' | 'onchain
     return undefined
 }
 
+
+router.get('/strategies', (_req: Request, res: Response) => {
+    return ok(res, { strategies: REBALANCE_STRATEGIES })
+})
 
 router.get('/rebalance/history', async (req: Request, res: Response) => {
     try {
@@ -138,9 +143,16 @@ router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: R
                             : message
             return fail(res, 400, 'VALIDATION_ERROR', fullMessage)
         }
-        const { userAddress, allocations, threshold, slippageTolerance } = parsed.data
+        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = parsed.data
         const slippageTolerancePercent = slippageTolerance ?? 1
-        const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold, slippageTolerancePercent)
+        const portfolioId = await stellarService.createPortfolio(
+            userAddress,
+            allocations,
+            threshold,
+            slippageTolerancePercent,
+            strategy ?? 'threshold',
+            strategyConfig ?? {}
+        )
         const mode = featureFlags.demoMode ? 'demo' : 'onchain'
         return ok(res, {
             portfolioId,
@@ -186,7 +198,7 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         const prices = await reflectorService.getCurrentPrices()
         const totalValue = Object.entries(portfolio.balances || {}).reduce((sum, [asset, bal]) => sum + (bal * (prices[asset]?.price ?? 0)), 0)
-        const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? 1
+        const slippageTolerancePercent = portfolio.slippageTolerance ?? 1
         const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
         return ok(res, {
             portfolioId,
@@ -570,7 +582,7 @@ router.post('/portfolio', async (req, res) => {
         if (!userAddress || !allocations || threshold === undefined) {
             return res.status(400).json({ error: 'Missing required fields: userAddress, allocations, threshold' })
         }
-        const total = Object.values(allocations).reduce((sum: number, val: number) => sum + val, 0)
+        const total = Object.values(allocations as Record<string, number>).reduce((sum: number, val: number) => sum + val, 0)
         if (Math.abs(total - 100) > 0.01) {
             return res.status(400).json({ error: 'Allocations must sum to 100%' })
         }

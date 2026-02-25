@@ -79,6 +79,7 @@ export const API_CONFIG = {
         PRICE_CHART: (asset: string) => `/api/market/${asset}/chart`,
         REBALANCE_HISTORY: '/api/rebalance/history',
         REBALANCE_RECORD: '/api/rebalance/history',
+        STRATEGIES: '/api/strategies',
         RISK_METRICS: (portfolioId: string) => `/api/risk/metrics/${portfolioId}`,
         RISK_CHECK: (portfolioId: string) => `/api/risk/check/${portfolioId}`,
         TEST_CORS: '/test/cors',

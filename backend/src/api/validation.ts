@@ -23,6 +23,12 @@ export const createPortfolioSchema = z.object({
     ),
     threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
     slippageTolerance: z.number().min(0.1, "Slippage tolerance must be between 0.1% and 5%").max(5, "Slippage tolerance must be between 0.1% and 5%").optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
 }).strict();
 
 // Schema for POST /portfolio/:id/rebalance

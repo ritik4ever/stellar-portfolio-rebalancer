@@ -17,9 +17,27 @@ export interface HistoricalPrice {
 }
 
 // Portfolio interface
-
+export interface Portfolio {
+    id: string
+    userAddress: string
+    allocations: Record<string, number>
+    threshold: number
+    slippageTolerance?: number
+    balances?: Record<string, number>
+    totalValue?: number
+    createdAt: string
     lastRebalance: string
     version: number
+    strategy?: RebalanceStrategyType
+    strategyConfig?: RebalanceStrategyConfig
+}
+
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+
+export interface RebalanceStrategyConfig {
+    intervalDays?: number
+    volatilityThresholdPct?: number
+    minDaysBetweenRebalance?: number
 }
 
 
