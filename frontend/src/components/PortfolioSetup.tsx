@@ -19,6 +19,7 @@ import {
   CheckCircle,
   Zap,
 } from "lucide-react";
+import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
 
 // TanStack Query Mutations

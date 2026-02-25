@@ -11,6 +11,7 @@ import { AutoRebalancerService } from '../services/autoRebalancer.js'
 import { logger } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
+import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { writeRateLimiter } from '../middleware/rateLimit.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
@@ -19,6 +20,7 @@ import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/
 import { createPortfolioSchema } from './validation.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
 import type { Portfolio } from '../types/index.js'
+import { ok, fail } from '../utils/apiResponse.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -63,31 +65,29 @@ router.get('/rebalance/history', async (req: Request, res: Response) => {
             portfolioId || undefined,
             limit,
             {
-                eventSource: source === 'all' ? undefined : source,
+                eventSource: source,
                 startTimestamp,
                 endTimestamp
             }
         )
 
-        return res.json({
-            success: true,
-            history,
-            count: history.length,
-            portfolioId: portfolioId || undefined,
-            filters: {
-                source,
-                startTimestamp,
-                endTimestamp
-            }
-        })
+        return ok(
+            res,
+            {
+                history,
+                portfolioId: portfolioId || undefined,
+                filters: {
+                    source,
+                    startTimestamp,
+                    endTimestamp
+                }
+            },
+            { meta: { count: history.length } }
+        )
 
     } catch (error) {
         logger.error('[ERROR] Rebalance history failed', { error: getErrorObject(error) })
-        res.json({
-            success: false,
-            error: getErrorMessage(error),
-            history: []
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -103,44 +103,32 @@ router.post('/rebalance/history', idempotencyMiddleware, async (req: Request, re
             isAutomatic: eventData.isAutomatic || false
         })
 
-        res.json({
-            success: true,
-            event,
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { event })
     } catch (error) {
         logger.error('[ERROR] Failed to record rebalance event', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request, res: Response) => {
     try {
         const result = await contractEventIndexerService.syncOnce()
-        res.json({
-            success: true,
+        return ok(res, {
             ...result,
-            indexer: contractEventIndexerService.getStatus(),
-            timestamp: new Date().toISOString()
+            indexer: contractEventIndexerService.getStatus()
         })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
         if (!parsed.success) {
-            const first = parsed.error.errors[0]
+            const first = parsed.error.issues[0]
             const message = first?.message ?? 'Validation failed'
-            const fullMessage = parsed.error.errors.some(e => e.path.join('.') !== '')
+            const fullMessage = parsed.error.issues.some((e) => e.path.join('.') !== '')
                 ? message
                 : req.body?.userAddress == null
                     ? 'Missing required fields: userAddress, allocations, threshold'
@@ -149,80 +137,70 @@ router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: R
                         : req.body?.threshold == null
                             ? 'Missing required fields: threshold'
                             : message
-            return res.status(400).json({ success: false, error: fullMessage })
+            return fail(res, 400, 'VALIDATION_ERROR', fullMessage)
         }
-        const { userAddress, allocations, threshold, slippageTolerance } = parsed.data
+
         const slippageTolerancePercent = slippageTolerance ?? 1
         const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold, slippageTolerancePercent)
         const mode = featureFlags.demoMode ? 'demo' : 'onchain'
-        return res.status(201).json({
-            success: true,
+        return ok(res, {
             portfolioId,
             status: 'created',
-            mode,
-            timestamp: new Date().toISOString()
-        })
+            mode
+        }, { status: 201 })
     } catch (error) {
         logger.error('[ERROR] Create portfolio failed', { error: getErrorObject(error) })
-        return res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-router.get('/portfolio/:id', async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id
-        if (!portfolioId) return res.status(400).json({ success: false, error: 'Portfolio ID required' })
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await stellarService.getPortfolio(portfolioId)
-        if (!portfolio) return res.status(404).json({ success: false, error: 'Portfolio not found' })
-        return res.json({ success: true, portfolio, timestamp: new Date().toISOString() })
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+ main
+        return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
-        return res.status(500).json({ success: false, error: getErrorMessage(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
-    try {
-        const address = req.params.address
-        if (!address) return res.status(400).json({ success: false, error: 'User address required' })
-        const list = portfolioStorage.getUserPortfolios(address)
-        return res.json(list)
+ main
+        return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
-        return res.status(500).json({ success: false, error: getErrorMessage(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
-        if (!portfolioId) return res.status(400).json({ success: false, error: 'Portfolio ID required' })
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
-        if (!portfolio) return res.status(404).json({ success: false, error: 'Portfolio not found' })
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         const prices = await reflectorService.getCurrentPrices()
         const totalValue = Object.entries(portfolio.balances || {}).reduce((sum, [asset, bal]) => sum + (bal * (prices[asset]?.price ?? 0)), 0)
-        const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? 1
+        const slippageTolerancePercent = portfolio.slippageTolerance ?? 1
         const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
-        return res.json({
-            success: true,
+        return ok(res, {
             portfolioId,
             totalValue,
             maxSlippagePercent: slippageTolerancePercent,
             estimatedSlippageBps,
-            prices: Object.keys(prices).length > 0 ? prices : undefined,
-            timestamp: new Date().toISOString()
+            prices: Object.keys(prices).length > 0 ? prices : undefined
         })
     } catch (error) {
         logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })
-        return res.status(500).json({ success: false, error: getErrorMessage(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 // Manual portfolio rebalance
-router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id;
 
@@ -232,41 +210,33 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware,
         const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
         if (!lockAcquired) {
             console.log(`[WARNING] Rebalance already in progress for portfolio: ${portfolioId}`);
-            return res.status(409).json({
-                success: false,
-                error: 'Rebalance already in progress for this portfolio'
-            });
+            return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
         }
 
         try {
             const portfolio = await stellarService.getPortfolio(portfolioId);
+            if (!portfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
+            }
+            if (req.user && portfolio.userAddress !== req.user.address) {
+                return fail(res, 403, 'FORBIDDEN', 'Portfolio not found');
+            }
             const prices = await reflectorService.getCurrentPrices();
             const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices);
 
             if (!riskCheck.allowed) {
-                return res.status(400).json({
-                    success: false,
-                    error: riskCheck.reason,
-                    alerts: riskCheck.alerts
-                });
+                return fail(res, 400, 'BAD_REQUEST', riskCheck.reason ?? 'Rebalance blocked by risk checks', { alerts: riskCheck.alerts });
             }
 
             const result = await stellarService.executeRebalance(portfolioId);
 
-            res.json({
-                success: true,
-                result,
-                timestamp: new Date().toISOString()
-            });
+            return ok(res, { result });
         } finally {
             await rebalanceLockService.releaseLock(portfolioId);
         }
     } catch (error) {
         console.error('[ERROR] Manual rebalance failed:', error);
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
 });
 
@@ -297,27 +267,15 @@ router.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) => 
         const recommendations = riskManagementService.getRecommendations(riskMetrics, allocationsRecord)
         const circuitBreakers = riskManagementService.getCircuitBreakerStatus()
 
-        res.json({
-            success: true,
+        return ok(res, {
             portfolioId,
             riskMetrics,
             recommendations,
-            circuitBreakers,
-            timestamp: new Date().toISOString()
+            circuitBreakers
         })
     } catch (error) {
         logger.error('[ERROR] Failed to get risk metrics', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            riskMetrics: {
-                volatility: 0,
-                concentrationRisk: 0,
-                liquidityRisk: 0,
-                correlationRisk: 0,
-
-            }
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -333,21 +291,13 @@ router.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
 
         const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices)
 
-        res.json({
-            success: true,
+        return ok(res, {
             portfolioId,
-            ...riskCheck,
-            timestamp: new Date().toISOString()
+            ...riskCheck
         })
     } catch (error) {
         logger.error('[ERROR] Failed to check risk conditions', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            allowed: false,
-            reason: 'Failed to assess risk conditions',
-            alerts: [],
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -364,16 +314,13 @@ router.get('/prices', async (req: Request, res: Response) => {
         logger.info('[DEBUG] Raw prices from service', { prices })
 
         // Return prices directly in the format frontend expects
-        res.json(prices)
+        return ok(res, prices)
 
     } catch (error) {
         logger.error('[ERROR] Prices endpoint failed', { error: getErrorObject(error) })
 
         if (!featureFlags.allowFallbackPrices) {
-            return res.status(503).json({
-                success: false,
-                error: 'Price feeds unavailable and ALLOW_FALLBACK_PRICES is disabled'
-            })
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Price feeds unavailable and ALLOW_FALLBACK_PRICES is disabled')
         }
 
         // Return explicit fallback data only when feature flag allows it.
@@ -385,7 +332,7 @@ router.get('/prices', async (req: Request, res: Response) => {
         }
 
         logger.info('[DEBUG] Sending fallback prices', { fallbackPrices })
-        res.json(fallbackPrices)
+        return ok(res, fallbackPrices)
     }
 })
 
@@ -414,21 +361,13 @@ router.get('/prices/enhanced', async (req: Request, res: Response) => {
             }
         })
 
-        res.json({
-            success: true,
+        return ok(res, {
             prices: enhancedPrices,
-            riskAlerts,
-            timestamp: new Date().toISOString()
+            riskAlerts
         })
     } catch (error) {
         logger.error('[ERROR] Failed to fetch enhanced prices', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            prices: {},
-            riskAlerts: [],
-            circuitBreakers: {}
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -439,13 +378,10 @@ router.get('/market/:asset/details', async (req: Request, res: Response) => {
         const reflector = new ReflectorService()
         const marketData = await reflector.getDetailedMarketData(asset)
 
-        res.json({
-            ...marketData,
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, marketData)
     } catch (error) {
         logger.error('Failed to fetch detailed market data', { error: getErrorObject(error) })
-        res.status(500).json({ error: 'Failed to fetch market data' })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch market data')
     }
 })
 
@@ -458,7 +394,7 @@ router.get('/market/:asset/chart', async (req: Request, res: Response) => {
         const reflector = new ReflectorService()
         const history = await reflector.getPriceHistory(asset, days)
 
-        res.json({
+        return ok(res, {
             asset,
             data: history,
             timeframe: `${days}d`,
@@ -466,7 +402,7 @@ router.get('/market/:asset/chart', async (req: Request, res: Response) => {
         })
     } catch (error) {
         logger.error('Failed to fetch price chart', { error: getErrorObject(error) })
-        res.status(500).json({ error: 'Failed to fetch chart data' })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch chart data')
     }
 })
 
@@ -477,9 +413,7 @@ router.get('/market/:asset/chart', async (req: Request, res: Response) => {
 router.get('/auto-rebalancer/status', async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
-            return res.json({
-                success: false,
-                error: 'Auto-rebalancer not initialized',
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized', {
                 status: { isRunning: false }
             })
         }
@@ -487,91 +421,57 @@ router.get('/auto-rebalancer/status', async (req: Request, res: Response) => {
         const status = autoRebalancer.getStatus()
         const statistics = await autoRebalancer.getStatistics()
 
-        res.json({
-            success: true,
-            status,
-            statistics,
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { status, statistics })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 router.post('/auto-rebalancer/start', requireAdmin, (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
-            return res.status(500).json({
-                success: false,
-                error: 'Auto-rebalancer not initialized'
-            })
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
         }
 
         autoRebalancer.start()
 
-        res.json({
-            success: true,
+        return ok(res, {
             message: 'Auto-rebalancer started successfully',
-            status: autoRebalancer.getStatus(),
-            timestamp: new Date().toISOString()
+            status: autoRebalancer.getStatus()
         })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 router.post('/auto-rebalancer/stop', requireAdmin, (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
-            return res.status(500).json({
-                success: false,
-                error: 'Auto-rebalancer not initialized'
-            })
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
         }
 
         autoRebalancer.stop()
 
-        res.json({
-            success: true,
+        return ok(res, {
             message: 'Auto-rebalancer stopped successfully',
-            status: autoRebalancer.getStatus(),
-            timestamp: new Date().toISOString()
+            status: autoRebalancer.getStatus()
         })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 router.post('/auto-rebalancer/force-check', requireAdmin, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
-            return res.status(500).json({
-                success: false,
-                error: 'Auto-rebalancer not initialized'
-            })
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
         }
 
         await autoRebalancer.forceCheck()
 
-        res.json({
-            success: true,
-            message: 'Force check completed',
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { message: 'Force check completed' })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -587,19 +487,16 @@ router.get('/auto-rebalancer/history', requireAdmin, async (req: Request, res: R
             history = (await rebalanceHistoryService.getAllAutoRebalances(limit)).slice(0, limit)
         }
 
-        res.json({
-            success: true,
-            history,
-            count: history.length,
-            portfolioId: portfolioId || 'all',
-            timestamp: new Date().toISOString()
-        })
+        return ok(
+            res,
+            {
+                history,
+                portfolioId: portfolioId || 'all'
+            },
+            { meta: { count: history.length } }
+        )
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            history: []
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -628,8 +525,7 @@ router.get('/system/status', async (req: Request, res: Response) => {
         const autoRebalancerStats = autoRebalancer ? await autoRebalancer.getStatistics() : null
         const onChainIndexerStatus = contractEventIndexerService.getStatus()
 
-        res.json({
-            success: true,
+        return ok(res, {
             system: {
                 status: priceSourcesHealthy ? 'operational' : 'degraded',
                 uptime: global.process.uptime(),
@@ -664,11 +560,7 @@ router.get('/system/status', async (req: Request, res: Response) => {
         })
     } catch (error) {
         logger.error('[ERROR] Failed to get system status', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            system: { status: 'error' }
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -682,7 +574,7 @@ router.post('/portfolio', async (req, res) => {
         if (!userAddress || !allocations || threshold === undefined) {
             return res.status(400).json({ error: 'Missing required fields: userAddress, allocations, threshold' })
         }
-        const total = Object.values(allocations).reduce((sum: number, val: number) => sum + val, 0)
+        const total = Object.values(allocations as Record<string, number>).reduce((sum: number, val: number) => sum + val, 0)
         if (Math.abs(total - 100) > 0.01) {
             return res.status(400).json({ error: 'Allocations must sum to 100%' })
         }
@@ -746,30 +638,27 @@ router.get('/portfolio/:id/analytics', async (req: Request, res: Response) => {
         const days = parseInt(req.query.days as string) || 30
 
         if (!portfolioId) {
-            return res.status(400).json({ error: 'Portfolio ID required' })
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
 
         const portfolio = portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) {
-            return res.status(404).json({ error: 'Portfolio not found' })
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         }
 
         const analytics = analyticsService.getAnalytics(portfolioId, days)
 
-        res.json({
-            success: true,
-            portfolioId,
-            data: analytics,
-            count: analytics.length,
-            period: `${days} days`,
-            timestamp: new Date().toISOString()
-        })
+        return ok(
+            res,
+            {
+                portfolioId,
+                data: analytics
+            },
+            { meta: { count: analytics.length, period: `${days} days` } }
+        )
     } catch (error) {
         logger.error('Failed to fetch analytics', { error: getErrorObject(error), portfolioId: req.params.id })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -778,28 +667,20 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
         const portfolioId = req.params.id
 
         if (!portfolioId) {
-            return res.status(400).json({ error: 'Portfolio ID required' })
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
 
         const portfolio = portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) {
-            return res.status(404).json({ error: 'Portfolio not found' })
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         }
 
         const summary = analyticsService.getPerformanceSummary(portfolioId)
 
-        res.json({
-            success: true,
-            portfolioId,
-            ...summary,
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { portfolioId, ...summary })
     } catch (error) {
         logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -808,57 +689,40 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 // ================================
 
 // Subscribe to notifications
-router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/notifications/subscribe', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
-        const { userId, emailEnabled, emailAddress, webhookEnabled, webhookUrl, events } = req.body
+        const userId = req.user?.address ?? req.body?.userId
 
         // Validation
         if (!userId) {
-            return res.status(400).json({
-                success: false,
-                error: 'userId is required'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
 
+
         if (emailEnabled === undefined || webhookEnabled === undefined || !events) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: emailEnabled, webhookEnabled, events'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'Missing required fields: emailEnabled, webhookEnabled, events')
         }
 
         // Validate events object
         const requiredEvents = ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']
         for (const event of requiredEvents) {
             if (events[event] === undefined) {
-                return res.status(400).json({
-                    success: false,
-                    error: `Missing event configuration: ${event}`
-                })
+                return fail(res, 400, 'VALIDATION_ERROR', `Missing event configuration: ${event}`)
             }
         }
 
         // Validate email address if email is enabled
         if (emailEnabled && !emailAddress) {
-            return res.status(400).json({
-                success: false,
-                error: 'email address is required when emailEnabled is true'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'email address is required when emailEnabled is true')
         }
 
         // Validate webhook URL if webhook is enabled
         if (webhookEnabled && !webhookUrl) {
-            return res.status(400).json({
-                success: false,
-                error: 'webhookUrl is required when webhookEnabled is true'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'webhookUrl is required when webhookEnabled is true')
         }
 
         if (webhookUrl && !webhookUrl.match(/^https?:\/\/.+/)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid webhook URL format. Must start with http:// or https://'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'Invalid webhook URL format. Must start with http:// or https://')
         }
 
         // Subscribe user
@@ -873,83 +737,52 @@ router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware,
 
         logger.info('User subscribed to notifications', { userId, emailEnabled, webhookEnabled })
 
-        res.json({
-            success: true,
-            message: 'Notification preferences saved successfully',
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { message: 'Notification preferences saved successfully' })
     } catch (error) {
         logger.error('Failed to subscribe to notifications', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 // Get notification preferences
-router.get('/notifications/preferences', async (req: Request, res: Response) => {
+router.get('/notifications/preferences', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const userId = req.query.userId as string
+        const userId = req.user?.address ?? (req.query.userId as string)
 
         if (!userId) {
-            return res.status(400).json({
-                success: false,
-                error: 'userId query parameter is required'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
         const preferences = notificationService.getPreferences(userId)
 
         if (!preferences) {
-            return res.json({
-                success: true,
-                preferences: null,
-                message: 'No preferences found for this user'
-            })
+            return ok(res, { preferences: null, message: 'No preferences found for this user' })
         }
 
-        res.json({
-            success: true,
-            preferences,
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { preferences })
     } catch (error) {
         logger.error('Failed to get notification preferences', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 // Unsubscribe from notifications
-router.delete('/notifications/unsubscribe', async (req: Request, res: Response) => {
+router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const userId = req.query.userId as string
+        const userId = req.user?.address ?? (req.query.userId as string)
 
         if (!userId) {
-            return res.status(400).json({
-                success: false,
-                error: 'userId query parameter is required'
-            })
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
         notificationService.unsubscribe(userId)
 
         logger.info('User unsubscribed from notifications', { userId })
 
-        res.json({
-            success: true,
-            message: 'Successfully unsubscribed from all notifications',
-            timestamp: new Date().toISOString()
-        })
+        return ok(res, { message: 'Successfully unsubscribed from all notifications' })
     } catch (error) {
         logger.error('Failed to unsubscribe from notifications', { error: getErrorObject(error) })
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -1155,7 +988,7 @@ router.delete('/notifications/unsubscribe', async (req: Request, res: Response) 
 
 router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
-
+        const apiKey = process.env.COINGECKO_API_KEY
 
         // Test direct API call
         const testUrl = apiKey ?
@@ -1176,18 +1009,15 @@ router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request,
         const response = await fetch(testUrl, { headers })
         const data = await response.json()
 
-        res.json({
+        return ok(res, {
             apiKeySet: !!apiKey,
             testUrl,
             responseStatus: response.status,
-            responseData: data,
-            timestamp: new Date().toISOString()
+            responseData: data
         })
     } catch (error) {
-        res.status(500).json({
-            error: getErrorMessage(error),
-            stack: error instanceof Error ? error.stack : String(error),
-            timestamp: new Date().toISOString()
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
+            stack: error instanceof Error ? error.stack : String(error)
         })
     }
 })
@@ -1205,19 +1035,13 @@ router.get('/debug/force-fresh-prices', blockDebugInProduction, async (req: Requ
         // Force a fresh API call
         const result = await reflectorService.getCurrentPrices()
 
-        res.json({
-            success: true,
+        return ok(res, {
             cacheCleared: true,
             cacheStatusAfterClear: cacheStatus,
-            freshPrices: result,
-            timestamp: new Date().toISOString()
+            freshPrices: result
         })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            timestamp: new Date().toISOString()
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
@@ -1228,50 +1052,38 @@ router.get('/debug/reflector-test', blockDebugInProduction, async (req: Request,
         const testResult = await reflectorService.testApiConnectivity()
         const cacheStatus = reflectorService.getCacheStatus()
 
-        res.json({
-            success: true,
+        return ok(res, {
             apiConnectivityTest: testResult,
             cacheStatus,
             environment: {
                 nodeEnv: global.process.env.NODE_ENV,
                 apiKeySet: !!global.process.env.COINGECKO_API_KEY,
                 apiKeyLength: global.process.env.COINGECKO_API_KEY?.length || 0
-            },
-            timestamp: new Date().toISOString()
+            }
         })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            timestamp: new Date().toISOString()
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
 router.get('/debug/env', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
-        res.json({
+        return ok(res, {
             environment: global.process.env.NODE_ENV,
             apiKeySet: !!global.process.env.COINGECKO_API_KEY,
             autoRebalancerEnabled: !!autoRebalancer,
             autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
             enableAutoRebalancer: global.process.env.ENABLE_AUTO_REBALANCER,
-            port: global.process.env.PORT,
-            timestamp: new Date().toISOString()
+            port: global.process.env.PORT
         })
     } catch (error) {
-        res.status(500).json({
-            error: getErrorMessage(error),
-            timestamp: new Date().toISOString()
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
-            return res.json({
-                success: false,
-                error: 'Auto-rebalancer not initialized',
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized', {
                 autoRebalancerAvailable: false
             })
         }
@@ -1280,8 +1092,7 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Re
         const statistics = await autoRebalancer.getStatistics()
         const portfolioCount = await portfolioStorage.getPortfolioCount()
 
-        res.json({
-            success: true,
+        return ok(res, {
             autoRebalancerAvailable: true,
             status,
             statistics,
@@ -1289,9 +1100,7 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Re
             testTimestamp: new Date().toISOString()
         })
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
             autoRebalancerAvailable: false
         })
     }
@@ -1309,18 +1118,13 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Re
 router.get('/queue/health', async (req: Request, res: Response) => {
     try {
         const metrics = await getQueueMetrics()
-        const httpStatus = metrics.redisConnected ? 200 : 503
-        res.status(httpStatus).json({
-            success: metrics.redisConnected,
-            ...metrics,
-            timestamp: new Date().toISOString(),
-        })
+        if (metrics.redisConnected) {
+            return ok(res, metrics)
+        }
+        return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Redis unavailable', metrics)
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: getErrorMessage(error),
-            redisConnected: false,
-            timestamp: new Date().toISOString(),
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
+            redisConnected: false
         })
     }
 })

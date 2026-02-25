@@ -2,6 +2,9 @@ import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
 
 // TanStack Query Hooks
 import { usePrices } from '../hooks/queries/usePricesQuery'
+import React, { useState, useEffect } from 'react'
+import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+import { api, API_CONFIG, ENDPOINTS } from '../config/api'
 
 interface PriceTrackerProps {
     compact?: boolean

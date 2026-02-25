@@ -195,7 +195,7 @@ export class StellarService {
             let totalValue = 0
             const currentValues: Record<string, number> = {}
 
-            for (const [asset, balance] of Object.entries(portfolio.balances)) {
+            for (const [asset, balance] of Object.entries(portfolio.balances ?? {})) {
                 const price = prices[asset]?.price || 0
                 const value = balance * price
                 currentValues[asset] = value
@@ -626,7 +626,7 @@ export class StellarService {
             const allocations = []
 
             for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
-                const balance = portfolio.balances[asset] || 0
+                const balance = (portfolio.balances ?? {})[asset] || 0
                 const price = prices[asset]?.price || 0
                 const value = balance * price
                 totalValue += value

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
+import { api, ENDPOINTS } from '../config/api'
 import { useTheme } from '../context/ThemeContext'
 
 // TanStack Query Hooks

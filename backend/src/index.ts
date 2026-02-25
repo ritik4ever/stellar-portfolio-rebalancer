@@ -1,9 +1,11 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import swaggerUi from 'swagger-ui-express'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
+n
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { globalRateLimiter } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
@@ -20,6 +22,8 @@ import { startRebalanceWorker, stopRebalanceWorker } from './queue/workers/rebal
 import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './queue/workers/analyticsSnapshotWorker.js'
 import { contractEventIndexerService } from './services/contractEventIndexer.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
+import { apiErrorHandler } from './middleware/apiErrorHandler.js'
+import { initRobustWebSocket } from './services/websocket.service.js'
 
 let startupConfig: StartupConfig
 try {
@@ -146,6 +150,17 @@ app.get('/test/coingecko', async (req, res) => {
         })
     }
 })
+// OpenAPI spec as JSON (for Postman: Import → Link → http://localhost:3000/api-docs/openapi.json)
+app.get('/api-docs/openapi.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.json(openApiSpec)
+})
+
+// Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'Stellar Portfolio Rebalancer API',
+}))
 
 // Root route
 app.get('/', (req, res) => {
@@ -163,6 +178,7 @@ app.get('/', (req, res) => {
         },
         endpoints: {
             health: '/health',
+            apiDocs: '/api-docs',
             corsTest: '/test/cors',
             coinGeckoTest: '/test/coingecko',
             autoRebalancerStatus: '/api/auto-rebalancer/status',
@@ -172,7 +188,9 @@ app.get('/', (req, res) => {
 })
 
 // Mount API routes
+app.use('/api/auth', authRouter)
 app.use('/api', portfolioRouter)
+app.use('/api', apiErrorHandler)
 
 // Legacy non-/api compatibility (redirect only)
 const LEGACY_API_PREFIXES = [
@@ -244,18 +262,7 @@ const server = createServer(app)
 // WebSocket setup
 const wss = new WebSocketServer({ server })
 
-wss.on('connection', (ws) => {
-    logger.info('WebSocket connection established')
-    ws.send(JSON.stringify({
-        type: 'connection',
-        message: 'Connected',
-        autoRebalancerStatus: autoRebalancer.getStatus()
-    }))
 
-    ws.on('error', (error) => {
-        logger.error('WebSocket error', { error })
-    })
-})
 
 // Start existing rebalancing service (now queue-backed, no cron)
 try {

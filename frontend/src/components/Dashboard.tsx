@@ -16,6 +16,9 @@ import { API_CONFIG } from '../config/api'
 import { useUserPortfolios, usePortfolioDetails } from '../hooks/queries/usePortfolioQuery'
 import { usePrices } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
+import { api, ENDPOINTS } from '../config/api'
+import { logout as authLogout } from '../services/authService'
+import { browserPriceService } from '../services/browserPriceService'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
@@ -95,7 +98,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         window.location.reload()
     }
 
-    const disconnectWallet = () => {
+    const disconnectWallet = async () => {
+        if (publicKey) {
+            await authLogout(publicKey)
+        }
         StellarWallet.disconnect()
         onNavigate('landing')
     }

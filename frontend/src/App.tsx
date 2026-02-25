@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard'
 import PortfolioSetup from './components/PortfolioSetup'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
+import { login as authLogin } from './services/authService'
 
 function App() {
     const [currentView, setCurrentView] = useState('landing')
@@ -19,6 +20,10 @@ function App() {
         try {
             const publicKey = await walletManager.reconnect()
             if (publicKey) {
+                try {
+                    await authLogin(publicKey)
+                } catch (_) {
+                }
                 setPublicKey(publicKey)
                 setCurrentView('dashboard')
             }
@@ -34,6 +39,10 @@ function App() {
         try {
             const publicKey = walletManager.getPublicKey()
             if (publicKey) {
+                try {
+                    await authLogin(publicKey)
+                } catch (_) {
+                }
                 setPublicKey(publicKey)
                 setCurrentView('dashboard')
             } else {

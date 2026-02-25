@@ -1,0 +1,71 @@
+/**
+ * Minimal OpenAPI 3.0 spec for Swagger UI. Full spec with schemas is in spec.ts (fix brace balance to use it).
+ */
+const base = {
+    openapi: '3.0.3',
+    info: {
+        title: 'Stellar Portfolio Rebalancer API',
+        description: 'Intelligent portfolio rebalancing service for the Stellar ecosystem. Create portfolios, fetch prices, execute rebalances, and manage risk.',
+        version: '1.0.0',
+    },
+    servers: [{ url: 'http://localhost:3000', description: 'Development' }, { url: '/', description: 'Current host' }],
+    tags: [
+        { name: 'Health', description: 'Health and root' },
+        { name: 'Portfolio', description: 'Portfolio CRUD and rebalancing' },
+        { name: 'Rebalance history', description: 'Rebalance event history' },
+        { name: 'Risk', description: 'Risk metrics and checks' },
+        { name: 'Prices & market', description: 'Price feeds and market data' },
+        { name: 'Auto-rebalancer', description: 'Automatic rebalancing service' },
+        { name: 'System', description: 'System status' },
+        { name: 'Notifications', description: 'Notification preferences' },
+        { name: 'Queue', description: 'BullMQ queue health' },
+    ],
+    paths: {
+        '/': { get: { tags: ['Health'], summary: 'Root', description: 'API info and feature flags.', responses: { '200': { description: 'OK' } } } },
+        '/health': { get: { tags: ['Health'], summary: 'Health check', responses: { '200': { description: 'OK' } } } },
+        '/api/rebalance/history': {
+            get: { tags: ['Rebalance history'], summary: 'Get rebalance history', parameters: [{ name: 'portfolioId', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer' } }], responses: { '200': { description: 'OK' } } },
+            post: { tags: ['Rebalance history'], summary: 'Record rebalance event', requestBody: { content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'OK' } } },
+        },
+        '/api/rebalance/history/sync-onchain': { post: { tags: ['Rebalance history'], summary: 'Sync on-chain history (admin)', responses: { '200': { description: 'OK' } } } },
+        '/api/portfolio': {
+            post: { tags: ['Portfolio'], summary: 'Create portfolio', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { userAddress: { type: 'string' }, allocations: { type: 'object' }, threshold: { type: 'number' }, slippageTolerance: { type: 'number' } } } } }, responses: { '201': { description: 'Created' } } },
+        },
+        '/api/portfolio/{id}': { get: { tags: ['Portfolio'], summary: 'Get portfolio', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } } },
+        '/api/user/{address}/portfolios': { get: { tags: ['Portfolio'], summary: 'List user portfolios', parameters: [{ name: 'address', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/portfolio/{id}/rebalance-plan': { get: { tags: ['Portfolio'], summary: 'Get rebalance plan', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/portfolio/{id}/rebalance': {
+            post: { tags: ['Portfolio'], summary: 'Execute rebalance', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'OK' }, '409': { description: 'Conflict' } } },
+        },
+        '/api/portfolio/{id}/analytics': { get: { tags: ['Portfolio'], summary: 'Get analytics', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/portfolio/{id}/performance-summary': { get: { tags: ['Portfolio'], summary: 'Get performance summary', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/risk/metrics/{portfolioId}': { get: { tags: ['Risk'], summary: 'Get risk metrics', parameters: [{ name: 'portfolioId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/risk/check/{portfolioId}': { get: { tags: ['Risk'], summary: 'Check risk', parameters: [{ name: 'portfolioId', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/prices': { get: { tags: ['Prices & market'], summary: 'Get current prices', responses: { '200': { description: 'OK' }, '503': { description: 'Unavailable' } } } },
+        '/api/prices/enhanced': { get: { tags: ['Prices & market'], summary: 'Get enhanced prices', responses: { '200': { description: 'OK' } } } },
+        '/api/market/{asset}/details': { get: { tags: ['Prices & market'], summary: 'Market details', parameters: [{ name: 'asset', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/market/{asset}/chart': { get: { tags: ['Prices & market'], summary: 'Price chart', parameters: [{ name: 'asset', in: 'path', required: true, schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/auto-rebalancer/status': { get: { tags: ['Auto-rebalancer'], summary: 'Auto-rebalancer status', responses: { '200': { description: 'OK' } } } },
+        '/api/auto-rebalancer/start': { post: { tags: ['Auto-rebalancer'], summary: 'Start (admin)', responses: { '200': { description: 'OK' } } } },
+        '/api/auto-rebalancer/stop': { post: { tags: ['Auto-rebalancer'], summary: 'Stop (admin)', responses: { '200': { description: 'OK' } } } },
+        '/api/auto-rebalancer/force-check': { post: { tags: ['Auto-rebalancer'], summary: 'Force check (admin)', responses: { '200': { description: 'OK' } } } },
+        '/api/auto-rebalancer/history': { get: { tags: ['Auto-rebalancer'], summary: 'Auto-rebalance history (admin)', parameters: [{ name: 'portfolioId', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/system/status': { get: { tags: ['System'], summary: 'System status', responses: { '200': { description: 'OK' } } } },
+        '/api/notifications/subscribe': { post: { tags: ['Notifications'], summary: 'Subscribe', requestBody: { content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'OK' } } } },
+        '/api/notifications/preferences': { get: { tags: ['Notifications'], summary: 'Get preferences', parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/notifications/unsubscribe': { delete: { tags: ['Notifications'], summary: 'Unsubscribe', parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'OK' } } } },
+        '/api/queue/health': { get: { tags: ['Queue'], summary: 'Queue health', responses: { '200': { description: 'OK' }, '503': { description: 'Unavailable' } } } },
+    },
+    components: {
+        securitySchemes: { adminAuth: { type: 'apiKey', in: 'header', name: 'Authorization' } },
+        schemas: {
+            ApiEnvelope: { type: 'object', properties: { success: { type: 'boolean' }, data: {}, error: { type: 'object', nullable: true }, timestamp: { type: 'string' }, meta: { type: 'object' } } },
+            ApiError: { type: 'object', properties: { code: { type: 'string' }, message: { type: 'string' }, details: {} } },
+            Portfolio: { type: 'object' },
+            PriceData: { type: 'object', properties: { price: { type: 'number' }, change: { type: 'number' }, timestamp: { type: 'number' } } },
+            RebalanceResult: { type: 'object' },
+        },
+    }
+};
+
+export default base as Record<string, unknown>;
