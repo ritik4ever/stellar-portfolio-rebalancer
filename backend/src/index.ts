@@ -22,6 +22,7 @@ import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './que
 import { contractEventIndexerService } from './services/contractEventIndexer.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
+import { initRobustWebSocket } from './services/websocket.service.js';
 
 let startupConfig: StartupConfig
 try {
@@ -261,6 +262,8 @@ wss.on('connection', (ws) => {
     })
 })
 
+initRobustWebSocket(wss);
+
 // Start existing rebalancing service (now queue-backed, no cron)
 try {
     const rebalancingService = new RebalancingService(wss)
@@ -332,6 +335,16 @@ server.listen(port, async () => {
     } catch (error) {
         logger.error('[CHAIN-INDEXER] Failed to start', { error })
     }
+
+    logger.info('Available endpoints', {
+        health: `/health`,
+        corsTest: `/test/cors`,
+        coinGeckoTest: `/test/coingecko`,
+        autoRebalancerStatus: `/api/auto-rebalancer/status`,
+        queueHealth: `/api/queue/health`,
+    })
+})
+
 
     logger.info('Available endpoints', {
         health: `/health`,
