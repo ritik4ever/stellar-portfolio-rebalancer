@@ -1,4 +1,5 @@
 import { browserPriceService } from '../services/browserPriceService'
+import { getAccessToken, refresh } from '../services/authService'
 
 export interface ApiErrorPayload {
     code: string
@@ -68,6 +69,9 @@ export const API_CONFIG = {
     ENDPOINTS: {
         HEALTH: '/health',
         ROOT: '/',
+        AUTH_LOGIN: '/api/auth/login',
+        AUTH_REFRESH: '/api/auth/refresh',
+        AUTH_LOGOUT: '/api/auth/logout',
         PORTFOLIO: '/api/portfolio',
         USER_PORTFOLIOS: (address: string) => `/api/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `/api/portfolio/${id}`,
@@ -130,6 +134,11 @@ export const apiRequest = async <T>(
         'Accept': 'application/json',
     }
 
+    const accessToken = getAccessToken()
+    if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`
+    }
+
     // Add origin header only in browser context
     if (typeof window !== 'undefined') {
         headers['Origin'] = window.location.origin
@@ -169,6 +178,13 @@ export const apiRequest = async <T>(
 
         const body = await response.json()
         console.log('API Response Data:', body)
+
+        if (response.status === 401 && retryCount === 0 && isApiRequest) {
+            const refreshed = await refresh()
+            if (refreshed) {
+                return apiRequest<T>(endpoint, options, retryCount + 1)
+            }
+        }
 
         if (isApiRequest) {
             const envelope = body as ApiEnvelope<T>
