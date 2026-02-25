@@ -21,6 +21,7 @@ import { startAnalyticsSnapshotWorker, stopAnalyticsSnapshotWorker } from './que
 import { contractEventIndexerService } from './services/contractEventIndexer.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
+import { initRobustWebSocket } from './services/websocket.service.js';
 
 let startupConfig: StartupConfig
 try {
@@ -246,18 +247,8 @@ const server = createServer(app)
 // WebSocket setup
 const wss = new WebSocketServer({ server })
 
-wss.on('connection', (ws) => {
-    logger.info('WebSocket connection established')
-    ws.send(JSON.stringify({
-        type: 'connection',
-        message: 'Connected',
-        autoRebalancerStatus: autoRebalancer.getStatus()
-    }))
 
-    ws.on('error', (error) => {
-        logger.error('WebSocket error', { error })
-    })
-})
+initRobustWebSocket(wss);
 
 // Start existing rebalancing service (now queue-backed, no cron)
 try {
