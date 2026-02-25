@@ -22,6 +22,7 @@ import { rebalanceLockService } from '../services/rebalanceLock.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { getPortfolioExport } from '../services/portfolioExportService.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -179,6 +180,29 @@ router.get('/portfolio/:id', async (req: Request, res: Response) => {
         return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Portfolio export (JSON, CSV, PDF) — GDPR data portability
+router.get('/portfolio/:id/export', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const format = (req.query.format as string)?.toLowerCase()
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        if (!['json', 'csv', 'pdf'].includes(format)) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Query parameter format must be one of: json, csv, pdf')
+        }
+        const result = await getPortfolioExport(portfolioId, format as 'json' | 'csv' | 'pdf')
+        if (!result) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        res.setHeader('Content-Type', result.contentType)
+        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+        if (Buffer.isBuffer(result.body)) {
+            return res.send(result.body)
+        }
+        return res.send(result.body)
+    } catch (error) {
+        logger.error('[ERROR] Portfolio export failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

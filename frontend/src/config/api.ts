@@ -75,6 +75,7 @@ export const API_CONFIG = {
         PORTFOLIO: '/api/portfolio',
         USER_PORTFOLIOS: (address: string) => `/api/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `/api/portfolio/${id}`,
+        PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') => `/api/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `/api/portfolio/${id}/rebalance`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `/api/portfolio/${id}/rebalance-status`,
         PRICES: '/api/prices',
@@ -255,6 +256,44 @@ export const api = {
     delete: <T>(endpoint: string): Promise<T> => {
         return apiRequest<T>(endpoint, { method: 'DELETE' })
     }
+}
+
+/** Fetch export file (JSON/CSV/PDF) and trigger download. Uses blob response and Content-Disposition filename. */
+export const downloadPortfolioExport = async (
+    portfolioId: string,
+    format: 'json' | 'csv' | 'pdf'
+): Promise<void> => {
+    const url = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.PORTFOLIO_EXPORT(portfolioId, format)}`
+    const headers: Record<string, string> = { Accept: format === 'pdf' ? 'application/pdf' : 'application/json, text/csv' }
+    const token = getAccessToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(url, { method: 'GET', headers, credentials: 'omit' })
+
+    if (res.status === 401) {
+        const refreshed = await refresh()
+        if (refreshed) return downloadPortfolioExport(portfolioId, format)
+        throw new ApiClientError('Unauthorized', 401, 'UNAUTHORIZED')
+    }
+
+    if (!res.ok) {
+        const text = await res.text()
+        let message = `Export failed: ${res.status}`
+        try {
+            const json = JSON.parse(text)
+            message = json?.error?.message || json?.message || message
+        } catch {
+            if (text) message = text.slice(0, 200)
+        }
+        throw new ApiClientError(message, res.status, 'EXPORT_FAILED')
+    }
+
+    const blob = await res.blob()
+    const disposition = res.headers.get('Content-Disposition')
+    const match = disposition?.match(/filename="?([^";\n]+)"?/)
+    const filename = match?.[1] ?? `portfolio_export_${new Date().toISOString().slice(0, 10)}.${format === 'pdf' ? 'pdf' : format === 'csv' ? 'csv' : 'json'}`
+    const { downloadBlob } = await import('../utils/export')
+    downloadBlob(filename, blob)
 }
 
 // Direct price fetching function

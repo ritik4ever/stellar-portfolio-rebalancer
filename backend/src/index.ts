@@ -177,6 +177,7 @@ app.get('/', (req, res) => {
 // Mount API routes
 app.use('/api/auth', authRouter)
 app.use('/api', portfolioRouter)
+app.use('/api/v1', portfolioRouter)
 app.use('/api', apiErrorHandler)
 
 // Legacy non-/api compatibility (redirect only)
