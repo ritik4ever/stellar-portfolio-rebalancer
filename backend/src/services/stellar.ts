@@ -1,7 +1,7 @@
 import { Horizon } from '@stellar/stellar-sdk'
 
 import { ConflictError } from '../types/index.js'
-import type { PricesMap, RebalanceResult } from '../types/index.js'
+import type { PricesMap, RebalanceResult, RebalanceStrategyType, RebalanceStrategyConfig } from '../types/index.js'
 import { Dec } from '../utils/decimal.js'
 import {
     StellarDEXService,
@@ -11,6 +11,7 @@ import {
 } from './dex.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { rebalanceHistoryService, riskManagementService } from './serviceContainer.js'
+import { shouldRebalanceByStrategy } from './rebalancingStrategyService.js'
 import { logger, logAudit } from '../utils/logger.js'
 
 interface StoredPortfolio {
@@ -53,7 +54,9 @@ export class StellarService {
         userAddress: string,
         allocations: Record<string, number>,
         threshold: number,
-        slippageTolerancePercent: number = 1
+        slippageTolerancePercent: number = 1,
+        strategy: RebalanceStrategyType = 'threshold',
+        strategyConfig: RebalanceStrategyConfig = {}
     ) {
         try {
             if (!Dec.allocationsSumValid(allocations)) {
@@ -90,7 +93,9 @@ export class StellarService {
                     allocations,
                     threshold,
                     mockBalances,
-                    slippageTolerance
+                    slippageTolerance,
+                strategy,
+                strategyConfig as Record<string, unknown>
                 )
 
                 logger.info('Demo portfolio created', { portfolioId, totalValue })
@@ -122,8 +127,10 @@ export class StellarService {
                 allocations,
                 threshold,
                 filteredBalances,
-                slippageTolerance
-            )
+                slippageTolerance,
+                strategy,
+                strategyConfig as Record<string, unknown>
+                )
             logger.info('Portfolio created with real on-chain balances', { portfolioId, totalValue })
             logAudit('portfolio_create_completed', {
                 portfolioId,
@@ -192,34 +199,11 @@ export class StellarService {
             const reflector = new ReflectorService()
             const prices = await reflector.getCurrentPrices()
 
-            let totalValue = 0
-            const currentValues: Record<string, number> = {}
-
-            for (const [asset, balance] of Object.entries(portfolio.balances ?? {})) {
-                const price = prices[asset]?.price || 0
-                const value = balance * price
-                currentValues[asset] = value
-                totalValue += value
-            }
-
-            if (totalValue === 0) return false
-
-            for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
-                const currentValue = currentValues[asset] || 0
-                const currentPercentage = Dec.percentage(currentValue, totalValue)
-                const drift = Dec.drift(currentPercentage, targetPercentage)
-
-                if (drift > 50) {
-                    logger.warn('Excessive drift detected', { asset, drift })
-                    return false
-                }
-
-                if (drift > portfolio.threshold) {
-                    return true
-                }
-            }
-
-            return false
+            return shouldRebalanceByStrategy({
+                portfolio,
+                prices,
+                now: Date.now()
+            })
         } catch (error) {
             logger.error('Error checking rebalance need', { error })
             return false

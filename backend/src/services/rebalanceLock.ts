@@ -67,6 +67,7 @@ export class RebalanceLockService {
 
         if (this.useRedis && this.redis) {
             try {
+                const result = await this.redis.set(lockKey, Date.now().toString(), 'PX', ttlMs, 'NX')
 
                 return result === 'OK'
             } catch (error) {

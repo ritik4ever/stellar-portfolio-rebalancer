@@ -19,8 +19,10 @@ import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/helpers.js'
 import { createPortfolioSchema } from './validation.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
+import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { getPortfolioExport } from '../services/portfolioExportService.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -46,6 +48,10 @@ const parseHistorySource = (value: unknown): 'offchain' | 'simulated' | 'onchain
     return undefined
 }
 
+
+router.get('/strategies', (_req: Request, res: Response) => {
+    return ok(res, { strategies: REBALANCE_STRATEGIES })
+})
 
 router.get('/rebalance/history', async (req: Request, res: Response) => {
     try {
@@ -122,6 +128,7 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
     }
 })
 
+router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
 
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
@@ -139,9 +146,17 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
                             : message
             return fail(res, 400, 'VALIDATION_ERROR', fullMessage)
         }
+        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = parsed.data
 
         const slippageTolerancePercent = slippageTolerance ?? 1
-        const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold, slippageTolerancePercent)
+        const portfolioId = await stellarService.createPortfolio(
+            userAddress,
+            allocations,
+            threshold,
+            slippageTolerancePercent,
+            strategy ?? 'threshold',
+            strategyConfig ?? {}
+        )
         const mode = featureFlags.demoMode ? 'demo' : 'onchain'
         return ok(res, {
             portfolioId,
@@ -154,13 +169,14 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
     }
 })
 
+router.get('/portfolio/:id', async (req: Request, res: Response) => {
 
     try {
         const portfolioId = req.params.id
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await stellarService.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
- main
+
         return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
@@ -168,7 +184,35 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
     }
 })
 
- main
+// Portfolio export (JSON, CSV, PDF) — GDPR data portability
+router.get('/portfolio/:id/export', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const format = (req.query.format as string)?.toLowerCase()
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        if (!['json', 'csv', 'pdf'].includes(format)) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Query parameter format must be one of: json, csv, pdf')
+        }
+        const result = await getPortfolioExport(portfolioId, format as 'json' | 'csv' | 'pdf')
+        if (!result) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        res.setHeader('Content-Type', result.contentType)
+        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+        if (Buffer.isBuffer(result.body)) {
+            return res.send(result.body)
+        }
+        return res.send(result.body)
+    } catch (error) {
+        logger.error('[ERROR] Portfolio export failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
+    try {
+        const address = req.params.address
+        if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
+        const list = portfolioStorage.getUserPortfolios(address)
+
         return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
@@ -200,6 +244,7 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
 })
 
 // Manual portfolio rebalance
+router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
 
     try {
         const portfolioId = req.params.id;
@@ -692,6 +737,7 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 router.post('/notifications/subscribe', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const userId = req.user?.address ?? req.body?.userId
+        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body ?? {}
 
         // Validation
         if (!userId) {

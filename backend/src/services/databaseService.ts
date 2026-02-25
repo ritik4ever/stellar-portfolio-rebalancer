@@ -36,6 +36,8 @@ interface PortfolioRow {
     created_at: string
     last_rebalance: string
     version: number
+    strategy?: string
+    strategy_config?: string
 }
 
 interface RebalanceHistoryRow {
@@ -128,8 +130,8 @@ function seedDemoData(db: Database.Database): void {
     const balances = { XLM: 11173.18, BTC: 0.02697, ETH: 0.68257, USDC: 1000 }
 
     db.prepare(`
-        INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     `).run(
         DEMO_PORTFOLIO_ID,
         'DEMO-USER',
@@ -139,7 +141,9 @@ function seedDemoData(db: Database.Database): void {
         JSON.stringify(balances),
         10000,
         now,
-        now
+        now,
+        'threshold',
+        '{}'
     )
 
     const historyRows = [
@@ -239,7 +243,9 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
         totalValue: row.total_value,
         createdAt: row.created_at,
         lastRebalance: row.last_rebalance,
-        version: row.version ?? 1
+        version: row.version ?? 1,
+        strategy: (row.strategy as Portfolio['strategy']) || 'threshold',
+        strategyConfig: row.strategy_config ? safeJsonParse(row.strategy_config, {}, `portfolio(${row.id}).strategy_config`) : undefined
     }
 }
 
@@ -296,6 +302,14 @@ export class DatabaseService {
             this.db.exec("ALTER TABLE portfolios ADD COLUMN slippage_tolerance_percent REAL NOT NULL DEFAULT 1")
             logger.info('[DB] Migration: added slippage_tolerance_percent column to portfolios')
         }
+        if (!cols.some(c => c.name === 'strategy')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN strategy TEXT NOT NULL DEFAULT 'threshold'")
+            logger.info('[DB] Migration: added strategy column to portfolios')
+        }
+        if (!cols.some(c => c.name === 'strategy_config')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN strategy_config TEXT DEFAULT '{}'")
+            logger.info('[DB] Migration: added strategy_config column to portfolios')
+        }
     }
 
     // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -311,15 +325,17 @@ export class DatabaseService {
         userAddress: string,
         allocations: Record<string, number>,
         threshold: number,
-        slippageTolerancePercent: number = 1
+        slippageTolerancePercent: number = 1,
+        strategy: string = 'threshold',
+        strategyConfig: Record<string, unknown> = {}
     ): string {
         try {
             const id = generateId()
             const now = new Date().toISOString()
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify({}), 0, now, now)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify({}), 0, now, now, strategy, JSON.stringify(strategyConfig))
             return id
         } catch (err) {
             throw new Error(`Failed to create portfolio for user '${userAddress}': ${err}`)
@@ -331,16 +347,18 @@ export class DatabaseService {
         allocations: Record<string, number>,
         threshold: number,
         currentBalances: Record<string, number>,
-        slippageTolerancePercent: number = 1
+        slippageTolerancePercent: number = 1,
+        strategy: string = 'threshold',
+        strategyConfig: Record<string, unknown> = {}
     ): string {
         try {
             const id = generateId()
             const now = new Date().toISOString()
             const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify(currentBalances), totalValue, now, now)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify(currentBalances), totalValue, now, now, strategy, JSON.stringify(strategyConfig))
             return id
         } catch (err) {
             throw new Error(`Failed to create portfolio with balances for user '${userAddress}': ${err}`)
@@ -753,13 +771,14 @@ export class DatabaseService {
             if (!existing) {
                 this.db.prepare(`
                     INSERT OR IGNORE INTO portfolios
-                        (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 `).run(
                     portfolioId, userAddress,
-                    JSON.stringify({}), 5,
+                    JSON.stringify({}), 5, 1,
                     JSON.stringify({}), 0,
-                    new Date().toISOString(), new Date().toISOString(), 1
+                    new Date().toISOString(), new Date().toISOString(),
+                    'threshold', '{}'
                 )
             }
         } catch (err) {
