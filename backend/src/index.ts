@@ -1,11 +1,10 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
-import swaggerUi from 'swagger-ui-express'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
-n
+import { authRouter } from './api/authRoutes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { globalRateLimiter } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
@@ -150,18 +149,6 @@ app.get('/test/coingecko', async (req, res) => {
         })
     }
 })
-// OpenAPI spec as JSON (for Postman: Import → Link → http://localhost:3000/api-docs/openapi.json)
-app.get('/api-docs/openapi.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json')
-    res.json(openApiSpec)
-})
-
-// Swagger UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'Stellar Portfolio Rebalancer API',
-}))
-
 // Root route
 app.get('/', (req, res) => {
     res.json({

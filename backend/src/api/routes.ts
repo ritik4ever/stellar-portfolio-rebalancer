@@ -175,7 +175,7 @@ router.get('/portfolio/:id', async (req: Request, res: Response) => {
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await stellarService.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
- main
+
         return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
@@ -188,7 +188,7 @@ router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
         const address = req.params.address
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
         const list = portfolioStorage.getUserPortfolios(address)
- main
+
         return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
@@ -713,6 +713,7 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 router.post('/notifications/subscribe', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const userId = req.user?.address ?? req.body?.userId
+        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body ?? {}
 
         // Validation
         if (!userId) {
