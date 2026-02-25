@@ -11,6 +11,7 @@ import { AutoRebalancerService } from '../services/autoRebalancer.js'
 import { logger } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
+import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { writeRateLimiter } from '../middleware/rateLimit.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
@@ -127,6 +128,7 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
 })
 
 router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
         if (!parsed.success) {
@@ -144,6 +146,7 @@ router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: R
             return fail(res, 400, 'VALIDATION_ERROR', fullMessage)
         }
         const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = parsed.data
+
         const slippageTolerancePercent = slippageTolerance ?? 1
         const portfolioId = await stellarService.createPortfolio(
             userAddress,
@@ -166,11 +169,13 @@ router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: R
 })
 
 router.get('/portfolio/:id', async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await stellarService.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+ main
         return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
@@ -183,6 +188,7 @@ router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
         const address = req.params.address
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
         const list = portfolioStorage.getUserPortfolios(address)
+ main
         return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
@@ -215,6 +221,7 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
 
 // Manual portfolio rebalance
 router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id;
 
@@ -229,6 +236,12 @@ router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware,
 
         try {
             const portfolio = await stellarService.getPortfolio(portfolioId);
+            if (!portfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
+            }
+            if (req.user && portfolio.userAddress !== req.user.address) {
+                return fail(res, 403, 'FORBIDDEN', 'Portfolio not found');
+            }
             const prices = await reflectorService.getCurrentPrices();
             const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices);
 
@@ -697,14 +710,15 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 // ================================
 
 // Subscribe to notifications
-router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/notifications/subscribe', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
-        const { userId, emailEnabled, emailAddress, webhookEnabled, webhookUrl, events } = req.body
+        const userId = req.user?.address ?? req.body?.userId
 
         // Validation
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
+
 
         if (emailEnabled === undefined || webhookEnabled === undefined || !events) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Missing required fields: emailEnabled, webhookEnabled, events')
@@ -752,9 +766,9 @@ router.post('/notifications/subscribe', writeRateLimiter, idempotencyMiddleware,
 })
 
 // Get notification preferences
-router.get('/notifications/preferences', async (req: Request, res: Response) => {
+router.get('/notifications/preferences', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const userId = req.query.userId as string
+        const userId = req.user?.address ?? (req.query.userId as string)
 
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
@@ -774,9 +788,9 @@ router.get('/notifications/preferences', async (req: Request, res: Response) => 
 })
 
 // Unsubscribe from notifications
-router.delete('/notifications/unsubscribe', async (req: Request, res: Response) => {
+router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const userId = req.query.userId as string
+        const userId = req.user?.address ?? (req.query.userId as string)
 
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')

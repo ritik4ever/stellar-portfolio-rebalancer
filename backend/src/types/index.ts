@@ -1,19 +1,18 @@
-// Core price data interface
+export * from './websocket.js';
+
 export interface PriceData {
-    price: number
-    change: number
-    timestamp: number
-    source?: 'reflector' | 'coingecko_pro' | 'coingecko_free' | 'external' | 'fallback'
-    volume?: number
+    price: number;
+    change: number;
+    timestamp: number;
+    source?: 'reflector' | 'coingecko_pro' | 'coingecko_free' | 'external' | 'fallback';
+    volume?: number;
 }
 
-// Price map type - using type alias as expected by risk management service
-export type PricesMap = Record<string, PriceData>
+export type PricesMap = Record<string, PriceData>;
 
-// Historical price data
 export interface HistoricalPrice {
-    timestamp: number
-    price: number
+    timestamp: number;
+    price: number;
 }
 
 // Portfolio interface
@@ -38,240 +37,218 @@ export interface RebalanceStrategyConfig {
     intervalDays?: number
     volatilityThresholdPct?: number
     minDaysBetweenRebalance?: number
+
 }
 
-
-/**
- * Per-asset allocation item returned by the API / UI layer.
- * This is the array-element shape produced by StellarService.getPortfolio()
- * and MUST be converted via toStoredAllocations() before being passed to any
- * risk-management method.
- */
 export interface UIAllocation {
-    asset: string
-    /** Target weight as a percentage (0-100) */
-    target: number
-    /** Current weight as a percentage (0-100) */
-    current: number
-    amount?: number
-    balance?: number
-    price?: number
+    asset: string;
+    target: number;
+    current: number;
+    amount?: number;
+    balance?: number;
+    price?: number;
 }
 
-// Thrown when an update targets a stale portfolio version
 export class ConflictError extends Error {
-    readonly currentVersion: number
+    readonly currentVersion: number;
     constructor(currentVersion: number) {
-        super(`Portfolio was modified concurrently (current version: ${currentVersion})`)
-        this.name = 'ConflictError'
-        this.currentVersion = currentVersion
+        super(`Portfolio was modified concurrently (current version: ${currentVersion})`);
+        this.name = 'ConflictError';
+        this.currentVersion = currentVersion;
     }
 }
 
 // Rebalance event interface
 export interface RebalanceEvent {
-    id: string
-    portfolioId: string
-    timestamp: string
-    trigger: string
-    trades: number
-    gasUsed: string
-    status: 'completed' | 'failed' | 'pending'
-    eventSource?: 'offchain' | 'simulated' | 'onchain'
-    onChainConfirmed?: boolean
-    onChainEventType?: string
-    onChainTxHash?: string
-    onChainLedger?: number
-    onChainContractId?: string
-    onChainPagingToken?: string
-    isSimulated?: boolean
+    id: string;
+    portfolioId: string;
+    timestamp: string;
+    trigger: string;
+    trades: number;
+    gasUsed: string;
+    status: 'completed' | 'failed' | 'pending';
+    eventSource?: 'offchain' | 'simulated' | 'onchain';
+    onChainConfirmed?: boolean;
+    onChainEventType?: string;
+    onChainTxHash?: string;
+    onChainLedger?: number;
+    onChainContractId?: string;
+    onChainPagingToken?: string;
+    isSimulated?: boolean;
     details?: {
-        fromAsset?: string
-        toAsset?: string
-        amount?: number
-        reason?: string
-        volatilityDetected?: boolean
-        riskLevel?: 'low' | 'medium' | 'high'
-        priceDirection?: 'up' | 'down'
-        performanceImpact?: 'positive' | 'negative' | 'neutral'
-        riskMetrics?: any
-        marketConditions?: any
-        /** Slippage in basis points for this rebalance (tracked in history). */
-        totalSlippageBps?: number
-    }
+        fromAsset?: string;
+        toAsset?: string;
+        amount?: number;
+        reason?: string;
+        volatilityDetected?: boolean;
+        riskLevel?: 'low' | 'medium' | 'high';
+        priceDirection?: 'up' | 'down';
+        performanceImpact?: 'positive' | 'negative' | 'neutral';
+        riskMetrics?: any;
+        marketConditions?: any;
+        totalSlippageBps?: number;
+    };
 }
 
 // Risk management interfaces
 export interface RiskMetrics {
-    volatility: number
-    concentrationRisk: number
-    liquidityRisk: number
-    correlationRisk: number
-    overallRiskLevel: 'low' | 'medium' | 'high' | 'critical'
-    ewmaVolatility: number
-    var95: number
-    cvar95: number
-    maxDrawdown: number
-    drawdownBand: 'normal' | 'elevated' | 'critical'
-    correlations: Record<string, Record<string, number>>
-    sampleSize: number
+    volatility: number;
+    concentrationRisk: number;
+    liquidityRisk: number;
+    correlationRisk: number;
+    overallRiskLevel: 'low' | 'medium' | 'high' | 'critical';
+    ewmaVolatility: number;
+    var95: number;
+    cvar95: number;
+    maxDrawdown: number;
+    drawdownBand: 'normal' | 'elevated' | 'critical';
+    correlations: Record<string, Record<string, number>>;
+    sampleSize: number;
 }
 
 export interface RiskAlert {
-    type: 'volatility' | 'concentration' | 'liquidity' | 'correlation' | 'circuit_breaker'
-    severity: 'warning' | 'critical'
-    message: string
-    asset?: string
-    recommendedAction: string
-    timestamp: number
+    type: 'volatility' | 'concentration' | 'liquidity' | 'correlation' | 'circuit_breaker';
+    severity: 'warning' | 'critical';
+    message: string;
+    asset?: string;
+    recommendedAction: string;
+    timestamp: number;
 }
 
 export interface CircuitBreakerStatus {
-    isTriggered: boolean
-    triggerReason?: string
-    cooldownUntil?: number
-    triggeredAssets: string[]
+    isTriggered: boolean;
+    triggerReason?: string;
+    cooldownUntil?: number;
+    triggeredAssets: string[];
 }
 
 // API response interfaces
 export interface ApiErrorResponseBody {
-    code: string
-    message: string
-    details?: unknown
+    code: string;
+    message: string;
+    details?: unknown;
 }
 
 export interface ApiResponse<T = any> {
-    success: boolean
-    data: T | null
-    error: ApiErrorResponseBody | null
-    timestamp: string
-    meta?: Record<string, unknown>
+    success: boolean;
+    data: T | null;
+    error: ApiErrorResponseBody | null;
+    timestamp: string;
+    meta?: Record<string, unknown>;
 }
 
 export interface PortfolioApiResponse extends ApiResponse {
-    portfolio?: Portfolio
-    prices?: PricesMap
-    riskMetrics?: RiskMetrics
+    portfolio?: Portfolio;
+    prices?: PricesMap;
+    riskMetrics?: RiskMetrics;
 }
 
 export interface RebalanceHistoryResponse extends ApiResponse {
-    history: RebalanceEvent[]
-    count: number
+    history: RebalanceEvent[];
+    count: number;
 }
 
-// Trade interface
 export interface Trade {
-    fromAsset: string
-    toAsset: string
-    amount: number
-    price?: number
-    timestamp?: string
+    fromAsset: string;
+    toAsset: string;
+    amount: number;
+    price?: number;
+    timestamp?: string;
 }
 
-// Market data interface
 export interface MarketData {
-    asset: string
-    price: number
-    change24h: number
-    volume24h: number
-    marketCap?: number
-    high24h?: number
-    low24h?: number
-    source: string
-    lastUpdated: string
-}
-
-// WebSocket message types
-export interface WebSocketMessage {
-    type: 'portfolio_update' | 'market_update' | 'risk_alert' | 'rebalance_complete' | 'connection' | 'heartbeat'
-    portfolioId?: string
-    event?: string
-    data?: any
-    timestamp: string
+    asset: string;
+    price: number;
+    change24h: number;
+    volume24h: number;
+    marketCap?: number;
+    high24h?: number;
+    low24h?: number;
+    source: string;
+    lastUpdated: string;
 }
 
 // System status interface
 export interface SystemStatus {
     system: {
-        status: 'operational' | 'degraded' | 'error'
-        uptime: number
-        timestamp: string
-        version: string
-    }
+        status: 'operational' | 'degraded' | 'error';
+        uptime: number;
+        timestamp: string;
+        version: string;
+    };
     portfolios: {
-        total: number
-        active: number
-    }
+        total: number;
+        active: number;
+    };
     rebalanceHistory: {
-        totalEvents: number
-        portfolios: number
-        recentActivity: number
-    }
+        totalEvents: number;
+        portfolios: number;
+        recentActivity: number;
+    };
     riskManagement: {
-        circuitBreakers: Record<string, CircuitBreakerStatus>
-        enabled: boolean
-        alertsActive: boolean
-    }
+        circuitBreakers: Record<string, CircuitBreakerStatus>;
+        enabled: boolean;
+        alertsActive: boolean;
+    };
     services: {
-        priceFeeds: boolean
-        riskManagement: boolean
-        webSockets: boolean
-        autoRebalancing: boolean
-        stellarNetwork: boolean
-    }
-    featureFlags?: Record<string, boolean>
+        priceFeeds: boolean;
+        riskManagement: boolean;
+        webSockets: boolean;
+        autoRebalancing: boolean;
+        stellarNetwork: boolean;
+    };
+    featureFlags?: Record<string, boolean>;
 }
 
-// Additional utility types
-export type AssetCode = 'XLM' | 'BTC' | 'ETH' | 'USDC'
+export type AssetCode = 'XLM' | 'BTC' | 'ETH' | 'USDC';
 
 export interface RebalanceRequest {
-    portfolioId: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
+    portfolioId: string;
+    userAddress: string;
+    allocations: Record<string, number>;
+    threshold: number;
 }
 
 export interface RebalanceResult {
-    trades: number
-    plannedTrades?: number
-    gasUsed: string
-    timestamp: string
-    status: 'success' | 'partial' | 'failed'
-    newBalances: Record<string, number>
-    riskAlerts?: RiskAlert[]
-    eventId?: string
-    executedTrades?: RebalanceExecutionTrade[]
-    partialFills?: RebalanceExecutionTrade[]
-    failedTrades?: RebalanceExecutionTrade[]
-    failureReasons?: string[]
-    rollback?: RebalanceRollback
-    totalSlippageBps?: number
+    trades: number;
+    plannedTrades?: number;
+    gasUsed: string;
+    timestamp: string;
+    status: 'success' | 'partial' | 'failed';
+    newBalances: Record<string, number>;
+    riskAlerts?: RiskAlert[];
+    eventId?: string;
+    executedTrades?: RebalanceExecutionTrade[];
+    partialFills?: RebalanceExecutionTrade[];
+    failedTrades?: RebalanceExecutionTrade[];
+    failureReasons?: string[];
+    rollback?: RebalanceRollback;
+    totalSlippageBps?: number;
 }
 
 export interface RebalanceExecutionTrade {
-    tradeId: string
-    fromAsset: string
-    toAsset: string
-    requestedAmount: number
-    executedAmount: number
-    estimatedReceivedAmount: number
-    remainingAmount: number
-    referencePrice: number
-    priceLimit: number
-    spreadBps: number
-    slippageBps: number
-    liquidityCoverage: number
-    status: 'executed' | 'partial' | 'failed' | 'skipped'
-    txHash?: string
-    rollbackTxHash?: string
-    rolledBack?: boolean
-    failureReason?: string
+    tradeId: string;
+    fromAsset: string;
+    toAsset: string;
+    requestedAmount: number;
+    executedAmount: number;
+    estimatedReceivedAmount: number;
+    remainingAmount: number;
+    referencePrice: number;
+    priceLimit: number;
+    spreadBps: number;
+    slippageBps: number;
+    liquidityCoverage: number;
+    status: 'executed' | 'partial' | 'failed' | 'skipped';
+    txHash?: string;
+    rollbackTxHash?: string;
+    rolledBack?: boolean;
+    failureReason?: string;
 }
 
 export interface RebalanceRollback {
-    attempted: boolean
-    success: boolean
-    rolledBackTrades: number
-    failures: string[]
+    attempted: boolean;
+    success: boolean;
+    rolledBackTrades: number;
+    failures: string[];
 }

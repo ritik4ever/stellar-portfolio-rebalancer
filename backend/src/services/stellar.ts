@@ -204,6 +204,34 @@ export class StellarService {
                 prices,
                 now: Date.now()
             })
+            let totalValue = 0
+            const currentValues: Record<string, number> = {}
+
+            for (const [asset, balance] of Object.entries(portfolio.balances ?? {})) {
+                const price = prices[asset]?.price || 0
+                const value = balance * price
+                currentValues[asset] = value
+                totalValue += value
+            }
+
+            if (totalValue === 0) return false
+
+            for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
+                const currentValue = currentValues[asset] || 0
+                const currentPercentage = Dec.percentage(currentValue, totalValue)
+                const drift = Dec.drift(currentPercentage, targetPercentage)
+
+                if (drift > 50) {
+                    logger.warn('Excessive drift detected', { asset, drift })
+                    return false
+                }
+
+                if (drift > portfolio.threshold) {
+                    return true
+                }
+            }
+
+            return false
         } catch (error) {
             logger.error('Error checking rebalance need', { error })
             return false
