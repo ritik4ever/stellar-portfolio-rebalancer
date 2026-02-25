@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader } from 'lucide-react'
-import { api } from '../config/api'
+import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader, Download } from 'lucide-react'
+import { api, downloadPortfolioExport } from '../config/api'
 
 interface NotificationPreferencesProps {
     userId: string
+    /** When set, show export buttons for GDPR data portability */
+    portfolioId?: string | null
 }
 
 interface EventPreferences {
@@ -22,7 +24,7 @@ interface Preferences {
     events: EventPreferences
 }
 
-const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userId }) => {
+const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userId, portfolioId }) => {
     const [preferences, setPreferences] = useState<Preferences>({
         emailEnabled: false,
         emailAddress: '',
@@ -43,6 +45,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const [error, setError] = useState<string | null>(null)
     const [webhookError, setWebhookError] = useState<string | null>(null)
     const [emailError, setEmailError] = useState<string | null>(null)
+    const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
 
 
     useEffect(() => {
@@ -185,6 +188,18 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         }
     }
 
+    const handleExport = async (format: 'json' | 'csv' | 'pdf') => {
+        if (!portfolioId) return
+        setExporting(format)
+        try {
+            await downloadPortfolioExport(portfolioId, format)
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Export failed')
+        } finally {
+            setExporting(null)
+        }
+    }
+
     const hasUnsavedChanges = () => {
         if (!originalPreferences) return false
         return JSON.stringify(preferences) !== JSON.stringify(originalPreferences)
@@ -242,8 +257,44 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 </motion.div>
             )}
 
+            {/* Export my data (GDPR) */}
+            <div className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <div className="flex items-center mb-2">
+                    <Download className="w-5 h-5 text-gray-600 mr-2" />
+                    <span className="font-medium text-gray-900">Export your data</span>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">
+                    Download your portfolio data and rebalance history (GDPR right-to-data).
+                </p>
+                {portfolioId ? (
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={() => handleExport('json')}
+                            disabled={!!exporting}
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+                        >
+                            {exporting === 'json' ? '…' : 'JSON'}
+                        </button>
+                        <button
+                            onClick={() => handleExport('csv')}
+                            disabled={!!exporting}
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+                        >
+                            {exporting === 'csv' ? '…' : 'CSV'}
+                        </button>
+                        <button
+                            onClick={() => handleExport('pdf')}
+                            disabled={!!exporting}
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+                        >
+                            {exporting === 'pdf' ? '…' : 'PDF'}
+                        </button>
+                    </div>
+                ) : (
+                    <p className="text-sm text-gray-500">Connect your wallet and open a portfolio to export from the Overview tab.</p>
+                )}
+            </div>
 
-            
 
             {/* Provider Configuration */}
             <div className="space-y-6 mb-6">

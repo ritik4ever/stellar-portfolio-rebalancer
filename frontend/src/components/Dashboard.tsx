@@ -22,6 +22,7 @@ import { browserPriceService } from '../services/browserPriceService'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
+import { downloadPortfolioExport } from '../config/api'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -160,6 +161,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         })
     }
 
+    /** Server-side export (full data + rebalance history) — use when connected with real portfolio */
+    const exportFromApi = async (format: 'json' | 'csv' | 'pdf') => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') {
+            alert('Connect your wallet and open a portfolio to export full data (JSON/CSV/PDF) from the server.')
+            return
+        }
+        try {
+            await downloadPortfolioExport(portfolioData.id, format)
+        } catch (e) {
+            console.error('Export failed', e)
+            alert(e instanceof Error ? e.message : 'Export failed. Please try again.')
+        }
+    }
+
     const performanceData = [
         { date: '1/1', value: 10000 },
         { date: '1/2', value: 10250 },
@@ -228,22 +243,48 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                     <div className="flex items-center space-x-4">
                         <ThemeToggle />
-                        {/*  NEW: Export buttons */}
+                        {/*  NEW: Export buttons — server-side (full data + history) when connected, client-side for demo */}
                         <div className="flex items-center space-x-2">
-                            <button
-                                onClick={exportPortfolioCSV}
-                                disabled={!portfolioData}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
-                            >
-                                Export CSV
-                            </button>
-                            <button
-                                onClick={exportPortfolioJSON}
-                                disabled={!portfolioData}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
-                            >
-                                Export JSON
-                            </button>
+                            {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
+                                <>
+                                    <button
+                                        onClick={() => exportFromApi('json')}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        Export JSON
+                                    </button>
+                                    <button
+                                        onClick={() => exportFromApi('csv')}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        Export CSV
+                                    </button>
+                                    <button
+                                        onClick={() => exportFromApi('pdf')}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        Export PDF
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={exportPortfolioCSV}
+                                        disabled={!portfolioData}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                    >
+                                        Export CSV
+                                    </button>
+                                    <button
+                                        onClick={exportPortfolioJSON}
+                                        disabled={!portfolioData}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                    >
+                                        Export JSON
+                                    </button>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Connect wallet for full export (PDF + history)</span>
+                                </>
+                            )}
                         </div>
 
                         {publicKey ? (
@@ -327,7 +368,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 {activeTab === 'analytics' ? (
                     <PerformanceChart portfolioId={portfolioData?.id || null} />
                 ) : activeTab === 'notifications' ? (
-                    <NotificationPreferences userId={publicKey || 'demo'} />
+                    <NotificationPreferences userId={publicKey || 'demo'} portfolioId={portfolioData?.id || null} />
                 ) :  (
                     <>
                         {/* Portfolio Overview */}
