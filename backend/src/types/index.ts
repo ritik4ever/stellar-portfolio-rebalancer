@@ -27,14 +27,6 @@ export interface Portfolio {
     createdAt: string
     lastRebalance: string
     version: number
-
-export interface Portfolio {
-    id: string;
-    userAddress: string;
-    allocations: Record<string, number>;
-    threshold: number;
-    lastRebalance: string;
-    version: number;
 }
 
 export interface UIAllocation {

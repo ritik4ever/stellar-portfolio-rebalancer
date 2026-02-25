@@ -345,16 +345,6 @@ server.listen(port, async () => {
     })
 })
 
-
-    logger.info('Available endpoints', {
-        health: `/health`,
-        corsTest: `/test/cors`,
-        coinGeckoTest: `/test/coingecko`,
-        autoRebalancerStatus: `/api/auto-rebalancer/status`,
-        queueHealth: `/api/queue/health`,
-    })
-})
-
 // Graceful shutdown
 const gracefulShutdown = async (signal: string) => {
     logger.info('[SHUTDOWN] Signal received, shutting down gracefully', { signal })
