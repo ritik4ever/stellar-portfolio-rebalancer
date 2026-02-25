@@ -122,7 +122,7 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
     }
 })
 
-router.post('/portfolio', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
         if (!parsed.success) {
@@ -139,8 +139,7 @@ router.post('/portfolio', requireJwtWhenEnabled, writeRateLimiter, idempotencyMi
                             : message
             return fail(res, 400, 'VALIDATION_ERROR', fullMessage)
         }
-        const { allocations, threshold, slippageTolerance } = parsed.data
-        const userAddress = req.user?.address ?? parsed.data.userAddress
+
         const slippageTolerancePercent = slippageTolerance ?? 1
         const portfolioId = await stellarService.createPortfolio(userAddress, allocations, threshold, slippageTolerancePercent)
         const mode = featureFlags.demoMode ? 'demo' : 'onchain'
@@ -155,15 +154,13 @@ router.post('/portfolio', requireJwtWhenEnabled, writeRateLimiter, idempotencyMi
     }
 })
 
-router.get('/portfolio/:id', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await stellarService.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        if (req.user && portfolio.userAddress !== req.user.address) {
-            return fail(res, 403, 'FORBIDDEN', 'Portfolio not found')
-        }
+ main
         return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
@@ -171,14 +168,7 @@ router.get('/portfolio/:id', requireJwtWhenEnabled, async (req: Request, res: Re
     }
 })
 
-router.get('/user/:address/portfolios', requireJwtWhenEnabled, async (req: Request, res: Response) => {
-    try {
-        const address = req.user?.address ?? req.params.address
-        if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
-        if (req.user && req.params.address !== req.user.address) {
-            return fail(res, 403, 'FORBIDDEN', 'Cannot access another user\'s portfolios')
-        }
-        const list = await portfolioStorage.getUserPortfolios(address)
+ main
         return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
@@ -210,7 +200,7 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
 })
 
 // Manual portfolio rebalance
-router.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id;
 
@@ -708,7 +698,7 @@ router.post('/notifications/subscribe', requireJwtWhenEnabled, writeRateLimiter,
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
 
-        const { emailEnabled, emailAddress, webhookEnabled, webhookUrl, events } = req.body
+
         if (emailEnabled === undefined || webhookEnabled === undefined || !events) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Missing required fields: emailEnabled, webhookEnabled, events')
         }
