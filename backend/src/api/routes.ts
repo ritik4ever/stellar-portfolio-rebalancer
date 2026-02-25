@@ -570,7 +570,7 @@ router.post('/portfolio', async (req, res) => {
         if (!userAddress || !allocations || threshold === undefined) {
             return res.status(400).json({ error: 'Missing required fields: userAddress, allocations, threshold' })
         }
-        const total = Object.values(allocations).reduce((sum: number, val: number) => sum + val, 0)
+        const total = Object.values(allocations as Record<string, number>).reduce((sum: number, val: number) => sum + val, 0)
         if (Math.abs(total - 100) > 0.01) {
             return res.status(400).json({ error: 'Allocations must sum to 100%' })
         }
