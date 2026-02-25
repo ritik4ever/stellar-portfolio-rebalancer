@@ -11,6 +11,7 @@ import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
 import { api, ENDPOINTS } from '../config/api'
+import { logout as authLogout } from '../services/authService'
 import { browserPriceService } from '../services/browserPriceService'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
@@ -160,7 +161,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         setLoading(false)
     }
 
-    const disconnectWallet = () => {
+    const disconnectWallet = async () => {
+        if (publicKey) {
+            await authLogout(publicKey)
+        }
         StellarWallet.disconnect()
         onNavigate('landing')
     }

@@ -5,14 +5,7 @@ import swaggerUi from 'swagger-ui-express'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const openApiSpec = JSON.parse(
-    readFileSync(join(__dirname, 'openapi', 'openapi.json'), 'utf-8')
-) as Record<string, unknown>
+n
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { globalRateLimiter } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
@@ -195,6 +188,7 @@ app.get('/', (req, res) => {
 })
 
 // Mount API routes
+app.use('/api/auth', authRouter)
 app.use('/api', portfolioRouter)
 app.use('/api', apiErrorHandler)
 
@@ -268,7 +262,7 @@ const server = createServer(app)
 // WebSocket setup
 const wss = new WebSocketServer({ server })
 
-initRobustWebSocket(wss)
+
 
 // Start existing rebalancing service (now queue-backed, no cron)
 try {

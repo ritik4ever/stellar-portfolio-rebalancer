@@ -15,18 +15,7 @@ export interface HistoricalPrice {
     price: number;
 }
 
-export interface Portfolio {
-    id: string;
-    userAddress: string;
-    allocations: Record<string, number>;
-    threshold: number;
-    slippageTolerancePercent?: number;
-    slippageTolerance?: number;
-    balances: Record<string, number>;
-    totalValue: number;
-    createdAt: string;
-    lastRebalance: string;
-    version: number;
+
 }
 
 export interface UIAllocation {
