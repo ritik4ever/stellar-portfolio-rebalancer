@@ -1,3 +1,7 @@
+import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+
+// TanStack Query Hooks
+import { usePrices } from '../hooks/queries/usePricesQuery'
 import React, { useState, useEffect } from 'react'
 import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
 import { api, API_CONFIG, ENDPOINTS } from '../config/api'
@@ -124,12 +128,20 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
             setLoading(false)
         }
     }
+    // Query for prices
+    const { data: priceData, isLoading, error: queryError } = usePrices()
 
     const retryConnection = () => {
-        setLoading(true)
-        setError(null)
-        fetchPrices()
+        // TanStack Query handles retries, but we can refetch manually
+        window.location.reload()
     }
+
+    // Determine finalized data and loading state
+    const prices: Record<string, PriceData> = priceData || {}
+    const loading = isLoading && Object.keys(prices).length === 0
+    const error = queryError ? 'Failed to fetch real-time prices' : null
+    const isConnected = !queryError
+    const lastUpdate = new Date().toLocaleTimeString()
 
     // NEW: Show skeleton loading state
     if (loading && Object.keys(prices).length === 0) {

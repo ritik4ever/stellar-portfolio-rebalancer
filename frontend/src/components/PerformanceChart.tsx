@@ -1,80 +1,34 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
 import { api, ENDPOINTS } from '../config/api'
 import { useTheme } from '../context/ThemeContext'
 
+// TanStack Query Hooks
+import { usePortfolioAnalytics, usePerformanceSummary } from '../hooks/queries/useAnalyticsQuery'
+
 interface PerformanceChartProps {
     portfolioId: string | null
 }
 
-interface AnalyticsData {
-    portfolioId: string
-    timestamp: string
-    totalValue: number
-    allocations: Record<string, number>
-    balances: Record<string, number>
-}
-
-interface PerformanceSummary {
-    metrics: {
-        totalReturn: number
-        dailyChange: number
-        weeklyChange: number
-        maxDrawdown: number
-        bestDay: { date: string; change: number }
-        worstDay: { date: string; change: number }
-        sharpeRatio: number
-        volatility: number
-    }
-    dataPoints: number
-    period: string
-    lastUpdated: string | null
-}
-
 const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
-    const [analyticsData, setAnalyticsData] = useState<AnalyticsData[]>([])
-    const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(30)
     const { isDark } = useTheme()
 
-    useEffect(() => {
-        if (portfolioId && portfolioId !== 'demo') {
-            fetchAnalytics()
-        } else {
-            setLoading(false)
-        }
-    }, [portfolioId, days])
+    // Query for analytics data
+    const { data: analyticsDataResult, isLoading: analyticsLoading, error: analyticsError } = usePortfolioAnalytics(portfolioId, days)
 
-    const fetchAnalytics = async () => {
-        if (!portfolioId || portfolioId === 'demo') {
-            setLoading(false)
-            return
-        }
+    // Query for performance summary
+    const { data: summaryDataResult, isLoading: summaryLoading, error: summaryError } = usePerformanceSummary(portfolioId)
 
-        try {
-            setLoading(true)
-            setError(null)
-
-            const [analyticsResult, summaryResult] = await Promise.all([
-                api.get<{ portfolioId: string; data: AnalyticsData[] }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId) + `/analytics`, { days: String(days) }),
-                api.get<{ portfolioId: string } & PerformanceSummary>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId) + `/performance-summary`)
-            ])
-
-            setAnalyticsData(analyticsResult.data || [])
-            setPerformanceSummary(summaryResult)
-        } catch (err) {
-            console.error('Failed to fetch analytics:', err)
-            setError('Failed to load performance data')
-        } finally {
-            setLoading(false)
-        }
-    }
+    // Determine finalized data and loading state
+    const analyticsData = analyticsDataResult?.data || []
+    const performanceSummary = summaryDataResult
+    const loading = portfolioId && portfolioId !== 'demo' ? (analyticsLoading || summaryLoading) : false
+    const error = analyticsError || summaryError ? 'Failed to load performance data' : null
 
     const formatChartData = () => {
-        return analyticsData.map(snapshot => ({
+        return analyticsData.map((snapshot: any) => ({
             date: new Date(snapshot.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
             value: Number(snapshot.totalValue.toFixed(2)),
             timestamp: snapshot.timestamp
