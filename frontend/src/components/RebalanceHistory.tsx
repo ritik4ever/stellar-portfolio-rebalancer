@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+
+// TanStack Query Hooks
+import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 
 //  NEW: export utils
 import { downloadCSV, toCSV } from '../utils/export'
@@ -41,69 +43,19 @@ interface RebalanceHistoryProps {
 }
 
 const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
-    const [history, setHistory] = useState<RebalanceEvent[]>([])
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    // Query for rebalance history
+    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId)
 
-    useEffect(() => {
-        fetchRebalanceHistory()
-
-        // Refresh every 30 seconds
-        const interval = setInterval(fetchRebalanceHistory, 30000)
-        return () => clearInterval(interval)
-    }, [portfolioId])
-
-    const fetchRebalanceHistory = async () => {
-        try {
-            let url = `${API_CONFIG.BASE_URL}/api/rebalance/history`
-            if (portfolioId) {
-                url += `?portfolioId=${portfolioId}`
-            }
-
-            console.log('Fetching rebalance history from:', url)
-            const response = await fetch(url)
-
-            if (response.ok) {
-                const data = await response.json()
-                console.log('Rebalance history data:', data)
-                setHistory(data.history || [])
-                setError(null)
-            } else {
-                console.warn('API failed, using demo data')
-                setHistory(getDemoHistory())
-            }
-        } catch (err) {
-            console.error('Failed to fetch rebalance history:', err)
-            setError('Failed to load rebalance history')
-            // Fallback to demo data
-            setHistory(getDemoHistory())
-
-        } finally {
-            setLoading(false)
-        }
-    }
-
-    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
-        const date = new Date(timestamp)
-
-        const dateFormatted = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        })
-
-        const timeFormatted = date.toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-        })
-
-        return { dateFormatted, timeFormatted }
-    }
-
+    // Demo history generator
     const getDemoHistory = (): RebalanceEvent[] => {
         const now = new Date()
+        const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
+            const date = new Date(timestamp)
+            return {
+                dateFormatted: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+                timeFormatted: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+            }
+        }
 
         return [
             {
@@ -150,54 +102,32 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                     executionTime: 1800,
                     chain: 'Stellar'
                 }
-            },
-            {
-                id: '3',
-                timestamp: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-                ...formatDateTime(new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString()),
-                trigger: 'Volatility circuit breaker',
-                trades: 1,
-                gasUsed: '0.0089 XLM',
-                status: 'completed',
-                portfolioId: portfolioId || 'demo',
-                eventSource: 'simulated',
-                onChainConfirmed: false,
-                isSimulated: true,
-                details: {
-                    reason: 'High market volatility detected, protective rebalance executed',
-                    volatilityDetected: true,
-                    riskLevel: 'high',
-                    priceDirection: 'down',
-                    performanceImpact: 'negative',
-                    executionTime: 3200,
-                    chain: 'Stellar'
-                }
-            },
-            {
-                id: '4',
-                timestamp: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-                ...formatDateTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()),
-                trigger: 'Manual rebalance',
-                trades: 4,
-                gasUsed: '0.0298 XLM',
-                status: 'completed',
-                portfolioId: portfolioId || 'demo',
-                eventSource: 'simulated',
-                onChainConfirmed: false,
-                isSimulated: true,
-                details: {
-                    fromAsset: 'BTC',
-                    toAsset: 'USDC',
-                    amount: 0.05,
-                    reason: 'User-initiated manual rebalancing',
-                    riskLevel: 'low',
-                    priceDirection: 'up',
-                    performanceImpact: 'positive',
-                    executionTime: 2100,
-                    chain: 'Stellar'
-                }
             }
         ]
+    }
+
+    // Determine finalized data
+    const history: RebalanceEvent[] = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : [])
+    const error = queryError ? 'Failed to load rebalance history' : null
+    const loading = isLoading && !data
+
+    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
+        const date = new Date(timestamp)
+
+        const dateFormatted = date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        })
+
+        const timeFormatted = date.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        })
+
+        return { dateFormatted, timeFormatted }
     }
 
     const formatTimestamp = (timestamp: string) => {

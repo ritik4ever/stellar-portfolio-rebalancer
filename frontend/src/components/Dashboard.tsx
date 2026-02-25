@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink } from 'lucide-react'
@@ -8,11 +8,14 @@ import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
 import NotificationPreferences from './NotificationPreferences'
-import { NotificationTest } from './NotificationTest'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
-import { browserPriceService } from '../services/browserPriceService'
+
+// TanStack Query Hooks
+import { useUserPortfolios, usePortfolioDetails } from '../hooks/queries/usePortfolioQuery'
+import { usePrices } from '../hooks/queries/usePricesQuery'
+import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
@@ -23,116 +26,51 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
-    const [portfolioData, setPortfolioData] = useState<any>(null)
-    const [prices, setPrices] = useState<any>({})
-    const [loading, setLoading] = useState(true)
-    const [rebalancing, setRebalancing] = useState(false)
-    const [priceSource, setPriceSource] = useState<string>('loading...')
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'test-notifications'>('overview')
     const { isDark } = useTheme()
 
-    useEffect(() => {
-        if (publicKey) {
-            fetchPortfolioData()
-            fetchPrices()
-            const interval = setInterval(() => {
-                fetchPrices()
-            }, 60000) // Reduce frequency to avoid rate limits
-            return () => clearInterval(interval)
-        } else {
-            loadDemoData()
-        }
-    }, [publicKey])
+    // Query for user portfolios
+    const { data: portfolios, isLoading: portfoliosLoading } = useUserPortfolios(publicKey)
 
-    const fetchPortfolioData = async () => {
-        try {
-            console.log('Fetching portfolio data for:', publicKey)
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/user/${publicKey}/portfolios`)
+    // Determine the latest portfolio
+    const latestPortfolioId = portfolios && portfolios.length > 0
+        ? portfolios[portfolios.length - 1].id
+        : null
 
-            if (response.ok) {
-                const portfolios = await response.json()
-                console.log('Found portfolios:', portfolios)
+    // Query for portfolio details
+    const { data: portfolioDetails, isLoading: detailsLoading } = usePortfolioDetails(latestPortfolioId)
 
-                if (portfolios.length > 0) {
-                    // Use the most recent portfolio (last in array)
-                    const latestPortfolio = portfolios[portfolios.length - 1]
-                    console.log('Using portfolio:', latestPortfolio)
+    // Query for prices
+    const { data: priceData, isLoading: pricesLoading } = usePrices()
 
-                    const portfolioResponse = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${latestPortfolio.id}`)
-                    if (portfolioResponse.ok) {
-                        const data = await portfolioResponse.json()
-                        console.log('Portfolio data:', data)
-                        setPortfolioData(data.portfolio || data)
-                    } else {
-                        console.log('Portfolio details fetch failed, using list data')
-                        setPortfolioData(latestPortfolio)
-                    }
-                } else {
-                    console.log('No portfolios found, loading demo data')
-                    loadDemoData()
-                }
-            } else {
-                console.log('Portfolio list fetch failed, loading demo data')
-                loadDemoData()
-            }
-        } catch (error) {
-            console.error('Failed to fetch portfolio:', error)
-            loadDemoData()
-        } finally {
-            setLoading(false)
-        }
+    // Mutation for rebalancing
+    const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
+
+    // Demo data fallback
+    const demoData = {
+        id: 'demo',
+        totalValue: 10000,
+        dayChange: 0.85,
+        needsRebalance: false,
+        lastRebalance: '2 hours ago',
+        allocations: [
+            { asset: 'XLM', target: 40, current: 40.2, amount: 4020 },
+            { asset: 'USDC', target: 60, current: 59.8, amount: 5980 }
+        ]
     }
 
-    const fetchPrices = async () => {
-        try {
-            console.log('Fetching prices using browser service...')
-            // Use browser price service directly
-            const priceData = await browserPriceService.getCurrentPrices()
-            console.log('Browser prices fetched:', priceData)
-
-            // Transform to expected format if needed
-            const transformedPrices: any = {}
-            Object.entries(priceData).forEach(([asset, data]) => {
-                transformedPrices[asset] = {
-                    price: (data as any).price,
-                    change: (data as any).change || 0
-                }
-            })
-
-            setPrices(transformedPrices)
-            setPriceSource('CoinGecko Browser API')
-        } catch (error) {
-            console.error('Failed to fetch prices from browser service:', error)
-            setPriceSource('Fallback Data')
-
-            // Fallback to demo prices
-            setPrices({
-                XLM: { price: 0.354, change: -1.86 },
-                USDC: { price: 1.0, change: -0.01 },
-                BTC: { price: 110000, change: -1.19 },
-                ETH: { price: 4200, change: -1.50 }
-            })
-        }
+    const demoPrices = {
+        XLM: { price: 0.354, change: -1.86 },
+        USDC: { price: 1.0, change: -0.01 },
+        BTC: { price: 110000, change: -1.19 },
+        ETH: { price: 4200, change: -1.50 }
     }
 
-    const loadDemoData = () => {
-        console.log('Loading demo data')
-        setPortfolioData({
-            id: 'demo',
-            totalValue: 10000,
-            dayChange: 0.85,
-            needsRebalance: false,
-            lastRebalance: '2 hours ago',
-            allocations: [
-                { asset: 'XLM', target: 40, current: 40.2, amount: 4020 },
-                { asset: 'USDC', target: 60, current: 59.8, amount: 5980 }
-            ]
-        })
-
-        // Load demo prices and try to get real prices
-        fetchPrices()
-        setLoading(false)
-    }
+    // Determine finalized data and loading state
+    const portfolioData = publicKey ? (portfolioDetails || (portfolios && portfolios.length > 0 ? portfolios[portfolios.length - 1] : null)) : demoData
+    const prices = priceData || demoPrices
+    const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
+    const priceSource = priceData ? 'CoinGecko Browser API' : (publicKey ? 'Fallback Data' : 'Demo Data')
 
     const executeRebalance = async () => {
         if (!portfolioData?.id || portfolioData.id === 'demo') {
@@ -140,35 +78,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             return
         }
 
-        setRebalancing(true)
-
         try {
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio/${portfolioData.id}/rebalance`, {
-                method: 'POST'
-            })
-
-            if (response.ok) {
-                const result = await response.json()
-                alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
-                fetchPortfolioData()
-            } else {
-                const errData = await response.json().catch(() => ({}))
-                const msg = errData?.error ?? 'Rebalance failed. Please try again.'
-                const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-                alert(isSlippage ? `Slippage too high: ${msg}` : msg)
-            }
-        } catch (error) {
+            const result = await executeRebalanceMutation.mutateAsync()
+            alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
+        } catch (error: any) {
             console.error('Rebalance failed:', error)
-            alert('Rebalance failed. Please try again.')
-        } finally {
-            setRebalancing(false)
+            const msg = error.message ?? 'Rebalance failed. Please try again.'
+            const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
+            alert(isSlippage ? `Slippage too high: ${msg}` : msg)
         }
     }
 
     const refreshData = async () => {
-        setLoading(true)
-        await Promise.all([fetchPortfolioData(), fetchPrices()])
-        setLoading(false)
+        // TanStack Query handles background refresh automatically, but we can force it
+        // by invalidating queries if needed. For now, simple manual refresh is fine.
+        window.location.reload()
     }
 
     const disconnectWallet = () => {
@@ -489,10 +413,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         )}
                                         <button
                                             onClick={executeRebalance}
-                                            disabled={rebalancing || !publicKey || portfolioData?.id === 'demo'}
+                                            disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
                                             className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
                                         >
-                                            {rebalancing ? (
+                                            {executeRebalanceMutation.isPending ? (
                                                 <>
                                                     <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
                                                     Rebalancing...

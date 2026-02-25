@@ -17,9 +17,12 @@ import {
   ArrowLeft,
   AlertCircle,
   CheckCircle,
+  Zap,
 } from "lucide-react";
-import { API_CONFIG } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
+
+// TanStack Query Mutations
+import { useCreatePortfolioMutation } from "../hooks/mutations/usePortfolioMutations";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,10 +50,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [threshold, setThreshold] = useState(5);
   const [slippageTolerance, setSlippageTolerance] = useState(1);
   const [autoRebalance, setAutoRebalance] = useState(true);
-  const [isCreating, setIsCreating] = useState(false); // loading state for submit
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
+
+  // Mutation for portfolio creation
+  const createPortfolioMutation = useCreatePortfolioMutation();
 
   // ── Static data ────────────────────────────────────────────────────────────
 
@@ -220,44 +225,32 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       return;
     }
 
-    setIsCreating(true);
     setError(null);
-
-    try {
-      // Convert allocations array → { ASSET: percentage } map expected by the API
-      const allocationsMap = allocations.reduce(
-        (acc, alloc) => {
-          acc[alloc.asset] = alloc.percentage;
-          return acc;
-        },
-        {} as Record<string, number>,
-      );
-
-      const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolio`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userAddress: publicKey || "demo-user",
-          allocations: allocationsMap,
-          threshold,
-          slippageTolerance,
-        }),
-      });
-
-      if (response.ok) {
-        setSuccess(true);
-        // Brief pause so the user sees the success banner before being redirected
-        setTimeout(() => onNavigate("dashboard"), 2000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Failed to create portfolio");
-      }
-    } catch (err) {
-      setError("Network error. Please try again.");
-    } finally {
-      setIsCreating(false);
-    }
-  };
+ 
+     try {
+       // Convert allocations array → { ASSET: percentage } map expected by the API
+       const allocationsMap = allocations.reduce(
+         (acc, alloc) => {
+           acc[alloc.asset] = alloc.percentage / 100;
+           return acc;
+         },
+         {} as Record<string, number>,
+       );
+ 
+       await createPortfolioMutation.mutateAsync({
+         userAddress: publicKey || "demo-user",
+         allocations: allocationsMap,
+         threshold,
+         slippageTolerance,
+       });
+ 
+       setSuccess(true);
+       // Brief pause so the user sees the success banner before being redirected
+       setTimeout(() => onNavigate("dashboard"), 2000);
+     } catch (err: any) {
+       setError(err.message || "Failed to create portfolio");
+     }
+   };
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
@@ -701,27 +694,27 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - isCreating: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
-            <button
-              onClick={createPortfolio}
-              disabled={!isValidTotal || hasAnyFieldError || isCreating}
-              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-            >
-              {isCreating ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Creating...
-                </>
-              ) : (
-                "Create Portfolio"
-              )}
-            </button>
-
-            {/*
-             * Helper hint shown beneath the disabled button.
-             * Explains why the button is inactive so users aren't left guessing.
-             * Hidden once the API call starts (isCreating) to avoid mixed messaging.
-             */}
-            {(hasAnyFieldError || !isValidTotal) && !isCreating && (
+             <button
+               onClick={createPortfolio}
+               disabled={!isValidTotal || hasAnyFieldError || createPortfolioMutation.isPending}
+               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+             >
+               {createPortfolioMutation.isPending ? (
+                 <>
+                   <Zap className="w-4 h-4 mr-2 animate-spin" />
+                   Creating...
+                 </>
+               ) : (
+                 "Create Portfolio"
+               )}
+             </button>
+ 
+             {/*
+              * Helper hint shown beneath the disabled button.
+              * Explains why the button is inactive so users aren't left guessing.
+              * Hidden once the API call starts (createPortfolioMutation.isPending) to avoid mixed messaging.
+              */}
+             {(hasAnyFieldError || !isValidTotal) && !createPortfolioMutation.isPending && (
               <p className="text-xs text-gray-400 text-center mt-2">
                 Fix validation errors above to continue
               </p>

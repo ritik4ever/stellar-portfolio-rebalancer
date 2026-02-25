@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react'
-import { TrendingUp, TrendingDown, Activity, Wifi, WifiOff } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+
+// TanStack Query Hooks
+import { usePrices } from '../hooks/queries/usePricesQuery'
 
 interface PriceTrackerProps {
     compact?: boolean
@@ -15,146 +16,20 @@ interface PriceData {
 }
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
-    const [prices, setPrices] = useState<Record<string, PriceData>>({})
-    const [loading, setLoading] = useState(true)
-    const [lastUpdate, setLastUpdate] = useState<string>('')
-    const [error, setError] = useState<string | null>(null)
-    const [isConnected, setIsConnected] = useState(true)
-
-    useEffect(() => {
-        console.log('PriceTracker mounted, API_CONFIG:', API_CONFIG)
-        fetchPrices()
-
-        // Update every 60 seconds instead of 30 to avoid rate limits
-        const interval = setInterval(fetchPrices, 60000)
-        return () => clearInterval(interval)
-    }, [])
-
-    const fetchPrices = async () => {
-        try {
-            const url = `${API_CONFIG.BASE_URL}/api/prices`
-            console.log('Fetching prices from:', url)
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                // Add timeout to prevent hanging requests
-                signal: AbortSignal.timeout(10000)
-            })
-
-            console.log('Response status:', response.status)
-            console.log('Response headers:', Object.fromEntries(response.headers.entries()))
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-            }
-
-            const rawData = await response.text()
-            console.log('Raw response:', rawData)
-
-            // Parse JSON safely
-            let data
-            try {
-                data = JSON.parse(rawData)
-            } catch (parseError) {
-                console.error('JSON parse error:', parseError)
-                throw new Error('Invalid JSON response from server')
-            }
-
-            console.log('Parsed price data:', data)
-
-            // Transform the data to match expected format
-            const transformedPrices: Record<string, PriceData> = {}
-
-            // Handle different possible response formats
-            if (data && typeof data === 'object') {
-                Object.keys(data).forEach(asset => {
-                    const assetData = data[asset]
-
-                    // Handle both direct price objects and nested structures
-                    if (assetData && typeof assetData === 'object') {
-                        transformedPrices[asset] = {
-                            price: assetData.price || assetData.usd || 0,
-                            change: assetData.change || assetData.usd_24h_change || 0,
-                            source: assetData.source || 'coingecko',
-                            timestamp: assetData.timestamp || Date.now() / 1000,
-                            volume: assetData.volume || assetData.usd_24h_vol || 0
-                        }
-                    } else if (typeof assetData === 'number') {
-                        // Handle simple price format
-                        transformedPrices[asset] = {
-                            price: assetData,
-                            change: 0,
-                            source: 'unknown',
-                            timestamp: Date.now() / 1000,
-                            volume: 0
-                        }
-                    }
-                })
-            }
-
-            console.log('Transformed prices:', transformedPrices)
-
-            // Only update if we have valid data
-            if (Object.keys(transformedPrices).length > 0) {
-                setPrices(transformedPrices)
-                setError(null)
-                setIsConnected(true)
-            } else {
-                throw new Error('No valid price data received')
-            }
-
-            setLastUpdate(new Date().toLocaleTimeString())
-            setLoading(false)
-
-        } catch (error) {
-            console.error('Failed to fetch prices:', error)
-            setError(error instanceof Error ? error.message : 'Failed to fetch real-time prices')
-            setIsConnected(false)
-
-            // Only use fallback if we have no data at all
-            if (Object.keys(prices).length === 0) {
-                console.log('Using fallback prices')
-                setPrices({
-                    XLM: {
-                        price: 0.355735,
-                        change: -1.09,
-                        source: 'fallback',
-                        timestamp: Date.now() / 1000
-                    },
-                    BTC: {
-                        price: 110209,
-                        change: -0.31,
-                        source: 'fallback',
-                        timestamp: Date.now() / 1000
-                    },
-                    ETH: {
-                        price: 4285.36,
-                        change: -0.31,
-                        source: 'fallback',
-                        timestamp: Date.now() / 1000
-                    },
-                    USDC: {
-                        price: 0.999835,
-                        change: 0.00,
-                        source: 'fallback',
-                        timestamp: Date.now() / 1000
-                    }
-                })
-            }
-            setLastUpdate(new Date().toLocaleTimeString())
-            setLoading(false)
-        }
-    }
+    // Query for prices
+    const { data: priceData, isLoading, error: queryError } = usePrices()
 
     const retryConnection = () => {
-        setLoading(true)
-        setError(null)
-        fetchPrices()
+        // TanStack Query handles retries, but we can refetch manually
+        window.location.reload()
     }
+
+    // Determine finalized data and loading state
+    const prices: Record<string, PriceData> = priceData || {}
+    const loading = isLoading && Object.keys(prices).length === 0
+    const error = queryError ? 'Failed to fetch real-time prices' : null
+    const isConnected = !queryError
+    const lastUpdate = new Date().toLocaleTimeString()
 
     // NEW: Show skeleton loading state
     if (loading && Object.keys(prices).length === 0) {
