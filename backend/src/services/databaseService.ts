@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS kv_store (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS assets (
+    symbol            TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    contract_address  TEXT,
+    issuer_account    TEXT,
+    coingecko_id      TEXT,
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_assets_enabled ON assets(enabled) WHERE enabled = 1;
 `
 
 // ─────────────────────────────────────────────
@@ -289,6 +301,8 @@ export class DatabaseService {
             seedDemoData(this.db)
         }
 
+        this._seedDefaultAssets()
+
         logger.info('[DB] SQLite database ready', { dbPath })
     }
 
@@ -310,6 +324,25 @@ export class DatabaseService {
             this.db.exec("ALTER TABLE portfolios ADD COLUMN strategy_config TEXT DEFAULT '{}'")
             logger.info('[DB] Migration: added strategy_config column to portfolios')
         }
+    }
+
+    private _seedDefaultAssets(): void {
+        const count = (this.db.prepare('SELECT COUNT(*) as cnt FROM assets').get() as { cnt: number }).cnt
+        if (count > 0) return
+        const now = new Date().toISOString()
+        const defaults = [
+            ['XLM', 'Stellar Lumens', null, null, 'stellar', 1],
+            ['USDC', 'USD Coin', 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5', null, 'usd-coin', 1],
+            ['BTC', 'Bitcoin', 'GAUTUYY2THLF7SGITDFMXJVYH3LHDSMGEAKSBU267M2K7A3W543CKUEF', null, 'bitcoin', 1],
+            ['ETH', 'Ethereum', null, null, 'ethereum', 1]
+        ]
+        const stmt = this.db.prepare(
+            'INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        for (const row of defaults) {
+            stmt.run(...row, now, now)
+        }
+        logger.info('[DB] Seeded default assets (XLM, USDC, BTC, ETH)')
     }
 
     // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -478,6 +511,77 @@ export class DatabaseService {
             return result.changes > 0
         } catch (err) {
             throw new Error(`Failed to delete portfolio '${id}': ${err}`)
+        }
+    }
+
+    // ──────────────────────────────────────────
+    // Asset registry (configurable assets)
+    // ──────────────────────────────────────────
+
+    listAssets(enabledOnly: boolean = true): Array<{ symbol: string; name: string; contractAddress?: string; issuerAccount?: string; coingeckoId?: string; enabled: boolean }> {
+        try {
+            const rows = this.db.prepare<[], { symbol: string; name: string; contract_address: string | null; issuer_account: string | null; coingecko_id: string | null; enabled: number }>(
+                enabledOnly ? 'SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE enabled = 1 ORDER BY symbol' : 'SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets ORDER BY symbol'
+            ).all()
+            return rows.map(r => ({
+                symbol: r.symbol,
+                name: r.name,
+                contractAddress: r.contract_address ?? undefined,
+                issuerAccount: r.issuer_account ?? undefined,
+                coingeckoId: r.coingecko_id ?? undefined,
+                enabled: r.enabled === 1
+            }))
+        } catch (err) {
+            throw new Error(`Failed to list assets: ${err}`)
+        }
+    }
+
+    getAssetBySymbol(symbol: string): { symbol: string; name: string; contractAddress?: string; issuerAccount?: string; coingeckoId?: string; enabled: boolean } | undefined {
+        try {
+            const row = this.db.prepare<[string], { symbol: string; name: string; contract_address: string | null; issuer_account: string | null; coingecko_id: string | null; enabled: number }>(
+                'SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE symbol = ?'
+            ).get(symbol.toUpperCase())
+            if (!row) return undefined
+            return {
+                symbol: row.symbol,
+                name: row.name,
+                contractAddress: row.contract_address ?? undefined,
+                issuerAccount: row.issuer_account ?? undefined,
+                coingeckoId: row.coingecko_id ?? undefined,
+                enabled: row.enabled === 1
+            }
+        } catch (err) {
+            throw new Error(`Failed to get asset '${symbol}': ${err}`)
+        }
+    }
+
+    addAsset(symbol: string, name: string, options: { contractAddress?: string; issuerAccount?: string; coingeckoId?: string } = {}): void {
+        try {
+            const sym = symbol.toUpperCase()
+            const now = new Date().toISOString()
+            this.db.prepare(
+                'INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
+            ).run(sym, name, options.contractAddress ?? null, options.issuerAccount ?? null, options.coingeckoId ?? null, now, now)
+        } catch (err) {
+            throw new Error(`Failed to add asset '${symbol}': ${err}`)
+        }
+    }
+
+    removeAsset(symbol: string): boolean {
+        try {
+            const result = this.db.prepare('DELETE FROM assets WHERE symbol = ?').run(symbol.toUpperCase())
+            return result.changes > 0
+        } catch (err) {
+            throw new Error(`Failed to remove asset '${symbol}': ${err}`)
+        }
+    }
+
+    setAssetEnabled(symbol: string, enabled: boolean): boolean {
+        try {
+            const result = this.db.prepare('UPDATE assets SET enabled = ?, updated_at = ? WHERE symbol = ?').run(enabled ? 1 : 0, new Date().toISOString(), symbol.toUpperCase())
+            return result.changes > 0
+        } catch (err) {
+            throw new Error(`Failed to set asset enabled '${symbol}': ${err}`)
         }
     }
 

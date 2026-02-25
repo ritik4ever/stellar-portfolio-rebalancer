@@ -18,7 +18,9 @@
     { "name": "Auto-rebalancer", "description": "Automatic rebalancing service" },
     { "name": "System", "description": "System status" },
     { "name": "Notifications", "description": "Notification preferences" },
-    { "name": "Queue", "description": "BullMQ queue health" }
+    { "name": "Queue", "description": "BullMQ queue health" },
+    { "name": "Assets", "description": "Configurable asset registry" },
+    { "name": "Admin", "description": "Admin-only endpoints" }
   ],
   "paths": {
     "/": { "get": { "tags": ["Health"], "summary": "Root", "description": "API info and feature flags.", "responses": { "200": { "description": "OK" } } } },
@@ -51,7 +53,10 @@
     "/api/notifications/subscribe": { "post": { "tags": ["Notifications"], "summary": "Subscribe", "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } }, "responses": { "200": { "description": "OK" } } } },
     "/api/notifications/preferences": { "get": { "tags": ["Notifications"], "summary": "Get preferences", "parameters": [{ "name": "userId", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
     "/api/notifications/unsubscribe": { "delete": { "tags": ["Notifications"], "summary": "Unsubscribe", "parameters": [{ "name": "userId", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-    "/api/queue/health": { "get": { "tags": ["Queue"], "summary": "Queue health", "responses": { "200": { "description": "OK" }, "503": { "description": "Unavailable" } } } }
+    "/api/queue/health": { "get": { "tags": ["Queue"], "summary": "Queue health", "responses": { "200": { "description": "OK" }, "503": { "description": "Unavailable" } } } },
+    "/api/assets": { "get": { "tags": ["Assets"], "summary": "List assets", "description": "Configurable asset registry; no contract redeploy needed for new assets. Supports custom Stellar tokens.", "parameters": [{ "name": "enabledOnly", "in": "query", "schema": { "type": "boolean", "default": true } }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "assets": { "type": "array", "items": { "type": "object", "properties": { "symbol": { "type": "string" }, "name": { "type": "string" }, "contractAddress": { "type": "string" }, "issuerAccount": { "type": "string" }, "coingeckoId": { "type": "string" }, "enabled": { "type": "boolean" } } } } } } } } } } },
+    "/api/admin/assets": { "get": { "tags": ["Assets", "Admin"], "summary": "List all assets (admin)", "parameters": [], "responses": { "200": { "description": "OK" } } }, "post": { "tags": ["Assets", "Admin"], "summary": "Add asset (admin)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "required": ["symbol", "name"], "properties": { "symbol": { "type": "string" }, "name": { "type": "string" }, "contractAddress": { "type": "string" }, "issuerAccount": { "type": "string" }, "coingeckoId": { "type": "string" } } } } } }, "responses": { "201": { "description": "Created" }, "400": { "description": "Validation error" } } } },
+    "/api/admin/assets/{symbol}": { "delete": { "tags": ["Assets", "Admin"], "summary": "Remove asset (admin)", "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } } }, "patch": { "tags": ["Assets", "Admin"], "summary": "Enable/disable asset (admin)", "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "enabled": { "type": "boolean" } } } } } }, "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } } } } }
   },
   "components": {
     "securitySchemes": { "adminAuth": { "type": "apiKey", "in": "header", "name": "Authorization" } },

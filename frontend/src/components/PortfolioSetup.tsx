@@ -9,7 +9,7 @@
  *   - Submit blocked until all fields and total are valid
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
 import {
   Plus,
@@ -17,11 +17,17 @@ import {
   ArrowLeft,
   AlertCircle,
   CheckCircle,
+  Search,
 } from "lucide-react";
 import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface AssetOption {
+  value: string;
+  label: string;
+}
 
 interface PortfolioSetupProps {
   onNavigate: (view: string) => void;
@@ -32,6 +38,13 @@ interface Allocation {
   asset: string;
   percentage: number;
 }
+
+const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
+  { value: "XLM", label: "XLM (Stellar Lumens)" },
+  { value: "USDC", label: "USDC (USD Coin)" },
+  { value: "BTC", label: "BTC (Bitcoin)" },
+  { value: "ETH", label: "ETH (Ethereum)" },
+];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -53,16 +66,27 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
+  const [assetOptions, setAssetOptions] = useState<AssetOption[]>(DEFAULT_ASSET_OPTIONS);
+  const [assetSearch, setAssetSearch] = useState<Record<number, string>>({}); // per-row filter for asset dropdown
 
-  // ── Static data ────────────────────────────────────────────────────────────
-
-  /** All supported assets the user can allocate to */
-  const assetOptions = [
-    { value: "XLM", label: "XLM (Stellar Lumens)" },
-    { value: "USDC", label: "USDC (USD Coin)" },
-    { value: "BTC", label: "BTC (Bitcoin)" },
-    { value: "ETH", label: "ETH (Ethereum)" },
-  ];
+  // ── Fetch available assets from registry (dynamic, supports custom Stellar tokens) ──
+  useEffect(() => {
+    let cancelled = false;
+    api.get<{ assets: Array<{ symbol: string; name: string }> }>(ENDPOINTS.ASSETS)
+      .then((res) => {
+        if (cancelled || !res?.assets?.length) return;
+        setAssetOptions(
+          res.assets.map((a) => ({
+            value: a.symbol,
+            label: `${a.symbol} (${a.name})`,
+          }))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setAssetOptions(DEFAULT_ASSET_OPTIONS);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   /** Pre-built allocation sets for quick setup */
   const presetPortfolios = [
@@ -397,6 +421,22 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 {allocations.map((allocation, index) => {
                   // Evaluate per-row validation on every render so errors update instantly
                   const fieldError = getAllocationError(allocation.percentage);
+                  const searchTerm = (assetSearch[index] ?? "").toLowerCase();
+                  const filteredOptions = searchTerm
+                    ? assetOptions.filter(
+                        (o) =>
+                          o.value.toLowerCase().includes(searchTerm) ||
+                          o.label.toLowerCase().includes(searchTerm)
+                      )
+                    : assetOptions;
+                  const optionsWithSelected = filteredOptions.some((o) => o.value === allocation.asset)
+                    ? filteredOptions
+                    : (() => {
+                        const set = new Map(assetOptions.map((o) => [o.value, o]));
+                        const selected = set.get(allocation.asset);
+                        const rest = filteredOptions.filter((o) => o.value !== allocation.asset);
+                        return selected ? [selected, ...rest] : rest;
+                      })();
 
                   return (
                     /*
@@ -411,19 +451,32 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                        * message adds height below the inputs.
                        */}
                       <div className="flex items-start space-x-3">
-                        {/* Asset dropdown */}
+                        {/* Asset dropdown with search */}
                         <div className="flex-1">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Asset
                           </label>
+                          <div className="relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="Search assets..."
+                              value={assetSearch[index] ?? ""}
+                              onChange={(e) =>
+                                setAssetSearch((s) => ({ ...s, [index]: e.target.value }))
+                              }
+                              onFocus={(e) => e.target.select()}
+                              className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                            />
+                          </div>
                           <select
                             value={allocation.asset}
                             onChange={(e) =>
                               updateAllocation(index, "asset", e.target.value)
                             }
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           >
-                            {assetOptions.map((option) => (
+                            {optionsWithSelected.map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
                               </option>

@@ -16,6 +16,7 @@ interface PriceData {
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const [prices, setPrices] = useState<Record<string, PriceData>>({})
+    const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
     const [loading, setLoading] = useState(true)
     const [lastUpdate, setLastUpdate] = useState<string>('')
     const [error, setError] = useState<string | null>(null)
@@ -23,6 +24,11 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
     useEffect(() => {
         console.log('PriceTracker mounted, API_CONFIG:', API_CONFIG)
+        api.get<{ assets: Array<{ symbol: string }> }>(ENDPOINTS.ASSETS)
+            .then((res) => {
+                if (res?.assets?.length) setAssetList(res.assets.map((a) => a.symbol))
+            })
+            .catch(() => {})
         fetchPrices()
 
         // Update every 60 seconds instead of 30 to avoid rate limits
@@ -150,7 +156,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         )
     }
 
-    const assets = ['XLM', 'BTC', 'ETH', 'USDC']
+    const assets = assetList.length > 0 ? assetList : Object.keys(prices)
 
     if (compact) {
         return (

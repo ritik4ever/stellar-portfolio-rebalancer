@@ -1,4 +1,5 @@
 import type { PricesMap } from '../types/index.js'
+import { assetRegistryService } from './assetRegistryService.js'
 
 export interface StatisticalRiskMetrics {
     ewmaVolatility: number
@@ -67,7 +68,9 @@ export class RiskManagementService {
     private readonly CIRCUIT_BREAKER_COOLDOWN = 300000 // 5 minutes
 
     constructor() {
-        ;['XLM', 'BTC', 'ETH', 'USDC'].forEach(asset => {
+        const symbols = assetRegistryService.getSymbols(true)
+        const assets = symbols.length > 0 ? symbols : ['XLM', 'BTC', 'ETH', 'USDC']
+        assets.forEach(asset => {
             this.circuitBreakers.set(asset, {
                 isTriggered: false,
                 triggeredAssets: []
@@ -82,6 +85,10 @@ export class RiskManagementService {
         Object.entries(prices).forEach(([asset, priceData]) => {
             const price = priceData?.price
             if (!Number.isFinite(price) || price <= 0) return
+
+            if (!this.circuitBreakers.has(asset)) {
+                this.circuitBreakers.set(asset, { isTriggered: false, triggeredAssets: [] })
+            }
 
             let history = this.priceHistory.get(asset) || []
             const previous = history.length > 0 ? history[history.length - 1].price : undefined
