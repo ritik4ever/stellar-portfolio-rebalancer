@@ -17,7 +17,16 @@ export interface HistoricalPrice {
 }
 
 // Portfolio interface
-
+export interface Portfolio {
+    id: string
+    userAddress: string
+    allocations: Record<string, number>
+    threshold: number
+    slippageTolerancePercent?: number
+    slippageTolerance?: number
+    balances: Record<string, number>
+    totalValue: number
+    createdAt: string
     lastRebalance: string
     version: number
 }
