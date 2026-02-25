@@ -23,6 +23,7 @@ import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
+import { assetRegistryService } from '../services/assetRegistryService.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -51,6 +52,81 @@ const parseHistorySource = (value: unknown): 'offchain' | 'simulated' | 'onchain
 
 router.get('/strategies', (_req: Request, res: Response) => {
     return ok(res, { strategies: REBALANCE_STRATEGIES })
+})
+
+// ─── Asset registry (configurable assets, no contract redeploy) ─────────────────
+/** Public: list enabled assets for portfolio setup and frontend */
+router.get('/assets', (_req: Request, res: Response) => {
+    try {
+        const enabledOnly = parseOptionalBoolean(_req.query.enabledOnly) !== false
+        const assets = assetRegistryService.list(enabledOnly)
+        return ok(res, { assets })
+    } catch (error) {
+        logger.error('[ERROR] List assets failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: list all assets (including disabled) */
+router.get('/admin/assets', requireAdmin, (_req: Request, res: Response) => {
+    try {
+        const assets = assetRegistryService.list(false)
+        return ok(res, { assets })
+    } catch (error) {
+        logger.error('[ERROR] Admin list assets failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: add asset */
+router.post('/admin/assets', requireAdmin, writeRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body ?? {}
+        if (!symbol || typeof symbol !== 'string' || !name || typeof name !== 'string') {
+            return fail(res, 400, 'VALIDATION_ERROR', 'symbol and name are required')
+        }
+        assetRegistryService.add(symbol.trim(), name.trim(), {
+            contractAddress: typeof contractAddress === 'string' ? contractAddress : undefined,
+            issuerAccount: typeof issuerAccount === 'string' ? issuerAccount : undefined,
+            coingeckoId: typeof coingeckoId === 'string' ? coingeckoId : undefined
+        })
+        const asset = assetRegistryService.getBySymbol(symbol.trim().toUpperCase())
+        return ok(res, { asset }, { status: 201 })
+    } catch (error) {
+        logger.error('[ERROR] Admin add asset failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: remove asset */
+router.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol
+        if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
+        const removed = assetRegistryService.remove(symbol)
+        if (!removed) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+        return ok(res, { message: 'Asset removed' })
+    } catch (error) {
+        logger.error('[ERROR] Admin remove asset failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: enable/disable asset */
+router.patch('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol
+        const enabled = req.body?.enabled
+        if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
+        if (typeof enabled !== 'boolean') return fail(res, 400, 'VALIDATION_ERROR', 'body.enabled must be boolean')
+        const updated = assetRegistryService.setEnabled(symbol, enabled)
+        if (!updated) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+        const asset = assetRegistryService.getBySymbol(symbol)
+        return ok(res, { asset })
+    } catch (error) {
+        logger.error('[ERROR] Admin set asset enabled failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
 })
 
 router.get('/rebalance/history', async (req: Request, res: Response) => {

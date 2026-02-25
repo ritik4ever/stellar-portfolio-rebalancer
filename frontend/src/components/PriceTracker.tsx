@@ -19,6 +19,115 @@ interface PriceData {
 }
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
+    const [prices, setPrices] = useState<Record<string, PriceData>>({})
+    const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
+    const [loading, setLoading] = useState(true)
+    const [lastUpdate, setLastUpdate] = useState<string>('')
+    const [error, setError] = useState<string | null>(null)
+    const [isConnected, setIsConnected] = useState(true)
+
+    useEffect(() => {
+        console.log('PriceTracker mounted, API_CONFIG:', API_CONFIG)
+        api.get<{ assets: Array<{ symbol: string }> }>(ENDPOINTS.ASSETS)
+            .then((res) => {
+                if (res?.assets?.length) setAssetList(res.assets.map((a) => a.symbol))
+            })
+            .catch(() => {})
+        fetchPrices()
+
+        // Update every 60 seconds instead of 30 to avoid rate limits
+        const interval = setInterval(fetchPrices, 60000)
+        return () => clearInterval(interval)
+    }, [])
+
+    const fetchPrices = async () => {
+        try {
+            const data = await api.get<Record<string, any>>(ENDPOINTS.PRICES)
+            console.log('Parsed price data:', data)
+
+            // Transform the data to match expected format
+            const transformedPrices: Record<string, PriceData> = {}
+
+            // Handle different possible response formats
+            if (data && typeof data === 'object') {
+                Object.keys(data).forEach(asset => {
+                    const assetData = data[asset]
+
+                    // Handle both direct price objects and nested structures
+                    if (assetData && typeof assetData === 'object') {
+                        transformedPrices[asset] = {
+                            price: assetData.price || assetData.usd || 0,
+                            change: assetData.change || assetData.usd_24h_change || 0,
+                            source: assetData.source || 'coingecko',
+                            timestamp: assetData.timestamp || Date.now() / 1000,
+                            volume: assetData.volume || assetData.usd_24h_vol || 0
+                        }
+                    } else if (typeof assetData === 'number') {
+                        // Handle simple price format
+                        transformedPrices[asset] = {
+                            price: assetData,
+                            change: 0,
+                            source: 'unknown',
+                            timestamp: Date.now() / 1000,
+                            volume: 0
+                        }
+                    }
+                })
+            }
+
+            console.log('Transformed prices:', transformedPrices)
+
+            // Only update if we have valid data
+            if (Object.keys(transformedPrices).length > 0) {
+                setPrices(transformedPrices)
+                setError(null)
+                setIsConnected(true)
+            } else {
+                throw new Error('No valid price data received')
+            }
+
+            setLastUpdate(new Date().toLocaleTimeString())
+            setLoading(false)
+
+        } catch (error) {
+            console.error('Failed to fetch prices:', error)
+            setError(error instanceof Error ? error.message : 'Failed to fetch real-time prices')
+            setIsConnected(false)
+
+            // Only use fallback if we have no data at all
+            if (Object.keys(prices).length === 0) {
+                console.log('Using fallback prices')
+                setPrices({
+                    XLM: {
+                        price: 0.355735,
+                        change: -1.09,
+                        source: 'fallback',
+                        timestamp: Date.now() / 1000
+                    },
+                    BTC: {
+                        price: 110209,
+                        change: -0.31,
+                        source: 'fallback',
+                        timestamp: Date.now() / 1000
+                    },
+                    ETH: {
+                        price: 4285.36,
+                        change: -0.31,
+                        source: 'fallback',
+                        timestamp: Date.now() / 1000
+                    },
+                    USDC: {
+                        price: 0.999835,
+                        change: 0.00,
+                        source: 'fallback',
+                        timestamp: Date.now() / 1000
+                    }
+                })
+            }
+            setLastUpdate(new Date().toLocaleTimeString())
+            setLoading(false)
+        }
+    }
     // Query for prices
     const { data: priceData, isLoading, error: queryError } = usePrices()
 
@@ -59,7 +168,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         )
     }
 
-    const assets = ['XLM', 'BTC', 'ETH', 'USDC']
+    const assets = assetList.length > 0 ? assetList : Object.keys(prices)
 
     if (compact) {
         return (

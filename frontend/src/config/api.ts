@@ -85,6 +85,7 @@ export const API_CONFIG = {
         REBALANCE_HISTORY: '/api/rebalance/history',
         REBALANCE_RECORD: '/api/rebalance/history',
         STRATEGIES: '/api/strategies',
+        ASSETS: '/api/assets',
         RISK_METRICS: (portfolioId: string) => `/api/risk/metrics/${portfolioId}`,
         RISK_CHECK: (portfolioId: string) => `/api/risk/check/${portfolioId}`,
         TEST_CORS: '/test/cors',

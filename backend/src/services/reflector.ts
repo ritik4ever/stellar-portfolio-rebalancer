@@ -2,6 +2,15 @@ import { SorobanRpc } from '@stellar/stellar-sdk'
 import type { PricesMap, PriceData } from '../types/index.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js' // Added logger import
+import { assetRegistryService } from './assetRegistryService.js'
+
+const DEFAULT_SYMBOLS = ['XLM', 'BTC', 'ETH', 'USDC']
+const DEFAULT_COIN_IDS: Record<string, string> = {
+    'XLM': 'stellar',
+    'BTC': 'bitcoin',
+    'ETH': 'ethereum',
+    'USDC': 'usd-coin'
+}
 
 export class ReflectorService {
     private coinGeckoApiKey: string
@@ -14,20 +23,25 @@ export class ReflectorService {
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
         this.priceCache = new Map()
+        this.coinGeckoIds = { ...DEFAULT_COIN_IDS }
+    }
 
-        // FIXED: Correct CoinGecko ID mapping
-        this.coinGeckoIds = {
-            'XLM': 'stellar',
-            'BTC': 'bitcoin',
-            'ETH': 'ethereum',
-            'USDC': 'usd-coin'
-        }
+    /** Asset list from registry; fallback to default 4 if registry empty */
+    private getAssetList(): string[] {
+        const symbols = assetRegistryService.getSymbols(true)
+        return symbols.length > 0 ? symbols : DEFAULT_SYMBOLS
+    }
+
+    /** CoinGecko ID map from registry; fallback to default */
+    private getCoinIdMap(): Record<string, string> {
+        const map = assetRegistryService.getCoingeckoIdMap()
+        return Object.keys(map).length > 0 ? map : { ...DEFAULT_COIN_IDS }
     }
 
     async getCurrentPrices(): Promise<PricesMap> {
         try {
             logger.info('[DEBUG] Fetching prices from CoinGecko with smart caching')
-            const assets = ['XLM', 'BTC', 'ETH', 'USDC']
+            const assets = this.getAssetList()
 
             // Check if we have fresh cached data for all assets
             const cachedPrices = this.getCachedPrices(assets)
@@ -50,7 +64,8 @@ export class ReflectorService {
             }
 
             // Get fresh data only if cache is stale AND rate limit allows
-            const freshPrices = await this.getFreshPrices(assets)
+            const coinIds = this.getCoinIdMap()
+            const freshPrices = await this.getFreshPrices(assets, coinIds)
 
             // Merge cached and fresh data
             return { ...cachedPrices, ...freshPrices }
@@ -58,7 +73,7 @@ export class ReflectorService {
             logger.error('[ERROR] Price fetch failed', { error })
 
             // Try to return cached data first before falling back
-            const assets = ['XLM', 'BTC', 'ETH', 'USDC']
+            const assets = this.getAssetList()
             const cachedPrices = this.getCachedPrices(assets)
             if (Object.keys(cachedPrices).length > 0) {
                 logger.info('[DEBUG] Using cached prices due to API error')
@@ -87,7 +102,7 @@ export class ReflectorService {
         return cachedPrices
     }
 
-    private async getFreshPrices(assets: string[]): Promise<PricesMap> {
+    private async getFreshPrices(assets: string[], coinIds: Record<string, string>): Promise<PricesMap> {
         const now = Date.now()
 
         // Rate limiting - don't make requests too frequently
@@ -111,18 +126,18 @@ export class ReflectorService {
                 'User-Agent': 'StellarPortfolioRebalancer/1.0'
             }
 
-            // FIXED: Build correct coin IDs
-            const coinIds = assets
-                .map(asset => this.coinGeckoIds[asset])
+            // FIXED: Build correct coin IDs from registry map
+            const coinIdsParam = assets
+                .map(asset => coinIds[asset])
                 .filter(Boolean)
                 .join(',')
 
-            logger.info('[DEBUG] Coin IDs', { coinIds })
+            logger.info('[DEBUG] Coin IDs', { coinIds: coinIdsParam })
 
             // FIXED: Correct API endpoint and parameters
             const endpoint = '/simple/price'
             const params = new URLSearchParams({
-                'ids': coinIds,
+                'ids': coinIdsParam,
                 'vs_currencies': 'usd',
                 'include_24hr_change': 'true',
                 'include_last_updated_at': 'true'
@@ -175,7 +190,7 @@ export class ReflectorService {
             const prices: PricesMap = {}
 
             assets.forEach(asset => {
-                const coinId = this.coinGeckoIds[asset]
+                const coinId = coinIds[asset]
                 const coinData = data[coinId]
 
                 if (coinData && coinData.usd !== undefined) {
@@ -218,7 +233,8 @@ export class ReflectorService {
 
     async getDetailedMarketData(asset: string): Promise<any> {
         try {
-            const coinId = this.coinGeckoIds[asset]
+            const coinIds = this.getCoinIdMap()
+            const coinId = coinIds[asset]
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
@@ -278,7 +294,8 @@ export class ReflectorService {
 
     async getPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
         try {
-            const coinId = this.coinGeckoIds[asset]
+            const coinIds = this.getCoinIdMap()
+            const coinId = coinIds[asset]
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
@@ -342,6 +359,10 @@ export class ReflectorService {
             'ETH': 4200,
             'USDC': 1.0
         }
+        const assets = this.getAssetList()
+        assets.forEach(sym => {
+            if (basePrices[sym] === undefined) basePrices[sym] = 1
+        })
 
         const basePrice = basePrices[asset] || 1
 
@@ -362,40 +383,31 @@ export class ReflectorService {
     private getFallbackPrices(): PricesMap {
         logger.warn('[FALLBACK] Using fallback prices - all sources failed')
 
-        // Add some randomness to make fallback prices look more realistic
+        const assets = this.getAssetList()
         const addVariation = (basePrice: number) => {
-            const variation = (Math.random() - 0.5) * 0.02 // ±1% variation
+            const variation = (Math.random() - 0.5) * 0.02
             return basePrice * (1 + variation)
         }
 
         const now = Math.floor(Date.now() / 1000)
+        const defaultPrices: Record<string, { price: number; changeRange: number }> = {
+            XLM: { price: 0.354, changeRange: 4 },
+            USDC: { price: 1.0, changeRange: 0.1 },
+            BTC: { price: 110000, changeRange: 6 },
+            ETH: { price: 4200, changeRange: 5 }
+        }
 
-        return {
-            XLM: {
-                price: addVariation(0.354),
-                change: (Math.random() - 0.5) * 4, // Random change ±2%
-                timestamp: now,
-                source: 'fallback'
-            },
-            USDC: {
-                price: addVariation(1.0),
-                change: (Math.random() - 0.5) * 0.1, // Minimal change for stablecoin
-                timestamp: now,
-                source: 'fallback'
-            },
-            BTC: {
-                price: addVariation(110000),
-                change: (Math.random() - 0.5) * 6, // Random change ±3%
-                timestamp: now,
-                source: 'fallback'
-            },
-            ETH: {
-                price: addVariation(4200),
-                change: (Math.random() - 0.5) * 5, // Random change ±2.5%
+        const result: PricesMap = {}
+        assets.forEach(asset => {
+            const def = defaultPrices[asset] || { price: 1, changeRange: 2 }
+            result[asset] = {
+                price: addVariation(def.price),
+                change: (Math.random() - 0.5) * def.changeRange,
                 timestamp: now,
                 source: 'fallback'
             }
-        }
+        })
+        return result
     }
 
     async testApiConnectivity(): Promise<{ success: boolean, error?: string, data?: any }> {
