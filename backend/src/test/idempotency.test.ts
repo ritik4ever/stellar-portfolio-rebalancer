@@ -160,7 +160,7 @@ describe('idempotencyMiddleware', () => {
         idempotencyMiddleware(mock.req, mock.res, mock.next)
         expect(mock.state.nextCalled).toBe(false)
         expect(mock.state.sentStatus).toBe(400)
-        expect((mock.state.sentBody as any).error).toMatch(/255 characters/)
+        expect((mock.state.sentBody as any).error.message).toMatch(/255 characters/)
     })
 
     it('first call: calls next, stores result, echoes Idempotency-Key header', async () => {
@@ -219,8 +219,8 @@ describe('idempotencyMiddleware', () => {
 
         expect(second.state.nextCalled).toBe(false)
         expect(second.state.sentStatus).toBe(409)
-        expect((second.state.sentBody as any).error).toMatch(/different request payload/)
-        expect((second.state.sentBody as any).idempotencyKey).toBe(key)
+        expect((second.state.sentBody as any).error.message).toMatch(/different request payload/)
+        expect((second.state.sentBody as any).error.details.idempotencyKey).toBe(key)
     })
 
     it('error responses (4xx) are also stored and replayed', async () => {
@@ -232,14 +232,14 @@ describe('idempotencyMiddleware', () => {
         // Route handler returns 400
         const first = mockReqRes({ headers: { 'idempotency-key': key }, body })
         idempotencyMiddleware(first.req, first.res, first.next)
-        first.res.status(400).json({ error: 'Missing required field' })
+        first.res.status(400).json({ error: { message: 'Missing required field', code: 'VALIDATION_ERROR' } })
 
         // Retry — replay the 400
         const second = mockReqRes({ headers: { 'idempotency-key': key }, body })
         idempotencyMiddleware(second.req, second.res, second.next)
 
         expect(second.state.sentStatus).toBe(400)
-        expect((second.state.sentBody as any).error).toBe('Missing required field')
+        expect((second.state.sentBody as any).error.message).toBe('Missing required field')
         expect(second.state.sentHeaders['Idempotency-Replayed']).toBe('true')
     })
 })
