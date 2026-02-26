@@ -1,21 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import { usePortfolio } from './usePortfolio'
-
-const getMock = vi.fn()
-const postMock = vi.fn()
-
-vi.mock('../config/api', async () => {
-    const actual = await vi.importActual<typeof import('../config/api')>('../config/api')
-    return {
-        ...actual,
-        api: {
-            ...actual.api,
-            get: getMock,
-            post: postMock
-        }
-    }
-})
+import { api } from '../config/api'
 
 function TestComponent({ portfolioId }: { portfolioId: string }) {
     const { portfolio, loading, error, executeRebalance } = usePortfolio(portfolioId)
@@ -31,12 +17,14 @@ function TestComponent({ portfolioId }: { portfolioId: string }) {
 
 describe('usePortfolio', () => {
     beforeEach(() => {
-        getMock.mockReset()
-        postMock.mockReset()
+        cleanup()
+        vi.restoreAllMocks()
     })
 
     it('loads portfolio data', async () => {
-        getMock.mockResolvedValue({ portfolio: { id: 'p1', totalValue: 100, allocations: [], needsRebalance: false, lastRebalance: '' } })
+        vi.spyOn(api, 'get').mockResolvedValue({
+            portfolio: { id: 'p1', totalValue: 100, allocations: [], needsRebalance: false, lastRebalance: '' }
+        } as any)
 
         render(<TestComponent portfolioId="p1" />)
 
@@ -46,17 +34,17 @@ describe('usePortfolio', () => {
     })
 
     it('executes rebalance and refreshes portfolio', async () => {
-        getMock
-            .mockResolvedValueOnce({ portfolio: { id: 'p1', totalValue: 100, allocations: [], needsRebalance: true, lastRebalance: '' } })
-            .mockResolvedValueOnce({ portfolio: { id: 'p1', totalValue: 120, allocations: [], needsRebalance: false, lastRebalance: '' } })
-        postMock.mockResolvedValue({ status: 'ok' })
+        const getSpy = vi.spyOn(api, 'get')
+            .mockResolvedValueOnce({ portfolio: { id: 'p1', totalValue: 100, allocations: [], needsRebalance: true, lastRebalance: '' } } as any)
+            .mockResolvedValueOnce({ portfolio: { id: 'p1', totalValue: 120, allocations: [], needsRebalance: false, lastRebalance: '' } } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ status: 'ok' } as any)
 
         render(<TestComponent portfolioId="p1" />)
         await waitFor(() => expect(screen.getByTestId('portfolio').textContent).toBe('p1'))
 
         fireEvent.click(screen.getByRole('button', { name: 'rebalance' }))
 
-        await waitFor(() => expect(postMock).toHaveBeenCalled())
-        expect(getMock).toHaveBeenCalledTimes(2)
+        await waitFor(() => expect(postSpy).toHaveBeenCalled())
+        expect(getSpy).toHaveBeenCalledTimes(2)
     })
 })

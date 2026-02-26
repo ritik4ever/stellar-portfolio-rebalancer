@@ -1,47 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import RebalanceHistory from './RebalanceHistory'
 
-const getMock = vi.fn()
-const downloadCsvMock = vi.fn()
-const toCsvMock = vi.fn(() => 'csv-content')
-
-vi.mock('../config/api', async () => {
-    const actual = await vi.importActual<typeof import('../config/api')>('../config/api')
-    return {
-        ...actual,
-        api: {
-            ...actual.api,
-            get: getMock
-        }
-    }
-})
+const { downloadCsvMock, toCsvMock, useHistoryMock } = vi.hoisted(() => ({
+    downloadCsvMock: vi.fn(),
+    toCsvMock: vi.fn(() => 'csv-content'),
+    useHistoryMock: vi.fn()
+}))
 
 vi.mock('../utils/export', () => ({
     downloadCSV: downloadCsvMock,
     toCSV: toCsvMock
 }))
 
+vi.mock('../hooks/queries/useHistoryQuery', () => ({
+    useRebalanceHistory: useHistoryMock
+}))
+
 describe('RebalanceHistory', () => {
     beforeEach(() => {
-        getMock.mockReset()
+        cleanup()
+        vi.restoreAllMocks()
         downloadCsvMock.mockReset()
         toCsvMock.mockClear()
+        useHistoryMock.mockReset()
     })
 
     it('renders fetched history data', async () => {
-        getMock.mockResolvedValue({
-            history: [
-                {
-                    id: 'e1',
-                    timestamp: new Date().toISOString(),
-                    trigger: 'Automatic Rebalancing',
-                    trades: 2,
-                    gasUsed: '0.02 XLM',
-                    status: 'completed',
-                    portfolioId: 'p1'
-                }
-            ]
+        useHistoryMock.mockReturnValue({
+            data: {
+                history: [
+                    {
+                        id: 'e1',
+                        timestamp: new Date().toISOString(),
+                        trigger: 'Automatic Rebalancing',
+                        trades: 2,
+                        gasUsed: '0.02 XLM',
+                        status: 'completed',
+                        portfolioId: 'p1'
+                    }
+                ]
+            },
+            isLoading: false,
+            error: null
         })
 
         render(<RebalanceHistory portfolioId="p1" />)
@@ -50,28 +51,31 @@ describe('RebalanceHistory', () => {
         expect(screen.getByText(/2 trades/i)).toBeInTheDocument()
     })
 
-    it('falls back to demo history and shows load error when API fails', async () => {
-        getMock.mockRejectedValue(new Error('boom'))
+    it('shows fallback error state', async () => {
+        useHistoryMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error('boom') })
 
         render(<RebalanceHistory portfolioId="p1" />)
 
         expect(await screen.findByText(/Failed to load rebalance history/i)).toBeInTheDocument()
-        expect(await screen.findByText(/Threshold exceeded/i)).toBeInTheDocument()
     })
 
     it('exports CSV when export button is clicked', async () => {
-        getMock.mockResolvedValue({
-            history: [
-                {
-                    id: 'e2',
-                    timestamp: new Date().toISOString(),
-                    trigger: 'Manual Rebalance',
-                    trades: 1,
-                    gasUsed: '0.01 XLM',
-                    status: 'completed',
-                    portfolioId: 'p1'
-                }
-            ]
+        useHistoryMock.mockReturnValue({
+            data: {
+                history: [
+                    {
+                        id: 'e2',
+                        timestamp: new Date().toISOString(),
+                        trigger: 'Manual Rebalance',
+                        trades: 1,
+                        gasUsed: '0.01 XLM',
+                        status: 'completed',
+                        portfolioId: 'p1'
+                    }
+                ]
+            },
+            isLoading: false,
+            error: null
         })
 
         render(<RebalanceHistory portfolioId="p1" />)

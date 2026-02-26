@@ -26,7 +26,9 @@ describe('RebalanceHistoryService', () => {
         recordMock.mockImplementation((event) => ({ id: 'evt-1', ...event }))
 
         const { RebalanceHistoryService } = await import('../services/rebalanceHistory.js')
-        const service = new RebalanceHistoryService()
+        const service = new RebalanceHistoryService({
+            analyzePortfolioRisk: vi.fn(() => ({ overallRiskLevel: 'medium' }))
+        } as any)
 
         const event = await service.recordRebalanceEvent({
             portfolioId: 'p1',
@@ -34,6 +36,7 @@ describe('RebalanceHistoryService', () => {
             trades: 2,
             gasUsed: '0.02 XLM',
             status: 'completed',
+            portfolio: { allocations: { XLM: 50, BTC: 50 } },
             prices: {
                 XLM: { price: 0.1, change: -2, timestamp: 1 },
                 BTC: { price: 100, change: 1, timestamp: 1 }
@@ -53,7 +56,9 @@ describe('RebalanceHistoryService', () => {
         getRecentAutoMock.mockReturnValue([{ id: 'e2' }])
 
         const { RebalanceHistoryService } = await import('../services/rebalanceHistory.js')
-        const service = new RebalanceHistoryService()
+        const service = new RebalanceHistoryService({
+            analyzePortfolioRisk: vi.fn(() => ({ overallRiskLevel: 'medium' }))
+        } as any)
 
         const history = await service.getRebalanceHistory('p1', 20)
         const auto = await service.getRecentAutoRebalances('p1', 10)

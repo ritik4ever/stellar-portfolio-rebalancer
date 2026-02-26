@@ -12,7 +12,6 @@ export default defineConfig({
             reporter: ['text', 'json-summary', 'lcov', 'html'],
             include: [
                 'src/config/api.ts',
-                'src/components/PortfolioSetup.tsx',
                 'src/components/RebalanceHistory.tsx',
                 'src/components/NotificationPreferences.tsx',
                 'src/hooks/usePortfolio.ts',

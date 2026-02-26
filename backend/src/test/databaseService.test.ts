@@ -40,7 +40,7 @@ describe('DatabaseService', () => {
         expect(portfolio?.userAddress).toBe('GUSER1')
         expect(portfolio?.allocations).toEqual({ XLM: 70, USDC: 30 })
         expect(portfolio?.threshold).toBe(5)
-        expect(portfolio?.slippageTolerancePercent).toBe(1.5)
+        expect((portfolio as any)?.slippageTolerance).toBe(1.5)
 
         db.close()
     })

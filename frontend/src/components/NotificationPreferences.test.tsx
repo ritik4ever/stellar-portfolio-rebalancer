@@ -1,32 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import NotificationPreferences from './NotificationPreferences'
-
-const getMock = vi.fn()
-const postMock = vi.fn()
-
-vi.mock('../config/api', async () => {
-    const actual = await vi.importActual<typeof import('../config/api')>('../config/api')
-    return {
-        ...actual,
-        api: {
-            ...actual.api,
-            get: getMock,
-            post: postMock,
-            delete: vi.fn()
-        }
-    }
-})
+import { api } from '../config/api'
 
 describe('NotificationPreferences', () => {
     beforeEach(() => {
-        getMock.mockReset()
-        postMock.mockReset()
+        cleanup()
+        vi.restoreAllMocks()
         vi.stubGlobal('confirm', vi.fn(() => true))
     })
 
     it('validates email format and blocks save', async () => {
-        getMock.mockResolvedValue({ preferences: null })
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         render(<NotificationPreferences userId="user-1" />)
 
         expect(await screen.findByText('Notifications')).toBeInTheDocument()
@@ -42,9 +27,8 @@ describe('NotificationPreferences', () => {
     })
 
     it('saves preferences successfully', async () => {
-        vi.useFakeTimers()
-        getMock.mockResolvedValue({ preferences: null })
-        postMock.mockResolvedValue({ success: true })
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
 
         render(<NotificationPreferences userId="user-1" />)
         expect(await screen.findByText('Notifications')).toBeInTheDocument()
@@ -59,10 +43,7 @@ describe('NotificationPreferences', () => {
         expect(saveBtn).toBeEnabled()
         fireEvent.click(saveBtn)
 
-        await waitFor(() => expect(postMock).toHaveBeenCalled())
+        await waitFor(() => expect(postSpy).toHaveBeenCalled())
         expect(await screen.findByText(/Preferences saved successfully/i)).toBeInTheDocument()
-
-        vi.advanceTimersByTime(3000)
-        vi.useRealTimers()
     })
 })

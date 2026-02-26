@@ -1,19 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import { useReflector } from './useReflector'
-
-const getMock = vi.fn()
-
-vi.mock('../config/api', async () => {
-    const actual = await vi.importActual<typeof import('../config/api')>('../config/api')
-    return {
-        ...actual,
-        api: {
-            ...actual.api,
-            get: getMock
-        }
-    }
-})
+import { api } from '../config/api'
 
 function TestComponent() {
     const { prices, loading, error } = useReflector()
@@ -28,11 +16,12 @@ function TestComponent() {
 
 describe('useReflector', () => {
     beforeEach(() => {
-        getMock.mockReset()
+        cleanup()
+        vi.restoreAllMocks()
     })
 
     it('loads prices', async () => {
-        getMock.mockResolvedValue({ XLM: { price: 0.1, change: 1, timestamp: 1 } })
+        vi.spyOn(api, 'get').mockResolvedValue({ XLM: { price: 0.1, change: 1, timestamp: 1 } } as any)
 
         render(<TestComponent />)
 
@@ -42,7 +31,7 @@ describe('useReflector', () => {
     })
 
     it('sets error when fetch fails', async () => {
-        getMock.mockRejectedValue(new Error('fetch failed'))
+        vi.spyOn(api, 'get').mockRejectedValue(new Error('fetch failed'))
 
         render(<TestComponent />)
 
