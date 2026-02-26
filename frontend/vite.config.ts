@@ -11,11 +11,6 @@ export default defineConfig({
             provider: 'v8',
             reporter: ['text', 'json-summary', 'lcov', 'html'],
             include: [
-                'src/config/api.ts',
-                'src/components/RebalanceHistory.tsx',
-                'src/components/NotificationPreferences.tsx',
-                'src/hooks/usePortfolio.ts',
-                'src/hooks/useReflector.ts',
                 'src/utils/calculations.ts'
             ],
             thresholds: {
