@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS assets (
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_assets_enabled ON assets(enabled) WHERE enabled = 1;
+
+CREATE TABLE IF NOT EXISTS legal_consent (
+    user_id             TEXT PRIMARY KEY,
+    terms_accepted_at   TEXT,
+    privacy_accepted_at TEXT,
+    cookie_accepted_at  TEXT,
+    ip_address          TEXT,
+    user_agent          TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // ─────────────────────────────────────────────
@@ -583,6 +594,62 @@ export class DatabaseService {
         } catch (err) {
             throw new Error(`Failed to set asset enabled '${symbol}': ${err}`)
         }
+    }
+
+    // ──────────────────────────────────────────
+    // Legal consent (GDPR/CCPA)
+    // ──────────────────────────────────────────
+
+    recordConsent(
+        userId: string,
+        opts: { terms: boolean; privacy: boolean; cookies: boolean; ipAddress?: string; userAgent?: string }
+    ): void {
+        const now = new Date().toISOString()
+        this.db.prepare(
+            `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, ip_address, user_agent, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+               terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
+               privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
+               cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
+               ip_address = excluded.ip_address,
+               user_agent = excluded.user_agent,
+               updated_at = excluded.updated_at`
+        ).run(
+            userId,
+            opts.terms ? now : null,
+            opts.privacy ? now : null,
+            opts.cookies ? now : null,
+            opts.ipAddress ?? null,
+            opts.userAgent ?? null,
+            now
+        )
+    }
+
+    getConsent(userId: string): { termsAcceptedAt: string | null; privacyAcceptedAt: string | null; cookieAcceptedAt: string | null } | undefined {
+        const row = this.db.prepare<[string], { terms_accepted_at: string | null; privacy_accepted_at: string | null; cookie_accepted_at: string | null }>(
+            'SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at FROM legal_consent WHERE user_id = ?'
+        ).get(userId)
+        if (!row) return undefined
+        return {
+            termsAcceptedAt: row.terms_accepted_at,
+            privacyAcceptedAt: row.privacy_accepted_at,
+            cookieAcceptedAt: row.cookie_accepted_at
+        }
+    }
+
+    hasFullConsent(userId: string): boolean {
+        const c = this.getConsent(userId)
+        return Boolean(c?.termsAcceptedAt && c?.privacyAcceptedAt && c?.cookieAcceptedAt)
+    }
+
+    deleteUserData(userId: string): void {
+        this.db.prepare('DELETE FROM legal_consent WHERE user_id = ?').run(userId)
+        const portfolios = this.db.prepare<[string], { id: string }>('SELECT id FROM portfolios WHERE user_address = ?').all(userId)
+        for (const p of portfolios) {
+            this.db.prepare('DELETE FROM rebalance_history WHERE portfolio_id = ?').run(p.id)
+        }
+        this.db.prepare('DELETE FROM portfolios WHERE user_address = ?').run(userId)
     }
 
     clearAll(): void {

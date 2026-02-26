@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2 } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
@@ -168,6 +168,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         }
         StellarWallet.disconnect()
         onNavigate('landing')
+    }
+
+    /** GDPR: Delete all user data from the server, then logout and go to landing */
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [deleting, setDeleting] = useState(false)
+    const deleteMyData = async () => {
+        if (!publicKey) return
+        setDeleting(true)
+        try {
+            await api.delete(ENDPOINTS.USER_DATA_DELETE(publicKey))
+            await authLogout(publicKey)
+            StellarWallet.disconnect()
+            setShowDeleteConfirm(false)
+            onNavigate('landing')
+        } catch (e) {
+            console.error('Delete data failed', e)
+            alert(e instanceof Error ? e.message : 'Failed to delete data. Please try again.')
+        } finally {
+            setDeleting(false)
+        }
     }
 
     // Create allocation data from portfolio data
@@ -353,6 +373,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         {publicKey ? (
                             <>
                                 <button
+                                    onClick={() => setShowDeleteConfirm(true)}
+                                    className="text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 px-3 py-2 text-sm transition-colors flex items-center gap-1"
+                                    title="Delete my data (GDPR)"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete my data
+                                </button>
+                                <button
                                     onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
                                 >
@@ -383,6 +411,47 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Delete my data confirmation modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete my data</h2>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                            This will permanently delete your consent records, all portfolios, and rebalance history from our servers. You will be signed out. This action cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={deleting}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={deleteMyData}
+                                disabled={deleting}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                            >
+                                {deleting ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete all my data
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="p-6 max-w-7xl mx-auto">
                 {/* Tab Navigation */}

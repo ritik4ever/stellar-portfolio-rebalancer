@@ -90,6 +90,9 @@ export const API_CONFIG = {
         RISK_CHECK: (portfolioId: string) => `/api/risk/check/${portfolioId}`,
         TEST_CORS: '/test/cors',
         TEST_COINGECKO: '/test/coingecko',
+        CONSENT_STATUS: '/api/consent/status',
+        CONSENT_RECORD: '/api/consent',
+        USER_DATA_DELETE: (address: string) => `/api/user/${address}/data`,
     }
 }
 
