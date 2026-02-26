@@ -12,7 +12,7 @@ import { logger } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
-import { writeRateLimiter } from '../middleware/rateLimit.js'
+import { writeRateLimiter, protectedWriteLimiter, protectedCriticalLimiter, adminRateLimiter } from '../middleware/rateLimit.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
@@ -24,6 +24,7 @@ import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { assetRegistryService } from '../services/assetRegistryService.js'
+import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
 
 const router = Router()
@@ -76,7 +77,7 @@ router.get('/consent/status', (req: Request, res: Response) => {
 })
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-router.post('/consent', writeRateLimiter, (req: Request, res: Response) => {
+router.post('/consent', ...protectedWriteLimiter, (req: Request, res: Response) => {
     try {
         const { userId, terms, privacy, cookies } = req.body ?? {}
         if (!userId || typeof userId !== 'string') return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
@@ -97,7 +98,7 @@ router.post('/consent', writeRateLimiter, (req: Request, res: Response) => {
 })
 
 /** GDPR: Delete all data for a user (portfolios, history, consent). Requires JWT when enabled. */
-router.delete('/user/:address/data', requireJwtWhenEnabled, writeRateLimiter, async (req: Request, res: Response) => {
+router.delete('/user/:address/data', requireJwtWhenEnabled, ...protectedCriticalLimiter, async (req: Request, res: Response) => {
     try {
         const address = req.params.address
         const userId = req.user?.address ?? address
@@ -141,8 +142,29 @@ router.get('/admin/assets', requireAdmin, (_req: Request, res: Response) => {
     }
 })
 
+/** Admin: get rate limiting metrics and monitoring data */
+router.get('/admin/rate-limits/metrics', requireAdmin, (_req: Request, res: Response) => {
+    try {
+        const metrics = rateLimitMonitor.getMetrics()
+        const topOffendersByIP = rateLimitMonitor.getTopOffendersByIP(10)
+        const topOffendersByUser = rateLimitMonitor.getTopOffendersByUser(10)
+        const throttlingByEndpoint = rateLimitMonitor.getThrottlingByEndpoint()
+        
+        return ok(res, {
+            metrics,
+            topOffendersByIP,
+            topOffendersByUser,
+            throttlingByEndpoint,
+            report: rateLimitMonitor.generateReport()
+        })
+    } catch (error) {
+        logger.error('[ERROR] Admin rate limit metrics failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 /** Admin: add asset */
-router.post('/admin/assets', requireAdmin, writeRateLimiter, async (req: Request, res: Response) => {
+router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body ?? {}
         if (!symbol || typeof symbol !== 'string' || !name || typeof name !== 'string') {
@@ -162,7 +184,7 @@ router.post('/admin/assets', requireAdmin, writeRateLimiter, async (req: Request
 })
 
 /** Admin: remove asset */
-router.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
+router.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
@@ -255,7 +277,7 @@ router.post('/rebalance/history', idempotencyMiddleware, async (req: Request, re
     }
 })
 
-router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request, res: Response) => {
+router.post('/rebalance/history/sync-onchain', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         const result = await contractEventIndexerService.syncOnce()
         return ok(res, {
@@ -267,7 +289,7 @@ router.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request
     }
 })
 
-router.post('/portfolio', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
 
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
@@ -367,7 +389,7 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         const prices = await reflectorService.getCurrentPrices()
         const totalValue = Object.entries(portfolio.balances || {}).reduce((sum, [asset, bal]) => sum + (bal * (prices[asset]?.price ?? 0)), 0)
-        const slippageTolerancePercent = portfolio.slippageTolerance ?? 1
+        const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? 1
         const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
         return ok(res, {
             portfolioId,
@@ -383,7 +405,7 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
 })
 
 // Manual portfolio rebalance
-router.post('/portfolio/:id/rebalance', writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/portfolio/:id/rebalance', ...protectedCriticalLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
 
     try {
         const portfolioId = req.params.id;
@@ -611,7 +633,7 @@ router.get('/auto-rebalancer/status', async (req: Request, res: Response) => {
     }
 })
 
-router.post('/auto-rebalancer/start', requireAdmin, (req: Request, res: Response) => {
+router.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -628,7 +650,7 @@ router.post('/auto-rebalancer/start', requireAdmin, (req: Request, res: Response
     }
 })
 
-router.post('/auto-rebalancer/stop', requireAdmin, (req: Request, res: Response) => {
+router.post('/auto-rebalancer/stop', requireAdmin, adminRateLimiter, (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -645,7 +667,7 @@ router.post('/auto-rebalancer/stop', requireAdmin, (req: Request, res: Response)
     }
 })
 
-router.post('/auto-rebalancer/force-check', requireAdmin, async (req: Request, res: Response) => {
+router.post('/auto-rebalancer/force-check', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -873,7 +895,7 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 // ================================
 
 // Subscribe to notifications
-router.post('/notifications/subscribe', requireJwtWhenEnabled, writeRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const userId = req.user?.address ?? req.body?.userId
         const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body ?? {}
@@ -952,7 +974,7 @@ router.get('/notifications/preferences', requireJwtWhenEnabled, async (req: Requ
 })
 
 // Unsubscribe from notifications
-router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimiter, async (req: Request, res: Response) => {
     try {
         const userId = req.user?.address ?? (req.query.userId as string)
 

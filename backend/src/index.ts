@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws'
 import { portfolioRouter } from './api/routes.js'
 import { authRouter } from './api/authRoutes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
-import { globalRateLimiter } from './middleware/rateLimit.js'
+import { globalRateLimiter, burstProtectionLimiter, requestMonitoringMiddleware, closeRateLimitStore } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
 import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
@@ -79,6 +79,11 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 // Request context + structured request logging
 app.use(requestContextMiddleware)
 
+// Request monitoring for rate limiting metrics
+app.use(requestMonitoringMiddleware)
+
+// Rate limiting - burst protection first, then global limits
+app.use(burstProtectionLimiter)
 app.use(globalRateLimiter)
 
 // Create auto-rebalancer instance
@@ -363,6 +368,14 @@ const gracefulShutdown = async (signal: string) => {
         logger.info('[SHUTDOWN] BullMQ queues closed')
     } catch (error) {
         logger.error('[SHUTDOWN] Error closing queues', { error })
+    }
+
+    // Close rate limiting Redis store
+    try {
+        await closeRateLimitStore()
+        logger.info('[SHUTDOWN] Rate limiting Redis store closed')
+    } catch (error) {
+        logger.error('[SHUTDOWN] Error closing rate limiting store', { error })
     }
 
     // Close database connection

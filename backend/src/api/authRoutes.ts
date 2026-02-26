@@ -6,12 +6,13 @@ import {
     logout
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
+import { authRateLimiter } from '../middleware/rateLimit.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
 
 const router = Router()
 
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -34,7 +35,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 })
 
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/refresh', authRateLimiter, async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -70,7 +71,7 @@ router.post('/logout', requireJwt, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/logout-all', async (req: Request, res: Response) => {
+router.post('/logout-all', authRateLimiter, async (req: Request, res: Response) => {
     try {
         const address = req.body?.address
         if (!address || typeof address !== 'string') {
