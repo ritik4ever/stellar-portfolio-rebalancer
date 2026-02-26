@@ -18,6 +18,8 @@ import {
   AlertCircle,
   CheckCircle,
   Search,
+  Save,
+  User,
   Zap,
 } from "lucide-react";
 import { api, ENDPOINTS } from "../config/api";
@@ -50,6 +52,87 @@ const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
   { value: "ETH", label: "ETH (Ethereum)" },
 ];
 
+export type RiskLevel = "low" | "medium" | "high";
+
+export interface PortfolioTemplate {
+  id: string;
+  name: string;
+  description: string;
+  riskLevel: RiskLevel;
+  allocations: Allocation[];
+}
+
+export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
+  {
+    id: "conservative",
+    name: "Conservative",
+    description: "Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.",
+    riskLevel: "low",
+    allocations: [
+      { asset: "USDC", percentage: 60 },
+      { asset: "XLM", percentage: 30 },
+      { asset: "BTC", percentage: 10 },
+    ],
+  },
+  {
+    id: "balanced",
+    name: "Balanced",
+    description: "Mix of stablecoins and crypto. Moderate risk with growth potential.",
+    riskLevel: "medium",
+    allocations: [
+      { asset: "USDC", percentage: 40 },
+      { asset: "XLM", percentage: 30 },
+      { asset: "BTC", percentage: 20 },
+      { asset: "ETH", percentage: 10 },
+    ],
+  },
+  {
+    id: "aggressive",
+    name: "Aggressive",
+    description: "Crypto-heavy for maximum growth. Higher volatility and risk.",
+    riskLevel: "high",
+    allocations: [
+      { asset: "BTC", percentage: 50 },
+      { asset: "ETH", percentage: 30 },
+      { asset: "XLM", percentage: 20 },
+    ],
+  },
+  {
+    id: "stablecoin-focus",
+    name: "Stablecoin Focus",
+    description: "Mostly USDC with some XLM. Minimal exposure to crypto volatility.",
+    riskLevel: "low",
+    allocations: [
+      { asset: "USDC", percentage: 80 },
+      { asset: "XLM", percentage: 20 },
+    ],
+  },
+  {
+    id: "custom",
+    name: "Custom",
+    description: "Define your own allocation. Start from scratch and add assets.",
+    riskLevel: "medium",
+    allocations: [{ asset: "XLM", percentage: 100 }],
+  },
+];
+
+const SAVED_TEMPLATES_KEY = (userId: string) => `portfolio-templates-${userId || "anonymous"}`;
+
+function loadSavedTemplates(userId: string): PortfolioTemplate[] {
+  try {
+    const raw = localStorage.getItem(SAVED_TEMPLATES_KEY(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PortfolioTemplate[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSavedTemplates(userId: string, templates: PortfolioTemplate[]): void {
+  localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates));
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
@@ -58,9 +141,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 }) => {
   // ── State ──────────────────────────────────────────────────────────────────
 
-  const [allocations, setAllocations] = useState<Allocation[]>([
-    { asset: "XLM", percentage: 40 },
-  ]);
+  const [allocations, setAllocations] = useState<Allocation[]>(() => {
+    const balanced = PORTFOLIO_TEMPLATES.find((t) => t.id === "balanced");
+    return balanced ? balanced.allocations.map((a) => ({ ...a })) : [{ asset: "XLM", percentage: 40 }];
+  });
   const [threshold, setThreshold] = useState(5);
   const [slippageTolerance, setSlippageTolerance] = useState(1);
   const [strategy, setStrategy] = useState<string>("threshold");
@@ -71,6 +155,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
   const [assetOptions, setAssetOptions] = useState<AssetOption[]>(DEFAULT_ASSET_OPTIONS);
   const [assetSearch, setAssetSearch] = useState<Record<number, string>>({}); // per-row filter for asset dropdown
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("balanced");
+  const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(() =>
+    loadSavedTemplates(publicKey || "")
+  );
+
+  useEffect(() => {
+    setSavedTemplates(loadSavedTemplates(publicKey || ""));
+  }, [publicKey]);
 
   // ── Fetch available assets from registry (dynamic, supports custom Stellar tokens) ──
   useEffect(() => {
@@ -91,6 +183,23 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     return () => { cancelled = true; };
   }, []);
 
+  const getRiskLevelLabel = (level: RiskLevel): string => {
+    switch (level) {
+      case "low": return "Low risk";
+      case "medium": return "Medium risk";
+      case "high": return "High risk";
+      default: return "Risk";
+    }
+  };
+
+  const getRiskLevelClass = (level: RiskLevel): string => {
+    switch (level) {
+      case "low": return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
+      case "medium": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
+      case "high": return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+      default: return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+    }
+  };
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation();
 
@@ -234,9 +343,40 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     setAllocations(updated);
   };
 
-  /** Replaces the current allocation list with a preset configuration */
-  const applyPreset = (preset: (typeof presetPortfolios)[0]) => {
-    setAllocations(preset.allocations);
+  /** Replaces the current allocation list with a template. User can modify before creating. */
+  const applyTemplate = (template: PortfolioTemplate) => {
+    setSelectedTemplateId(template.id);
+    setAllocations(template.allocations.map((a) => ({ ...a })));
+  };
+
+  const saveCurrentAsTemplate = () => {
+    const name = window.prompt("Template name", "My custom template");
+    if (!name?.trim()) return;
+    if (!isValidTotal || hasAnyFieldError) return;
+    const custom: PortfolioTemplate = {
+      id: `saved-${Date.now()}`,
+      name: name.trim(),
+      description: "Saved by you. Modify and use as a starting point.",
+      riskLevel: "medium",
+      allocations: allocations.map((a) => ({ ...a })),
+    };
+    const userId = publicKey || "";
+    const next = [...savedTemplates, custom];
+    setSavedTemplates(next);
+    saveSavedTemplates(userId, next);
+    setSelectedTemplateId(custom.id);
+  };
+
+  const removeSavedTemplate = (id: string) => {
+    if (!window.confirm("Remove this saved template?")) return;
+    const userId = publicKey || "";
+    const next = savedTemplates.filter((t) => t.id !== id);
+    setSavedTemplates(next);
+    saveSavedTemplates(userId, next);
+    if (selectedTemplateId === id) {
+      setSelectedTemplateId("custom");
+      setAllocations([{ asset: "XLM", percentage: 100 }]);
+    }
   };
 
   /**
@@ -366,25 +506,106 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         <div className="grid lg:grid-cols-2 gap-8">
           {/* ════ Left column: configuration inputs ════ */}
           <div className="space-y-6">
-            {/* ── Preset portfolio quick-start buttons ── */}
+            {/* ── Template selector: presets with descriptions and risk levels ── */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Quick Start
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                Choose a template
               </h3>
-              <div className="grid grid-cols-3 gap-3">
-                {presetPortfolios.map((preset, index) => (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Start from a preset or custom. You can modify allocations below before creating.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {PORTFOLIO_TEMPLATES.map((template) => (
                   <button
-                    key={index}
-                    onClick={() => applyPreset(preset)}
-                    className="p-3 text-sm bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-lg transition-colors text-center"
+                    key={template.id}
+                    type="button"
+                    onClick={() => applyTemplate(template)}
+                    className={`p-4 text-left rounded-lg border-2 transition-colors ${
+                      selectedTemplateId === template.id
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400"
+                        : "border-gray-200 dark:border-gray-600 bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
+                    }`}
                   >
-                    <div className="font-medium">{preset.name}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {preset.allocations.length} assets
+                    <div className="font-semibold text-gray-900 dark:text-white">
+                      {template.name}
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                      {template.description}
+                    </p>
+                    <span
+                      className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium ${getRiskLevelClass(
+                        template.riskLevel
+                      )}`}
+                    >
+                      {getRiskLevelLabel(template.riskLevel)}
+                    </span>
+                    <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                      {template.allocations.length} asset{template.allocations.length !== 1 ? "s" : ""}
                     </div>
                   </button>
                 ))}
               </div>
+              {savedTemplates.length > 0 && (
+                <>
+                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-4 mb-2 flex items-center">
+                    <User className="w-4 h-4 mr-1" />
+                    My saved templates
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {savedTemplates.map((template) => (
+                      <div
+                        key={template.id}
+                        className={`p-4 rounded-lg border-2 flex flex-col ${
+                          selectedTemplateId === template.id
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400"
+                            : "border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <button
+                            type="button"
+                            onClick={() => applyTemplate(template)}
+                            className="text-left flex-1"
+                          >
+                            <div className="font-semibold text-gray-900 dark:text-white">
+                              {template.name}
+                            </div>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-1">
+                              {template.description}
+                            </p>
+                            <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                              {template.allocations.length} asset{template.allocations.length !== 1 ? "s" : ""}
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeSavedTemplate(template.id);
+                            }}
+                            className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                            title="Remove template"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {isValidTotal && !hasAnyFieldError && (
+                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={saveCurrentAsTemplate}
+                    className="flex items-center px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200"
+                  >
+                    <Save className="w-4 h-4 mr-1" />
+                    Save current allocation as my template
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* ── Asset allocation rows with inline validation ── */}
