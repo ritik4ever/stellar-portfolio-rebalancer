@@ -20,9 +20,13 @@ import {
   Search,
   Save,
   User,
+  Zap,
 } from "lucide-react";
 import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
+
+// TanStack Query Mutations
+import { useCreatePortfolioMutation } from "../hooks/mutations/usePortfolioMutations";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,7 +150,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [strategy, setStrategy] = useState<string>("threshold");
   const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>({});
   const [autoRebalance, setAutoRebalance] = useState(true);
-  const [isCreating, setIsCreating] = useState(false); // loading state for submit
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
@@ -197,6 +200,46 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       default: return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
     }
   };
+  // Mutation for portfolio creation
+  const createPortfolioMutation = useCreatePortfolioMutation();
+
+  // ── Static data ────────────────────────────────────────────────────────────
+
+  /** All supported assets the user can allocate to */
+  const assetOptions = [
+    { value: "XLM", label: "XLM (Stellar Lumens)" },
+    { value: "USDC", label: "USDC (USD Coin)" },
+    { value: "BTC", label: "BTC (Bitcoin)" },
+    { value: "ETH", label: "ETH (Ethereum)" },
+  ];
+
+  /** Pre-built allocation sets for quick setup */
+  const presetPortfolios = [
+    {
+      name: "Conservative",
+      allocations: [
+        { asset: "XLM", percentage: 50 },
+        { asset: "USDC", percentage: 40 },
+        { asset: "BTC", percentage: 10 },
+      ],
+    },
+    {
+      name: "Balanced",
+      allocations: [
+        { asset: "XLM", percentage: 40 },
+        { asset: "USDC", percentage: 35 },
+        { asset: "BTC", percentage: 25 },
+      ],
+    },
+    {
+      name: "Aggressive",
+      allocations: [
+        { asset: "BTC", percentage: 50 },
+        { asset: "ETH", percentage: 30 },
+        { asset: "XLM", percentage: 20 },
+      ],
+    },
+  ];
 
   // ── Validation ─────────────────────────────────────────────────────────────
 
@@ -359,37 +402,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       return;
     }
 
-    setIsCreating(true);
     setError(null);
 
-    try {
-      // Convert allocations array → { ASSET: percentage } map expected by the API
-      const allocationsMap = allocations.reduce(
-        (acc, alloc) => {
-          acc[alloc.asset] = alloc.percentage;
-          return acc;
-        },
-        {} as Record<string, number>,
-      );
-
-      await api.post(ENDPOINTS.PORTFOLIO, {
-          userAddress: publicKey || "demo-user",
-          allocations: allocationsMap,
-          threshold,
-          slippageTolerance,
-          strategy: strategy || "threshold",
-          strategyConfig: Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
-      });
-
-      setSuccess(true);
-      // Brief pause so the user sees the success banner before being redirected
-      setTimeout(() => onNavigate("dashboard"), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Network error. Please try again.");
-    } finally {
-      setIsCreating(false);
-    }
-  };
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
@@ -1022,27 +1036,27 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - isCreating: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
-            <button
-              onClick={createPortfolio}
-              disabled={!isValidTotal || hasAnyFieldError || isCreating}
-              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-            >
-              {isCreating ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Creating...
-                </>
-              ) : (
-                "Create Portfolio"
-              )}
-            </button>
-
-            {/*
-             * Helper hint shown beneath the disabled button.
-             * Explains why the button is inactive so users aren't left guessing.
-             * Hidden once the API call starts (isCreating) to avoid mixed messaging.
-             */}
-            {(hasAnyFieldError || !isValidTotal) && !isCreating && (
+             <button
+               onClick={createPortfolio}
+               disabled={!isValidTotal || hasAnyFieldError || createPortfolioMutation.isPending}
+               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+             >
+               {createPortfolioMutation.isPending ? (
+                 <>
+                   <Zap className="w-4 h-4 mr-2 animate-spin" />
+                   Creating...
+                 </>
+               ) : (
+                 "Create Portfolio"
+               )}
+             </button>
+ 
+             {/*
+              * Helper hint shown beneath the disabled button.
+              * Explains why the button is inactive so users aren't left guessing.
+              * Hidden once the API call starts (createPortfolioMutation.isPending) to avoid mixed messaging.
+              */}
+             {(hasAnyFieldError || !isValidTotal) && !createPortfolioMutation.isPending && (
               <p className="text-xs text-gray-400 text-center mt-2">
                 Fix validation errors above to continue
               </p>
