@@ -57,7 +57,13 @@ jobs:
         npm run build
         npm start &
         echo "Backend started"
-        sleep 5
+        for i in {1..20}; do
+          if curl -sf http://localhost:3001/health > /dev/null; then
+            echo "Backend healthy"
+            break
+          fi
+          sleep 2
+        done
       working-directory: ./backend
 
     - name: Run Playwright tests
@@ -67,10 +73,18 @@ jobs:
       run: npx playwright test
       working-directory: ./frontend
 
-    - name: Upload artifact on failure
+    - name: Upload Playwright report
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: playwright-report
         path: frontend/playwright-report/
+        retention-days: 30
+
+    - name: Upload Playwright test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-test-results
+        path: frontend/test-results/
         retention-days: 30
