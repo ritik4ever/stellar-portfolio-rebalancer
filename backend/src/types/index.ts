@@ -23,11 +23,32 @@ export interface Portfolio {
     allocations: Record<string, number>
     threshold: number
     slippageTolerancePercent?: number
+    slippageTolerance?: number        // Add this for backward compatibility
+    strategy?: RebalanceStrategyType   // Add this
+    strategyConfig?: RebalanceStrategyConfig  // Add this
     balances: Record<string, number>
     totalValue: number
     createdAt: string
     lastRebalance: string
     version: number
+}
+
+// Rebalance strategy types
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+
+export interface RebalanceStrategyConfig {
+    type?: RebalanceStrategyType
+    parameters?: Record<string, unknown>
+    enabled?: boolean
+    intervalDays?: number
+    volatilityThresholdPct?: number
+    minDaysBetweenRebalance?: number
+}
+
+export interface UIAllocation {
+    asset: string
+    percentage: number
+    value: number
 }
 
 // Thrown when an update targets a stale portfolio version

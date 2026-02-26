@@ -23,12 +23,16 @@ class RateLimitMonitor {
     }
 
     private readonly resetInterval = 24 * 60 * 60 * 1000 // 24 hours
+    private intervalId?: NodeJS.Timeout
 
     constructor() {
-        // Reset metrics daily
-        setInterval(() => {
-            this.resetMetrics()
-        }, this.resetInterval)
+        // Only set up interval in non-test environments
+        if (process.env.NODE_ENV !== 'test') {
+            // Reset metrics daily
+            this.intervalId = setInterval(() => {
+                this.resetMetrics()
+            }, this.resetInterval)
+        }
     }
 
     /**
