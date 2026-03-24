@@ -3,6 +3,9 @@ import express from 'express'
 import cors from 'cors'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
+import { portfolioStorage } from './services/portfolioStorage.js'
+import swaggerUi from 'swagger-ui-express'
+import spec from './openapi/spec.js'
 import { portfolioRouter } from './api/routes.js'
 import { authRouter } from './api/authRoutes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
@@ -223,6 +226,11 @@ app.use((req, res, next) => {
 
     return res.redirect(308, target)
 })
+
+// API Documentation
+app.use('/api-docs', swaggerUi.serve)
+app.get('/api-docs', swaggerUi.setup(spec))
+app.get('/api-docs/openapi.json', (req, res) => res.json(spec))
 
 // 404 handler
 app.use((req, res) => {
