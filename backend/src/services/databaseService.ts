@@ -298,11 +298,12 @@ function generateId(): string {
 
 export class DatabaseService {
     private db: Database.Database
+    private readonly dbPath: string
 
     constructor() {
-        const dbPath = process.env.DB_PATH || './data/portfolio.db'
-        mkdirSync(dirname(dbPath), { recursive: true })
-        this.db = new Database(dbPath)
+        this.dbPath = process.env.DB_PATH || './data/portfolio.db'
+        mkdirSync(dirname(this.dbPath), { recursive: true })
+        this.db = new Database(this.dbPath)
         this.db.exec(SCHEMA_SQL)
         this._migrateSchema()
 
@@ -314,7 +315,23 @@ export class DatabaseService {
 
         this._seedDefaultAssets()
 
-        logger.info('[DB] SQLite database ready', { dbPath })
+        logger.info('[DB] SQLite database ready', { dbPath: this.dbPath })
+    }
+
+    getReadiness(): { ready: boolean; databasePath: string; error?: string } {
+        try {
+            this.db.prepare('SELECT 1 as ok').get()
+            return {
+                ready: true,
+                databasePath: this.dbPath
+            }
+        } catch (error) {
+            return {
+                ready: false,
+                databasePath: this.dbPath,
+                error: error instanceof Error ? error.message : String(error)
+            }
+        }
     }
 
     private _migrateSchema(): void {

@@ -9,8 +9,18 @@ import { notificationService } from '../../services/notificationService.js'
 import { getRebalanceQueue } from '../queues.js'
 import { logger, logAudit } from '../../utils/logger.js'
 import type { PortfolioCheckJobData } from '../queues.js'
+import {
+    createWorkerRuntimeStatus,
+    markWorkerFailed,
+    markWorkerReady,
+    markWorkerStarting,
+    markWorkerStopped,
+    snapshotWorkerRuntimeStatus,
+    type WorkerRuntimeStatus
+} from './workerRuntime.js'
 
 let worker: Worker | null = null
+const runtimeStatus = createWorkerRuntimeStatus('portfolio-check', 1)
 
 /**
  * Core processor: checks all portfolios for drift and enqueues rebalance jobs
@@ -140,6 +150,7 @@ export function startPortfolioCheckWorker(): Worker | null {
     if (worker) return worker
 
     try {
+        markWorkerStarting(runtimeStatus)
         worker = new Worker(
             'portfolio-check',
             processPortfolioCheckJob,
@@ -149,11 +160,24 @@ export function startPortfolioCheckWorker(): Worker | null {
             }
         )
     } catch (err) {
+        markWorkerFailed(runtimeStatus, err)
         logger.warn('[WORKER:portfolio-check] Failed to start – Redis may be unavailable', {
             error: err instanceof Error ? err.message : String(err),
         })
         return null
     }
+
+    void worker.waitUntilReady()
+        .then(() => {
+            markWorkerReady(runtimeStatus)
+            logger.info('[WORKER:portfolio-check] Worker ready')
+        })
+        .catch((err) => {
+            markWorkerFailed(runtimeStatus, err)
+            logger.error('[WORKER:portfolio-check] Worker failed readiness check', {
+                error: err instanceof Error ? err.message : String(err),
+            })
+        })
 
     worker.on('completed', (job) => {
         logger.info('[WORKER:portfolio-check] Job completed', { jobId: job.id })
@@ -175,6 +199,11 @@ export async function stopPortfolioCheckWorker(): Promise<void> {
     if (worker) {
         await worker.close()
         worker = null
+        markWorkerStopped(runtimeStatus)
         logger.info('[WORKER:portfolio-check] Worker stopped')
     }
+}
+
+export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
+    return snapshotWorkerRuntimeStatus(runtimeStatus)
 }

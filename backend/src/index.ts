@@ -8,7 +8,6 @@ import { authRouter } from './api/authRoutes.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 import { globalRateLimiter, burstProtectionLimiter, requestMonitoringMiddleware, closeRateLimitStore } from './middleware/rateLimit.js'
 import { RebalancingService } from './monitoring/rebalancer.js'
-import { AutoRebalancerService } from './services/autoRebalancer.js'
 import { logger } from './utils/logger.js'
 import { databaseService } from './services/databaseService.js'
 import { validateStartupConfigOrThrow, buildStartupSummary, type StartupConfig } from './config/startupConfig.js'
@@ -23,6 +22,8 @@ import { contractEventIndexerService } from './services/contractEventIndexer.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 import { initRobustWebSocket } from './services/websocket.service.js'
+import { autoRebalancer } from './services/runtimeServices.js'
+import { buildReadinessReport } from './monitoring/readiness.js'
 
 let startupConfig: StartupConfig
 try {
@@ -86,17 +87,28 @@ app.use(requestMonitoringMiddleware)
 app.use(burstProtectionLimiter)
 app.use(globalRateLimiter)
 
-// Create auto-rebalancer instance
-const autoRebalancer = new AutoRebalancerService()
-
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({
-        status: 'healthy',
+        status: 'ok',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development',
-        autoRebalancer: autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
+        uptimeSeconds: Math.round(process.uptime())
     })
+})
+
+app.get('/ready', async (req, res) => {
+    try {
+        const report = await buildReadinessReport()
+        res.status(report.status === 'ready' ? 200 : 503).json(report)
+    } catch (error) {
+        logger.error('[READINESS] Failed to build readiness report', { error })
+        res.status(503).json({
+            status: 'not_ready',
+            timestamp: new Date().toISOString(),
+            uptimeSeconds: Math.round(process.uptime()),
+            error: error instanceof Error ? error.message : String(error)
+        })
+    }
 })
 
 // CORS test endpoint
@@ -170,6 +182,7 @@ app.get('/', (req, res) => {
         },
         endpoints: {
             health: '/health',
+            ready: '/ready',
             apiDocs: '/api-docs',
             corsTest: '/test/cors',
             coinGeckoTest: '/test/coingecko',
@@ -201,7 +214,7 @@ const LEGACY_API_PREFIXES = [
     '/debug'
 ]
 
-const PUBLIC_ROOT_PATHS = new Set(['/', '/health', '/test/cors', '/test/coingecko'])
+const PUBLIC_ROOT_PATHS = new Set(['/', '/health', '/ready', '/test/cors', '/test/coingecko'])
 
 app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next()
@@ -233,6 +246,7 @@ app.use((req, res) => {
         url: req.url,
         availableEndpoints: {
             health: '/health',
+            ready: '/ready',
             api: '/api/*',
             autoRebalancer: '/api/auto-rebalancer/*',
             queueHealth: '/api/queue/health'
@@ -331,6 +345,7 @@ server.listen(port, async () => {
 
     logger.info('Available endpoints', {
         health: `/health`,
+        ready: `/ready`,
         corsTest: `/test/cors`,
         coinGeckoTest: `/test/coingecko`,
         autoRebalancerStatus: `/api/auto-rebalancer/status`,
@@ -433,6 +448,4 @@ process.on('unhandledRejection', (reason, promise) => {
     logger.error('[UNHANDLED-REJECTION] Unhandled promise rejection', { reason, promise })
 })
 
-// Export instances for use in routes
-export { autoRebalancer }
 export default app
