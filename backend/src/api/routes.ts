@@ -449,6 +449,19 @@ router.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) 
     }
 })
 
+router.get('/portfolio/:id/rebalance-estimate', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        const estimate = await stellarService.estimateRebalanceGas(portfolioId)
+
+        return ok(res, estimate)
+    } catch (error) {
+        logger.error('[ERROR] Rebalance estimate failed', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 // Manual portfolio rebalance
 router.post('/portfolio/:id/rebalance', ...protectedCriticalLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
 

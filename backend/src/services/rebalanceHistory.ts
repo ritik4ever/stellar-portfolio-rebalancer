@@ -38,6 +38,11 @@ export interface RebalanceEvent {
         actualSlippageBps?: number
         slippageExceededTolerance?: boolean
         totalSlippageBps?: number
+        gasFeeXlm?: number
+        gasFeeUsd?: number
+        gasPerTradeXlm?: number
+        gasWarning?: boolean
+        gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
     }
 }
 
@@ -76,6 +81,11 @@ export class RebalanceHistoryService {
         slippageExceededTolerance?: boolean
         /** Optional aggregate slippage in basis points for backwards compatibility. */
         totalSlippageBps?: number
+        gasFeeXlm?: number
+        gasFeeUsd?: number
+        gasPerTradeXlm?: number
+        gasWarning?: boolean
+        gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -92,7 +102,12 @@ export class RebalanceHistoryService {
             estimatedSlippageBps: eventData.estimatedSlippageBps,
             actualSlippageBps: eventData.actualSlippageBps,
             slippageExceededTolerance: eventData.slippageExceededTolerance,
-            ...(eventData.totalSlippageBps != null && { totalSlippageBps: eventData.totalSlippageBps })
+            ...(eventData.totalSlippageBps != null && { totalSlippageBps: eventData.totalSlippageBps }),
+            gasFeeXlm: eventData.gasFeeXlm,
+            gasFeeUsd: eventData.gasFeeUsd,
+            gasPerTradeXlm: eventData.gasPerTradeXlm,
+            gasWarning: eventData.gasWarning,
+            gasBreakdown: eventData.gasBreakdown
         }
 
         if (eventData.prices && eventData.portfolio) {

@@ -93,6 +93,11 @@ export interface RebalanceEvent {
         riskMetrics?: any
         marketConditions?: any
         totalSlippageBps?: number
+        gasFeeXlm?: number
+        gasFeeUsd?: number
+        gasPerTradeXlm?: number
+        gasWarning?: boolean
+        gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
     }
 }
 
