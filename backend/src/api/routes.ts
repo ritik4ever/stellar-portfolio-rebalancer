@@ -8,7 +8,7 @@ import { analyticsService } from '../services/analyticsService.js'
 import { notificationService } from '../services/notificationService.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { AutoRebalancerService } from '../services/autoRebalancer.js'
-import { logger } from '../utils/logger.js'
+import { logger, logAudit } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -176,6 +176,19 @@ router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request
             coingeckoId: typeof coingeckoId === 'string' ? coingeckoId : undefined
         })
         const asset = assetRegistryService.getBySymbol(symbol.trim().toUpperCase())
+        if (asset) {
+            const auditFields: Record<string, unknown> = {
+                domain: 'asset_registry',
+                actorPublicKey: req.adminPublicKey,
+                symbol: asset.symbol,
+                name: asset.name,
+                enabled: asset.enabled
+            }
+            if (asset.coingeckoId) auditFields.coingeckoId = asset.coingeckoId
+            if (asset.contractAddress) auditFields.contractAddress = asset.contractAddress
+            if (asset.issuerAccount) auditFields.issuerAccount = asset.issuerAccount
+            logAudit('asset_registry_asset_created', auditFields)
+        }
         return ok(res, { asset }, { status: 201 })
     } catch (error) {
         logger.error('[ERROR] Admin add asset failed', { error: getErrorObject(error) })
@@ -188,8 +201,22 @@ router.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (re
     try {
         const symbol = req.params.symbol
         if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
+        const prior = assetRegistryService.getBySymbol(symbol)
         const removed = assetRegistryService.remove(symbol)
         if (!removed) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+        if (prior) {
+            const auditFields: Record<string, unknown> = {
+                domain: 'asset_registry',
+                actorPublicKey: req.adminPublicKey,
+                symbol: prior.symbol,
+                name: prior.name,
+                enabled: prior.enabled
+            }
+            if (prior.coingeckoId) auditFields.coingeckoId = prior.coingeckoId
+            if (prior.contractAddress) auditFields.contractAddress = prior.contractAddress
+            if (prior.issuerAccount) auditFields.issuerAccount = prior.issuerAccount
+            logAudit('asset_registry_asset_removed', auditFields)
+        }
         return ok(res, { message: 'Asset removed' })
     } catch (error) {
         logger.error('[ERROR] Admin remove asset failed', { error: getErrorObject(error) })
@@ -204,9 +231,20 @@ router.patch('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Re
         const enabled = req.body?.enabled
         if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
         if (typeof enabled !== 'boolean') return fail(res, 400, 'VALIDATION_ERROR', 'body.enabled must be boolean')
+        const prior = assetRegistryService.getBySymbol(symbol)
         const updated = assetRegistryService.setEnabled(symbol, enabled)
         if (!updated) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
         const asset = assetRegistryService.getBySymbol(symbol)
+        if (prior) {
+            logAudit('asset_registry_asset_updated', {
+                domain: 'asset_registry',
+                actorPublicKey: req.adminPublicKey,
+                symbol: prior.symbol,
+                field: 'enabled',
+                previousValue: prior.enabled,
+                newValue: enabled
+            })
+        }
         return ok(res, { asset })
     } catch (error) {
         logger.error('[ERROR] Admin set asset enabled failed', { error: getErrorObject(error) })
