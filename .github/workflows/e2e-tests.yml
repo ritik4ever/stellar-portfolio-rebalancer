@@ -10,6 +10,15 @@ jobs:
   test:
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    env:
+      # Job-wide so migrate, seed, background `npm start`, and any libpq-based tools
+      # never fall back to the runner OS user (often root in logs → FATAL: role "root" does not exist).
+      DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
+      PGUSER: testuser
+      PGPASSWORD: testpassword
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGDATABASE: stellartest
 
     services:
       postgres:
@@ -42,8 +51,6 @@ jobs:
       working-directory: ./frontend
 
     - name: Setup Backend Database
-      env:
-        DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
       run: |
         npm run db:migrate
         npm run db:seed:e2e
@@ -52,24 +59,30 @@ jobs:
     - name: Start Backend Services
       env:
         PORT: 3001
-        DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
       run: |
         npm run build
         npm start &
         echo "Backend started"
-        for i in {1..20}; do
+        ok=0
+        for i in $(seq 1 30); do
           if curl -sf http://localhost:3001/health > /dev/null; then
             echo "Backend healthy"
+            ok=1
             break
           fi
+          echo "Waiting for backend... ($i/30)"
           sleep 2
         done
+        if [ "$ok" != 1 ]; then
+          echo "::error::Backend did not become healthy on http://localhost:3001/health"
+          exit 1
+        fi
       working-directory: ./backend
 
     - name: Run Playwright tests
       env:
         VITE_API_URL: http://localhost:3001
-        VITE_E2E_MOCK_WALLET: true
+        VITE_E2E_MOCK_WALLET: 'true'
       run: npx playwright test
       working-directory: ./frontend
 

@@ -1,16 +1,19 @@
 import pg from 'pg'
 
-const connectionString = process.env.DATABASE_URL
-
 let pool: pg.Pool | null = null
+
+function connectionString(): string | undefined {
+    return process.env.DATABASE_URL
+}
 
 export function getPool(): pg.Pool {
     if (!pool) {
-        if (!connectionString) {
+        const url = connectionString()
+        if (!url) {
             throw new Error('DATABASE_URL is not set')
         }
         pool = new pg.Pool({
-            connectionString,
+            connectionString: url,
             max: 20,
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 5000
@@ -31,5 +34,5 @@ export async function closePool(): Promise<void> {
 }
 
 export function isDbConfigured(): boolean {
-    return Boolean(connectionString)
+    return Boolean(connectionString())
 }

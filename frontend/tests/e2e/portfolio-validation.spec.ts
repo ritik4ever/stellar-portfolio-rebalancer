@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
+import { connectMockWallet } from './helpers'
 
 test.describe('Portfolio validation edge cases', () => {
   test('shows under/over allocation validation and enables submit when balanced', async ({ page }) => {
     await page.goto('/')
-    await page.getByRole('button', { name: /Connect Wallet/i }).first().click()
-    await page.getByRole('button', { name: /Mock Wallet \(Test\)/i }).click()
+    await connectMockWallet(page)
 
     await expect(page.getByRole('heading', { name: /Portfolio Dashboard/i })).toBeVisible({ timeout: 10000 })
     await page.getByRole('button', { name: /Create Portfolio/i }).click()

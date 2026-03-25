@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { connectMockWallet } from './helpers';
 
 test.describe('Dashboard, Rebalance, and History', () => {
   test('should view dashboard, trigger rebalance, and check history', async ({ page }) => {
     // 1. Visit landing and connect mock wallet
     await page.goto('/');
-    await page.getByRole('button', { name: /Connect Wallet/i }).first().click();
-    await page.getByRole('button', { name: /Mock Wallet \(Test\)/i }).click();
+    await connectMockWallet(page);
 
     // Wait for Dashboard to load
     await expect(page.getByRole('heading', { name: /Portfolio Dashboard/i })).toBeVisible({ timeout: 10000 });
