@@ -16,7 +16,9 @@
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
         "test:ci": "npm run test:coverage",
-        "test:rate-limits": "node scripts/test-rate-limits.js"
+        "test:rate-limits": "node scripts/test-rate-limits.js",
+        "openapi:export": "tsx scripts/export-openapi.ts",
+        "api:validate": "tsx scripts/validate-api-docs.ts"
     },
     "dependencies": {
         "@stellar/stellar-sdk": "^12.0.1",
@@ -31,9 +33,10 @@
         "node-cron": "^3.0.3",
         "nodemailer": "^8.0.1",
         "pdfkit": "^0.17.2",
-        "pino": "^9.6.0",
         "pg": "^8.11.3",
+        "pino": "^9.6.0",
         "rate-limit-redis": "^4.2.0",
+        "swagger-ui-express": "^5.0.1",
         "ws": "^8.14.2",
         "zod": "^4.3.6"
     },
@@ -48,6 +51,7 @@
         "@types/pdfkit": "^0.17.5",
         "@types/pg": "^8.10.9",
         "@types/supertest": "^2.0.12",
+        "@types/swagger-ui-express": "^4.1.8",
         "@types/ws": "^8.18.1",
         "@vitest/coverage-v8": "^4.0.18",
         "supertest": "^6.3.3",
