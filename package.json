@@ -21,6 +21,7 @@
         "test": "npm run test:contracts && npm run test:backend",
         "test:contracts": "cd contracts && cargo test",
         "test:backend": "cd backend && npm test",
+        "validate:env-examples": "node scripts/validate-env-examples.mjs",
         "lint": "npm run lint:backend && npm run lint:frontend",
         "lint:backend": "cd backend && npm run lint",
         "lint:frontend": "cd frontend && npm run lint",
