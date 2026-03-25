@@ -10,6 +10,23 @@ jobs:
   test:
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      # Required by validateStartupConfigOrThrow — backend/src/index.ts runs this before listen().
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_CONTRACT_ADDRESS: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      DEMO_MODE: 'true'
+      ALLOW_DEMO_BALANCE_FALLBACK: 'true'
+      JWT_SECRET: e2e-ci-jwt-secret-at-least-32-characters-long
+      # Job-wide DB: migrate, seed, `npm start` — explicit PG* avoids implicit OS user (FATAL: role "root").
+      DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
+      PGUSER: testuser
+      PGPASSWORD: testpassword
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGDATABASE: stellartest
 
     services:
       postgres:
@@ -42,8 +59,6 @@ jobs:
       working-directory: ./frontend
 
     - name: Setup Backend Database
-      env:
-        DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
       run: |
         npm run db:migrate
         npm run db:seed:e2e
@@ -52,24 +67,30 @@ jobs:
     - name: Start Backend Services
       env:
         PORT: 3001
-        DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
       run: |
         npm run build
         npm start &
         echo "Backend started"
-        for i in {1..20}; do
+        ok=0
+        for i in $(seq 1 30); do
           if curl -sf http://localhost:3001/health > /dev/null; then
             echo "Backend healthy"
+            ok=1
             break
           fi
+          echo "Waiting for backend... ($i/30)"
           sleep 2
         done
+        if [ "$ok" != 1 ]; then
+          echo "::error::Backend did not become healthy on http://localhost:3001/health"
+          exit 1
+        fi
       working-directory: ./backend
 
     - name: Run Playwright tests
       env:
         VITE_API_URL: http://localhost:3001
-        VITE_E2E_MOCK_WALLET: true
+        VITE_E2E_MOCK_WALLET: 'true'
       run: npx playwright test
       working-directory: ./frontend
 

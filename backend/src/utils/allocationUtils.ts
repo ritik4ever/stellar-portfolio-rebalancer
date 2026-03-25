@@ -26,7 +26,8 @@ export function toStoredAllocations(
         const result: Record<string, number> = {}
         for (const item of input) {
             if (typeof item.asset === 'string') {
-                result[item.asset] = item.target
+                const pct = item.target ?? item.percentage
+                result[item.asset] = pct
             }
         }
         return result
