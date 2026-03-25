@@ -49,6 +49,9 @@ export interface UIAllocation {
     asset: string
     percentage: number
     value: number
+    /** Target allocation % when provided by the UI (alias of percentage in some flows) */
+    target?: number
+    current?: number
 }
 
 // Thrown when an update targets a stale portfolio version
