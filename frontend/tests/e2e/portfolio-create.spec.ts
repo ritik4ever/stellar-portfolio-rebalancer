@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { connectMockWallet } from './helpers';
 
 test.describe('Portfolio Creation Flow', () => {
   test('should create a new portfolio', async ({ page }) => {
     // 1. Visit landing and connect mock wallet
     await page.goto('/');
-    await page.getByRole('button', { name: /Connect Wallet/i }).first().click();
-    await page.getByRole('button', { name: /Mock Wallet \(Test\)/i }).click();
+    await connectMockWallet(page);
 
     // 2. Wait for dashboard redirect
     await expect(page.getByRole('heading', { name: /Portfolio Dashboard/i })).toBeVisible({ timeout: 10000 });

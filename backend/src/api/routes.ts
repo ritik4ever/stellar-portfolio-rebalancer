@@ -51,6 +51,13 @@ const parseHistorySource = (value: unknown): 'offchain' | 'simulated' | 'onchain
     return undefined
 }
 
+/** Lightweight JSON health for API clients and integration tests (mounted at /api/health). */
+router.get('/health', (_req: Request, res: Response) => {
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString()
+    })
+})
 
 router.get('/strategies', (_req: Request, res: Response) => {
     return ok(res, { strategies: REBALANCE_STRATEGIES })
