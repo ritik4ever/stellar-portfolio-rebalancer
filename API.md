@@ -61,12 +61,12 @@ Error responses:
 ### Portfolio
 
 - **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%.
-- **GET /api/portfolio/:id** — Get portfolio by ID.
-- **GET /api/user/:address/portfolios** — List portfolios for a Stellar address.
-- **GET /api/portfolio/:id/rebalance-plan** — Get rebalance plan (total value, slippage, prices).
-- **POST /api/portfolio/:id/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`).
-- **GET /api/portfolio/:id/analytics** — Analytics time series (query: `days`, default 30).
-- **GET /api/portfolio/:id/performance-summary** — Performance summary.
+- **GET /api/portfolio/{id}** — Get portfolio by ID.
+- **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address.
+- **GET /api/portfolio/{id}/rebalance-plan** — Get rebalance plan (total value, slippage, prices).
+- **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`).
+- **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
+- **GET /api/portfolio/{id}/performance-summary** — Performance summary.
 
 ### Rebalance history
 
@@ -76,15 +76,15 @@ Error responses:
 
 ### Risk
 
-- **GET /api/risk/metrics/:portfolioId** — Risk metrics and recommendations.
-- **GET /api/risk/check/:portfolioId** — Check if rebalance is allowed (risk check).
+- **GET /api/risk/metrics/{portfolioId}** — Risk metrics and recommendations.
+- **GET /api/risk/check/{portfolioId}** — Check if rebalance is allowed (risk check).
 
 ### Prices and market
 
 - **GET /api/prices** — Current asset prices (e.g. XLM, BTC, ETH, USDC).
 - **GET /api/prices/enhanced** — Prices with risk/volatility info.
-- **GET /api/market/:asset/details** — Market details for one asset.
-- **GET /api/market/:asset/chart** — Price history for charting (query: `days`, default 7).
+- **GET /api/market/{asset}/details** — Market details for one asset.
+- **GET /api/market/{asset}/chart** — Price history for charting (query: `days`, default 7).
 
 ### Auto-rebalancer
 
@@ -140,6 +140,23 @@ npm run openapi:export
 ```
 
 This writes `backend/openapi.json`. In Postman: **Import** → **Upload** → select `openapi.json`.
+
+### Maintaining Documentation Sync
+
+To ensure that `API.md`, `openapi.json`, and the code-defined specification (`backend/src/openapi/spec.ts`) stay in sync, we use an automated validation script.
+
+**To validate sync:**
+```bash
+cd backend
+npm run api:validate
+```
+
+**To refresh generated outputs (if you've changed the API code):**
+```bash
+cd backend
+npm run openapi:export
+```
+The CI pipeline will fail if documents are out of sync.
 
 ## Examples
 

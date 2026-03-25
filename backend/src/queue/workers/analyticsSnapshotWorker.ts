@@ -21,25 +21,25 @@ const runtimeStatus = createWorkerRuntimeStatus('analytics-snapshot', 1)
  * Extracted as a standalone function so tests can call it directly.
  */
 export async function processAnalyticsSnapshotJob(
-    job: Job<AnalyticsSnapshotJobData>
+  job: Job<AnalyticsSnapshotJobData>,
 ): Promise<void> {
-    logger.info('[WORKER:analytics-snapshot] Capturing portfolio snapshots', {
-        jobId: job.id,
-        triggeredBy: job.data.triggeredBy ?? 'scheduler',
-    })
+  logger.info("[WORKER:analytics-snapshot] Capturing portfolio snapshots", {
+    jobId: job.id,
+    triggeredBy: job.data.triggeredBy ?? "scheduler",
+  });
 
-    await analyticsService.captureAllPortfolios()
+  await analyticsService.captureAllPortfolios();
 
-    logger.info('[WORKER:analytics-snapshot] Snapshot cycle complete', {
-        jobId: job.id,
-    })
+  logger.info("[WORKER:analytics-snapshot] Snapshot cycle complete", {
+    jobId: job.id,
+  });
 }
 
 /**
  * Starts the analytics-snapshot BullMQ worker (singleton).
  */
 export function startAnalyticsSnapshotWorker(): Worker | null {
-    if (worker) return worker
+  if (worker) return worker;
 
     try {
         markWorkerStarting(runtimeStatus)
@@ -75,16 +75,16 @@ export function startAnalyticsSnapshotWorker(): Worker | null {
         logger.info('[WORKER:analytics-snapshot] Job completed', { jobId: job.id })
     })
 
-    worker.on('failed', (job, err) => {
-        logger.error('[WORKER:analytics-snapshot] Job failed', {
-            jobId: job?.id,
-            error: err.message,
-            attemptsMade: job?.attemptsMade,
-        })
-    })
+  worker.on("failed", (job, err) => {
+    logger.error("[WORKER:analytics-snapshot] Job failed", {
+      jobId: job?.id,
+      error: err.message,
+      attemptsMade: job?.attemptsMade,
+    });
+  });
 
-    logger.info('[WORKER:analytics-snapshot] Worker started')
-    return worker
+  logger.info("[WORKER:analytics-snapshot] Worker started");
+  return worker;
 }
 
 export async function stopAnalyticsSnapshotWorker(): Promise<void> {

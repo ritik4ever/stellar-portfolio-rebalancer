@@ -1,10 +1,3 @@
-import { Worker, Job } from 'bullmq'
-import { getConnectionOptions } from '../connection.js'
-import { StellarService } from '../../services/stellar.js'
-import { rebalanceHistoryService } from '../../services/serviceContainer.js'
-import { notificationService } from '../../services/notificationService.js'
-import { rebalanceLockService } from '../../services/rebalanceLock.js'
-import { logger, logAudit } from '../../utils/logger.js'
 
 import type { RebalanceJobData } from '../queues.js'
 import {
@@ -25,117 +18,123 @@ const runtimeStatus = createWorkerRuntimeStatus('rebalance', 3)
  * Extracted as a standalone function so tests can call it directly.
  */
 export async function processRebalanceJob(
-    job: Job<RebalanceJobData>
+  job: Job<RebalanceJobData>,
 ): Promise<void> {
-    const { portfolioId, triggeredBy } = job.data
+  const { portfolioId, triggeredBy } = job.data;
 
-    logger.info('[WORKER:rebalance] Executing rebalance', {
-        jobId: job.id,
-        portfolioId,
-        triggeredBy,
-    })
-    if (triggeredBy === 'auto') {
-        logAudit('auto_rebalance_started', {
-            portfolioId,
-            jobId: job.id,
-        })
-    }
+  logger.info("[WORKER:rebalance] Executing rebalance", {
+    jobId: job.id,
+    portfolioId,
+    triggeredBy,
+  });
+  if (triggeredBy === "auto") {
+    logAudit("auto_rebalance_started", {
+      portfolioId,
+      jobId: job.id,
+    });
+  }
 
-    // Try to acquire the concurrency lock
-    const lockAcquired = await rebalanceLockService.acquireLock(portfolioId)
+  // Try to acquire the concurrency lock
+  const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
 
-    if (!lockAcquired) {
-        logger.info('[WORKER:rebalance] Rebalance already in progress. Aborting.', { portfolioId })
-        return // Gracefully skip execution
-    }
+  if (!lockAcquired) {
+    logger.info("[WORKER:rebalance] Rebalance already in progress. Aborting.", {
+      portfolioId,
+    });
+    return; // Gracefully skip execution
+  }
 
-    const stellarService = new StellarService()
+  const stellarService = new StellarService();
+  try {
+    const portfolio = await stellarService.getPortfolio(portfolioId);
+    const rebalanceResult = await stellarService.executeRebalance(portfolioId);
+
+    // Record success
+    await rebalanceHistoryService.recordRebalanceEvent({
+      portfolioId,
+      trigger:
+        triggeredBy === "auto" ? "Automatic Rebalancing" : "Manual Rebalancing",
+      trades: rebalanceResult.trades ?? 0,
+      gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+      status: "completed",
+      isAutomatic: triggeredBy === "auto",
+    });
+
+    // Send notification
     try {
-        const portfolio = await stellarService.getPortfolio(portfolioId)
-        const rebalanceResult = await stellarService.executeRebalance(portfolioId)
-
-        // Record success
-        await rebalanceHistoryService.recordRebalanceEvent({
-            portfolioId,
-            trigger: triggeredBy === 'auto' ? 'Automatic Rebalancing' : 'Manual Rebalancing',
-            trades: rebalanceResult.trades ?? 0,
-            gasUsed: rebalanceResult.gasUsed ?? '0 XLM',
-            status: 'completed',
-            isAutomatic: triggeredBy === 'auto',
-        })
-
-        // Send notification
-        try {
-            await notificationService.notify({
-                userId: portfolio.userAddress,
-                eventType: 'rebalance',
-                title: 'Portfolio Rebalanced',
-                message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? '0 XLM'} gas used.`,
-                data: {
-                    portfolioId,
-                    trades: rebalanceResult.trades,
-                    gasUsed: rebalanceResult.gasUsed,
-                    trigger: triggeredBy,
-                },
-                timestamp: new Date().toISOString(),
-            })
-        } catch (notifyErr) {
-            logger.error('[WORKER:rebalance] Notification failed (non-fatal)', {
-                portfolioId,
-                error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
-            })
-        }
-
-        logger.info('[WORKER:rebalance] Rebalance completed', {
-            portfolioId,
-            trades: rebalanceResult.trades,
-        })
-        if (triggeredBy === 'auto') {
-            logAudit('auto_rebalance_completed', {
-                portfolioId,
-                jobId: job.id,
-                trades: rebalanceResult.trades ?? 0,
-                status: 'completed'
-            })
-        }
-    } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err)
-
-        // Record failure in audit trail
-        try {
-            await rebalanceHistoryService.recordRebalanceEvent({
-                portfolioId,
-                trigger: `Automatic Rebalancing (Failed – attempt ${job.attemptsMade + 1})`,
-                trades: 0,
-                gasUsed: '0 XLM',
-                status: 'failed',
-                isAutomatic: triggeredBy === 'auto',
-                error: errorMessage,
-            })
-        } catch (histErr) {
-            logger.error('[WORKER:rebalance] Failed to record failure event', { histErr })
-        }
-
-        logger.error('[WORKER:rebalance] Rebalance failed', {
-            portfolioId,
-            error: errorMessage,
-            attemptsMade: job.attemptsMade,
-        })
-        if (triggeredBy === 'auto') {
-            logAudit('auto_rebalance_failed', {
-                portfolioId,
-                jobId: job.id,
-                error: errorMessage,
-                attemptsMade: job.attemptsMade
-            })
-        }
-
-        // Re-throw so BullMQ can retry with backoff
-        throw err
-    } finally {
-        // Always release the lock to prevent deadlocks
-        await rebalanceLockService.releaseLock(portfolioId)
+      await notificationService.notify({
+        userId: portfolio.userAddress,
+        eventType: "rebalance",
+        title: "Portfolio Rebalanced",
+        message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
+        data: {
+          portfolioId,
+          trades: rebalanceResult.trades,
+          gasUsed: rebalanceResult.gasUsed,
+          trigger: triggeredBy,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (notifyErr) {
+      logger.error("[WORKER:rebalance] Notification failed (non-fatal)", {
+        portfolioId,
+        error:
+          notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+      });
     }
+
+    logger.info("[WORKER:rebalance] Rebalance completed", {
+      portfolioId,
+      trades: rebalanceResult.trades,
+    });
+    if (triggeredBy === "auto") {
+      logAudit("auto_rebalance_completed", {
+        portfolioId,
+        jobId: job.id,
+        trades: rebalanceResult.trades ?? 0,
+        status: "completed",
+      });
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+
+    // Record failure in audit trail
+    try {
+      await rebalanceHistoryService.recordRebalanceEvent({
+        portfolioId,
+        trigger: `Automatic Rebalancing (Failed – attempt ${job.attemptsMade + 1})`,
+        trades: 0,
+        gasUsed: "0 XLM",
+        status: "failed",
+        isAutomatic: triggeredBy === "auto",
+        error: errorMessage,
+      });
+    } catch (histErr) {
+      logger.error("[WORKER:rebalance] Failed to record failure event", {
+        histErr,
+      });
+    }
+
+    logger.error("[WORKER:rebalance] Rebalance failed", {
+      portfolioId,
+      error: errorMessage,
+      attemptsMade: job.attemptsMade,
+    });
+    if (triggeredBy === "auto") {
+      logAudit("auto_rebalance_failed", {
+        portfolioId,
+        jobId: job.id,
+        error: errorMessage,
+        attemptsMade: job.attemptsMade,
+      });
+    }
+
+    // Re-throw so BullMQ can retry with backoff
+    throw err;
+  } finally {
+    // Always release the lock to prevent deadlocks
+    await rebalanceLockService.releaseLock(portfolioId);
+  }
 }
 
 /**

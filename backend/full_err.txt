@@ -1,0 +1,85 @@
+﻿node.exe : 
+At C:\Users\hp\Download
+s\stellar-portfolio-reb
+alancer\backend\node_mo
+dules\.bin\tsx.ps1:24 
+char:5
++     & "node$exe"  "$b
+asedir/../tsx/dist/cli.
+mjs" $args
++     ~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (:String) [],    
+ RemoteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+node:internal/modules/r
+un_main:107
+    triggerUncaughtExce
+ption(
+    ^
+Error 
+[TransformError]: 
+Transform failed with 
+1 error:
+C:\Users\hp\Downloads\s
+tellar-portfolio-rebala
+ncer\backend\src\openap
+i\spec.ts:852:1: 
+ERROR: Expected "}" 
+but found ";"
+    at 
+failureErrorWithLog (C:
+\Users\hp\Downloads\ste
+llar-portfolio-rebalanc
+er\backend\node_modules
+\esbuild\lib\main.js:14
+67:15)
+    at C:\Users\hp\Down
+loads\stellar-portfolio
+-rebalancer\backend\nod
+e_modules\esbuild\lib\m
+ain.js:736:50
+    at responseCallback
+s.<computed> (C:\Users\
+hp\Downloads\stellar-po
+rtfolio-rebalancer\back
+end\node_modules\esbuil
+d\lib\main.js:603:9)
+    at 
+handleIncomingPacket (C
+:\Users\hp\Downloads\st
+ellar-portfolio-rebalan
+cer\backend\node_module
+s\esbuild\lib\main.js:6
+58:12)
+    at 
+Socket.readFromStdout (
+C:\Users\hp\Downloads\s
+tellar-portfolio-rebala
+ncer\backend\node_modul
+es\esbuild\lib\main.js:
+581:7)
+    at Socket.emit 
+(node:events:508:28)
+    at addChunk (node:i
+nternal/streams/readabl
+e:563:12)
+    at readableAddChunk
+PushByteMode (node:inte
+rnal/streams/readable:5
+14:3)
+    at Readable.push (n
+ode:internal/streams/re
+adable:394:5)
+    at 
+Pipe.onStreamRead (node
+:internal/stream_base_c
+ommons:189:23)
+
+Node.js v24.14.0
