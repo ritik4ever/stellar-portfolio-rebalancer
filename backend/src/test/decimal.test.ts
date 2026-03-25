@@ -28,7 +28,7 @@ describe('Dec.allocationsSumValid', () => {
     })
 
     it('accepts allocations within epsilon (99.995 to 100.005)', () => {
-        expect(Dec.allocationsSumValid({ XLM: 50, USDC: 49.999 })).toBe(false)
+        expect(Dec.allocationsSumValid({ XLM: 50, USDC: 49.999 })).toBe(true)
         expect(Dec.allocationsSumValid({ XLM: 50, USDC: 50.005 })).toBe(true)
     })
 

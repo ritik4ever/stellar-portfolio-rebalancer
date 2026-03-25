@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { api, ENDPOINTS } from '../config/api'
 
 interface PriceData {
     [asset: string]: {
@@ -16,10 +17,7 @@ export const useReflector = () => {
     useEffect(() => {
         const fetchPrices = async () => {
             try {
-                const response = await fetch('/api/prices')
-                if (!response.ok) throw new Error('Failed to fetch prices')
-
-                const data = await response.json()
+                const data = await api.get<PriceData>(ENDPOINTS.PRICES)
                 setPrices(data)
                 setError(null)
             } catch (err) {

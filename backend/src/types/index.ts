@@ -22,13 +22,33 @@ export interface Portfolio {
     userAddress: string
     allocations: Record<string, number>
     threshold: number
-    /** Slippage tolerance in percent (0.5–5). Trades exceeding this are rejected. */
-    slippageTolerance?: number
+    slippageTolerancePercent?: number
+    slippageTolerance?: number        // Add this for backward compatibility
+    strategy?: RebalanceStrategyType   // Add this
+    strategyConfig?: RebalanceStrategyConfig  // Add this
     balances: Record<string, number>
     totalValue: number
     createdAt: string
     lastRebalance: string
     version: number
+}
+
+// Rebalance strategy types
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+
+export interface RebalanceStrategyConfig {
+    type?: RebalanceStrategyType
+    parameters?: Record<string, unknown>
+    enabled?: boolean
+    intervalDays?: number
+    volatilityThresholdPct?: number
+    minDaysBetweenRebalance?: number
+}
+
+export interface UIAllocation {
+    asset: string
+    percentage: number
+    value: number
 }
 
 // Thrown when an update targets a stale portfolio version
@@ -69,7 +89,6 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
-        /** Slippage in basis points for this rebalance (tracked in history). */
         totalSlippageBps?: number
     }
 }
@@ -107,11 +126,18 @@ export interface CircuitBreakerStatus {
 }
 
 // API response interfaces
+export interface ApiErrorResponseBody {
+    code: string
+    message: string
+    details?: unknown
+}
+
 export interface ApiResponse<T = any> {
     success: boolean
-    data?: T
-    error?: string
+    data: T | null
+    error: ApiErrorResponseBody | null
     timestamp: string
+    meta?: Record<string, unknown>
 }
 
 export interface PortfolioApiResponse extends ApiResponse {
