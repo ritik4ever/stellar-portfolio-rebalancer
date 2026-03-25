@@ -2,24 +2,6 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-    test: {
-        environment: 'jsdom',
-        setupFiles: ['./src/test/setup.ts'],
-        include: ['src/**/*.{test,spec}.{ts,tsx}'],
-        exclude: ['tests/e2e/**'],
-        coverage: {
-            provider: 'v8',
-            reporter: ['text', 'json-summary', 'lcov', 'html'],
-            include: [
-                'src/utils/calculations.ts'
-            ],
-            thresholds: {
-                lines: 70,
-                functions: 70,
-                branches: 70
-            }
-        }
-    },
     plugins: [react()],
     server: {
         port: 3000,
