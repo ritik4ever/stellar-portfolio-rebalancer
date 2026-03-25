@@ -47,8 +47,8 @@ describe('RebalanceHistory', () => {
 
         render(<RebalanceHistory portfolioId="p1" />)
 
-        expect(await screen.findByText('Automatic Rebalancing')).toBeInTheDocument()
-        expect(screen.getByText(/2 trades/i)).toBeInTheDocument()
+        expect(await screen.findByText('Automatic Rebalancing')).toBeTruthy()
+        expect(screen.getByText(/2 trades/i)).toBeTruthy()
     })
 
     it('shows fallback error state', async () => {
@@ -56,7 +56,7 @@ describe('RebalanceHistory', () => {
 
         render(<RebalanceHistory portfolioId="p1" />)
 
-        expect(await screen.findByText(/Failed to load rebalance history/i)).toBeInTheDocument()
+        expect(await screen.findByText(/Failed to load rebalance history/i)).toBeTruthy()
     })
 
     it('exports CSV when export button is clicked', async () => {

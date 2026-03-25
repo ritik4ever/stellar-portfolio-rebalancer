@@ -14,7 +14,7 @@ describe('NotificationPreferences', () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         render(<NotificationPreferences userId="user-1" />)
 
-        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+        expect(await screen.findByText('Notifications')).toBeTruthy()
 
         const toggles = screen.getAllByRole('button')
         fireEvent.click(toggles[0])
@@ -22,8 +22,8 @@ describe('NotificationPreferences', () => {
         const emailInput = await screen.findByPlaceholderText(/your-email@example.com/i)
         fireEvent.change(emailInput, { target: { value: 'bad-email' } })
 
-        expect(await screen.findByText(/Invalid email address format/i)).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Save Preferences/i })).toBeDisabled()
+        expect(await screen.findByText(/Invalid email address format/i)).toBeTruthy()
+        expect((screen.getByRole('button', { name: /Save Preferences/i }) as HTMLButtonElement).disabled).toBe(true)
     })
 
     it('saves preferences successfully', async () => {
@@ -31,7 +31,7 @@ describe('NotificationPreferences', () => {
         const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
 
         render(<NotificationPreferences userId="user-1" />)
-        expect(await screen.findByText('Notifications')).toBeInTheDocument()
+        expect(await screen.findByText('Notifications')).toBeTruthy()
 
         const saveBtn = screen.getByRole('button', { name: /Save Preferences/i })
         const toggles = screen.getAllByRole('button')
@@ -40,10 +40,10 @@ describe('NotificationPreferences', () => {
         const emailInput = await screen.findByPlaceholderText(/your-email@example.com/i)
         fireEvent.change(emailInput, { target: { value: 'user@example.com' } })
 
-        expect(saveBtn).toBeEnabled()
+        expect((saveBtn as HTMLButtonElement).disabled).toBe(false)
         fireEvent.click(saveBtn)
 
         await waitFor(() => expect(postSpy).toHaveBeenCalled())
-        expect(await screen.findByText(/Preferences saved successfully/i)).toBeInTheDocument()
+        expect(await screen.findByText(/Preferences saved successfully/i)).toBeTruthy()
     })
 })
