@@ -1,0 +1,36 @@
+name: Env Example Validation
+
+on:
+  pull_request:
+    paths:
+      - 'backend/.env.example'
+      - 'frontend/.env.example'
+      - 'backend/src/**'
+      - 'frontend/src/**'
+      - 'scripts/validate-env-examples.mjs'
+      - '.github/workflows/env-example-validation.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/.env.example'
+      - 'frontend/.env.example'
+      - 'backend/src/**'
+      - 'frontend/src/**'
+      - 'scripts/validate-env-examples.mjs'
+      - '.github/workflows/env-example-validation.yml'
+
+jobs:
+  validate-env-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate backend/frontend .env.example files
+        run: npm run validate:env-examples

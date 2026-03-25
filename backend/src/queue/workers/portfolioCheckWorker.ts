@@ -1,193 +1,85 @@
-import { Worker, Job } from 'bullmq'
-import { getConnectionOptions } from '../connection.js'
+import type { Job } from 'bullmq'
+import { Worker } from 'bullmq'
+import { portfolioStorage } from '../../services/portfolioStorage.js'
 import { StellarService } from '../../services/stellar.js'
 import { ReflectorService } from '../../services/reflector.js'
-import { riskManagementService } from '../../services/serviceContainer.js'
-import { portfolioStorage } from '../../services/portfolioStorage.js'
 import { CircuitBreakers } from '../../services/circuitBreakers.js'
-import { notificationService } from '../../services/notificationService.js'
 import { getRebalanceQueue } from '../queues.js'
-import { logger, logAudit } from '../../utils/logger.js'
 import type { PortfolioCheckJobData } from '../queues.js'
-import {
-    createWorkerRuntimeStatus,
-    markWorkerFailed,
-    markWorkerReady,
-    markWorkerStarting,
-    markWorkerStopped,
-    snapshotWorkerRuntimeStatus,
-    type WorkerRuntimeStatus
-} from './workerRuntime.js'
+import { getConnectionOptions } from '../connection.js'
+import { logger } from '../../utils/logger.js'
+
+const DEMO_PORTFOLIO_IDS = new Set(['demo', 'demo-portfolio-1'])
 
 let worker: Worker | null = null
-const runtimeStatus = createWorkerRuntimeStatus('portfolio-check', 1)
 
-/**
- * Core processor: checks all portfolios for drift and enqueues rebalance jobs
- * as needed. Extracted as a standalone function so tests can call it directly.
- */
-export async function processPortfolioCheckJob(
-    job: Job<PortfolioCheckJobData>
-): Promise<void> {
-    logger.info('[WORKER:portfolio-check] Starting portfolio check cycle', {
+export async function processPortfolioCheckJob(job: Job<PortfolioCheckJobData>): Promise<void> {
+    const triggeredBy = job.data.triggeredBy ?? 'scheduler'
+    logger.info('[WORKER:portfolio-check] Running portfolio check cycle', {
         jobId: job.id,
-        triggeredBy: job.data.triggeredBy ?? 'scheduler',
+        triggeredBy
     })
 
-    const stellarService = new StellarService()
-    const reflectorService = new ReflectorService()
-
     const allPortfolios = await portfolioStorage.getAllPortfolios()
+    const portfolios = allPortfolios.filter((p) => !DEMO_PORTFOLIO_IDS.has(p.id))
 
-    if (allPortfolios.length === 0) {
-        logger.info('[WORKER:portfolio-check] No portfolios to check')
+    if (portfolios.length === 0) {
         return
     }
 
-    // Get current market prices once for all portfolios
-    const prices = await reflectorService.getCurrentPrices()
-
-    // Market-wide circuit breaker
-    const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
-    if (!marketCheck.safe) {
-        logger.warn('[WORKER:portfolio-check] Market conditions unsafe, skipping cycle', {
-            reason: marketCheck.reason,
+    const reflector = new ReflectorService()
+    const prices = await reflector.getCurrentPrices()
+    const market = await CircuitBreakers.checkMarketConditions(prices)
+    if (!market.safe) {
+        logger.warn('[WORKER:portfolio-check] Skipping rebalance enqueue — market conditions unsafe', {
+            jobId: job.id,
+            reason: market.reason
         })
         return
     }
 
-    const rebalanceQueue = getRebalanceQueue()
-
-    let checked = 0
-    let queued = 0
-    let skipped = 0
-
-    for (const portfolio of allPortfolios) {
-        try {
-            checked++
-
-            // Skip demo portfolio
-            if (portfolio.id === 'demo') {
-                logger.info('[WORKER:portfolio-check] Skipping demo portfolio')
-                skipped++
-                continue
-            }
-
-            const needsRebalance = await stellarService.checkRebalanceNeeded(portfolio.id)
-            if (!needsRebalance) {
-                skipped++
-                continue
-            }
-
-            // Use the stored portfolio directly for risk checks.
-            // stellarService.getPortfolio() returns a UI response with allocations as an
-            // array, which would corrupt weight calculations in shouldAllowRebalance.
-            const storedPortfolio = portfolio  // already the stored shape from getAllPortfolios()
-
-            // Check cooldown using last-rebalance timestamp from stored portfolio
-            const cooldownCheck = CircuitBreakers.checkCooldownPeriod(storedPortfolio.lastRebalance)
-            if (!cooldownCheck.safe) {
-                skipped++
-                continue
-            }
-
-            // Risk management — pass stored portfolio with Record<string, number> allocations
-            const riskCheck = riskManagementService.shouldAllowRebalance(storedPortfolio, prices)
-            if (!riskCheck.allowed) {
-                logger.warn('[WORKER:portfolio-check] Rebalance blocked by risk management', {
-                    portfolioId: portfolio.id,
-                    reason: riskCheck.reason,
-                })
-                skipped++
-                continue
-            }
-
-            // Concentration risk
-            const concentrationCheck = CircuitBreakers.checkConcentrationRisk(storedPortfolio.allocations)
-            if (!concentrationCheck.safe) {
-                skipped++
-                continue
-            }
-
-            // Enqueue a rebalance job for this portfolio
-            if (rebalanceQueue) {
-                const jobId = `rebalance-${portfolio.id}-${Date.now()}`
-                await rebalanceQueue.add(
-                    `rebalance-${portfolio.id}`,
-                    { portfolioId: portfolio.id, triggeredBy: 'auto' },
-                    { jobId }
-                )
-                queued++
-                logger.info('[WORKER:portfolio-check] Enqueued rebalance job', {
-                    portfolioId: portfolio.id,
-                    jobId,
-                })
-                logAudit('auto_rebalance_enqueued', {
-                    portfolioId: portfolio.id,
-                    jobId,
-                })
-            }
-        } catch (err) {
-            logger.error('[WORKER:portfolio-check] Error checking portfolio', {
-                portfolioId: portfolio.id,
-                error: err instanceof Error ? err.message : String(err),
-            })
-            skipped++
-        }
+    const queue = getRebalanceQueue()
+    if (!queue) {
+        logger.warn('[WORKER:portfolio-check] Rebalance queue unavailable', { jobId: job.id })
+        return
     }
 
-    logger.info('[WORKER:portfolio-check] Cycle complete', {
-        checked,
-        queued,
-        skipped,
-    })
+    const stellarService = new StellarService()
+    for (const p of portfolios) {
+        const needed = await stellarService.checkRebalanceNeeded(p.id)
+        if (!needed) continue
+
+        await queue.add(
+            `rebalance-${p.id}`,
+            { portfolioId: p.id, triggeredBy: 'auto' as const },
+            { removeOnComplete: true }
+        )
+    }
 }
 
-/**
- * Starts the portfolio-check BullMQ worker (singleton).
- */
 export function startPortfolioCheckWorker(): Worker | null {
     if (worker) return worker
-
     try {
-        markWorkerStarting(runtimeStatus)
-        worker = new Worker(
-            'portfolio-check',
-            processPortfolioCheckJob,
-            {
-                connection: getConnectionOptions(),
-                concurrency: 1,
-            }
-        )
+        worker = new Worker('portfolio-check', processPortfolioCheckJob, {
+            connection: getConnectionOptions(),
+            concurrency: 1
+        })
     } catch (err) {
-        markWorkerFailed(runtimeStatus, err)
         logger.warn('[WORKER:portfolio-check] Failed to start – Redis may be unavailable', {
-            error: err instanceof Error ? err.message : String(err),
+            error: err instanceof Error ? err.message : String(err)
         })
         return null
     }
 
-    void worker.waitUntilReady()
-        .then(() => {
-            markWorkerReady(runtimeStatus)
-            logger.info('[WORKER:portfolio-check] Worker ready')
-        })
-        .catch((err) => {
-            markWorkerFailed(runtimeStatus, err)
-            logger.error('[WORKER:portfolio-check] Worker failed readiness check', {
-                error: err instanceof Error ? err.message : String(err),
-            })
-        })
-
-    worker.on('completed', (job) => {
-        logger.info('[WORKER:portfolio-check] Job completed', { jobId: job.id })
+    worker.on('completed', (j) => {
+        logger.info('[WORKER:portfolio-check] Job completed', { jobId: j.id })
     })
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', (j, err) => {
         logger.error('[WORKER:portfolio-check] Job failed', {
-            jobId: job?.id,
+            jobId: j?.id,
             error: err.message,
-            attemptsMade: job?.attemptsMade,
+            attemptsMade: j?.attemptsMade
         })
     })
 
@@ -199,11 +91,10 @@ export async function stopPortfolioCheckWorker(): Promise<void> {
     if (worker) {
         await worker.close()
         worker = null
-        markWorkerStopped(runtimeStatus)
         logger.info('[WORKER:portfolio-check] Worker stopped')
     }
 }
 
-export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
-    return snapshotWorkerRuntimeStatus(runtimeStatus)
+export function isPortfolioCheckWorkerRunning(): boolean {
+    return worker !== null
 }

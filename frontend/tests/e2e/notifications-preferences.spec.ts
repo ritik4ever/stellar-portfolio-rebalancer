@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { connectMockWallet } from './helpers'
 
 test.describe('Notification preferences flow', () => {
   test('loads preferences and saves updates deterministically', async ({ page }) => {
@@ -42,8 +43,7 @@ test.describe('Notification preferences flow', () => {
     })
 
     await page.goto('/')
-    await page.getByRole('button', { name: /Connect Wallet/i }).first().click()
-    await page.getByRole('button', { name: /Mock Wallet \(Test\)/i }).click()
+    await connectMockWallet(page)
 
     await expect(page.getByRole('heading', { name: /Portfolio Dashboard/i })).toBeVisible({ timeout: 10000 })
     await page.getByRole('button', { name: /Notifications/i }).click()

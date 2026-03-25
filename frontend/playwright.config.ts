@@ -56,7 +56,8 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     env: {
-       VITE_E2E_MOCK_WALLET: 'true'
-    }
+      VITE_E2E_MOCK_WALLET: 'true',
+      ...(process.env.VITE_API_URL ? { VITE_API_URL: process.env.VITE_API_URL } : {}),
+    },
   },
 });
