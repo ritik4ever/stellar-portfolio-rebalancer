@@ -36,17 +36,19 @@ describe('requireAdmin middleware', () => {
         const timestamp = Date.now().toString()
         const sig = kp.sign(Buffer.from(timestamp, 'utf8')).toString('base64')
         const next = vi.fn()
-
-        requireAdmin({
+        const req = {
             headers: {
                 'x-public-key': kp.publicKey(),
                 'x-message': timestamp,
                 'x-signature': sig
             }
-        } as any, {} as any, next)
+        } as any
+
+        requireAdmin(req, {} as any, next)
 
         expect(next).toHaveBeenCalledOnce()
         expect(failMock).not.toHaveBeenCalled()
+        expect(req.adminPublicKey).toBe(kp.publicKey())
     })
 
     it('rejects invalid signature', async () => {

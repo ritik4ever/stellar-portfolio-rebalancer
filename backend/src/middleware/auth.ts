@@ -42,5 +42,6 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
         fail(res, 403, 'FORBIDDEN', 'Forbidden')
         return
     }
+    req.adminPublicKey = pub
     next()
 }
