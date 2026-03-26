@@ -5,12 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { ConflictError } from '../types/index.js'
-import {
-    AssetRegistryConflictError,
-    isSqliteAssetPrimaryKeyConflict
-} from './assetRegistryValidation.js'
-import { logger } from '../utils/logger.js'
-import type { Portfolio } from '../types/index.js'
+
 
 // ─────────────────────────────────────────────
 // Exported type used by rebalanceHistory.ts

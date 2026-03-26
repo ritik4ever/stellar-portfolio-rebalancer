@@ -1,9 +1,7 @@
 import 'dotenv/config'
 import { validateStartupConfigOrThrow, buildStartupSummary } from './config/startupConfig.js'
 import { logger } from './utils/logger.js'
-import { createApp } from './startup/appFactory.js'
-import { createHttpServer } from './startup/httpServer.js'
-import { startQueueSchedulerOnListen } from './startup/workers.js'
+
 
 const config = validateStartupConfigOrThrow()
 const app = createApp(config)
