@@ -84,6 +84,8 @@ cp frontend/.env.example frontend/.env
 ```
 >Edit `.env` files with your own configuration (contract addresses, API keys, etc.)
 
+The frontend HTTP client targets **`/api/v1/*`** for resource routes by default (`VITE_API_VERSION=v1` in `frontend/.env.example`). JWT auth still uses **`/api/auth/*`**. See [API.md](API.md) for versioning details.
+
 ## Database Migrations (PostgreSQL)
 ```bash
 cd backend
@@ -104,7 +106,7 @@ Other providers: SendGrid, Mailgun, AWS SES.
 
 Test Notifications:
 ```bash
-curl -X POST http://localhost:3001/api/notifications/test \
+curl -X POST http://localhost:3001/api/v1/notifications/test \
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 ```

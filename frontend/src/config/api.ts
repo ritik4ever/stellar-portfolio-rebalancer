@@ -1,5 +1,9 @@
 import { browserPriceService } from '../services/browserPriceService'
 import { getAccessToken, refresh } from '../services/authService'
+import { getApiResourceRoot } from './apiVersion'
+
+/** Resolved once at load; see `getApiResourceRoot` and `frontend/src/config/apiVersion.ts`. */
+export const API_RESOURCE_ROOT = getApiResourceRoot()
 
 export interface ApiErrorPayload {
     code: string
@@ -69,31 +73,43 @@ export const API_CONFIG = {
     ENDPOINTS: {
         HEALTH: '/health',
         ROOT: '/',
+        /** Versionless auth namespace (matches backend `app.use('/api/auth', authRouter)`) */
         AUTH_LOGIN: '/api/auth/login',
         AUTH_REFRESH: '/api/auth/refresh',
         AUTH_LOGOUT: '/api/auth/logout',
-        PORTFOLIO: '/api/portfolio',
-        USER_PORTFOLIOS: (address: string) => `/api/user/${address}/portfolios`,
-        PORTFOLIO_DETAIL: (id: string) => `/api/portfolio/${id}`,
-        PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') => `/api/portfolio/${id}/export?format=${format}`,
-        PORTFOLIO_REBALANCE: (id: string) => `/api/portfolio/${id}/rebalance`,
-        PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `/api/portfolio/${id}/rebalance-estimate`,
-        PORTFOLIO_REBALANCE_STATUS: (id: string) => `/api/portfolio/${id}/rebalance-status`,
-        PRICES: '/api/prices',
-        PRICES_ENHANCED: '/api/prices/enhanced',
-        MARKET_DETAILS: (asset: string) => `/api/market/${asset}/details`,
-        PRICE_CHART: (asset: string) => `/api/market/${asset}/chart`,
-        REBALANCE_HISTORY: '/api/rebalance/history',
-        REBALANCE_RECORD: '/api/rebalance/history',
-        STRATEGIES: '/api/strategies',
-        ASSETS: '/api/assets',
-        RISK_METRICS: (portfolioId: string) => `/api/risk/metrics/${portfolioId}`,
-        RISK_CHECK: (portfolioId: string) => `/api/risk/check/${portfolioId}`,
+        PORTFOLIO: `${API_RESOURCE_ROOT}/portfolio`,
+        USER_PORTFOLIOS: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/portfolios`,
+        PORTFOLIO_DETAIL: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}`,
+        PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') =>
+            `${API_RESOURCE_ROOT}/portfolio/${id}/export?format=${format}`,
+        PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
+        PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-estimate`,
+        PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
+        PORTFOLIO_ANALYTICS: (id: string, days: number) =>
+            `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
+        PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) =>
+            `${API_RESOURCE_ROOT}/portfolio/${id}/performance-summary`,
+        PRICES: `${API_RESOURCE_ROOT}/prices`,
+        PRICES_ENHANCED: `${API_RESOURCE_ROOT}/prices/enhanced`,
+        MARKET_DETAILS: (asset: string) => `${API_RESOURCE_ROOT}/market/${asset}/details`,
+        PRICE_CHART: (asset: string) => `${API_RESOURCE_ROOT}/market/${asset}/chart`,
+        REBALANCE_HISTORY: `${API_RESOURCE_ROOT}/rebalance/history`,
+        REBALANCE_RECORD: `${API_RESOURCE_ROOT}/rebalance/history`,
+        STRATEGIES: `${API_RESOURCE_ROOT}/strategies`,
+        ASSETS: `${API_RESOURCE_ROOT}/assets`,
+        RISK_METRICS: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/metrics/${portfolioId}`,
+        RISK_CHECK: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/check/${portfolioId}`,
+        NOTIFICATIONS_PREFERENCES: `${API_RESOURCE_ROOT}/notifications/preferences`,
+        NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
+        NOTIFICATIONS_UNSUBSCRIBE: (userId: string) =>
+            `${API_RESOURCE_ROOT}/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
+        NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/notifications/test`,
+        NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/notifications/test-all`,
         TEST_CORS: '/test/cors',
         TEST_COINGECKO: '/test/coingecko',
-        CONSENT_STATUS: '/api/consent/status',
-        CONSENT_RECORD: '/api/consent',
-        USER_DATA_DELETE: (address: string) => `/api/user/${address}/data`,
+        CONSENT_STATUS: `${API_RESOURCE_ROOT}/consent/status`,
+        CONSENT_RECORD: `${API_RESOURCE_ROOT}/consent`,
+        USER_DATA_DELETE: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/data`,
     }
 }
 
@@ -101,6 +117,7 @@ export const API_CONFIG = {
 const viteEnv = (import.meta as any).env
 console.log('API Configuration:', {
     baseUrl: API_CONFIG.BASE_URL,
+    apiResourceRoot: API_RESOURCE_ROOT,
     isDev: !viteEnv?.PROD,
     envApiUrl: viteEnv?.VITE_API_URL,
     mode: viteEnv?.MODE

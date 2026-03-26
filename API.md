@@ -15,7 +15,17 @@ This document describes the HTTP API for the Stellar Portfolio Rebalancer backen
 - **Development:** `http://localhost:3000` (or the port set by `PORT`)
 - **Production:** Your deployed backend URL
 
-All API routes below are relative to the base URL. The main API prefix is `/api`.
+All API routes below are relative to the base URL.
+
+### URL versioning
+
+| Namespace | Purpose |
+|-----------|---------|
+| **`/api/v1/*`** | **Canonical** portfolio/API surface. Prefer this for new clients; responses do not include deprecation headers. |
+| **`/api/*`** (same paths, no `v1` segment) | **Legacy** compatibility; the server may attach `Deprecation`, `Sunset`, and `Link` headers (RFC 8594). |
+| **`/api/auth/*`** | JWT login, refresh, and logout — **not** under `/api/v1` (see `backend/src/http/mountApiRoutes.ts`). |
+
+The **frontend** defaults to `/api/v1` for resource routes via `VITE_API_VERSION` and `API_RESOURCE_ROOT` in `frontend/src/config/api.ts` (see `frontend/.env.example`). Set `VITE_USE_LEGACY_API=true` only for emergency rollback to unversioned `/api/*`.
 
 ## Authentication
 

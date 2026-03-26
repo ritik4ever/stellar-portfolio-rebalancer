@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { TrendingUp, Shield, Zap, ArrowRight, X } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { WalletSelector } from './WalletSelector'
-import { api } from '../config/api'
+import { api, ENDPOINTS } from '../config/api'
 
 interface LandingProps {
     onNavigate: (view: string) => void
@@ -25,7 +25,9 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
     const handleWalletSelected = async (pk: string) => {
         setShowWalletSelector(false)
         try {
-            const res = await api.get<{ accepted: boolean }>(`/api/consent/status?userId=${encodeURIComponent(pk)}`)
+            const res = await api.get<{ accepted: boolean }>(
+                `${ENDPOINTS.CONSENT_STATUS}?userId=${encodeURIComponent(pk)}`
+            )
             if (res?.accepted) {
                 await onConnectWallet()
             } else if (onNeedsConsent) {
