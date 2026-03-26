@@ -1085,204 +1085,78 @@ router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimi
 })
 
 // ================================
-// NOTIFICATION TEST ROUTES
-// ================================
-
-// Test notification delivery
-// router.post('/notifications/test', async (req: Request, res: Response) => {
-//     try {
-//         const { userId, eventType } = req.body
-
-//         if (!userId) {
-//             return res.status(400).json({
-//                 success: false,
-//                 error: 'userId is required'
-//             })
-//         }
-
-//         if (!eventType || !['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange'].includes(eventType)) {
-//             return res.status(400).json({
-//                 success: false,
-//                 error: 'eventType must be one of: rebalance, circuitBreaker, priceMovement, riskChange'
-//             })
-//         }
-
-//         // Check if user has preferences
-//         const preferences = notificationService.getPreferences(userId)
-//         if (!preferences) {
-//             return res.status(404).json({
-//                 success: false,
-//                 error: 'No notification preferences found for this user. Please subscribe first.'
-//             })
-//         }
-
-//         // Create test notification payload based on event type
-//         let payload: any = {
-//             userId,
-//             eventType,
-//             timestamp: new Date().toISOString()
-//         }
-
-//         switch (eventType) {
-//             case 'rebalance':
-//                 payload.title = 'Test: Portfolio Rebalanced'
-//                 payload.message = 'This is a test notification for a rebalance event. Your portfolio has been rebalanced with 3 trades executed.'
-//                 payload.data = {
-//                     portfolioId: 'test-portfolio-123',
-//                     trades: 3,
-//                     gasUsed: '0.0234 XLM',
-//                     trigger: 'manual'
-//                 }
-//                 break
-
-//             case 'circuitBreaker':
-//                 payload.title = 'Test: Circuit Breaker Triggered'
-//                 payload.message = 'This is a test notification for a circuit breaker event. Circuit breaker activated for BTC due to 22.5% price movement.'
-//                 payload.data = {
-//                     asset: 'BTC',
-//                     priceChange: '22.5',
-//                     cooldownMinutes: 5
-//                 }
-//                 break
-
-//             case 'priceMovement':
-//                 payload.title = 'Test: Large Price Movement Detected'
-//                 payload.message = 'This is a test notification for a price movement event. ETH price increased by 12.34% to $2,150.00'
-//                 payload.data = {
-//                     asset: 'ETH',
-//                     priceChange: '12.34',
-//                     currentPrice: 2150.00,
-//                     direction: 'increased'
-//                 }
-//                 break
-
-//             case 'riskChange':
-//                 payload.title = 'Test: Portfolio Risk Level Changed'
-//                 payload.message = 'This is a test notification for a risk level change. Your portfolio risk level has increased from medium to high.'
-//                 payload.data = {
-//                     portfolioId: 'test-portfolio-123',
-//                     oldLevel: 'medium',
-//                     newLevel: 'high',
-//                     severity: 'increased'
-//                 }
-//                 break
-//         }
-
-//         // Send the notification
-//         await notificationService.notify(payload)
-
-//         logger.info('Test notification sent', { userId, eventType })
-
-//         res.json({
-//             success: true,
-//             message: 'Test notification sent successfully',
-//             sentTo: {
-//                 email: preferences.emailEnabled ? preferences.emailAddress : null,
-//                 webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
-//             },
-//             eventType,
-//             timestamp: new Date().toISOString()
-//         })
-//     } catch (error) {
-//         logger.error('Failed to send test notification', { error: getErrorObject(error) })
-//         res.status(500).json({
-//             success: false,
-//             error: getErrorMessage(error)
-//         })
-//     }
-// })
-
-// Test all notification types at once
-// router.post('/notifications/test-all', async (req: Request, res: Response) => {
-//     try {
-//         const { userId } = req.body
-
-//         if (!userId) {
-//             return res.status(400).json({
-//                 success: false,
-//                 error: 'userId is required'
-//             })
-//         }
-
-//         const preferences = notificationService.getPreferences(userId)
-//         if (!preferences) {
-//             return res.status(404).json({
-//                 success: false,
-//                 error: 'No notification preferences found for this user. Please subscribe first.'
-//             })
-//         }
-
-//         const eventTypes = ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']
-//         const results = []
-
-//         for (const eventType of eventTypes) {
-//             try {
-//                 // Create test payload
-//                 let payload: any = {
-//                     userId,
-//                     eventType,
-//                     timestamp: new Date().toISOString()
-//                 }
-
-//                 switch (eventType) {
-//                     case 'rebalance':
-//                         payload.title = 'Test: Portfolio Rebalanced'
-//                         payload.message = 'Test rebalance notification - 3 trades executed'
-//                         payload.data = { portfolioId: 'test-123', trades: 3, gasUsed: '0.0234 XLM' }
-//                         break
-//                     case 'circuitBreaker':
-//                         payload.title = 'Test: Circuit Breaker Triggered'
-//                         payload.message = 'Test circuit breaker notification - BTC moved 22.5%'
-//                         payload.data = { asset: 'BTC', priceChange: '22.5' }
-//                         break
-//                     case 'priceMovement':
-//                         payload.title = 'Test: Large Price Movement'
-//                         payload.message = 'Test price movement notification - ETH up 12.34%'
-//                         payload.data = { asset: 'ETH', priceChange: '12.34', direction: 'increased' }
-//                         break
-//                     case 'riskChange':
-//                         payload.title = 'Test: Risk Level Changed'
-//                         payload.message = 'Test risk change notification - Risk increased to high'
-//                         payload.data = { oldLevel: 'medium', newLevel: 'high' }
-//                         break
-//                 }
-
-//                 await notificationService.notify(payload)
-//                 results.push({ eventType, status: 'sent' })
-//             } catch (error) {
-//                 results.push({ 
-//                     eventType, 
-//                     status: 'failed', 
-//                     error: error instanceof Error ? error.message : String(error) 
-//                 })
-//             }
-
-//             // Small delay between notifications
-//             await new Promise(resolve => setTimeout(resolve, 500))
-//         }
-
-//         res.json({
-//             success: true,
-//             message: 'Test notifications sent',
-//             results,
-//             sentTo: {
-//                 email: preferences.emailEnabled ? preferences.emailAddress : null,
-//                 webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
-//             },
-//             timestamp: new Date().toISOString()
-//         })
-//     } catch (error) {
-//         logger.error('Failed to send test notifications', { error: getErrorObject(error) })
-//         res.status(500).json({
-//             success: false,
-//             error: getErrorMessage(error)
-//         })
-//     }
-// })
-
-// ================================
 // DEBUG ROUTES
 // ================================
+
+/**
+ * Debug-only + admin-gated endpoint for sending a single test notification.
+ * This keeps test-notification behavior explicit and isolated from production routes.
+ */
+router.post('/debug/notifications/test', blockDebugInProduction, requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const userId = (req.body?.userId ?? req.user?.address) as string | undefined
+        const eventType = req.body?.eventType as 'rebalance' | 'circuitBreaker' | 'priceMovement' | 'riskChange' | undefined
+        const normalizedEventType = eventType ?? 'rebalance'
+        const allowedEvents = new Set(['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange'])
+
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        if (!allowedEvents.has(normalizedEventType)) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'eventType must be one of: rebalance, circuitBreaker, priceMovement, riskChange')
+        }
+
+        const preferences = notificationService.getPreferences(userId)
+        if (!preferences) {
+            return fail(res, 404, 'NOT_FOUND', 'No notification preferences found for this user')
+        }
+
+        const payloadBase = {
+            userId,
+            eventType: normalizedEventType,
+            timestamp: new Date().toISOString()
+        }
+
+        const payloadByType = {
+            rebalance: {
+                title: 'Test: Portfolio Rebalanced',
+                message: 'Test rebalance notification - 3 trades executed.',
+                data: { portfolioId: 'test-portfolio-123', trades: 3, gasUsed: '0.0234 XLM' }
+            },
+            circuitBreaker: {
+                title: 'Test: Circuit Breaker Triggered',
+                message: 'Test circuit breaker notification - BTC moved 22.5%.',
+                data: { asset: 'BTC', priceChange: '22.5', cooldownMinutes: 5 }
+            },
+            priceMovement: {
+                title: 'Test: Large Price Movement',
+                message: 'Test price movement notification - ETH up 12.34%.',
+                data: { asset: 'ETH', priceChange: '12.34', direction: 'increased' }
+            },
+            riskChange: {
+                title: 'Test: Risk Level Changed',
+                message: 'Test risk change notification - Risk increased to high.',
+                data: { portfolioId: 'test-portfolio-123', oldLevel: 'medium', newLevel: 'high' }
+            }
+        } as const
+
+        await notificationService.notify({
+            ...payloadBase,
+            ...payloadByType[normalizedEventType]
+        })
+
+        logger.info('Debug test notification sent', { userId, eventType: normalizedEventType })
+        return ok(res, {
+            message: 'Test notification sent successfully',
+            eventType: normalizedEventType,
+            sentTo: {
+                email: preferences.emailEnabled ? preferences.emailAddress : null,
+                webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
+            }
+        })
+    } catch (error) {
+        logger.error('Failed to send debug test notification', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
 
 router.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
