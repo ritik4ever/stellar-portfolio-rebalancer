@@ -88,7 +88,7 @@ router.get('/consent/status', (req: Request, res: Response) => {
 })
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-router.post('/consent', ...protectedWriteLimiter, (req: Request, res: Response) => {
+router.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, (req: Request, res: Response) => {
     try {
         const { userId, terms, privacy, cookies } = req.body ?? {}
         if (!userId || typeof userId !== 'string') return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
@@ -175,7 +175,7 @@ router.get('/admin/rate-limits/metrics', requireAdmin, (_req: Request, res: Resp
 })
 
 /** Admin: add asset */
-router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+router.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body ?? {}
         assetRegistryService.add(
@@ -245,7 +245,7 @@ router.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (re
 })
 
 /** Admin: enable/disable asset */
-router.patch('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
+router.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         const enabled = req.body?.enabled
