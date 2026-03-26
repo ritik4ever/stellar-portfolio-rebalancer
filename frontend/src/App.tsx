@@ -9,6 +9,8 @@ import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
 import { api } from './config/api'
 import type { LegalDocType } from './components/Legal'
+import RealtimeStatusBanner from './components/RealtimeStatusBanner'
+import { useRealtimeConnection } from './context/RealtimeConnectionContext'
 
 function App() {
     const [currentView, setCurrentView] = useState('landing')
@@ -17,6 +19,7 @@ function App() {
     const [legalDoc, setLegalDoc] = useState<LegalDocType | null>(null)
     const [isConnecting, setIsConnecting] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const { state: realtimeState } = useRealtimeConnection()
 
     useEffect(() => {
         checkWalletConnection()
@@ -158,10 +161,18 @@ function App() {
         setCurrentView(view)
     }
 
+    const errorTop =
+        realtimeState === 'connected'
+            ? 'top-4'
+            : 'top-[4.5rem]'
+
     return (
-        <div className="App">
+        <div className={`App min-h-screen ${realtimeState === 'connected' ? '' : 'pt-14'}`}>
+            <RealtimeStatusBanner />
             {error && (
-                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md">
+                <div
+                    className={`fixed left-1/2 transform -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md ${errorTop}`}
+                >
                     <div className="flex items-center text-red-800 dark:text-red-300">
                         <span className="mr-2">⚠️</span>
                         <span>{error}</span>

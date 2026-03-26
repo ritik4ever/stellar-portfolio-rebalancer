@@ -3,7 +3,6 @@ import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown
 
 // TanStack Query Hooks
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
-import { api, ENDPOINTS } from '../config/api'
 
 //  NEW: export utils
 import { downloadCSV, toCSV } from '../utils/export'

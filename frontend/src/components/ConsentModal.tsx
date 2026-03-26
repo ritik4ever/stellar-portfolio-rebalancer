@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react'
-import { FileText, AlertCircle } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 import { api } from '../config/api'
 
 interface ConsentModalProps {

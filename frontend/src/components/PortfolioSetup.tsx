@@ -203,44 +203,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation();
 
-  // ── Static data ────────────────────────────────────────────────────────────
-
-  /** All supported assets the user can allocate to */
-  const assetOptions = [
-    { value: "XLM", label: "XLM (Stellar Lumens)" },
-    { value: "USDC", label: "USDC (USD Coin)" },
-    { value: "BTC", label: "BTC (Bitcoin)" },
-    { value: "ETH", label: "ETH (Ethereum)" },
-  ];
-
-  /** Pre-built allocation sets for quick setup */
-  const presetPortfolios = [
-    {
-      name: "Conservative",
-      allocations: [
-        { asset: "XLM", percentage: 50 },
-        { asset: "USDC", percentage: 40 },
-        { asset: "BTC", percentage: 10 },
-      ],
-    },
-    {
-      name: "Balanced",
-      allocations: [
-        { asset: "XLM", percentage: 40 },
-        { asset: "USDC", percentage: 35 },
-        { asset: "BTC", percentage: 25 },
-      ],
-    },
-    {
-      name: "Aggressive",
-      allocations: [
-        { asset: "BTC", percentage: 50 },
-        { asset: "ETH", percentage: 30 },
-        { asset: "XLM", percentage: 20 },
-      ],
-    },
-  ];
-
   // ── Validation ─────────────────────────────────────────────────────────────
 
   /**
@@ -404,6 +366,48 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
     setError(null);
 
+    const DEMO_USER_ADDRESS =
+      "GA2C5RFPE6GCKIG3EQRUUYYTQ27WXYVHTP73HZY4MDF4M7Q2W4M2OWH7";
+    const userAddress = publicKey ?? DEMO_USER_ADDRESS;
+    const allocationsRecord = Object.fromEntries(
+      allocations.map((a) => [a.asset, a.percentage]),
+    );
+    const strategyEnum = ["threshold", "periodic", "volatility", "custom"] as const;
+    const strategySafe = strategyEnum.includes(strategy as (typeof strategyEnum)[number])
+      ? (strategy as (typeof strategyEnum)[number])
+      : "threshold";
+    const strategyConfigBody: {
+      intervalDays?: number;
+      volatilityThresholdPct?: number;
+      minDaysBetweenRebalance?: number;
+    } = {};
+    if (strategyConfig.intervalDays != null) {
+      strategyConfigBody.intervalDays = strategyConfig.intervalDays;
+    }
+    if (strategyConfig.volatilityThresholdPct != null) {
+      strategyConfigBody.volatilityThresholdPct = strategyConfig.volatilityThresholdPct;
+    }
+    if (strategyConfig.minDaysBetweenRebalance != null) {
+      strategyConfigBody.minDaysBetweenRebalance = strategyConfig.minDaysBetweenRebalance;
+    }
+
+    try {
+      await createPortfolioMutation.mutateAsync({
+        userAddress,
+        allocations: allocationsRecord,
+        threshold,
+        slippageTolerance,
+        strategy: strategySafe,
+        strategyConfig: strategyConfigBody,
+      });
+      setSuccess(true);
+      setTimeout(() => onNavigate("dashboard"), 2000);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create portfolio";
+      setError(message);
+    }
+  };
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();

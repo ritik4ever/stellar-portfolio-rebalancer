@@ -51,9 +51,9 @@ describe('apiRequest envelope handling', () => {
             })
         })))
 
-        const { apiRequest, ApiClientError } = await import('./api')
+        const { apiRequest } = await import('./api')
 
-        await expect(apiRequest('/api/portfolio/p1')).rejects.toMatchObject<ApiClientError>({
+        await expect(apiRequest('/api/portfolio/p1')).rejects.toMatchObject({
             name: 'ApiClientError',
             status: 409,
             code: 'CONFLICT',
