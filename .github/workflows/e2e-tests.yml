@@ -1,0 +1,111 @@
+name: Playwright E2E Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      # Required by validateStartupConfigOrThrow — backend/src/index.ts runs this before listen().
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_CONTRACT_ADDRESS: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      DEMO_MODE: 'true'
+      ALLOW_DEMO_BALANCE_FALLBACK: 'true'
+      JWT_SECRET: e2e-ci-jwt-secret-at-least-32-characters-long
+      # Job-wide DB: migrate, seed, `npm start` — explicit PG* avoids implicit OS user (FATAL: role "root").
+      DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
+      PGUSER: testuser
+      PGPASSWORD: testpassword
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGDATABASE: stellartest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: stellartest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install Dependencies (All)
+      run: npm run install:all
+
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps chromium
+      working-directory: ./frontend
+
+    - name: Setup Backend Database
+      run: |
+        npm run db:migrate
+        npm run db:seed:e2e
+      working-directory: ./backend
+
+    - name: Start Backend Services
+      env:
+        PORT: 3001
+      run: |
+        npm run build
+        npm start &
+        echo "Backend started"
+        ok=0
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:3001/health > /dev/null; then
+            echo "Backend healthy"
+            ok=1
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+        if [ "$ok" != 1 ]; then
+          echo "::error::Backend did not become healthy on http://localhost:3001/health"
+          exit 1
+        fi
+      working-directory: ./backend
+
+    - name: Run Playwright tests
+      env:
+        VITE_API_URL: http://localhost:3001
+        VITE_E2E_MOCK_WALLET: 'true'
+      run: npx playwright test
+      working-directory: ./frontend
+
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report
+        path: frontend/playwright-report/
+        retention-days: 30
+
+    - name: Upload Playwright test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-test-results
+        path: frontend/test-results/
+        retention-days: 30

@@ -1,19 +1,16 @@
 import { StellarService } from './stellar.js'
 import { ReflectorService } from './reflector.js'
-import { RebalanceHistoryService } from './rebalanceHistory.js'
-import { RiskManagementService } from './riskManagements.js'
+import { rebalanceHistoryService } from './serviceContainer.js'
 import { portfolioStorage } from './portfolioStorage.js'
 import { CircuitBreakers } from './circuitBreakers.js'
 import { notificationService } from './notificationService.js'
-import { logger } from '../utils/logger.js'
+import { logger, logAudit } from '../utils/logger.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { isRedisAvailable } from '../queue/connection.js'
 
 export class AutoRebalancerService {
     private stellarService: StellarService
     private reflectorService: ReflectorService
-    private rebalanceHistoryService: RebalanceHistoryService
-    private riskManagementService: RiskManagementService
     private isRunning = false
 
     // Configuration (kept for getStatus() compatibility)
@@ -24,8 +21,6 @@ export class AutoRebalancerService {
     constructor() {
         this.stellarService = new StellarService()
         this.reflectorService = new ReflectorService()
-        this.rebalanceHistoryService = new RebalanceHistoryService()
-        this.riskManagementService = new RiskManagementService()
     }
 
     /**
@@ -42,6 +37,7 @@ export class AutoRebalancerService {
 
         this.isRunning = true
         logger.info('[AUTO-REBALANCER] Service started (queue-backed)')
+        logAudit('auto_rebalancer_started', { backend: 'bullmq' })
 
         const redisUp = await isRedisAvailable()
         if (redisUp) {
@@ -66,6 +62,7 @@ export class AutoRebalancerService {
         if (!this.isRunning) return
         this.isRunning = false
         logger.info('[AUTO-REBALANCER] Service stopped')
+        logAudit('auto_rebalancer_stopped', { backend: 'bullmq' })
     }
 
     /**
@@ -81,6 +78,7 @@ export class AutoRebalancerService {
             { priority: 1 }
         )
         logger.info('[AUTO-REBALANCER] Force check job enqueued')
+        logAudit('auto_rebalancer_force_check_enqueued', { backend: 'bullmq' })
     }
 
     /**
@@ -112,7 +110,7 @@ export class AutoRebalancerService {
         averageRebalancesPerDay: number
     }> {
         try {
-            const allAutoRebalances = await this.rebalanceHistoryService.getAllAutoRebalances()
+            const allAutoRebalances = await rebalanceHistoryService.getAllAutoRebalances()
 
             const today = new Date()
             today.setHours(0, 0, 0, 0)

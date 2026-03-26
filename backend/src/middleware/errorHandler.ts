@@ -20,7 +20,8 @@ export const errorHandler = (
         stack: err.stack,
         url: req.url,
         method: req.method,
-        statusCode: err.statusCode
+        statusCode: err.statusCode,
+        requestId: req.requestId
     })
 
     if (process.env.NODE_ENV === 'development') {

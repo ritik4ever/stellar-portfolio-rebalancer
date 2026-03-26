@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { api, ENDPOINTS } from '../config/api'
 
 interface PortfolioData {
     id: string
@@ -24,10 +25,7 @@ export const usePortfolio = (portfolioId?: string) => {
         const fetchPortfolio = async () => {
             try {
                 setLoading(true)
-                const response = await fetch(`/api/portfolio/${portfolioId}`)
-                if (!response.ok) throw new Error('Failed to fetch portfolio')
-
-                const data = await response.json()
+                const data = await api.get<{ portfolio: PortfolioData }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId))
                 setPortfolio(data.portfolio)
                 setError(null)
             } catch (err) {
@@ -48,14 +46,10 @@ export const usePortfolio = (portfolioId?: string) => {
         if (!portfolioId) return
 
         try {
-            const response = await fetch(`/api/portfolio/${portfolioId}/rebalance`, {
-                method: 'POST'
-            })
-            if (!response.ok) throw new Error('Rebalance failed')
+            await api.post(ENDPOINTS.PORTFOLIO_REBALANCE(portfolioId))
 
             // Refresh portfolio data
-            const portfolioResponse = await fetch(`/api/portfolio/${portfolioId}`)
-            const data = await portfolioResponse.json()
+            const data = await api.get<{ portfolio: PortfolioData }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId))
             setPortfolio(data.portfolio)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Rebalance failed')

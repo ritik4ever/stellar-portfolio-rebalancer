@@ -1,9 +1,11 @@
-import { Worker, Job } from 'bullmq'
-import { getConnectionOptions } from '../connection.js'
+import type { Job } from 'bullmq'
+import { Worker } from 'bullmq'
+import { logger, logAudit } from '../../utils/logger.js'
+import { rebalanceLockService } from '../../services/rebalanceLock.js'
 import { StellarService } from '../../services/stellar.js'
-import { RebalanceHistoryService } from '../../services/rebalanceHistory.js'
+import { rebalanceHistoryService } from '../../services/serviceContainer.js'
 import { notificationService } from '../../services/notificationService.js'
-import { logger } from '../../utils/logger.js'
+import { getConnectionOptions } from '../connection.js'
 import type { RebalanceJobData } from '../queues.js'
 
 let worker: Worker | null = null
@@ -12,35 +14,44 @@ let worker: Worker | null = null
  * Core processor: executes a single portfolio rebalance.
  * Extracted as a standalone function so tests can call it directly.
  */
-export async function processRebalanceJob(
-    job: Job<RebalanceJobData>
-): Promise<void> {
+export async function processRebalanceJob(job: Job<RebalanceJobData>): Promise<void> {
     const { portfolioId, triggeredBy } = job.data
 
     logger.info('[WORKER:rebalance] Executing rebalance', {
         jobId: job.id,
         portfolioId,
-        triggeredBy,
+        triggeredBy
     })
+    if (triggeredBy === 'auto') {
+        logAudit('auto_rebalance_started', {
+            portfolioId,
+            jobId: job.id
+        })
+    }
+
+    const lockAcquired = await rebalanceLockService.acquireLock(portfolioId)
+
+    if (!lockAcquired) {
+        logger.info('[WORKER:rebalance] Rebalance already in progress. Aborting.', {
+            portfolioId
+        })
+        return
+    }
 
     const stellarService = new StellarService()
-    const rebalanceHistoryService = new RebalanceHistoryService()
-
     try {
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const rebalanceResult = await stellarService.executeRebalance(portfolioId)
 
-        // Record success
         await rebalanceHistoryService.recordRebalanceEvent({
             portfolioId,
             trigger: triggeredBy === 'auto' ? 'Automatic Rebalancing' : 'Manual Rebalancing',
             trades: rebalanceResult.trades ?? 0,
             gasUsed: rebalanceResult.gasUsed ?? '0 XLM',
             status: 'completed',
-            isAutomatic: triggeredBy === 'auto',
+            isAutomatic: triggeredBy === 'auto'
         })
 
-        // Send notification
         try {
             await notificationService.notify({
                 userId: portfolio.userAddress,
@@ -51,25 +62,32 @@ export async function processRebalanceJob(
                     portfolioId,
                     trades: rebalanceResult.trades,
                     gasUsed: rebalanceResult.gasUsed,
-                    trigger: triggeredBy,
+                    trigger: triggeredBy
                 },
-                timestamp: new Date().toISOString(),
+                timestamp: new Date().toISOString()
             })
         } catch (notifyErr) {
             logger.error('[WORKER:rebalance] Notification failed (non-fatal)', {
                 portfolioId,
-                error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+                error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr)
             })
         }
 
         logger.info('[WORKER:rebalance] Rebalance completed', {
             portfolioId,
-            trades: rebalanceResult.trades,
+            trades: rebalanceResult.trades
         })
+        if (triggeredBy === 'auto') {
+            logAudit('auto_rebalance_completed', {
+                portfolioId,
+                jobId: job.id,
+                trades: rebalanceResult.trades ?? 0,
+                status: 'completed'
+            })
+        }
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err)
 
-        // Record failure in audit trail
         try {
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
@@ -78,58 +96,62 @@ export async function processRebalanceJob(
                 gasUsed: '0 XLM',
                 status: 'failed',
                 isAutomatic: triggeredBy === 'auto',
-                error: errorMessage,
+                error: errorMessage
             })
         } catch (histErr) {
-            logger.error('[WORKER:rebalance] Failed to record failure event', { histErr })
+            logger.error('[WORKER:rebalance] Failed to record failure event', {
+                histErr
+            })
         }
 
         logger.error('[WORKER:rebalance] Rebalance failed', {
             portfolioId,
             error: errorMessage,
-            attemptsMade: job.attemptsMade,
+            attemptsMade: job.attemptsMade
         })
+        if (triggeredBy === 'auto') {
+            logAudit('auto_rebalance_failed', {
+                portfolioId,
+                jobId: job.id,
+                error: errorMessage,
+                attemptsMade: job.attemptsMade
+            })
+        }
 
-        // Re-throw so BullMQ can retry with backoff
         throw err
+    } finally {
+        await rebalanceLockService.releaseLock(portfolioId)
     }
 }
 
-/**
- * Starts the rebalance BullMQ worker (singleton).
- */
 export function startRebalanceWorker(): Worker | null {
     if (worker) return worker
 
     try {
-        worker = new Worker(
-            'rebalance',
-            processRebalanceJob,
-            {
-                connection: getConnectionOptions(),
-                concurrency: 3, // up to 3 rebalances in parallel
-            }
-        )
+        worker = new Worker('rebalance', processRebalanceJob, {
+            connection: getConnectionOptions(),
+            concurrency: 3
+        })
     } catch (err) {
         logger.warn('[WORKER:rebalance] Failed to start – Redis may be unavailable', {
-            error: err instanceof Error ? err.message : String(err),
+            error: err instanceof Error ? err.message : String(err)
         })
         return null
     }
 
-    worker.on('completed', (job) => {
+    worker.on('completed', (j: Job) => {
         logger.info('[WORKER:rebalance] Job completed', {
-            jobId: job.id,
-            portfolioId: job.data.portfolioId,
+            jobId: j.id,
+            portfolioId: j.data.portfolioId
         })
     })
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', (j: Job | undefined, err: Error) => {
         logger.error('[WORKER:rebalance] Job failed', {
-            jobId: job?.id,
-            portfolioId: job?.data.portfolioId,
+            jobId: j?.id,
+            portfolioId: j?.data.portfolioId,
             error: err.message,
-            attemptsMade: job?.attemptsMade,
+            attemptsMade: j?.attemptsMade
         })
     })
 
@@ -143,4 +165,8 @@ export async function stopRebalanceWorker(): Promise<void> {
         worker = null
         logger.info('[WORKER:rebalance] Worker stopped')
     }
+}
+
+export function isRebalanceWorkerRunning(): boolean {
+    return worker !== null
 }

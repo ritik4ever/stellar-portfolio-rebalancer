@@ -1,6 +1,10 @@
+import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+
+// TanStack Query Hooks
+import { usePrices } from '../hooks/queries/usePricesQuery'
 import React, { useState, useEffect } from 'react'
-import { TrendingUp, TrendingDown, Activity, Wifi, WifiOff } from 'lucide-react'
-import { API_CONFIG } from '../config/api'
+import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+import { api, API_CONFIG, ENDPOINTS } from '../config/api'
 
 interface PriceTrackerProps {
     compact?: boolean
@@ -16,6 +20,7 @@ interface PriceData {
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const [prices, setPrices] = useState<Record<string, PriceData>>({})
+    const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
     const [loading, setLoading] = useState(true)
     const [lastUpdate, setLastUpdate] = useState<string>('')
     const [error, setError] = useState<string | null>(null)
@@ -23,6 +28,11 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
     useEffect(() => {
         console.log('PriceTracker mounted, API_CONFIG:', API_CONFIG)
+        api.get<{ assets: Array<{ symbol: string }> }>(ENDPOINTS.ASSETS)
+            .then((res) => {
+                if (res?.assets?.length) setAssetList(res.assets.map((a) => a.symbol))
+            })
+            .catch(() => {})
         fetchPrices()
 
         // Update every 60 seconds instead of 30 to avoid rate limits
@@ -32,38 +42,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
     const fetchPrices = async () => {
         try {
-            const url = `${API_CONFIG.BASE_URL}/api/prices`
-            console.log('Fetching prices from:', url)
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                // Add timeout to prevent hanging requests
-                signal: AbortSignal.timeout(10000)
-            })
-
-            console.log('Response status:', response.status)
-            console.log('Response headers:', Object.fromEntries(response.headers.entries()))
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-            }
-
-            const rawData = await response.text()
-            console.log('Raw response:', rawData)
-
-            // Parse JSON safely
-            let data
-            try {
-                data = JSON.parse(rawData)
-            } catch (parseError) {
-                console.error('JSON parse error:', parseError)
-                throw new Error('Invalid JSON response from server')
-            }
-
+            const data = await api.get<Record<string, any>>(ENDPOINTS.PRICES)
             console.log('Parsed price data:', data)
 
             // Transform the data to match expected format
@@ -149,12 +128,20 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
             setLoading(false)
         }
     }
+    // Query for prices
+    const { data: priceData, isLoading, error: queryError } = usePrices()
 
     const retryConnection = () => {
-        setLoading(true)
-        setError(null)
-        fetchPrices()
+        // TanStack Query handles retries, but we can refetch manually
+        window.location.reload()
     }
+
+    // Determine finalized data and loading state
+    const prices: Record<string, PriceData> = priceData || {}
+    const loading = isLoading && Object.keys(prices).length === 0
+    const error = queryError ? 'Failed to fetch real-time prices' : null
+    const isConnected = !queryError
+    const lastUpdate = new Date().toLocaleTimeString()
 
     // NEW: Show skeleton loading state
     if (loading && Object.keys(prices).length === 0) {
@@ -181,7 +168,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         )
     }
 
-    const assets = ['XLM', 'BTC', 'ETH', 'USDC']
+    const assets = assetList.length > 0 ? assetList : Object.keys(prices)
 
     if (compact) {
         return (

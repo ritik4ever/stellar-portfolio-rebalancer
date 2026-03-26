@@ -1,7 +1,8 @@
 import { Horizon } from '@stellar/stellar-sdk'
 
 import { ConflictError } from '../types/index.js'
-import type { PricesMap, RebalanceResult } from '../types/index.js'
+import type { PricesMap, RebalanceResult, RebalanceStrategyType, RebalanceStrategyConfig } from '../types/index.js'
+import { Dec } from '../utils/decimal.js'
 import {
     StellarDEXService,
     type DEXTradeRequest,
@@ -9,15 +10,18 @@ import {
     type RebalanceExecutionConfig
 } from './dex.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
+import { rebalanceHistoryService, riskManagementService } from './serviceContainer.js'
+import { shouldRebalanceByStrategy } from './rebalancingStrategyService.js'
+import { logger, logAudit } from '../utils/logger.js'
 
 interface StoredPortfolio {
     id: string
     userAddress: string
     allocations: Record<string, number>
     threshold: number
+    slippageTolerancePercent?: number
     balances: Record<string, number>
     totalValue: number
-    // Optional version field used for compare-and-set updates
     version?: number
     createdAt: string
     lastRebalance: string
@@ -46,14 +50,22 @@ export class StellarService {
         this.dexService = new StellarDEXService()
     }
 
-    async createPortfolio(userAddress: string, allocations: Record<string, number>, threshold: number) {
+    async createPortfolio(
+        userAddress: string,
+        allocations: Record<string, number>,
+        threshold: number,
+        slippageTolerancePercent: number = 1,
+        strategy: RebalanceStrategyType = 'threshold',
+        strategyConfig: RebalanceStrategyConfig = {}
+    ) {
         try {
-            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0)
-            if (Math.abs(total - 100) > 0.01) {
+            if (!Dec.allocationsSumValid(allocations)) {
                 throw new Error('Allocations must sum to 100%')
             }
 
             await this.checkConcentrationRisk(allocations)
+
+            const slippageTolerance = Math.max(0.5, Math.min(5, Number(slippageTolerancePercent) || 1))
 
             const { ReflectorService } = await import('./reflector.js')
             const { portfolioStorage } = await import('./portfolioStorage.js')
@@ -61,19 +73,37 @@ export class StellarService {
             const prices = await reflector.getCurrentPrices()
             const flags = getFeatureFlags()
 
+            logAudit('portfolio_create_started', {
+                userAddress,
+                mode: flags.demoMode ? 'demo' : 'onchain'
+            })
+
             if (flags.demoMode) {
                 const mockBalances: Record<string, number> = {}
                 const totalValue = 10000
 
                 for (const [asset, percentage] of Object.entries(allocations)) {
-                    const assetValue = (totalValue * percentage) / 100
+                    const assetValue = Dec.targetValue(totalValue, percentage)
                     const price = prices[asset]?.price || 1
-                    mockBalances[asset] = assetValue / price
+                    mockBalances[asset] = Dec.assetQtyFromValue(assetValue, price)
                 }
 
-                const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, mockBalances)
+                const portfolioId = await portfolioStorage.createPortfolioWithBalances(
+                    userAddress,
+                    allocations,
+                    threshold,
+                    mockBalances,
+                    slippageTolerance,
+                strategy,
+                strategyConfig as Record<string, unknown>
+                )
 
-                console.log(`Demo portfolio ${portfolioId} created with $${totalValue} simulated value`)
+                logger.info('Demo portfolio created', { portfolioId, totalValue })
+                logAudit('portfolio_create_completed', {
+                    portfolioId,
+                    mode: 'demo',
+                    totalValue
+                })
                 return portfolioId
             }
 
@@ -92,8 +122,21 @@ export class StellarService {
                 throw new Error('No real funded balances found for selected allocation assets')
             }
 
-            const portfolioId = await portfolioStorage.createPortfolioWithBalances(userAddress, allocations, threshold, filteredBalances)
-            console.log(`Portfolio ${portfolioId} created with real on-chain balances`)
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(
+                userAddress,
+                allocations,
+                threshold,
+                filteredBalances,
+                slippageTolerance,
+                strategy,
+                strategyConfig as Record<string, unknown>
+                )
+            logger.info('Portfolio created with real on-chain balances', { portfolioId, totalValue })
+            logAudit('portfolio_create_completed', {
+                portfolioId,
+                mode: 'onchain',
+                totalValue
+            })
             return portfolioId
         } catch (error) {
             throw new Error(`Failed to create portfolio: ${error}`)
@@ -135,7 +178,7 @@ export class StellarService {
             if (!allowDemoFallback) {
                 throw new Error(`Could not fetch real balances: ${errorMessage}`)
             }
-            console.warn('Could not fetch real balances, using demo mode fallback:', errorMessage)
+            logger.warn('Could not fetch real balances, using demo mode fallback', { error: errorMessage })
             return {
                 XLM: 25000,
                 USDC: 10000,
@@ -156,36 +199,13 @@ export class StellarService {
             const reflector = new ReflectorService()
             const prices = await reflector.getCurrentPrices()
 
-            let totalValue = 0
-            const currentValues: Record<string, number> = {}
-
-            for (const [asset, balance] of Object.entries(portfolio.balances)) {
-                const price = prices[asset]?.price || 0
-                const value = balance * price
-                currentValues[asset] = value
-                totalValue += value
-            }
-
-            if (totalValue === 0) return false
-
-            for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
-                const currentValue = currentValues[asset] || 0
-                const currentPercentage = (currentValue / totalValue) * 100
-                const drift = Math.abs(currentPercentage - targetPercentage)
-
-                if (drift > 50) {
-                    console.warn(`Excessive drift detected for ${asset}: ${drift}%`)
-                    return false
-                }
-
-                if (drift > portfolio.threshold) {
-                    return true
-                }
-            }
-
-            return false
+            return shouldRebalanceByStrategy({
+                portfolio,
+                prices,
+                now: Date.now()
+            })
         } catch (error) {
-            console.error('Error checking rebalance need:', error)
+            logger.error('Error checking rebalance need', { error })
             return false
         }
     }
@@ -195,8 +215,6 @@ export class StellarService {
             const { portfolioStorage } = await import('./portfolioStorage.js')
             const { CircuitBreakers } = await import('./circuitBreakers.js')
             const { ReflectorService } = await import('./reflector.js')
-            const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
-            const { RiskManagementService } = await import('./riskManagements.js')
 
             const portfolio = await portfolioStorage.getPortfolio(portfolioId) as StoredPortfolio | undefined
             if (!portfolio) {
@@ -204,13 +222,11 @@ export class StellarService {
             }
 
             const reflector = new ReflectorService()
-            const rebalanceHistory = new RebalanceHistoryService()
-            const riskService = new RiskManagementService()
             const prices = await reflector.getCurrentPrices()
 
-            const riskCheck = riskService.shouldAllowRebalance(portfolio, prices)
+            const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
             if (!riskCheck.allowed) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Risk Management Block',
                     trades: 0,
@@ -218,6 +234,12 @@ export class StellarService {
                     status: 'failed',
                     prices,
                     portfolio
+                })
+
+                logAudit('rebalance_blocked', {
+                    portfolioId,
+                    reason: riskCheck.reason,
+                    stage: 'risk_management'
                 })
 
                 throw new Error(`Rebalance blocked: ${riskCheck.reason}`)
@@ -228,7 +250,7 @@ export class StellarService {
             const hourInMs = 60 * 60 * 1000
 
             if (now - lastRebalance < hourInMs) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Cooldown Period Active',
                     trades: 0,
@@ -238,12 +260,18 @@ export class StellarService {
                     portfolio
                 })
 
+                logAudit('rebalance_blocked', {
+                    portfolioId,
+                    reason: 'Cooldown period active',
+                    stage: 'cooldown'
+                })
+
                 throw new Error('Cooldown period active. Please wait before rebalancing again.')
             }
 
             const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
             if (!marketCheck.safe) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Circuit Breaker Triggered',
                     trades: 0,
@@ -253,12 +281,18 @@ export class StellarService {
                     portfolio
                 })
 
+                logAudit('rebalance_blocked', {
+                    portfolioId,
+                    reason: marketCheck.reason,
+                    stage: 'market_conditions'
+                })
+
                 throw new Error(`Rebalance blocked: ${marketCheck.reason}`)
             }
 
             const needed = await this.checkRebalanceNeeded(portfolioId)
             if (!needed) {
-                await rebalanceHistory.recordRebalanceEvent({
+                await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'No Rebalance Needed',
                     trades: 0,
@@ -268,15 +302,34 @@ export class StellarService {
                     portfolio
                 })
 
+                logAudit('rebalance_skipped', {
+                    portfolioId,
+                    reason: 'No rebalance needed'
+                })
+
                 throw new Error('Rebalance not needed at this time')
             }
 
-            const { trades, trigger } = this.calculateRebalanceTrades(portfolio, prices, options.tradeSlippageOverrides, options.tradeSlippageBps)
+            const portfolioSlippagePct = (portfolio as { slippageTolerancePercent?: number; slippageTolerance?: number }).slippageTolerancePercent
+                ?? (portfolio as { slippageTolerance?: number }).slippageTolerance ?? 1
+            const slippageBps = options.tradeSlippageBps ?? Math.round(portfolioSlippagePct * 100)
+            const { trades, trigger } = this.calculateRebalanceTrades(
+                portfolio,
+                prices,
+                options.tradeSlippageOverrides,
+                slippageBps
+            )
             if (trades.length === 0) {
                 throw new Error('No executable trades generated from current drift')
             }
 
-            await rebalanceHistory.recordRebalanceEvent({
+            logAudit('rebalance_started', {
+                portfolioId,
+                trigger,
+                plannedTrades: trades.length
+            })
+
+            await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Rebalance Started',
                 trades: 0,
@@ -286,7 +339,10 @@ export class StellarService {
                 portfolio
             })
 
-            const dexConfig = this.buildDexConfig(options)
+            const dexConfig = this.buildDexConfig({
+                ...options,
+                tradeSlippageBps: options.tradeSlippageBps ?? slippageBps
+            })
             const dexResult = await this.dexService.executeRebalanceTrades(
                 portfolio.userAddress,
                 trades,
@@ -323,7 +379,9 @@ export class StellarService {
             const failureReasons = dexResult.failedTrades.map(t => t.failureReason).filter(Boolean) as string[]
             const historyStatus = dexResult.status === 'failed' ? 'failed' : 'completed'
 
-            const event = await rebalanceHistory.recordRebalanceEvent({
+            const actualSlippageBps = dexResult.totalSlippageBps ?? 0
+            const maxAllowedBps = Math.round(portfolioSlippagePct * 100)
+            const event = await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: dexResult.status === 'failed'
                     ? `Execution Failed: ${dexResult.failureReason || 'unknown reason'}`
@@ -336,7 +394,11 @@ export class StellarService {
                 amount: firstExecuted?.executedAmount,
                 prices,
                 portfolio,
-                error: failureReasons.join('; ') || undefined
+                error: failureReasons.join('; ') || undefined,
+                estimatedSlippageBps: slippageBps,
+                actualSlippageBps: actualSlippageBps,
+                slippageExceededTolerance: actualSlippageBps > maxAllowedBps,
+                totalSlippageBps: dexResult.totalSlippageBps
             })
 
             const overallStatus = dexResult.status === 'success'
@@ -344,6 +406,15 @@ export class StellarService {
                 : dexResult.status === 'partial'
                     ? 'partial'
                     : 'failed'
+
+            logAudit('rebalance_completed', {
+                portfolioId,
+                status: historyStatus,
+                overallStatus,
+                trades: dexResult.executedTrades.filter(t => t.executedAmount > 0 && !t.rolledBack).length,
+                eventId: event.id,
+                gasUsed: `${dexResult.totalEstimatedFeeXLM.toFixed(7)} XLM`
+            })
 
             return {
                 trades: dexResult.executedTrades.filter(t => t.executedAmount > 0 && !t.rolledBack).length,
@@ -362,20 +433,20 @@ export class StellarService {
                 totalSlippageBps: dexResult.totalSlippageBps
             }
         } catch (error) {
-            // Bubble up concurrency conflicts without wrapping so callers can
-            // distinguish a 409 Conflict from a generic 500 failure.
-            if (error instanceof ConflictError) throw error
 
-            const { RebalanceHistoryService } = await import('./rebalanceHistory.js')
-            const rebalanceHistory = new RebalanceHistoryService()
             const message = error instanceof Error ? error.message : String(error)
 
-            await rebalanceHistory.recordRebalanceEvent({
+            await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Execution Failed',
                 trades: 0,
                 gasUsed: '0 XLM',
                 status: 'failed',
+                error: message
+            })
+
+            logAudit('rebalance_failed', {
+                portfolioId,
                 error: message
             })
 
@@ -409,12 +480,12 @@ export class StellarService {
 
         for (const [asset, targetPct] of Object.entries(portfolio.allocations)) {
             const currentValue = currentValues[asset] || 0
-            const currentPct = (currentValue / totalValue) * 100
+            const currentPct = Dec.percentage(currentValue, totalValue)
             currentPercents[asset] = currentPct
-            maxDrift = Math.max(maxDrift, Math.abs(currentPct - targetPct))
+            maxDrift = Math.max(maxDrift, Dec.drift(currentPct, targetPct))
 
-            const targetValue = (totalValue * targetPct) / 100
-            diffs.push({ asset, diffValue: currentValue - targetValue })
+            const targetValue = Dec.targetValue(totalValue, targetPct)
+            diffs.push({ asset, diffValue: Dec.sub(currentValue, targetValue) })
         }
 
         const minTradeUsd = this.readNumberEnv('MIN_TRADE_SIZE_USD', 10, 0.01, Number.MAX_SAFE_INTEGER)
@@ -441,7 +512,7 @@ export class StellarService {
                 const transferValue = Math.min(remainingOverValue, under.needed)
                 if (transferValue <= minTradeUsd) continue
 
-                const amountToSell = transferValue / fromPrice
+                const amountToSell = Dec.assetQtyFromValue(transferValue, fromPrice)
                 if (amountToSell <= 0) continue
 
                 const overrideKey = `${over.asset}->${under.asset}`
@@ -460,7 +531,7 @@ export class StellarService {
             }
         }
 
-        const trigger = `Threshold exceeded (${maxDrift.toFixed(1)}%)`
+        const trigger = `Threshold exceeded (${Dec.formatPct(maxDrift, 1)}%)`
         return { trades, trigger }
     }
 
@@ -508,8 +579,8 @@ export class StellarService {
             const fromBefore = balances[trade.fromAsset] || 0
             const toBefore = balances[trade.toAsset] || 0
 
-            balances[trade.fromAsset] = Math.max(0, this.roundAmount(fromBefore - trade.executedAmount))
-            balances[trade.toAsset] = this.roundAmount(toBefore + trade.estimatedReceivedAmount)
+            balances[trade.fromAsset] = Math.max(0, Dec.roundStellar(Dec.sub(fromBefore, trade.executedAmount)))
+            balances[trade.toAsset] = Dec.roundStellar(Dec.add(toBefore, trade.estimatedReceivedAmount))
         }
 
         return balances
@@ -539,7 +610,7 @@ export class StellarService {
             const allocations = []
 
             for (const [asset, targetPercentage] of Object.entries(portfolio.allocations)) {
-                const balance = portfolio.balances[asset] || 0
+                const balance = (portfolio.balances ?? {})[asset] || 0
                 const price = prices[asset]?.price || 0
                 const value = balance * price
                 totalValue += value
@@ -568,6 +639,7 @@ export class StellarService {
                 needsRebalance,
                 lastRebalance: portfolio.lastRebalance,
                 threshold: portfolio.threshold,
+                slippageTolerancePercent: (portfolio as { slippageTolerancePercent?: number; slippageTolerance?: number }).slippageTolerancePercent ?? (portfolio as { slippageTolerance?: number }).slippageTolerance ?? 1,
                 dayChange: this.calculateDayChange(allocations)
             }
         } catch (error) {
@@ -590,7 +662,7 @@ export class StellarService {
     }
 
     private roundAmount(amount: number): number {
-        return Math.round(amount * 10000000) / 10000000
+        return Dec.roundStellar(amount)
     }
 
     private readNumberEnv(name: string, fallback: number, min: number, max: number): number {

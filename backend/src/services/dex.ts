@@ -7,6 +7,7 @@ import {
     Keypair,
     Memo
 } from '@stellar/stellar-sdk'
+import { Dec } from '../utils/decimal.js'
 
 export interface DEXTradeRequest {
     tradeId: string
@@ -151,7 +152,7 @@ export class StellarDEXService {
                 fee
             )
 
-            totalEstimatedFeeXLM += fee / 10000000
+            totalEstimatedFeeXLM = Dec.addStroopFee(totalEstimatedFeeXLM, fee)
 
             if (tradeResult.status === 'failed') {
                 failedTrades.push(tradeResult)
@@ -194,7 +195,7 @@ export class StellarDEXService {
                     slippageBps: cumulativeSlippageBps,
                     liquidityCoverage: tradeResult.liquidityCoverage,
                     status: 'failed',
-                    failureReason: `Rebalance slippage ${cumulativeSlippageBps.toFixed(2)} bps exceeds max ${config.maxSlippageBpsPerRebalance} bps`
+                    failureReason: `Rebalance slippage ${Dec.formatBps(cumulativeSlippageBps)} bps exceeds max ${config.maxSlippageBpsPerRebalance} bps`
                 })
                 break
             }
@@ -299,7 +300,7 @@ export class StellarDEXService {
                 slippageBps: 0,
                 liquidityCoverage: market.liquidityCoverage,
                 status: 'failed',
-                failureReason: `Spread ${market.spreadBps.toFixed(2)} bps exceeds max ${maxSpreadBps} bps`
+                failureReason: `Spread ${Dec.formatBps(market.spreadBps)} bps exceeds max ${maxSpreadBps} bps`
             }
         }
 
@@ -318,11 +319,11 @@ export class StellarDEXService {
                 slippageBps: 0,
                 liquidityCoverage: market.liquidityCoverage,
                 status: 'failed',
-                failureReason: `Liquidity coverage ${market.liquidityCoverage.toFixed(2)}x below required ${minLiquidityCoverage}x`
+                failureReason: `Liquidity coverage ${Dec.formatBps(market.liquidityCoverage, 2)}x below required ${minLiquidityCoverage}x`
             }
         }
 
-        const priceLimit = market.referencePrice * (1 - (maxSlippageBps / 10000))
+        const priceLimit = Dec.priceLimit(market.referencePrice, maxSlippageBps)
         if (!Number.isFinite(priceLimit) || priceLimit <= 0) {
             return {
                 tradeId: trade.tradeId,
@@ -356,7 +357,7 @@ export class StellarDEXService {
                     selling: fromAsset,
                     buying: toAsset,
                     amount: this.amountToString(requestedAmount),
-                    price: priceLimit.toFixed(7),
+                    price: Dec.formatStellar(priceLimit),
                     offerId: '0'
                 })
             )
@@ -566,7 +567,7 @@ export class StellarDEXService {
                 selling: fromAsset,
                 buying: toAsset,
                 amount: '0',
-                price: cancelPrice.toFixed(7),
+                price: Dec.formatStellar(cancelPrice),
                 offerId: String(offer.id)
             })
         )
@@ -688,7 +689,7 @@ export class StellarDEXService {
     }
 
     private roundAmount(amount: number): number {
-        return Math.round(amount * 10000000) / 10000000
+        return Dec.roundStellar(amount)
     }
 
     private buildTradeMemo(tradeId: string): string {

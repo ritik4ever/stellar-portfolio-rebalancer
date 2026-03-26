@@ -1,14 +1,14 @@
 import { rateLimit, type Options } from 'express-rate-limit'
 import { RedisStore } from 'rate-limit-redis'
-import { default as IORedis } from 'ioredis'
-import { REDIS_URL } from '../queue/connection.js'
-import { logger } from '../utils/logger.js'
 
-const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000
-const max = Number(process.env.RATE_LIMIT_MAX) || 100
-const writeMax = Number(process.env.RATE_LIMIT_WRITE_MAX) || 10
 
-let redisClient: IORedis | undefined;
+// Rate limiting configuration from environment
+const GLOBAL_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000
+const GLOBAL_MAX = Number(process.env.RATE_LIMIT_MAX) || 100
+const WRITE_MAX = Number(process.env.RATE_LIMIT_WRITE_MAX) || 10
+const AUTH_MAX = Number(process.env.RATE_LIMIT_AUTH_MAX) || 5
+const CRITICAL_MAX = Number(process.env.RATE_LIMIT_CRITICAL_MAX) || 3
+
 
 if (process.env.NODE_ENV !== 'test') {
     try {
@@ -17,64 +17,181 @@ if (process.env.NODE_ENV !== 'test') {
             connectTimeout: 3000,
             maxRetriesPerRequest: 1,
             enableReadyCheck: false,
-        });
-        redisClient.on('error', (err) => {
-            // Suppress unhandled rejections during test or when Redis is down
-            logger.warn('[RATE-LIMIT] Redis connection error: ' + err.message);
-        });
-    } catch (error) {
-        logger.warn('[RATE-LIMIT] Failed to initialize Redis store, falling back to memory store: ', error);
-    }
-}
 
-function createRedisStore(prefix: string): RedisStore | undefined {
-    if (!redisClient) return undefined;
-    return new RedisStore({
-        prefix,
-        sendCommand: async (...args: string[]) => {
-            if (args.length === 0) return;
-            const command = args[0];
-            const rest = args.slice(1);
-            return await redisClient!.call(command, ...rest) as any;
-        }
-    });
-}
-
-function createHandler(ms: number) {
-    const retryAfterSec = Math.ceil(ms / 1000)
     return (req: import('express').Request, res: import('express').Response) => {
-        res.setHeader('Retry-After', String(retryAfterSec))
-        res.status(429).json({
-            success: false,
-            error: 'Too Many Requests',
-            message: 'Rate limit exceeded. Please try again later.',
+        const ip = req.ip
+        const userAddress = req.user?.address
+        const endpoint = `${req.method} ${req.route?.path || req.path}`
+        
+        // Record the throttling event
+        rateLimitMonitor.recordThrottle(req, limitType)
+        
+        // Log rate limit violation for monitoring
+        logger.warn('[RATE-LIMIT] Request throttled', {
+            limitType,
+            ip,
+            userAddress,
+            endpoint,
+            userAgent: req.get('user-agent'),
             retryAfter: retryAfterSec
         })
+        
+        res.setHeader('Retry-After', String(retryAfterSec))
+        res.setHeader('X-RateLimit-Limit-Type', limitType)
+        
+        fail(
+            res,
+            429,
+            'RATE_LIMITED',
+            `Rate limit exceeded for ${limitType}. Please try again later.`,
+            {
+                limitType,
+                retryAfter: retryAfterSec,
+                endpoint
+            },
+            { 
+                meta: { 
+                    retryAfter: retryAfterSec,
+                    limitType,
+                    endpoint
+                } 
+            }
+        )
     }
 }
 
+// Key generator that combines IP and wallet address for authenticated requests
+function createKeyGenerator(prefix: string) {
+    return (req: import('express').Request): string => {
+        const ip = req.ip || 'unknown'
+        const userAddress = req.user?.address
+        
+        // For authenticated requests, use both IP and wallet address
+        if (userAddress) {
+            return `${prefix}:${ip}:${userAddress}`
+        }
+        
+        // For unauthenticated requests, use IP only
+        return `${prefix}:${ip}`
+    }
+}
+
+// Skip rate limiting for health checks and internal requests
+function skipSuccessfulRequests(req: import('express').Request, res: import('express').Response): boolean {
+    // Skip health checks
+    if (req.path === '/health' || req.path === '/metrics') {
+        return true
+    }
+    
+    // In test environment, don't skip any requests to ensure rate limiting works
+    if (process.env.NODE_ENV === 'test') {
+        return false
+    }
+    
+    // Skip successful responses (only count failed/suspicious requests)
+    return res.statusCode < 400
+}
+
+// Base options for all rate limiters
 const baseOptions: Partial<Options> = {
-    windowMs,
-    standardHeaders: true,
-    legacyHeaders: false
+    standardHeaders: 'draft-7', // Use latest standard headers
+    legacyHeaders: false,
+    store: redisStore, // Will fall back to memory store if Redis unavailable
+    skip: skipSuccessfulRequests,
 }
 
+// Global rate limiter - applies to all requests
 export const globalRateLimiter = rateLimit({
-    ...baseOptions,
-    max,
-    handler: createHandler(windowMs),
-    store: createRedisStore('rl:global:')
+
 })
 
-export const writeRateLimiter = rateLimit({
-    ...baseOptions,
-    max: writeMax,
-    handler: createHandler(windowMs),
-    store: createRedisStore('rl:write:'),
-    keyGenerator: (req) => {
-        // IP + wallet-address based throttling for critical routes
-        const walletAddress = req.body?.userAddress || req.params?.address || 'unknown';
-        const ip = req.ip || req.socket.remoteAddress || 'unknown-ip';
-        return `write_limit:${walletAddress}:${ip}`;
-    }
+// Burst protection - very short window to prevent rapid-fire attacks
+export const burstProtectionLimiter = rateLimit({
+    windowMs: BURST_WINDOW_MS,
+    limit: BURST_MAX,
+    keyGenerator: createKeyGenerator('burst'),
+    handler: createHandler(BURST_WINDOW_MS, 'burst-protection'),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    store: redisStore,
+    skip: (req) => req.path === '/health' || req.path === '/metrics', // Only skip health checks
 })
+
+// Write operations rate limiter - stricter limits for mutating operations
+export const writeRateLimiter = rateLimit({
+
+})
+
+// Write burst protection - prevent rapid write attempts
+export const writeBurstLimiter = rateLimit({
+    windowMs: BURST_WINDOW_MS,
+    limit: WRITE_BURST_MAX,
+    keyGenerator: createKeyGenerator('write-burst'),
+    handler: createHandler(BURST_WINDOW_MS, 'write-burst-protection'),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    store: redisStore,
+    skip: (req) => req.path === '/health' || req.path === '/metrics',
+})
+
+// Authentication rate limiter - protect login/refresh endpoints
+export const authRateLimiter = rateLimit({
+    windowMs: GLOBAL_WINDOW_MS,
+    limit: AUTH_MAX,
+    keyGenerator: createKeyGenerator('auth'),
+    handler: createHandler(GLOBAL_WINDOW_MS, 'authentication'),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    store: redisStore,
+    skip: () => false, // Never skip auth rate limiting
+})
+
+// Critical operations rate limiter - for rebalancing and high-value operations
+export const criticalRateLimiter = rateLimit({
+    windowMs: GLOBAL_WINDOW_MS,
+    limit: CRITICAL_MAX,
+    keyGenerator: createKeyGenerator('critical'),
+    handler: createHandler(GLOBAL_WINDOW_MS, 'critical-operations'),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    store: redisStore,
+    skip: () => false, // Never skip critical operation rate limiting
+})
+
+// Admin operations rate limiter - protect admin endpoints
+export const adminRateLimiter = rateLimit({
+    windowMs: GLOBAL_WINDOW_MS,
+    limit: AUTH_MAX, // Same as auth for admin operations
+    keyGenerator: createKeyGenerator('admin'),
+    handler: createHandler(GLOBAL_WINDOW_MS, 'admin-operations'),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    store: redisStore,
+    skip: () => false,
+})
+
+// Composite middleware for write operations (combines write + burst protection)
+export const protectedWriteLimiter = [writeBurstLimiter, writeRateLimiter]
+
+// Composite middleware for critical operations (combines critical + burst protection)
+export const protectedCriticalLimiter = [burstProtectionLimiter, criticalRateLimiter]
+
+// Middleware to record successful requests for monitoring
+export const requestMonitoringMiddleware = (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): void => {
+    rateLimitMonitor.recordRequest()
+    next()
+}
+
+// Graceful shutdown function
+export async function closeRateLimitStore(): Promise<void> {
+    if (redisClient) {
+        try {
+            await redisClient.quit()
+            logger.info('[RATE-LIMIT] Redis connection closed')
+        } catch (error) {
+            logger.warn('[RATE-LIMIT] Error closing Redis connection', {
+                error: error instanceof Error ? error.message : String(error)
+            })
+        }
+    }
+}

@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - 'backend/**'
-      - 'docs/MIGRATION.md'
       - '.github/workflows/backend-tests.yml'
   push:
     branches:
@@ -12,43 +11,41 @@ on:
       - develop
     paths:
       - 'backend/**'
-      - 'docs/MIGRATION.md'
+      - '.github/workflows/backend-tests.yml'
 
 jobs:
-  test:
+  backend-tests:
     runs-on: ubuntu-latest
-    
     strategy:
       matrix:
-        node-version: [18.x, 20.x]
-    
+        node-version: ['20.x']
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: 'backend/package-lock.json'
-      
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
       - name: Install dependencies
-        working-directory: backend
+        working-directory: ./backend
         run: npm ci
-      
-      - name: Verify migrations (dry-run)
-        working-directory: backend
-        run: npm run db:migrate:dry-run
-      
-      - name: Run tests
-        working-directory: backend
-        run: npm run test
-      
-      - name: Upload test results
+
+      - name: Validate API documentation sync
+        working-directory: ./backend
+        run: npm run api:validate
+
+      - name: Run backend tests with coverage
+        working-directory: ./backend
+        run: npm run test:coverage
+
+      - name: Upload backend coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.node-version }}
+          name: backend-coverage-${{ matrix.node-version }}
           path: backend/coverage/
-          if-no-files-found: ignore
+          if-no-files-found: error

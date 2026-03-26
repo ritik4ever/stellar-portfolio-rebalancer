@@ -82,22 +82,22 @@ export class CircuitBreakers {
         return { safe: true }
     }
 
-    static checkConcentrationRisk(allocations: any[]): { safe: boolean, reason?: string } {
+    static checkConcentrationRisk(allocations: Record<string, number>): { safe: boolean, reason?: string } {
         const maxSingleAsset = 80 // 80% maximum for any single asset
         const minDiversification = 1 // Minimum number of assets
 
-        // Check maximum concentration
-        for (const allocation of allocations) {
-            if (allocation.current > maxSingleAsset) {
+        // Check maximum concentration (values are target percentages, 0-100)
+        for (const [asset, percentage] of Object.entries(allocations)) {
+            if (percentage > maxSingleAsset) {
                 return {
                     safe: false,
-                    reason: `Concentration risk: ${allocation.asset} represents ${allocation.current.toFixed(1)}% of portfolio`
+                    reason: `Concentration risk: ${asset} represents ${percentage.toFixed(1)}% of portfolio`
                 }
             }
         }
 
         // Check minimum diversification
-        const activeAssets = allocations.filter(a => a.current > 1).length
+        const activeAssets = Object.values(allocations).filter(pct => pct > 1).length
         if (activeAssets < minDiversification) {
             return {
                 safe: false,

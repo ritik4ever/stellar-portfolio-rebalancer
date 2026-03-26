@@ -133,17 +133,24 @@ deploy_production() {
     if [ "$1" = "--production" ]; then
         print_status "Deploying to production..."
         
-        if ! command -v docker-compose &> /dev/null; then
-            print_error "docker-compose is not installed"
+        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+            COMPOSE_CMD="docker compose"
+        elif command -v docker-compose &> /dev/null; then
+            COMPOSE_CMD="docker-compose"
+        else
+            print_error "Neither docker compose plugin nor docker-compose is installed"
             exit 1
         fi
+
+        print_status "Validating compose configuration..."
+        $COMPOSE_CMD -f deployment/docker-compose.yml config > /dev/null
         
         # Build and start services
-        docker-compose -f deployment/docker-compose.yml up --build -d
+        $COMPOSE_CMD -f deployment/docker-compose.yml up --build -d
         
         print_status "Production deployment completed!"
-        print_status "Frontend: http://localhost"
-        print_status "Backend API: http://localhost/api"
+        print_status "Frontend: http://localhost:3000"
+        print_status "Backend API: http://localhost:3001/api"
     fi
 }
 

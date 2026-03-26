@@ -3,15 +3,17 @@ import { motion } from 'framer-motion'
 import { TrendingUp, Shield, Zap, ArrowRight, X } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { WalletSelector } from './WalletSelector'
+import { api } from '../config/api'
 
 interface LandingProps {
     onNavigate: (view: string) => void
     onConnectWallet: () => Promise<void>
+    onNeedsConsent?: (publicKey: string) => void
     isConnecting: boolean
     publicKey: string | null
 }
 
-const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnecting, publicKey }) => {
+const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsConsent, isConnecting, publicKey }) => {
     const [showWalletSelector, setShowWalletSelector] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
@@ -20,9 +22,21 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
         setError(null)
     }
 
-    const handleWalletSelected = async (_publicKey: string) => {
+    const handleWalletSelected = async (pk: string) => {
         setShowWalletSelector(false)
-        await onConnectWallet()
+        try {
+            const res = await api.get<{ accepted: boolean }>(`/api/consent/status?userId=${encodeURIComponent(pk)}`)
+            if (res?.accepted) {
+                await onConnectWallet()
+            } else if (onNeedsConsent) {
+                onNeedsConsent(pk)
+            } else {
+                await onConnectWallet()
+            }
+        } catch {
+            if (onNeedsConsent) onNeedsConsent(pk)
+            else await onConnectWallet()
+        }
     }
 
     const handleWalletError = (errorMsg: string) => {
@@ -170,6 +184,33 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, isConnec
                     </div>
                 </motion.div>
             </div>
+
+            {/* Footer with legal links */}
+            <footer className="border-t border-gray-200 dark:border-gray-700 mt-20 py-6">
+                <div className="max-w-7xl mx-auto px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-gray-600 dark:text-gray-400">
+                    <button
+                        type="button"
+                        onClick={() => onNavigate('legal-terms')}
+                        className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                    >
+                        Terms of Service
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onNavigate('legal-privacy')}
+                        className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                    >
+                        Privacy Policy
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onNavigate('legal-cookies')}
+                        className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                    >
+                        Cookie Policy
+                    </button>
+                </div>
+            </footer>
 
             {showWalletSelector && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50 p-4">

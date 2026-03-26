@@ -1,6 +1,8 @@
 import { RiskManagementService } from './riskManagements.js'
-import { databaseService } from './databaseService.js'
+import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
+import { logger } from '../utils/logger.js'
 
 export interface RebalanceEvent {
     id: string
@@ -13,6 +15,14 @@ export interface RebalanceEvent {
     isAutomatic?: boolean
     riskAlerts?: any[]
     error?: string
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
     details?: {
         fromAsset?: string
         toAsset?: string
@@ -24,14 +34,18 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
+        totalSlippageBps?: number
     }
 }
 
 export class RebalanceHistoryService {
     private riskService: RiskManagementService
 
-    constructor() {
-        this.riskService = new RiskManagementService()
+    constructor(riskService?: RiskManagementService) {
+        this.riskService = riskService ?? new RiskManagementService()
     }
 
     async recordRebalanceEvent(eventData: {
@@ -47,8 +61,25 @@ export class RebalanceHistoryService {
         toAsset?: string
         amount?: number
         prices?: PricesMap
-        portfolio?: any
+        /** Stored portfolio record. Must have `allocations` as a `Record<string, number>`. */
+        portfolio?: { allocations: Record<string, number> }
+        eventSource?: RebalanceEvent['eventSource']
+        onChainConfirmed?: boolean
+        onChainEventType?: string
+        onChainTxHash?: string
+        onChainLedger?: number
+        onChainContractId?: string
+        onChainPagingToken?: string
+        isSimulated?: boolean
+        estimatedSlippageBps?: number
+        actualSlippageBps?: number
+        slippageExceededTolerance?: boolean
+        /** Optional aggregate slippage in basis points for backwards compatibility. */
+        totalSlippageBps?: number
     }): Promise<RebalanceEvent> {
+        const featureFlags = getFeatureFlags()
+        const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
+            || (featureFlags.demoMode ? 'simulated' : 'offchain')
         const details: RebalanceEvent['details'] = {
             fromAsset: eventData.fromAsset,
             toAsset: eventData.toAsset,
@@ -57,10 +88,13 @@ export class RebalanceHistoryService {
             volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
             riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
             priceDirection: this.determinePriceDirection(eventData.prices),
-            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger)
+            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger),
+            estimatedSlippageBps: eventData.estimatedSlippageBps,
+            actualSlippageBps: eventData.actualSlippageBps,
+            slippageExceededTolerance: eventData.slippageExceededTolerance,
+            ...(eventData.totalSlippageBps != null && { totalSlippageBps: eventData.totalSlippageBps })
         }
 
-        // Add risk metrics if available
         if (eventData.prices && eventData.portfolio) {
             try {
                 const riskMetrics = this.riskService.analyzePortfolioRisk(
@@ -69,7 +103,7 @@ export class RebalanceHistoryService {
                 )
                 details.riskMetrics = riskMetrics
             } catch (error) {
-                console.warn('Failed to calculate risk metrics:', error)
+                logger.warn('Failed to calculate risk metrics', { error })
             }
         }
 
@@ -83,16 +117,31 @@ export class RebalanceHistoryService {
             isAutomatic: eventData.isAutomatic ?? false,
             riskAlerts: eventData.riskAlerts ?? [],
             error: eventData.error,
-            details
+            details,
+            eventSource,
+            onChainConfirmed: eventData.onChainConfirmed,
+            onChainEventType: eventData.onChainEventType,
+            onChainTxHash: eventData.onChainTxHash,
+            onChainLedger: eventData.onChainLedger,
+            onChainContractId: eventData.onChainContractId,
+            onChainPagingToken: eventData.onChainPagingToken,
+            isSimulated: eventData.isSimulated
         })
 
-        console.log(`[REBALANCE-HISTORY] Recorded ${eventData.isAutomatic ? 'automatic' : 'manual'} rebalance event:`, event.id)
+        logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
+            eventId: event.id,
+            isAutomatic: eventData.isAutomatic ?? false
+        })
         return event
     }
 
-    async getRebalanceHistory(portfolioId?: string, limit: number = 50): Promise<RebalanceEvent[]> {
+    async getRebalanceHistory(
+        portfolioId?: string,
+        limit: number = 50,
+        options: RebalanceHistoryQueryOptions = {}
+    ): Promise<RebalanceEvent[]> {
         // Always use databaseService (SQLite)
-        return databaseService.getRebalanceHistory(portfolioId, limit)
+        return databaseService.getRebalanceHistory(portfolioId, limit, options)
     }
 
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {
@@ -100,7 +149,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getRecentAutoRebalances(portfolioId, limit)
         } catch (error) {
-            console.error('Error getting recent auto-rebalances:', error)
+            logger.error('Error getting recent auto-rebalances', { error })
             return []
         }
     }
@@ -110,7 +159,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getAutoRebalancesSince(portfolioId, since)
         } catch (error) {
-            console.error('Error getting auto-rebalances since date:', error)
+            logger.error('Error getting auto-rebalances since date', { error })
             return []
         }
     }
@@ -120,7 +169,7 @@ export class RebalanceHistoryService {
             // Always use databaseService (SQLite)
             return databaseService.getAllAutoRebalances()
         } catch (error) {
-            console.error('Error getting all auto-rebalances:', error)
+            logger.error('Error getting all auto-rebalances', { error })
             return []
         }
     }

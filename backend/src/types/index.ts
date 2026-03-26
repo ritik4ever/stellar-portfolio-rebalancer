@@ -22,11 +22,36 @@ export interface Portfolio {
     userAddress: string
     allocations: Record<string, number>
     threshold: number
+    slippageTolerancePercent?: number
+    slippageTolerance?: number        // Add this for backward compatibility
+    strategy?: RebalanceStrategyType   // Add this
+    strategyConfig?: RebalanceStrategyConfig  // Add this
     balances: Record<string, number>
     totalValue: number
     createdAt: string
     lastRebalance: string
     version: number
+}
+
+// Rebalance strategy types
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+
+export interface RebalanceStrategyConfig {
+    type?: RebalanceStrategyType
+    parameters?: Record<string, unknown>
+    enabled?: boolean
+    intervalDays?: number
+    volatilityThresholdPct?: number
+    minDaysBetweenRebalance?: number
+}
+
+export interface UIAllocation {
+    asset: string
+    percentage: number
+    value: number
+    /** Target allocation % when provided by the UI (alias of percentage in some flows) */
+    target?: number
+    current?: number
 }
 
 // Thrown when an update targets a stale portfolio version
@@ -48,6 +73,14 @@ export interface RebalanceEvent {
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
     details?: {
         fromAsset?: string
         toAsset?: string
@@ -59,6 +92,7 @@ export interface RebalanceEvent {
         performanceImpact?: 'positive' | 'negative' | 'neutral'
         riskMetrics?: any
         marketConditions?: any
+        totalSlippageBps?: number
     }
 }
 
@@ -69,6 +103,13 @@ export interface RiskMetrics {
     liquidityRisk: number
     correlationRisk: number
     overallRiskLevel: 'low' | 'medium' | 'high' | 'critical'
+    ewmaVolatility: number
+    var95: number
+    cvar95: number
+    maxDrawdown: number
+    drawdownBand: 'normal' | 'elevated' | 'critical'
+    correlations: Record<string, Record<string, number>>
+    sampleSize: number
 }
 
 export interface RiskAlert {
@@ -88,11 +129,18 @@ export interface CircuitBreakerStatus {
 }
 
 // API response interfaces
+export interface ApiErrorResponseBody {
+    code: string
+    message: string
+    details?: unknown
+}
+
 export interface ApiResponse<T = any> {
     success: boolean
-    data?: T
-    error?: string
+    data: T | null
+    error: ApiErrorResponseBody | null
     timestamp: string
+    meta?: Record<string, unknown>
 }
 
 export interface PortfolioApiResponse extends ApiResponse {

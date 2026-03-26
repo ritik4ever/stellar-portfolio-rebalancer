@@ -8,32 +8,35 @@ import { ConflictError } from '../types/index.js'
 
 
 // ─────────────────────────────────────────────
-// Types (mirrored from portfolioStorage.ts)
+// Exported type used by rebalanceHistory.ts
 // ─────────────────────────────────────────────
-
-export interface Portfolio {
-    id: string
-    userAddress: string
-    allocations: Record<string, number>
-    threshold: number
-    balances: Record<string, number>
-    totalValue: number
-    createdAt: string
-    lastRebalance: string
-    version: number
+export interface RebalanceHistoryQueryOptions {
+    isAutomatic?: boolean
+    status?: 'completed' | 'failed' | 'pending'
+    since?: string
+    until?: string
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
+    startTimestamp?: string
+    endTimestamp?: string
 }
 
-// Raw row shape as stored in SQLite
+
+// ─────────────────────────────────────────────
+// Types (mirrored from portfolioStorage.ts)
+// ─────────────────────────────────────────────
 interface PortfolioRow {
     id: string
     user_address: string
     allocations: string
     threshold: number
+    slippage_tolerance_percent?: number
     balances: string
     total_value: number
     created_at: string
     last_rebalance: string
     version: number
+    strategy?: string
+    strategy_config?: string
 }
 
 interface RebalanceHistoryRow {
@@ -63,6 +66,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
     user_address  TEXT NOT NULL,
     allocations   TEXT NOT NULL,
     threshold     REAL NOT NULL,
+    slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
     balances      TEXT NOT NULL,
     total_value   REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
@@ -99,6 +103,34 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     source      TEXT,
     captured_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS kv_store (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS assets (
+    symbol            TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    contract_address  TEXT,
+    issuer_account    TEXT,
+    coingecko_id      TEXT,
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_assets_enabled ON assets(enabled) WHERE enabled = 1;
+
+CREATE TABLE IF NOT EXISTS legal_consent (
+    user_id             TEXT PRIMARY KEY,
+    terms_accepted_at   TEXT,
+    privacy_accepted_at TEXT,
+    cookie_accepted_at  TEXT,
+    ip_address          TEXT,
+    user_agent          TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // ─────────────────────────────────────────────
@@ -120,17 +152,20 @@ function seedDemoData(db: Database.Database): void {
     const balances = { XLM: 11173.18, BTC: 0.02697, ETH: 0.68257, USDC: 1000 }
 
     db.prepare(`
-        INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     `).run(
         DEMO_PORTFOLIO_ID,
         'DEMO-USER',
         JSON.stringify(allocations),
         5,
+        1,
         JSON.stringify(balances),
         10000,
         now,
-        now
+        now,
+        'threshold',
+        '{}'
     )
 
     const historyRows = [
@@ -198,7 +233,7 @@ function seedDemoData(db: Database.Database): void {
         )
     }
 
-    console.log('[DB] Demo data seeded (portfolio + 3 history events)')
+    logger.info('[DB] Demo data seeded (portfolio + 3 history events)')
 }
 
 // ─────────────────────────────────────────────
@@ -214,7 +249,7 @@ function safeJsonParse<T>(value: string | null | undefined, fallback: T, context
     try {
         return JSON.parse(value) as T
     } catch {
-        console.error(`[DB] Failed to parse JSON for ${context}:`, value)
+        logger.error('[DB] Failed to parse JSON', { context, value })
         return fallback
     }
 }
@@ -225,11 +260,14 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
         userAddress: row.user_address,
         allocations: safeJsonParse(row.allocations, {}, `portfolio(${row.id}).allocations`),
         threshold: row.threshold,
+        slippageTolerance: row.slippage_tolerance_percent ?? 1,
         balances: safeJsonParse(row.balances, {}, `portfolio(${row.id}).balances`),
         totalValue: row.total_value,
         createdAt: row.created_at,
         lastRebalance: row.last_rebalance,
-        version: row.version ?? 1
+        version: row.version ?? 1,
+        strategy: (row.strategy as Portfolio['strategy']) || 'threshold',
+        strategyConfig: row.strategy_config ? safeJsonParse(row.strategy_config, {}, `portfolio(${row.id}).strategy_config`) : undefined
     }
 }
 
@@ -273,15 +311,48 @@ export class DatabaseService {
             seedDemoData(this.db)
         }
 
-        console.log(`[DB] SQLite database ready at: ${dbPath}`)
+        this._seedDefaultAssets()
+
+        logger.info('[DB] SQLite database ready', { dbPath })
     }
 
     private _migrateSchema(): void {
         const cols = this.db.prepare("PRAGMA table_info(portfolios)").all() as Array<{ name: string }>
         if (!cols.some(c => c.name === 'version')) {
             this.db.exec("ALTER TABLE portfolios ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
-            console.log('[DB] Migration: added version column to portfolios')
+            logger.info('[DB] Migration: added version column to portfolios')
         }
+        if (!cols.some(c => c.name === 'slippage_tolerance_percent')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN slippage_tolerance_percent REAL NOT NULL DEFAULT 1")
+            logger.info('[DB] Migration: added slippage_tolerance_percent column to portfolios')
+        }
+        if (!cols.some(c => c.name === 'strategy')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN strategy TEXT NOT NULL DEFAULT 'threshold'")
+            logger.info('[DB] Migration: added strategy column to portfolios')
+        }
+        if (!cols.some(c => c.name === 'strategy_config')) {
+            this.db.exec("ALTER TABLE portfolios ADD COLUMN strategy_config TEXT DEFAULT '{}'")
+            logger.info('[DB] Migration: added strategy_config column to portfolios')
+        }
+    }
+
+    private _seedDefaultAssets(): void {
+        const count = (this.db.prepare('SELECT COUNT(*) as cnt FROM assets').get() as { cnt: number }).cnt
+        if (count > 0) return
+        const now = new Date().toISOString()
+        const defaults = [
+            ['XLM', 'Stellar Lumens', null, null, 'stellar', 1],
+            ['USDC', 'USD Coin', 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5', null, 'usd-coin', 1],
+            ['BTC', 'Bitcoin', 'GAUTUYY2THLF7SGITDFMXJVYH3LHDSMGEAKSBU267M2K7A3W543CKUEF', null, 'bitcoin', 1],
+            ['ETH', 'Ethereum', null, null, 'ethereum', 1]
+        ]
+        const stmt = this.db.prepare(
+            'INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        for (const row of defaults) {
+            stmt.run(...row, now, now)
+        }
+        logger.info('[DB] Seeded default assets (XLM, USDC, BTC, ETH)')
     }
 
     // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -296,15 +367,18 @@ export class DatabaseService {
     createPortfolio(
         userAddress: string,
         allocations: Record<string, number>,
-        threshold: number
+        threshold: number,
+        slippageTolerancePercent: number = 1,
+        strategy: string = 'threshold',
+        strategyConfig: Record<string, unknown> = {}
     ): string {
         try {
             const id = generateId()
             const now = new Date().toISOString()
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify({}), 0, now, now)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify({}), 0, now, now, strategy, JSON.stringify(strategyConfig))
             return id
         } catch (err) {
             throw new Error(`Failed to create portfolio for user '${userAddress}': ${err}`)
@@ -315,16 +389,19 @@ export class DatabaseService {
         userAddress: string,
         allocations: Record<string, number>,
         threshold: number,
-        currentBalances: Record<string, number>
+        currentBalances: Record<string, number>,
+        slippageTolerancePercent: number = 1,
+        strategy: string = 'threshold',
+        strategyConfig: Record<string, unknown> = {}
     ): string {
         try {
             const id = generateId()
             const now = new Date().toISOString()
             const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
             this.db.prepare(`
-                INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(currentBalances), totalValue, now, now)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, JSON.stringify(currentBalances), totalValue, now, now, strategy, JSON.stringify(strategyConfig))
             return id
         } catch (err) {
             throw new Error(`Failed to create portfolio with balances for user '${userAddress}': ${err}`)
@@ -447,6 +524,136 @@ export class DatabaseService {
         }
     }
 
+    // ──────────────────────────────────────────
+    // Asset registry (configurable assets)
+    // ──────────────────────────────────────────
+
+    listAssets(enabledOnly: boolean = true): Array<{ symbol: string; name: string; contractAddress?: string; issuerAccount?: string; coingeckoId?: string; enabled: boolean }> {
+        try {
+            const rows = this.db.prepare<[], { symbol: string; name: string; contract_address: string | null; issuer_account: string | null; coingecko_id: string | null; enabled: number }>(
+                enabledOnly ? 'SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE enabled = 1 ORDER BY symbol' : 'SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets ORDER BY symbol'
+            ).all()
+            return rows.map(r => ({
+                symbol: r.symbol,
+                name: r.name,
+                contractAddress: r.contract_address ?? undefined,
+                issuerAccount: r.issuer_account ?? undefined,
+                coingeckoId: r.coingecko_id ?? undefined,
+                enabled: r.enabled === 1
+            }))
+        } catch (err) {
+            throw new Error(`Failed to list assets: ${err}`)
+        }
+    }
+
+    getAssetBySymbol(symbol: string): { symbol: string; name: string; contractAddress?: string; issuerAccount?: string; coingeckoId?: string; enabled: boolean } | undefined {
+        try {
+            const row = this.db.prepare<[string], { symbol: string; name: string; contract_address: string | null; issuer_account: string | null; coingecko_id: string | null; enabled: number }>(
+                'SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE symbol = ?'
+            ).get(symbol.toUpperCase())
+            if (!row) return undefined
+            return {
+                symbol: row.symbol,
+                name: row.name,
+                contractAddress: row.contract_address ?? undefined,
+                issuerAccount: row.issuer_account ?? undefined,
+                coingeckoId: row.coingecko_id ?? undefined,
+                enabled: row.enabled === 1
+            }
+        } catch (err) {
+            throw new Error(`Failed to get asset '${symbol}': ${err}`)
+        }
+    }
+
+    addAsset(symbol: string, name: string, options: { contractAddress?: string; issuerAccount?: string; coingeckoId?: string } = {}): void {
+        try {
+            const sym = symbol.toUpperCase()
+            const now = new Date().toISOString()
+            this.db.prepare(
+                'INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
+            ).run(sym, name, options.contractAddress ?? null, options.issuerAccount ?? null, options.coingeckoId ?? null, now, now)
+        } catch (err) {
+            if (isSqliteAssetPrimaryKeyConflict(err)) {
+                throw new AssetRegistryConflictError(`An asset with symbol ${symbol.toUpperCase()} already exists`)
+            }
+            throw new Error(`Failed to add asset '${symbol}': ${err}`)
+        }
+    }
+
+    removeAsset(symbol: string): boolean {
+        try {
+            const result = this.db.prepare('DELETE FROM assets WHERE symbol = ?').run(symbol.toUpperCase())
+            return result.changes > 0
+        } catch (err) {
+            throw new Error(`Failed to remove asset '${symbol}': ${err}`)
+        }
+    }
+
+    setAssetEnabled(symbol: string, enabled: boolean): boolean {
+        try {
+            const result = this.db.prepare('UPDATE assets SET enabled = ?, updated_at = ? WHERE symbol = ?').run(enabled ? 1 : 0, new Date().toISOString(), symbol.toUpperCase())
+            return result.changes > 0
+        } catch (err) {
+            throw new Error(`Failed to set asset enabled '${symbol}': ${err}`)
+        }
+    }
+
+    // ──────────────────────────────────────────
+    // Legal consent (GDPR/CCPA)
+    // ──────────────────────────────────────────
+
+    recordConsent(
+        userId: string,
+        opts: { terms: boolean; privacy: boolean; cookies: boolean; ipAddress?: string; userAgent?: string }
+    ): void {
+        const now = new Date().toISOString()
+        this.db.prepare(
+            `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, ip_address, user_agent, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+               terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
+               privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
+               cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
+               ip_address = excluded.ip_address,
+               user_agent = excluded.user_agent,
+               updated_at = excluded.updated_at`
+        ).run(
+            userId,
+            opts.terms ? now : null,
+            opts.privacy ? now : null,
+            opts.cookies ? now : null,
+            opts.ipAddress ?? null,
+            opts.userAgent ?? null,
+            now
+        )
+    }
+
+    getConsent(userId: string): { termsAcceptedAt: string | null; privacyAcceptedAt: string | null; cookieAcceptedAt: string | null } | undefined {
+        const row = this.db.prepare<[string], { terms_accepted_at: string | null; privacy_accepted_at: string | null; cookie_accepted_at: string | null }>(
+            'SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at FROM legal_consent WHERE user_id = ?'
+        ).get(userId)
+        if (!row) return undefined
+        return {
+            termsAcceptedAt: row.terms_accepted_at,
+            privacyAcceptedAt: row.privacy_accepted_at,
+            cookieAcceptedAt: row.cookie_accepted_at
+        }
+    }
+
+    hasFullConsent(userId: string): boolean {
+        const c = this.getConsent(userId)
+        return Boolean(c?.termsAcceptedAt && c?.privacyAcceptedAt && c?.cookieAcceptedAt)
+    }
+
+    deleteUserData(userId: string): void {
+        this.db.prepare('DELETE FROM legal_consent WHERE user_id = ?').run(userId)
+        const portfolios = this.db.prepare<[string], { id: string }>('SELECT id FROM portfolios WHERE user_address = ?').all(userId)
+        for (const p of portfolios) {
+            this.db.prepare('DELETE FROM rebalance_history WHERE portfolio_id = ?').run(p.id)
+        }
+        this.db.prepare('DELETE FROM portfolios WHERE user_address = ?').run(userId)
+    }
+
     clearAll(): void {
         try {
             this.db.prepare('DELETE FROM rebalance_history').run()
@@ -470,12 +677,21 @@ export class DatabaseService {
         riskAlerts?: any[]
         error?: string
         details?: any
+        timestamp?: string
+        eventSource?: 'offchain' | 'simulated' | 'onchain'
+        onChainConfirmed?: boolean
+        onChainEventType?: string
+        onChainTxHash?: string
+        onChainLedger?: number
+        onChainContractId?: string
+        onChainPagingToken?: string
+        isSimulated?: boolean
     }): RebalanceEvent {
         try {
             const event: RebalanceEvent = {
                 id: generateId(),
                 portfolioId: eventData.portfolioId,
-                timestamp: new Date().toISOString(),
+                timestamp: eventData.timestamp ?? new Date().toISOString(),
                 trigger: eventData.trigger,
                 trades: eventData.trades,
                 gasUsed: eventData.gasUsed,
@@ -483,7 +699,15 @@ export class DatabaseService {
                 isAutomatic: eventData.isAutomatic ?? false,
                 riskAlerts: eventData.riskAlerts ?? [],
                 error: eventData.error,
-                details: eventData.details
+                details: eventData.details,
+                eventSource: eventData.eventSource,
+                onChainConfirmed: eventData.onChainConfirmed,
+                onChainEventType: eventData.onChainEventType,
+                onChainTxHash: eventData.onChainTxHash,
+                onChainLedger: eventData.onChainLedger,
+                onChainContractId: eventData.onChainContractId,
+                onChainPagingToken: eventData.onChainPagingToken,
+                isSimulated: eventData.isSimulated
             }
 
             this.db.prepare(`
@@ -510,7 +734,7 @@ export class DatabaseService {
         }
     }
 
-    getRebalanceHistory(portfolioId?: string, limit: number = 50): RebalanceEvent[] {
+    getRebalanceHistory(portfolioId?: string, limit: number = 50, options?: RebalanceHistoryQueryOptions): RebalanceEvent[] {
         try {
             if (portfolioId) {
                 const rows = this.db.prepare<[string, number], RebalanceHistoryRow>(
@@ -687,6 +911,52 @@ export class DatabaseService {
 
     close(): void {
         this.db.close()
+    }
+
+    // ──────────────────────────────────────────
+    // Indexer state (key-value store for contract event indexer)
+    // ──────────────────────────────────────────
+
+    getIndexerState(key: string): string | undefined {
+        try {
+            const row = this.db.prepare<[string], { value: string }>(
+                'SELECT value FROM kv_store WHERE key = ?'
+            ).get(key)
+            return row?.value
+        } catch {
+            return undefined
+        }
+    }
+
+    setIndexerState(key: string, value: string): void {
+        try {
+            this.db.prepare(
+                'INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+            ).run(key, value)
+        } catch (err) {
+            throw new Error(`Failed to set indexer state key '${key}': ${err}`)
+        }
+    }
+
+    ensurePortfolioExists(portfolioId: string, userAddress: string): void {
+        try {
+            const existing = this.getPortfolio(portfolioId)
+            if (!existing) {
+                this.db.prepare(`
+                    INSERT OR IGNORE INTO portfolios
+                        (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                `).run(
+                    portfolioId, userAddress,
+                    JSON.stringify({}), 5, 1,
+                    JSON.stringify({}), 0,
+                    new Date().toISOString(), new Date().toISOString(),
+                    'threshold', '{}'
+                )
+            }
+        } catch (err) {
+            throw new Error(`Failed to ensure portfolio '${portfolioId}' exists: ${err}`)
+        }
     }
 }
 

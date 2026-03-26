@@ -20,7 +20,7 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
 
     const demoMode = parseBoolean(env.DEMO_MODE, !isProduction)
     const allowFallbackPrices = parseBoolean(env.ALLOW_FALLBACK_PRICES, !isProduction)
-    const enableDebugRoutes = parseBoolean(env.ENABLE_DEBUG_ROUTES, !isProduction)
+    const enableDebugRoutes = parseBoolean(env.ENABLE_DEBUG_ROUTES, false) // Default to false even in dev
     const allowMockPriceHistory = parseBoolean(env.ALLOW_MOCK_PRICE_HISTORY, demoMode)
     const allowDemoBalanceFallback = parseBoolean(env.ALLOW_DEMO_BALANCE_FALLBACK, demoMode)
     const enableDemoDbSeed = parseBoolean(env.ENABLE_DEMO_DB_SEED, demoMode)

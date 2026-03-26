@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Bell, Send, CheckCircle, XCircle, Loader } from 'lucide-react'
+import { api } from '../config/api'
 
 interface NotificationTestProps {
   userId: string
@@ -60,22 +61,14 @@ export function NotificationTest({ userId }: NotificationTestProps) {
     setError('')
 
     try {
-      const response = await fetch('http://localhost:3001/api/notifications/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          userId,
-          eventType
-        })
+      const data = await api.post<{
+        message: string
+        sentTo: { email: string | null; webhook: string | null }
+        timestamp: string
+      }>('/api/notifications/test', {
+        userId,
+        eventType
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send test notification')
-      }
 
       setTestResults(prev => ({
         ...prev,
@@ -114,19 +107,9 @@ export function NotificationTest({ userId }: NotificationTestProps) {
     })
 
     try {
-      const response = await fetch('http://localhost:3001/api/notifications/test-all', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ userId })
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send test notifications')
-      }
+      const data = await api.post<{
+        results: Array<{ eventType: EventType; success: boolean; error?: string; sentTo?: { email: string | null; webhook: string | null }; timestamp: string }>
+      }>('/api/notifications/test-all', { userId })
 
       // Update results for each event type
       const newResults: Record<EventType, TestResult | null> = {

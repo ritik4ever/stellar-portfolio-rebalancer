@@ -30,7 +30,7 @@ impl PriceData {
         let divisor = 10_i128.pow(decimals);
         self.price / divisor
     }
-    
+
     /// Check if price data is stale (older than specified seconds)
     pub fn is_stale(&self, current_timestamp: u64, max_age_seconds: u64) -> bool {
         current_timestamp.saturating_sub(self.timestamp) > max_age_seconds
@@ -41,11 +41,11 @@ impl Asset {
     pub fn xlm(env: &Env) -> Self {
         Asset::Other(Symbol::new(env, "XLM"))
     }
-    
+
     pub fn usdc(env: &Env) -> Self {
         Asset::Other(Symbol::new(env, "USDC"))
     }
-    
+
     pub fn btc(env: &Env) -> Self {
         Asset::Other(Symbol::new(env, "BTC"))
     }

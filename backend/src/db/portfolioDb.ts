@@ -6,11 +6,14 @@ export interface PortfolioRow {
     user_address: string
     allocations: Record<string, number>
     threshold: number
+    slippage_tolerance?: number
     balances: Record<string, number>
     total_value: number
     created_at: Date
     last_rebalance: Date
     version: number
+    strategy?: string
+    strategy_config?: Record<string, unknown>
 }
 
 function rowToPortfolio(r: PortfolioRow) {
@@ -19,11 +22,14 @@ function rowToPortfolio(r: PortfolioRow) {
         userAddress: r.user_address,
         allocations: r.allocations || {},
         threshold: r.threshold,
+        slippageTolerance: r.slippage_tolerance != null ? Number(r.slippage_tolerance) : 1,
         balances: r.balances || {},
         totalValue: Number(r.total_value),
         createdAt: r.created_at.toISOString(),
         lastRebalance: r.last_rebalance.toISOString(),
-        version: r.version ?? 1
+        version: r.version ?? 1,
+        strategy: (r.strategy as import('../types/index.js').RebalanceStrategyType) || 'threshold',
+        strategyConfig: r.strategy_config || undefined
     }
 }
 
@@ -33,12 +39,15 @@ export async function dbCreatePortfolio(
     allocations: Record<string, number>,
     threshold: number,
     balances: Record<string, number>,
-    totalValue: number
+    totalValue: number,
+    slippageTolerance: number = 1,
+    strategy: string = 'threshold',
+    strategyConfig: Record<string, unknown> = {}
 ) {
     await query(
-        `INSERT INTO portfolios (id, user_address, allocations, threshold, balances, total_value, created_at, last_rebalance, version)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), 1)`,
-        [id, userAddress, JSON.stringify(allocations), threshold, JSON.stringify(balances), totalValue]
+        `INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), 1, $8, $9)`,
+        [id, userAddress, JSON.stringify(allocations), threshold, slippageTolerance, JSON.stringify(balances), totalValue, strategy, JSON.stringify(strategyConfig)]
     )
 }
 
