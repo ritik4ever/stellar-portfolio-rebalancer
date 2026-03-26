@@ -24,6 +24,10 @@ import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { assetRegistryService } from '../services/assetRegistryService.js'
+import {
+    AssetRegistryConflictError,
+    AssetRegistryValidationError
+} from '../services/assetRegistryValidation.js'
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
 
@@ -174,15 +178,18 @@ router.get('/admin/rate-limits/metrics', requireAdmin, (_req: Request, res: Resp
 router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body ?? {}
-        if (!symbol || typeof symbol !== 'string' || !name || typeof name !== 'string') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'symbol and name are required')
-        }
-        assetRegistryService.add(symbol.trim(), name.trim(), {
-            contractAddress: typeof contractAddress === 'string' ? contractAddress : undefined,
-            issuerAccount: typeof issuerAccount === 'string' ? issuerAccount : undefined,
-            coingeckoId: typeof coingeckoId === 'string' ? coingeckoId : undefined
-        })
-        const asset = assetRegistryService.getBySymbol(symbol.trim().toUpperCase())
+        assetRegistryService.add(
+            symbol,
+            name,
+            {
+                contractAddress,
+                issuerAccount,
+                coingeckoId
+            }
+        )
+        const parsedSymbol =
+            typeof symbol === 'string' ? symbol.trim().toUpperCase() : ''
+        const asset = assetRegistryService.getBySymbol(parsedSymbol)
         if (asset) {
             const auditFields: Record<string, unknown> = {
                 domain: 'asset_registry',
@@ -198,6 +205,12 @@ router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request
         }
         return ok(res, { asset }, { status: 201 })
     } catch (error) {
+        if (error instanceof AssetRegistryValidationError) {
+            return fail(res, 400, 'VALIDATION_ERROR', error.message)
+        }
+        if (error instanceof AssetRegistryConflictError) {
+            return fail(res, 409, 'ASSET_CONFLICT', error.message)
+        }
         logger.error('[ERROR] Admin add asset failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }

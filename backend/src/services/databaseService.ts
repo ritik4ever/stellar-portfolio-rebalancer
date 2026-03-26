@@ -5,6 +5,10 @@ import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { ConflictError } from '../types/index.js'
+import {
+    AssetRegistryConflictError,
+    isSqliteAssetPrimaryKeyConflict
+} from './assetRegistryValidation.js'
 import { logger } from '../utils/logger.js'
 import type { Portfolio } from '../types/index.js'
 
@@ -574,6 +578,9 @@ export class DatabaseService {
                 'INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
             ).run(sym, name, options.contractAddress ?? null, options.issuerAccount ?? null, options.coingeckoId ?? null, now, now)
         } catch (err) {
+            if (isSqliteAssetPrimaryKeyConflict(err)) {
+                throw new AssetRegistryConflictError(`An asset with symbol ${symbol.toUpperCase()} already exists`)
+            }
             throw new Error(`Failed to add asset '${symbol}': ${err}`)
         }
     }
