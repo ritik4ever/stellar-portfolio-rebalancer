@@ -1,6 +1,10 @@
 import { rateLimit, type Options } from 'express-rate-limit'
 import { RedisStore } from 'rate-limit-redis'
-
+import IORedis from 'ioredis'
+import { fail } from '../utils/apiResponse.js'
+import { logger } from '../utils/logger.js'
+import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
+import { REDIS_URL } from '../queue/connection.js'
 
 // Rate limiting configuration from environment
 const GLOBAL_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000
@@ -9,7 +13,16 @@ const WRITE_MAX = Number(process.env.RATE_LIMIT_WRITE_MAX) || 10
 const AUTH_MAX = Number(process.env.RATE_LIMIT_AUTH_MAX) || 5
 const CRITICAL_MAX = Number(process.env.RATE_LIMIT_CRITICAL_MAX) || 3
 
+// Burst protection - shorter windows with lower limits
+const BURST_WINDOW_MS = Number(process.env.RATE_LIMIT_BURST_WINDOW_MS) || 10 * 1000
+const BURST_MAX = Number(process.env.RATE_LIMIT_BURST_MAX) || 20
+const WRITE_BURST_MAX = Number(process.env.RATE_LIMIT_WRITE_BURST_MAX) || 3
 
+// Redis store for shared rate limiting across instances
+let redisStore: RedisStore | undefined
+let redisClient: IORedis | undefined
+
+// Only try to connect to Redis if not in test environment
 if (process.env.NODE_ENV !== 'test') {
     try {
         redisClient = new IORedis(REDIS_URL, {
@@ -17,7 +30,27 @@ if (process.env.NODE_ENV !== 'test') {
             connectTimeout: 3000,
             maxRetriesPerRequest: 1,
             enableReadyCheck: false,
+        })
+        
+        redisStore = new RedisStore({
+            sendCommand: (...args: Parameters<IORedis['call']>) => redisClient!.call(...args) as Promise<any>,
+        })
+        
+        logger.info('[RATE-LIMIT] Redis store initialized for distributed rate limiting', {
+            redisUrl: REDIS_URL.replace(/:\/\/[^@]*@/, '://***@')
+        })
+    } catch (error) {
+        logger.warn('[RATE-LIMIT] Redis unavailable - falling back to memory store (single instance only)', {
+            error: error instanceof Error ? error.message : String(error)
+        })
+    }
+} else {
+    logger.info('[RATE-LIMIT] Test environment detected - using memory store')
+}
 
+// Enhanced rate limit handler with detailed metrics
+function createHandler(windowMs: number, limitType: string) {
+    const retryAfterSec = Math.ceil(windowMs / 1000)
     return (req: import('express').Request, res: import('express').Response) => {
         const ip = req.ip
         const userAddress = req.user?.address
@@ -106,7 +139,15 @@ const baseOptions: Partial<Options> = {
 
 // Global rate limiter - applies to all requests
 export const globalRateLimiter = rateLimit({
-
+    windowMs: GLOBAL_WINDOW_MS,
+    limit: GLOBAL_MAX,
+    keyGenerator: createKeyGenerator('global'),
+    handler: createHandler(GLOBAL_WINDOW_MS, 'global'),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    store: redisStore,
+    skip: skipSuccessfulRequests,
+    message: 'Too many requests from this IP, please try again later.'
 })
 
 // Burst protection - very short window to prevent rapid-fire attacks

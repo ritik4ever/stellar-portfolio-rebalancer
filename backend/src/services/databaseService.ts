@@ -4,7 +4,9 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { ConflictError } from '../types/index.js'
+import { ConflictError, type Portfolio } from '../types/index.js'
+import { logger } from '../utils/logger.js'
+import { AssetRegistryConflictError, isSqliteAssetPrimaryKeyConflict } from './assetRegistryValidation.js'
 
 
 // ─────────────────────────────────────────────
