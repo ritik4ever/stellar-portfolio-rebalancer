@@ -30,12 +30,11 @@ import {
 } from '../services/assetRegistryValidation.js'
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
-import { getAuthConfig } from '../services/authService.js'
+import { autoRebalancer } from '../services/runtimeServices.js'
 
 const router = Router()
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
-const autoRebalancer = new AutoRebalancerService()
 const featureFlags = getFeatureFlags()
 const publicFeatureFlags = getPublicFeatureFlags()
 
@@ -724,13 +723,13 @@ router.get('/auto-rebalancer/status', async (req: Request, res: Response) => {
     }
 })
 
-router.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, (req: Request, res: Response) => {
+router.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
         }
 
-        autoRebalancer.start()
+        await autoRebalancer.start()
 
         return ok(res, {
             message: 'Auto-rebalancer started successfully',

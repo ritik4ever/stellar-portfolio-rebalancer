@@ -63,19 +63,59 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Health'],
                 summary: 'Health check',
-                description: 'Returns service health and auto-rebalancer status.',
+                description: 'Lightweight liveness probe for process-up checks.',
                 responses: {
                     '200': {
-                        description: 'Healthy',
+                        description: 'Process is up',
                         content: {
                             'application/json': {
                                 schema: {
                                     type: 'object',
                                     properties: {
-                                        status: { type: 'string', example: 'healthy' },
+                                        status: { type: 'string', example: 'ok' },
                                         timestamp: { type: 'string', format: 'date-time' },
-                                        environment: { type: 'string' },
-                                        autoRebalancer: { type: 'object' },
+                                        uptimeSeconds: { type: 'integer', example: 42 },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/ready': {
+            get: {
+                tags: ['Health'],
+                summary: 'Readiness check',
+                description: 'Deep readiness probe covering database, Redis/queues, workers, indexer, and auto-rebalancer startup.',
+                responses: {
+                    '200': {
+                        description: 'System is ready to serve traffic',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        status: { type: 'string', example: 'ready' },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                        uptimeSeconds: { type: 'integer', example: 42 },
+                                        checks: { type: 'object' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '503': {
+                        description: 'System is not ready to serve traffic',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        status: { type: 'string', example: 'not_ready' },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                        uptimeSeconds: { type: 'integer', example: 42 },
+                                        checks: { type: 'object' },
                                     },
                                 },
                             },

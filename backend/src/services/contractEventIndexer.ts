@@ -24,6 +24,7 @@ interface ContractEventIndexerStatus {
     rpcUrl?: string
     pollIntervalMs: number
     lastRunAt?: string
+    lastSuccessfulRunAt?: string
     lastError?: string
     lastIngestedCount: number
     cursor?: string
@@ -170,6 +171,7 @@ export class ContractEventIndexerService {
             if (latestLedger) databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(latestLedger))
 
             this.status.lastRunAt = new Date().toISOString()
+            this.status.lastSuccessfulRunAt = this.status.lastRunAt
             this.status.lastError = undefined
             this.status.lastIngestedCount = ingested
             this.status.cursor = cursor
