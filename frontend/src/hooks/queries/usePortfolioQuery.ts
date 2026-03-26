@@ -26,3 +26,13 @@ export const usePortfolioDetails = (id: string | null) => {
         staleTime: 30000, // 30 seconds
     })
 }
+
+export const useRebalanceEstimate = (id: string | null) => {
+    return useQuery({
+        queryKey: [...portfolioKeys.detail(id || ''), 'rebalance-estimate'],
+        queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_REBALANCE_ESTIMATE(id!)),
+        enabled: !!id && id !== 'demo',
+        refetchInterval: 30000,
+        staleTime: 25000,
+    })
+}

@@ -32,6 +32,17 @@ export interface ExecuteRebalanceOptions extends Partial<RebalanceExecutionConfi
     tradeSlippageOverrides?: Record<string, number>
 }
 
+export interface RebalanceGasEstimate {
+    portfolioId: string
+    tradeCount: number
+    gasEstimateXlm: number
+    gasEstimateUsd: number
+    gasPerTradeXlm: number
+    gasWarning: boolean
+    breakdown: Array<{ tradeId: string, estimateXlm: number }>
+    xlmPriceUsd: number
+}
+
 export class StellarService {
     private server: Horizon.Server
     private contractAddress: string
@@ -210,6 +221,40 @@ export class StellarService {
         }
     }
 
+    async estimateRebalanceGas(portfolioId: string): Promise<RebalanceGasEstimate> {
+        const { portfolioStorage } = await import('./portfolioStorage.js')
+        const { ReflectorService } = await import('./reflector.js')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId) as StoredPortfolio | undefined
+        if (!portfolio) {
+            throw new Error('Portfolio not found')
+        }
+
+        const reflector = new ReflectorService()
+        const prices = await reflector.getCurrentPrices()
+        const portfolioSlippagePct = (portfolio as { slippageTolerancePercent?: number; slippageTolerance?: number }).slippageTolerancePercent
+            ?? (portfolio as { slippageTolerance?: number }).slippageTolerance ?? 1
+        const slippageBps = Math.round(portfolioSlippagePct * 100)
+        const { trades } = this.calculateRebalanceTrades(portfolio, prices, undefined, slippageBps)
+        const feeEstimate = await this.dexService.estimateNetworkFeeXlm(trades.length)
+        const xlmPriceUsd = prices.XLM?.price ?? 0
+        const gasEstimateUsd = Dec.roundStellar(feeEstimate.totalFeeXlm * xlmPriceUsd)
+
+        return {
+            portfolioId,
+            tradeCount: trades.length,
+            gasEstimateXlm: feeEstimate.totalFeeXlm,
+            gasEstimateUsd,
+            gasPerTradeXlm: feeEstimate.feePerTradeXlm,
+            gasWarning: feeEstimate.totalFeeXlm > 0.5,
+            breakdown: trades.map((trade) => ({
+                tradeId: trade.tradeId,
+                estimateXlm: feeEstimate.feePerTradeXlm
+            })),
+            xlmPriceUsd
+        }
+    }
+
     async executeRebalance(portfolioId: string, options: ExecuteRebalanceOptions = {}): Promise<RebalanceResult> {
         try {
             const { portfolioStorage } = await import('./portfolioStorage.js')
@@ -381,12 +426,15 @@ export class StellarService {
 
             const actualSlippageBps = dexResult.totalSlippageBps ?? 0
             const maxAllowedBps = Math.round(portfolioSlippagePct * 100)
+            const executedTradeCount = dexResult.executedTrades.filter(t => t.executedAmount > 0 && !t.rolledBack).length
+            const gasFeeXlm = Dec.roundStellar(dexResult.totalEstimatedFeeXLM)
+            const gasFeeUsd = Dec.roundStellar(gasFeeXlm * (prices.XLM?.price ?? 0))
             const event = await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: dexResult.status === 'failed'
                     ? `Execution Failed: ${dexResult.failureReason || 'unknown reason'}`
                     : trigger,
-                trades: dexResult.executedTrades.filter(t => t.executedAmount > 0 && !t.rolledBack).length,
+                trades: executedTradeCount,
                 gasUsed: `${dexResult.totalEstimatedFeeXLM.toFixed(7)} XLM`,
                 status: historyStatus,
                 fromAsset: firstExecuted?.fromAsset,
@@ -398,7 +446,17 @@ export class StellarService {
                 estimatedSlippageBps: slippageBps,
                 actualSlippageBps: actualSlippageBps,
                 slippageExceededTolerance: actualSlippageBps > maxAllowedBps,
-                totalSlippageBps: dexResult.totalSlippageBps
+                totalSlippageBps: dexResult.totalSlippageBps,
+                gasFeeXlm,
+                gasFeeUsd,
+                gasPerTradeXlm: executedTradeCount > 0 ? Dec.roundStellar(gasFeeXlm / executedTradeCount) : 0,
+                gasWarning: gasFeeXlm > 0.5,
+                gasBreakdown: dexResult.executedTrades.map((trade) => ({
+                    tradeId: trade.tradeId,
+                    fromAsset: trade.fromAsset,
+                    toAsset: trade.toAsset,
+                    feeXlm: executedTradeCount > 0 ? Dec.roundStellar(gasFeeXlm / executedTradeCount) : 0
+                }))
             })
 
             const overallStatus = dexResult.status === 'success'
