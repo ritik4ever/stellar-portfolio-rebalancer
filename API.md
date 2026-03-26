@@ -62,7 +62,7 @@ Error responses:
 
 - **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%.
 - **GET /api/portfolio/{id}** — Get portfolio by ID.
-- **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address.
+- **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address. When JWT auth is enabled, the token subject must match `:address` (otherwise `403`). In demo mode, public-by-address listing is allowed only when `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is enabled.
 - **GET /api/portfolio/{id}/rebalance-plan** — Get rebalance plan (total value, slippage, prices).
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`).
 - **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).

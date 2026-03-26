@@ -11,7 +11,7 @@ import { AutoRebalancerService } from '../services/autoRebalancer.js'
 import { logger, logAudit } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
-import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
+import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { writeRateLimiter, protectedWriteLimiter, protectedCriticalLimiter, adminRateLimiter } from '../middleware/rateLimit.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
@@ -30,6 +30,7 @@ import {
 } from '../services/assetRegistryValidation.js'
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
+import { getAuthConfig } from '../services/authService.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -430,7 +431,26 @@ router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
     try {
         const address = req.params.address
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
-        const list = portfolioStorage.getUserPortfolios(address)
+        const authConfig = getAuthConfig()
+        const allowPublicInDemo =
+            authConfig.enabled &&
+            featureFlags.demoMode &&
+            featureFlags.allowPublicUserPortfoliosInDemo
+
+        // Privacy model:
+        // - When JWT auth is enabled, only the token subject may list portfolios for `:address`.
+        // - In demo mode, we can explicitly allow unauthenticated public listing via feature flag.
+        if (authConfig.enabled && !allowPublicInDemo) {
+            let nextCalled = false
+            requireJwt(req, res, () => { nextCalled = true })
+            if (!nextCalled) return
+
+            if (req.user?.address !== address) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
+            }
+        }
+
+        const list = await portfolioStorage.getUserPortfolios(address)
 
         return ok(res, { portfolios: list })
     } catch (error) {
