@@ -3,7 +3,7 @@ import { connectMockWallet } from './helpers'
 
 test.describe('Notification preferences flow', () => {
   test('loads preferences and saves updates deterministically', async ({ page }) => {
-    await page.route('**/api/notifications/preferences**', async route => {
+    await page.route('**/api/v1/notifications/preferences**', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -29,7 +29,7 @@ test.describe('Notification preferences flow', () => {
       })
     })
 
-    await page.route('**/api/notifications/subscribe', async route => {
+    await page.route('**/api/v1/notifications/subscribe', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

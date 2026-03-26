@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader, Download } from 'lucide-react'
-import { api, downloadPortfolioExport } from '../config/api'
+import { api, downloadPortfolioExport, ENDPOINTS } from '../config/api'
 
 interface NotificationPreferencesProps {
     userId: string
@@ -58,7 +58,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setError(null)
 
             const data = await api.get<{ preferences: Preferences | null; message?: string }>(
-                '/api/notifications/preferences',
+                ENDPOINTS.NOTIFICATIONS_PREFERENCES,
                 { userId }
             )
 
@@ -139,7 +139,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         setSaveSuccess(false)
 
         try {
-            await api.post('/api/notifications/subscribe', {
+            await api.post(ENDPOINTS.NOTIFICATIONS_SUBSCRIBE, {
                 userId,
                 ...preferences
             })
@@ -165,7 +165,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         setError(null)
 
         try {
-            await api.delete(`/api/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`)
+            await api.delete(ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE(userId))
 
             // Update local state
             setPreferences(prev => ({
