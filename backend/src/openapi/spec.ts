@@ -306,8 +306,9 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Portfolio'],
                 summary: 'List user portfolios',
-                description: 'Get all portfolios for a Stellar address.',
+                description: 'Get all portfolios for a Stellar address. When JWT auth is enabled, only the authenticated user (token subject) may list portfolios for their own address. In demo mode, public-by-address listing is allowed only when ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO is enabled.',
                 parameters: [{ name: 'address', in: 'path', required: true, schema: { type: 'string' } }],
+                security: [{ adminAuth: [] }],
                 responses: {
                     '200': {
                         description: 'List of portfolios',
@@ -328,6 +329,8 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },

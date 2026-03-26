@@ -26,6 +26,7 @@ beforeAll(async () => {
     process.env.RATE_LIMIT_WRITE_MAX = '100'
     process.env.RATE_LIMIT_WRITE_BURST_MAX = '200'
     process.env.RATE_LIMIT_BURST_MAX = '200'
+    process.env.RATE_LIMIT_AUTH_MAX = '100'
 
     const express = (await import('express')).default
     const cors = (await import('cors')).default
@@ -63,6 +64,11 @@ describe('consent and privacy API', () => {
     it('GET /api/consent/status returns 400 when userId is missing', async () => {
         const res = await request(app).get('/api/consent/status').expect(400)
         expect(res.body.success).toBe(false)
+        expect(res.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('GET /api/consent/status returns 400 when userId is empty', async () => {
+        const res = await request(app).get('/api/consent/status').query({ userId: '' }).expect(400)
         expect(res.body.error?.code).toBe('VALIDATION_ERROR')
     })
 
@@ -106,6 +112,28 @@ describe('consent and privacy API', () => {
         expect(res.body.error?.code).toBe('VALIDATION_ERROR')
     })
 
+    it('POST /api/consent returns 400 for empty JSON body', async () => {
+        const res = await request(app).post('/api/consent').send({}).expect(400)
+        expect(res.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('POST /api/consent returns 400 when userId is empty string', async () => {
+        const res = await request(app)
+            .post('/api/consent')
+            .send({ userId: '', terms: true, privacy: true, cookies: true })
+            .expect(400)
+        expect(res.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('POST /api/consent returns 400 when terms, privacy, or cookies are omitted', async () => {
+        const userId = `GOMIT${Math.random().toString(36).slice(2, 12)}`
+        const res = await request(app)
+            .post('/api/consent')
+            .send({ userId, terms: true, privacy: true })
+            .expect(400)
+        expect(res.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
     it('POST /api/consent returns 400 when boolean fields are not booleans', async () => {
         const userId = `GINVALID${Math.random().toString(36).slice(2, 12)}`
         const res = await request(app)
@@ -142,6 +170,15 @@ describe('consent and privacy API', () => {
         expect(res.body.error?.code).toBe('UNAUTHORIZED')
     })
 
+    it('DELETE /api/user/:address/data returns 401 for invalid access token', async () => {
+        const userId = `GINVJWT${Math.random().toString(36).slice(2, 12)}`
+        const res = await request(app)
+            .delete(`/api/user/${userId}/data`)
+            .set('Authorization', 'Bearer not.a.valid.jwt')
+            .expect(401)
+        expect(res.body.error?.code).toBe('UNAUTHORIZED')
+    })
+
     it('DELETE /api/user/:address/data clears consent and portfolios for the owner', async () => {
         const { generateAccessToken } = await import('../services/authService.js')
         const userId = `GOWNER${Math.random().toString(36).slice(2, 12)}`
@@ -170,8 +207,55 @@ describe('consent and privacy API', () => {
         expect(statusRes.body.data.accepted).toBe(false)
         expect(statusRes.body.data.termsAcceptedAt).toBeNull()
 
-        const portfoliosRes = await request(app).get(`/api/user/${userId}/portfolios`).expect(200)
+        const portfoliosRes = await request(app)
+            .get(`/api/user/${userId}/portfolios`)
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
         expect(portfoliosRes.body.data.portfolios).toEqual([])
+    })
+
+    it('GET /api/user/:address/portfolios returns 401 without Authorization when JWT is required', async () => {
+        const victim = `GVISIT${Math.random().toString(36).slice(2, 12)}`
+        const res = await request(app).get(`/api/user/${victim}/portfolios`).expect(401)
+        expect(res.body.error?.code).toBe('UNAUTHORIZED')
+    })
+
+    it('GET /api/user/:address/portfolios returns 403 when JWT subject does not match address', async () => {
+        const { generateAccessToken } = await import('../services/authService.js')
+        const victim = `GVICTIM${Math.random().toString(36).slice(2, 12)}`
+        const attacker = `GATTACK${Math.random().toString(36).slice(2, 12)}`
+        const token = generateAccessToken(attacker)
+
+        const res = await request(app)
+            .get(`/api/user/${victim}/portfolios`)
+            .set('Authorization', `Bearer ${token}`)
+            .expect(403)
+        expect(res.body.error?.code).toBe('FORBIDDEN')
+    })
+
+    it('GET /api/user/:address/portfolios returns portfolios for the authenticated owner', async () => {
+        const { generateAccessToken } = await import('../services/authService.js')
+        const userId = `GOWNER${Math.random().toString(36).slice(2, 12)}`
+
+        const createRes = await request(app)
+            .post('/api/portfolio')
+            .send({
+                userAddress: userId,
+                allocations: { XLM: 60, USDC: 40 },
+                threshold: 5
+            })
+        expect([200, 201]).toContain(createRes.status)
+
+        const token = generateAccessToken(userId)
+        const portfoliosRes = await request(app)
+            .get(`/api/user/${userId}/portfolios`)
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(portfoliosRes.body.success).toBe(true)
+        expect(Array.isArray(portfoliosRes.body.data.portfolios)).toBe(true)
+        expect(portfoliosRes.body.data.portfolios.length).toBeGreaterThan(0)
+        expect(portfoliosRes.body.data.portfolios.every((p: any) => p.userAddress === userId)).toBe(true)
     })
 
     it('after DELETE user data, refresh token is rejected', async () => {
@@ -192,5 +276,64 @@ describe('consent and privacy API', () => {
             .send({ refreshToken })
             .expect(401)
         expect(refreshAfter.body.error?.code).toBe('UNAUTHORIZED')
+    })
+
+    it('POST /api/auth/refresh returns 400 when refreshToken is missing', async () => {
+        const res = await request(app).post('/api/auth/refresh').send({}).expect(400)
+        expect(res.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('POST /api/auth/refresh returns 400 when refreshToken is not a string', async () => {
+        const res = await request(app).post('/api/auth/refresh').send({ refreshToken: 12345 }).expect(400)
+        expect(res.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('after DELETE user data, all issued refresh tokens for that user are rejected', async () => {
+        const userId = `GMULTIRT${Math.random().toString(36).slice(2, 10)}`
+        const { issueTokens, generateAccessToken } = await import('../services/authService.js')
+        const first = await issueTokens(userId)
+        const second = await issueTokens(userId)
+        const rt1 = first.refreshToken
+        const rt2 = second.refreshToken
+        expect(rt1).toBeTruthy()
+        expect(rt2).toBeTruthy()
+        expect(rt1).not.toBe(rt2)
+
+        await request(app)
+            .delete(`/api/user/${userId}/data`)
+            .set('Authorization', `Bearer ${generateAccessToken(userId)}`)
+            .expect(200)
+
+        for (const token of [rt1, rt2]) {
+            const out = await request(app).post('/api/auth/refresh').send({ refreshToken: token }).expect(401)
+            expect(out.body.error?.code).toBe('UNAUTHORIZED')
+        }
+    })
+
+    it('after DELETE user data, consent can be recorded again and status shows accepted', async () => {
+        const userId = `GRECONSENT${Math.random().toString(36).slice(2, 10)}`
+        await request(app)
+            .post('/api/consent')
+            .send({ userId, terms: true, privacy: true, cookies: true })
+            .expect(200)
+        let status = await request(app).get('/api/consent/status').query({ userId }).expect(200)
+        expect(status.body.data.accepted).toBe(true)
+
+        const { generateAccessToken } = await import('../services/authService.js')
+        await request(app)
+            .delete(`/api/user/${userId}/data`)
+            .set('Authorization', `Bearer ${generateAccessToken(userId)}`)
+            .expect(200)
+
+        status = await request(app).get('/api/consent/status').query({ userId }).expect(200)
+        expect(status.body.data.accepted).toBe(false)
+
+        await request(app)
+            .post('/api/consent')
+            .send({ userId, terms: true, privacy: true, cookies: true })
+            .expect(200)
+        status = await request(app).get('/api/consent/status').query({ userId }).expect(200)
+        expect(status.body.data.accepted).toBe(true)
+        expect(status.body.data.termsAcceptedAt).toBeTruthy()
     })
 })

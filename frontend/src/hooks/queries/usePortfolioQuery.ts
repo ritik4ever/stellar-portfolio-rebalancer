@@ -12,7 +12,10 @@ export const portfolioKeys = {
 export const useUserPortfolios = (address: string | null) => {
     return useQuery({
         queryKey: portfolioKeys.list(address || ''),
-        queryFn: () => api.get<any[]>(ENDPOINTS.USER_PORTFOLIOS(address!)),
+        queryFn: async () => {
+            const res = await api.get<{ portfolios: any[] }>(ENDPOINTS.USER_PORTFOLIOS(address!))
+            return res.portfolios
+        },
         enabled: !!address,
         staleTime: 60000, // 1 minute
     })
@@ -24,5 +27,15 @@ export const usePortfolioDetails = (id: string | null) => {
         queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_DETAIL(id!)),
         enabled: !!id && id !== 'demo',
         staleTime: 30000, // 30 seconds
+    })
+}
+
+export const useRebalanceEstimate = (id: string | null) => {
+    return useQuery({
+        queryKey: [...portfolioKeys.detail(id || ''), 'rebalance-estimate'],
+        queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_REBALANCE_ESTIMATE(id!)),
+        enabled: !!id && id !== 'demo',
+        refetchInterval: 30000,
+        staleTime: 25000,
     })
 }

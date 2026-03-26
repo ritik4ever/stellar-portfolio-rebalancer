@@ -5,6 +5,7 @@ export interface FeatureFlags {
     allowMockPriceHistory: boolean
     allowDemoBalanceFallback: boolean
     enableDemoDbSeed: boolean
+    allowPublicUserPortfoliosInDemo: boolean
 }
 
 const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
@@ -24,6 +25,7 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
     const allowMockPriceHistory = parseBoolean(env.ALLOW_MOCK_PRICE_HISTORY, demoMode)
     const allowDemoBalanceFallback = parseBoolean(env.ALLOW_DEMO_BALANCE_FALLBACK, demoMode)
     const enableDemoDbSeed = parseBoolean(env.ENABLE_DEMO_DB_SEED, demoMode)
+    const allowPublicUserPortfoliosInDemo = parseBoolean(env.ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO, false)
 
     return {
         demoMode,
@@ -31,7 +33,8 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
         enableDebugRoutes,
         allowMockPriceHistory,
         allowDemoBalanceFallback,
-        enableDemoDbSeed
+        enableDemoDbSeed,
+        allowPublicUserPortfoliosInDemo
     }
 }
 
@@ -43,6 +46,7 @@ export const getPublicFeatureFlags = (env: NodeJS.ProcessEnv = process.env): Rec
         ENABLE_DEBUG_ROUTES: flags.enableDebugRoutes,
         ALLOW_MOCK_PRICE_HISTORY: flags.allowMockPriceHistory,
         ALLOW_DEMO_BALANCE_FALLBACK: flags.allowDemoBalanceFallback,
-        ENABLE_DEMO_DB_SEED: flags.enableDemoDbSeed
+        ENABLE_DEMO_DB_SEED: flags.enableDemoDbSeed,
+        ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: flags.allowPublicUserPortfoliosInDemo
     }
 }
