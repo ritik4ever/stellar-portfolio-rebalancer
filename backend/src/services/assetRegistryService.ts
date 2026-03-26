@@ -1,4 +1,8 @@
 import { databaseService } from './databaseService.js'
+import {
+    AssetRegistryConflictError,
+    parseAssetCreatePayload
+} from './assetRegistryValidation.js'
 
 export interface AssetRecord {
     symbol: string
@@ -31,8 +35,24 @@ export const assetRegistryService = {
         return map
     },
 
-    add(symbol: string, name: string, options: { contractAddress?: string; issuerAccount?: string; coingeckoId?: string } = {}): void {
-        databaseService.addAsset(symbol, name, options)
+    add(
+        symbol: unknown,
+        name: unknown,
+        options: {
+            contractAddress?: unknown
+            issuerAccount?: unknown
+            coingeckoId?: unknown
+        } = {}
+    ): void {
+        const parsed = parseAssetCreatePayload(symbol, name, options)
+        if (databaseService.getAssetBySymbol(parsed.symbol)) {
+            throw new AssetRegistryConflictError(`An asset with symbol ${parsed.symbol} already exists`)
+        }
+        databaseService.addAsset(parsed.symbol, parsed.name, {
+            contractAddress: parsed.contractAddress,
+            issuerAccount: parsed.issuerAccount,
+            coingeckoId: parsed.coingeckoId
+        })
     },
 
     remove(symbol: string): boolean {

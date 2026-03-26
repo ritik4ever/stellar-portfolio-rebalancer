@@ -25,6 +25,7 @@ export const useExecuteRebalanceMutation = (portfolioId: string | null) => {
             // Invalidate the specific portfolio details and history
             if (portfolioId) {
                 queryClient.invalidateQueries({ queryKey: portfolioKeys.detail(portfolioId) })
+                queryClient.invalidateQueries({ queryKey: [...portfolioKeys.detail(portfolioId), 'rebalance-estimate'] })
                 queryClient.invalidateQueries({ queryKey: historyKeys.list(portfolioId) })
                 queryClient.invalidateQueries({ queryKey: analyticsKeys.portfolio(portfolioId) })
             }

@@ -36,6 +36,11 @@ interface RebalanceEvent {
         actualSlippageBps?: number
         slippageExceededTolerance?: boolean
         totalSlippageBps?: number
+        gasFeeXlm?: number
+        gasFeeUsd?: number
+        gasPerTradeXlm?: number
+        gasWarning?: boolean
+        gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
     }
 }
 
@@ -81,6 +86,16 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                     performanceImpact: 'neutral',
                     executionTime: 2400,
                     chain: 'Stellar'
+                    ,
+                    gasFeeXlm: 0.0234,
+                    gasFeeUsd: 0.0028,
+                    gasPerTradeXlm: 0.0078,
+                    gasWarning: false,
+                    gasBreakdown: [
+                        { tradeId: 'trade-1', fromAsset: 'XLM', toAsset: 'ETH', feeXlm: 0.0078 },
+                        { tradeId: 'trade-2', fromAsset: 'USDC', toAsset: 'XLM', feeXlm: 0.0078 },
+                        { tradeId: 'trade-3', fromAsset: 'BTC', toAsset: 'USDC', feeXlm: 0.0078 }
+                    ]
                 }
             },
             {
@@ -102,6 +117,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                     performanceImpact: 'positive',
                     executionTime: 1800,
                     chain: 'Stellar'
+                    ,
+                    gasFeeXlm: 0.0156,
+                    gasFeeUsd: 0.0019,
+                    gasPerTradeXlm: 0.0078,
+                    gasWarning: false,
+                    gasBreakdown: [
+                        { tradeId: 'trade-1', fromAsset: 'XLM', toAsset: 'USDC', feeXlm: 0.0078 },
+                        { tradeId: 'trade-2', fromAsset: 'ETH', toAsset: 'XLM', feeXlm: 0.0078 }
+                    ]
                 }
             }
         ]
@@ -374,6 +398,12 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
                                             <div className="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400 mb-2">
                                                 <span>Gas: {event.gasUsed}</span>
+                                                {event.details?.gasFeeUsd != null && (
+                                                    <span>(~${event.details.gasFeeUsd.toFixed(4)})</span>
+                                                )}
+                                                {event.details?.gasPerTradeXlm != null && (
+                                                    <span>{event.details.gasPerTradeXlm.toFixed(4)} XLM/trade</span>
+                                                )}
                                                 {event.details?.executionTime && (
                                                     <span>Execution: {formatExecutionTime(event.details.executionTime)}</span>
                                                 )}
@@ -384,6 +414,19 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                     <span>Slippage: {(event.details.totalSlippageBps / 100).toFixed(2)}%</span>
                                                 )}
                                             </div>
+                                            {(event.details?.gasBreakdown?.length ?? 0) > 0 && (
+                                                <div className="text-xs text-gray-600 dark:text-gray-400 mb-2">
+                                                    {event.details?.gasWarning && (
+                                                        <div className="text-red-600 dark:text-red-400 mb-1 font-medium">High gas warning (&gt; 0.5 XLM)</div>
+                                                    )}
+                                                    {event.details?.gasBreakdown?.map((item) => (
+                                                        <div key={item.tradeId} className="flex justify-between">
+                                                            <span>{item.tradeId}: {item.fromAsset ?? '—'} → {item.toAsset ?? '—'}</span>
+                                                            <span>{item.feeXlm.toFixed(4)} XLM</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
 
                                             {/* Enhanced badges */}
                                             <div className="flex items-center space-x-2 mb-2">
