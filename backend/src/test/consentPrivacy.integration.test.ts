@@ -170,8 +170,55 @@ describe('consent and privacy API', () => {
         expect(statusRes.body.data.accepted).toBe(false)
         expect(statusRes.body.data.termsAcceptedAt).toBeNull()
 
-        const portfoliosRes = await request(app).get(`/api/user/${userId}/portfolios`).expect(200)
+        const portfoliosRes = await request(app)
+            .get(`/api/user/${userId}/portfolios`)
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
         expect(portfoliosRes.body.data.portfolios).toEqual([])
+    })
+
+    it('GET /api/user/:address/portfolios returns 401 without Authorization when JWT is required', async () => {
+        const victim = `GVISIT${Math.random().toString(36).slice(2, 12)}`
+        const res = await request(app).get(`/api/user/${victim}/portfolios`).expect(401)
+        expect(res.body.error?.code).toBe('UNAUTHORIZED')
+    })
+
+    it('GET /api/user/:address/portfolios returns 403 when JWT subject does not match address', async () => {
+        const { generateAccessToken } = await import('../services/authService.js')
+        const victim = `GVICTIM${Math.random().toString(36).slice(2, 12)}`
+        const attacker = `GATTACK${Math.random().toString(36).slice(2, 12)}`
+        const token = generateAccessToken(attacker)
+
+        const res = await request(app)
+            .get(`/api/user/${victim}/portfolios`)
+            .set('Authorization', `Bearer ${token}`)
+            .expect(403)
+        expect(res.body.error?.code).toBe('FORBIDDEN')
+    })
+
+    it('GET /api/user/:address/portfolios returns portfolios for the authenticated owner', async () => {
+        const { generateAccessToken } = await import('../services/authService.js')
+        const userId = `GOWNER${Math.random().toString(36).slice(2, 12)}`
+
+        const createRes = await request(app)
+            .post('/api/portfolio')
+            .send({
+                userAddress: userId,
+                allocations: { XLM: 60, USDC: 40 },
+                threshold: 5
+            })
+        expect([200, 201]).toContain(createRes.status)
+
+        const token = generateAccessToken(userId)
+        const portfoliosRes = await request(app)
+            .get(`/api/user/${userId}/portfolios`)
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(portfoliosRes.body.success).toBe(true)
+        expect(Array.isArray(portfoliosRes.body.data.portfolios)).toBe(true)
+        expect(portfoliosRes.body.data.portfolios.length).toBeGreaterThan(0)
+        expect(portfoliosRes.body.data.portfolios.every((p: any) => p.userAddress === userId)).toBe(true)
     })
 
     it('after DELETE user data, refresh token is rejected', async () => {

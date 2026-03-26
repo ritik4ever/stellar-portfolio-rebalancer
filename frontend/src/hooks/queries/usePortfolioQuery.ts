@@ -12,7 +12,10 @@ export const portfolioKeys = {
 export const useUserPortfolios = (address: string | null) => {
     return useQuery({
         queryKey: portfolioKeys.list(address || ''),
-        queryFn: () => api.get<any[]>(ENDPOINTS.USER_PORTFOLIOS(address!)),
+        queryFn: async () => {
+            const res = await api.get<{ portfolios: any[] }>(ENDPOINTS.USER_PORTFOLIOS(address!))
+            return res.portfolios
+        },
         enabled: !!address,
         staleTime: 60000, // 1 minute
     })
