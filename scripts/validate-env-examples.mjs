@@ -52,12 +52,10 @@ function collectBackendEnvKeys() {
   const files = walkFiles(BACKEND_SRC_PATH).filter(file => !file.includes('/test/'))
   const keys = new Set()
   const processEnvRegex = /process\.env\.([A-Z0-9_]+)/g
-  const typedEnvRegex = /\benv\.([A-Z0-9_]+)/g
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8')
     for (const match of content.matchAll(processEnvRegex)) keys.add(match[1])
-    for (const match of content.matchAll(typedEnvRegex)) keys.add(match[1])
   }
   return keys
 }
@@ -66,10 +64,16 @@ function collectFrontendEnvKeys() {
   const files = walkFiles(FRONTEND_SRC_PATH)
   const keys = new Set()
   const viteRegex = /(?:import\.meta\.env\.|VITE_)(VITE_[A-Z0-9_]+)/g
+  const optionalAccessRegex = /\?\.\s*(VITE_[A-Z0-9_]+)/g
+  const importMetaEnvDeclRegex = /readonly\s+(VITE_[A-Z0-9_]+)/g
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8')
     for (const match of content.matchAll(viteRegex)) keys.add(match[1])
+    for (const match of content.matchAll(optionalAccessRegex)) keys.add(match[1])
+    if (file.endsWith('vite-env.d.ts')) {
+      for (const match of content.matchAll(importMetaEnvDeclRegex)) keys.add(match[1])
+    }
   }
   return keys
 }
