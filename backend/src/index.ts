@@ -3,9 +3,8 @@ import express from 'express'
 import cors from 'cors'
 import { validateStartupConfigOrThrow, buildStartupSummary } from './config/startupConfig.js'
 import { logger } from './utils/logger.js'
-import { portfolioRouter } from './api/routes.js'
-import { authRouter } from './api/authRoutes.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
+import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
 import { startQueueScheduler } from './queue/scheduler.js'
 
@@ -33,8 +32,8 @@ app.get('/health', (_req, res) => {
     res.status(200).type('text/plain').send('ok')
 })
 
-app.use('/api', portfolioRouter)
-app.use('/api/auth', authRouter)
+mountLegacyNonApiRedirects(app)
+mountApiRoutes(app)
 
 app.use(apiErrorHandler)
 

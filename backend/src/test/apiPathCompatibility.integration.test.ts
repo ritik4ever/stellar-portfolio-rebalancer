@@ -1,0 +1,126 @@
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import type { Express } from 'express'
+import request from 'supertest'
+import { mkdirSync, rmSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+let app: Express
+let testDbPath: string
+const envBackup: NodeJS.ProcessEnv = { ...process.env }
+
+beforeAll(async () => {
+    const testDir = join(tmpdir(), `stellar-api-path-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    mkdirSync(testDir, { recursive: true })
+    testDbPath = join(testDir, 'api-path.db')
+
+    vi.resetModules()
+    process.env = { ...envBackup }
+    delete process.env.DATABASE_URL
+    process.env.DB_PATH = testDbPath
+    process.env.JWT_SECRET = 'unit-test-jwt-secret-min-32-chars!!'
+    process.env.NODE_ENV = 'test'
+    process.env.ENABLE_DEMO_DB_SEED = 'false'
+    process.env.DEMO_MODE = 'true'
+    process.env.RATE_LIMIT_CRITICAL_MAX = '100'
+    process.env.RATE_LIMIT_WRITE_MAX = '100'
+    process.env.RATE_LIMIT_WRITE_BURST_MAX = '200'
+    process.env.RATE_LIMIT_BURST_MAX = '200'
+
+    const express = (await import('express')).default
+    const cors = (await import('cors')).default
+    const { apiErrorHandler } = await import('../middleware/apiErrorHandler.js')
+    const { mountApiRoutes, mountLegacyNonApiRedirects } = await import('../http/mountApiRoutes.js')
+
+    app = express()
+    app.use(
+        cors({
+            origin: true,
+            credentials: true,
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
+        })
+    )
+    app.use(express.json({ limit: '10mb' }))
+    app.set('trust proxy', 1)
+    mountLegacyNonApiRedirects(app)
+    mountApiRoutes(app)
+    app.use(apiErrorHandler)
+})
+
+afterAll(() => {
+    process.env = { ...envBackup }
+    if (existsSync(testDbPath)) {
+        try {
+            rmSync(testDbPath, { force: true })
+        } catch {
+            // ignore
+        }
+    }
+})
+
+describe('API path compatibility matrix', () => {
+    it('GET /api/v1/strategies returns 200 envelope without deprecation headers (canonical)', async () => {
+        const res = await request(app).get('/api/v1/strategies').expect(200)
+        expect(res.headers.deprecation).toBeUndefined()
+        expect(res.headers.sunset).toBeUndefined()
+        expect(res.body.success).toBe(true)
+        expect(res.body.data).toBeDefined()
+        expect(res.body.error).toBeNull()
+        expect(res.body.timestamp).toBeDefined()
+        expect(Array.isArray(res.body.data.strategies)).toBe(true)
+    })
+
+    it('GET /api/strategies returns the same envelope with Deprecation / Sunset / Link (compatibility)', async () => {
+        const res = await request(app).get('/api/strategies').expect(200)
+        expect(res.headers.deprecation).toBe('true')
+        expect(res.headers.sunset).toBeDefined()
+        expect(String(res.headers.link)).toContain('deprecation')
+        expect(res.body.success).toBe(true)
+        expect(res.body.data).toBeDefined()
+        expect(res.body.error).toBeNull()
+        expect(Array.isArray(res.body.data.strategies)).toBe(true)
+    })
+
+    it('GET /api/v1/health returns JSON without deprecation headers', async () => {
+        const res = await request(app).get('/api/v1/health').expect(200)
+        expect(res.headers.deprecation).toBeUndefined()
+        expect(res.body.status).toBe('healthy')
+        expect(res.body.timestamp).toBeDefined()
+    })
+
+    it('GET /api/health returns the same JSON body with deprecation headers', async () => {
+        const res = await request(app).get('/api/health').expect(200)
+        expect(res.headers.deprecation).toBe('true')
+        expect(res.body.status).toBe('healthy')
+        expect(res.body.timestamp).toBeDefined()
+    })
+
+    it('validation errors use the standard envelope on both namespaces', async () => {
+        const v1 = await request(app).get('/api/v1/consent/status').expect(400)
+        expect(v1.headers.deprecation).toBeUndefined()
+        expect(v1.body.success).toBe(false)
+        expect(v1.body.data).toBeNull()
+        expect(v1.body.error?.code).toBe('VALIDATION_ERROR')
+
+        const legacy = await request(app).get('/api/consent/status').expect(400)
+        expect(legacy.headers.deprecation).toBe('true')
+        expect(legacy.body.success).toBe(false)
+        expect(legacy.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('GET /rebalance/history redirects to canonical /api/v1/rebalance/history preserving query string', async () => {
+        const res = await request(app).get('/rebalance/history').query({ limit: '3', portfolioId: 'p1' }).expect(308)
+        const loc = res.headers.location
+        expect(loc).toBeDefined()
+        const u = new URL(loc!, 'http://localhost')
+        expect(u.pathname).toBe('/api/v1/rebalance/history')
+        expect(u.searchParams.get('limit')).toBe('3')
+        expect(u.searchParams.get('portfolioId')).toBe('p1')
+    })
+
+    it('GET /api/auth/login is not marked as deprecated (auth mounted outside compatibility prefix)', async () => {
+        const res = await request(app).post('/api/auth/login').send({}).expect(400)
+        expect(res.headers.deprecation).toBeUndefined()
+    })
+})
