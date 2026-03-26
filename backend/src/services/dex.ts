@@ -113,6 +113,19 @@ export class StellarDEXService {
         }
     }
 
+    async estimateNetworkFeeXlm(tradeCount: number): Promise<{ totalFeeXlm: number, feePerTradeXlm: number, baseFeeStroops: number }> {
+        const safeTradeCount = Math.max(0, Math.floor(tradeCount))
+        const baseFeeStroops = await this.server.fetchBaseFee()
+        const feePerTradeXlm = Dec.addStroopFee(0, baseFeeStroops)
+        const totalFeeXlm = Dec.roundStellar(feePerTradeXlm * safeTradeCount)
+
+        return {
+            totalFeeXlm,
+            feePerTradeXlm,
+            baseFeeStroops
+        }
+    }
+
     async executeRebalanceTrades(
         userAddress: string,
         trades: DEXTradeRequest[],
