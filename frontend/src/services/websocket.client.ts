@@ -1,4 +1,5 @@
-import { PROTOCOL_VERSION } from '../../../backend/src/types'; 
+/** Must stay aligned with backend `src/types/websocket.ts` */
+const PROTOCOL_VERSION = '1.0.0'
 
 class RebalancerWSClient {
   private ws: WebSocket | null = null;

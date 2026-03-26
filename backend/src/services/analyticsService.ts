@@ -64,15 +64,16 @@ class AnalyticsService {
             let totalValue = 0
             const allocations: Record<string, number> = {}
 
-            for (const [asset, balance] of Object.entries(portfolio.balances ?? {})) {
+            const balancesMap = portfolio.balances ?? {}
+            for (const [asset, balance] of Object.entries(balancesMap)) {
                 const price = prices[asset]?.price || 0
-                const value = balance * price
+                const value = Number(balance) * price
                 totalValue += value
             }
 
-            for (const [asset, balance] of Object.entries(portfolio.balances ?? {})) {
+            for (const [asset, balance] of Object.entries(balancesMap)) {
                 const price = prices[asset]?.price || 0
-                const value = balance * price
+                const value = Number(balance) * price
                 allocations[asset] = totalValue > 0 ? (value / totalValue) * 100 : 0
             }
 
