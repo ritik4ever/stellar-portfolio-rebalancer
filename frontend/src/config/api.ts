@@ -77,6 +77,7 @@ export const API_CONFIG = {
         PORTFOLIO_DETAIL: (id: string) => `/api/portfolio/${id}`,
         PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') => `/api/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `/api/portfolio/${id}/rebalance`,
+        PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `/api/portfolio/${id}/rebalance-estimate`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `/api/portfolio/${id}/rebalance-status`,
         PRICES: '/api/prices',
         PRICES_ENHANCED: '/api/prices/enhanced',

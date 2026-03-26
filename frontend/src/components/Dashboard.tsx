@@ -13,7 +13,7 @@ import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
 
 // TanStack Query Hooks
-import { useUserPortfolios, usePortfolioDetails } from '../hooks/queries/usePortfolioQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate } from '../hooks/queries/usePortfolioQuery'
 import { usePrices } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { api, ENDPOINTS } from '../config/api'
@@ -45,6 +45,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     // Query for prices
     const { data: priceData, isLoading: pricesLoading } = usePrices()
+    const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
 
     // Mutation for rebalancing
     const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
@@ -91,6 +92,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             alert(isSlippage ? `Slippage too high: ${msg}` : msg)
         }
     }
+
+    const estimateXlm = rebalanceEstimate?.gasEstimateXlm ?? 0
+    const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
+    const hasHighGasWarning = rebalanceEstimate?.gasWarning || estimateXlm > 0.5
 
     const refreshData = async () => {
         // TanStack Query handles background refresh automatically, but we can force it
@@ -521,6 +526,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">
                                             Your portfolio has drifted from target allocation
                                         </p>
+                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-2 font-medium">
+                                            Estimated gas: {estimateXlm.toFixed(2)} XLM (~${estimateUsd.toFixed(3)})
+                                        </p>
+                                        <p className="text-xs text-orange-600 dark:text-orange-400 mb-3">
+                                            {rebalanceEstimate?.tradeCount ?? 0} estimated trade{(rebalanceEstimate?.tradeCount ?? 0) === 1 ? '' : 's'} @ {(rebalanceEstimate?.gasPerTradeXlm ?? 0).toFixed(4)} XLM each
+                                        </p>
+                                        {hasHighGasWarning && (
+                                            <p className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 rounded px-2 py-1 mb-3">
+                                                Warning: estimated gas is unusually high (&gt; 0.5 XLM). Consider reducing trade count.
+                                            </p>
+                                        )}
+                                        {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 && (
+                                            <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
+                                                {rebalanceEstimate.breakdown.map((item: any) => (
+                                                    <div key={item.tradeId} className="flex justify-between">
+                                                        <span>{item.tradeId}</span>
+                                                        <span>{Number(item.estimateXlm || 0).toFixed(4)} XLM</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                         {(portfolioData as any)?.slippageTolerancePercent != null && (
                                             <p className="text-xs text-orange-600 dark:text-orange-400 mb-4">
                                                 Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
