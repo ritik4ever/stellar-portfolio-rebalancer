@@ -53,7 +53,6 @@ describe('apiRequest envelope handling', () => {
 
         const { apiRequest } = await import('./api')
 
-
             name: 'ApiClientError',
             status: 409,
             code: 'CONFLICT',

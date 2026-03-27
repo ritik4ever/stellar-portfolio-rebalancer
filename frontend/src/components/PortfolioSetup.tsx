@@ -366,6 +366,35 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
     setError(null);
 
+    try {
+      const allocationsMap = allocations.reduce(
+        (acc, alloc) => {
+          acc[alloc.asset] = alloc.percentage;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+
+      await createPortfolioMutation.mutateAsync({
+        userAddress: publicKey || "demo-user",
+        allocations: allocationsMap,
+        threshold,
+        slippageTolerance,
+        strategy: strategy || "threshold",
+        strategyConfig:
+          Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
+      });
+
+      setSuccess(true);
+      setTimeout(() => onNavigate("dashboard"), 2000);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Network error. Please try again.",
+      );
+    }
+  };
 
     }
   };

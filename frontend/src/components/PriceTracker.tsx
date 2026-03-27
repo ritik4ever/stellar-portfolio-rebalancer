@@ -53,6 +53,7 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     }, [])
 
 
+
     if (loading && Object.keys(prices).length === 0) {
         return (
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">

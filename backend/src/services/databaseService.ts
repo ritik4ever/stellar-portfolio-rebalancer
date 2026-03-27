@@ -6,6 +6,7 @@ import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 
 
+
 function isSqliteAssetSymbolUniqueViolation(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err)
     return msg.includes('UNIQUE constraint failed') && msg.includes('assets.symbol')

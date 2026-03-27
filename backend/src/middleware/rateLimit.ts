@@ -172,7 +172,6 @@ export const writeRateLimiter = rateLimit({
     legacyHeaders: false,
     store: redisStore,
 
-})
 
 // Write burst protection - prevent rapid write attempts
 export const writeBurstLimiter = rateLimit({
