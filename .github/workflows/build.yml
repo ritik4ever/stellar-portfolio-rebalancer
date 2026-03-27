@@ -9,18 +9,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'
 
       - name: Build frontend
+        working-directory: frontend
         run: |
-          cd frontend
-          npm install
+          npm ci
           npm run build
 
       - name: Build backend
+        working-directory: backend
         run: |
-          cd backend
-          npm install
+          npm ci
           npm run build
