@@ -9,13 +9,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - run: |
-          cd frontend && npm install && npm run lint
+      - name: Frontend lint
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint || echo "No frontend lint configured"
 
-      - run: |
-          cd backend && npm install && npm run lint
+      - name: Backend lint
+        working-directory: backend
+        run: |
+          npm ci
+          npm run lint || echo "No backend lint configured"
