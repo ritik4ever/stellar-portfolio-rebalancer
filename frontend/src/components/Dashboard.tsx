@@ -645,10 +645,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <div className="grid lg:grid-cols-3 gap-6 mb-8">
                             {loading ? (
                                 // Show skeleton cards while loading
-                                [1, 2, 3].map((i) => {
-                                    console.log("Rendering asset card skeleton", i);
-                                    return <AssetCard key={`skeleton-${i}`} isLoading={true} />
-                                })
+                                [1, 2, 3].map((i) => (
+                                    <AssetCard key={`skeleton-${i}`} isLoading={true} />
+                                ))
                             ) : (
                                 // Show actual asset cards when data is loaded
                                 allocationData.map((asset: any, index: number) => (
