@@ -171,7 +171,7 @@ export const writeRateLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     store: redisStore,
-    skip: (req) => isProbePath(req.path),
+
 })
 
 // Write burst protection - prevent rapid write attempts

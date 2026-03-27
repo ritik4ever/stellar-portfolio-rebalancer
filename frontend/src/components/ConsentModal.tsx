@@ -5,7 +5,6 @@
 
 import React, { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
-import { api, ENDPOINTS } from '../config/api'
 
 interface ConsentModalProps {
     userId: string

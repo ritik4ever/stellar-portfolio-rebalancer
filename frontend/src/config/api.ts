@@ -61,7 +61,7 @@ const getBaseUrl = (): string => {
 
 export const API_CONFIG = {
     BASE_URL: getBaseUrl(),
-    WEBSOCKET_URL: getBaseUrl().replace('http', 'ws'),
+    WEBSOCKET_URL: getBaseUrl().replace(/^http/, 'ws'),
 
     // Use browser-based prices to bypass backend API issues
     USE_BROWSER_PRICES: true,
@@ -111,6 +111,16 @@ export const API_CONFIG = {
         CONSENT_RECORD: `${API_RESOURCE_ROOT}/consent`,
         USER_DATA_DELETE: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/data`,
     }
+}
+
+export function getWebSocketUrl(): string {
+    const viteEnv = (import.meta as any).env
+    const fromEnv = typeof viteEnv?.VITE_WS_URL === 'string' ? viteEnv.VITE_WS_URL.trim() : ''
+    if (fromEnv) return fromEnv
+    const base = API_CONFIG.WEBSOCKET_URL.replace(/\/$/, '')
+    const path = typeof viteEnv?.VITE_WS_PATH === 'string' ? viteEnv.VITE_WS_PATH.trim() : ''
+    if (!path) return base
+    return path.startsWith('/') ? `${base}${path}` : `${base}/${path}`
 }
 
 // Debug logging

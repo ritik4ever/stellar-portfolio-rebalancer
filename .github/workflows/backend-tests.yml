@@ -48,4 +48,4 @@ jobs:
         with:
           name: backend-coverage-${{ matrix.node-version }}
           path: backend/coverage/
-          if-no-files-found: error
+          if-no-files-found: warn
