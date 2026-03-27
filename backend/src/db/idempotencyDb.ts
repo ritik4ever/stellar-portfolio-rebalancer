@@ -24,6 +24,14 @@ export interface IdempotencyRecord {
 
 let idemDb: Database.Database | null = null
 
+/** Close the singleton so tests can swap `DB_PATH` or delete the file (Windows holds locks while open). */
+export function closeIdempotencyDb(): void {
+    if (idemDb) {
+        idemDb.close()
+        idemDb = null
+    }
+}
+
 function getDb(): Database.Database {
     if (!idemDb) {
         const dbPath = process.env.DB_PATH || './data/portfolio.db'
