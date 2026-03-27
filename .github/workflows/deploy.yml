@@ -13,4 +13,3 @@ jobs:
 
       - name: Build Docker images
         run: docker compose -f deployment/docker-compose.yml build
-
