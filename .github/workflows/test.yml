@@ -1,4 +1,4 @@
-name: Run Tests
+name: Tests
 
 on:
   pull_request:
@@ -10,44 +10,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # Node setup
+      # Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'
 
-      # Backend tests
-      - name: Install backend deps
-        run: |
-          cd backend
-          npm install
-
-      - name: Run backend tests
-        run: |
-          cd backend
-          npm test
-
-      # Frontend tests
+      # ---------- FRONTEND ----------
       - name: Install frontend deps
-        run: |
-          cd frontend
-          npm install
+        working-directory: frontend
+        run: npm ci
 
       - name: Run frontend tests
-        run: |
-          cd frontend
-          npm test
+        working-directory: frontend
+        run: npm run test
 
-      # Rust (contracts)
+      # ---------- BACKEND ----------
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+
+      - name: Run backend tests (with coverage)
+        working-directory: backend
+        run: npm run test:ci
+
+      # ---------- RUST CONTRACTS ----------
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
         with:
-          toolchain: stable
+          path: |
+            ~/.cargo
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
 
       - name: Run contract tests
-        run: |
-          cd contracts
-          cargo test
+        working-directory: contracts
+        run: cargo test
