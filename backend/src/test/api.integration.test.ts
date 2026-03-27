@@ -340,8 +340,9 @@ describe('Portfolio Management - GET /api/user/:address/portfolios', () => {
             .get(`/api/user/${userAddress}/portfolios`)
             .expect(200)
 
-        expect(Array.isArray(response.body)).toBe(true)
-        expect(response.body.length).toBeGreaterThan(0)
+        expect(response.body.success).toBe(true)
+        expect(Array.isArray(response.body.data?.portfolios)).toBe(true)
+        expect(response.body.data.portfolios.length).toBeGreaterThan(0)
     })
 
     it('should return empty array for user with no portfolios', async () => {
@@ -349,8 +350,9 @@ describe('Portfolio Management - GET /api/user/:address/portfolios', () => {
             .get('/api/user/GNEWUSER123456789ABCDEF/portfolios')
             .expect(200)
 
-        expect(Array.isArray(response.body)).toBe(true)
-        expect(response.body).toBeDefined()
+        expect(response.body.success).toBe(true)
+        expect(Array.isArray(response.body.data?.portfolios)).toBe(true)
+        expect(response.body.data.portfolios).toEqual([])
     })
 })
 

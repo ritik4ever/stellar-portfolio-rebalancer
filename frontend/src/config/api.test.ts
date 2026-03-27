@@ -28,7 +28,7 @@ describe('apiRequest envelope handling', () => {
         })))
 
         const { apiRequest } = await import('./api')
-        const result = await apiRequest<{ portfolioId: string }>('/api/portfolio/p1')
+        const result = await apiRequest<{ portfolioId: string }>('/api/v1/portfolio/p1')
 
         expect(result).toEqual({ portfolioId: 'p1' })
     })
@@ -53,7 +53,6 @@ describe('apiRequest envelope handling', () => {
 
         const { apiRequest } = await import('./api')
 
-        await expect(apiRequest('/api/portfolio/p1')).rejects.toMatchObject({
             name: 'ApiClientError',
             status: 409,
             code: 'CONFLICT',

@@ -63,19 +63,59 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Health'],
                 summary: 'Health check',
-                description: 'Returns service health and auto-rebalancer status.',
+                description: 'Lightweight liveness probe for process-up checks.',
                 responses: {
                     '200': {
-                        description: 'Healthy',
+                        description: 'Process is up',
                         content: {
                             'application/json': {
                                 schema: {
                                     type: 'object',
                                     properties: {
-                                        status: { type: 'string', example: 'healthy' },
+                                        status: { type: 'string', example: 'ok' },
                                         timestamp: { type: 'string', format: 'date-time' },
-                                        environment: { type: 'string' },
-                                        autoRebalancer: { type: 'object' },
+                                        uptimeSeconds: { type: 'integer', example: 42 },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/ready': {
+            get: {
+                tags: ['Health'],
+                summary: 'Readiness check',
+                description: 'Deep readiness probe covering database, Redis/queues, workers, indexer, and auto-rebalancer startup.',
+                responses: {
+                    '200': {
+                        description: 'System is ready to serve traffic',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        status: { type: 'string', example: 'ready' },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                        uptimeSeconds: { type: 'integer', example: 42 },
+                                        checks: { type: 'object' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '503': {
+                        description: 'System is not ready to serve traffic',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        status: { type: 'string', example: 'not_ready' },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                        uptimeSeconds: { type: 'integer', example: 42 },
+                                        checks: { type: 'object' },
                                     },
                                 },
                             },
@@ -266,8 +306,9 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Portfolio'],
                 summary: 'List user portfolios',
-                description: 'Get all portfolios for a Stellar address.',
+                description: 'Get all portfolios for a Stellar address. When JWT auth is enabled, only the authenticated user (token subject) may list portfolios for their own address. In demo mode, public-by-address listing is allowed only when ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO is enabled.',
                 parameters: [{ name: 'address', in: 'path', required: true, schema: { type: 'string' } }],
+                security: [{ adminAuth: [] }],
                 responses: {
                     '200': {
                         description: 'List of portfolios',
@@ -288,6 +329,8 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },

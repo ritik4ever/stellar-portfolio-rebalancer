@@ -5,7 +5,6 @@
 
 import React, { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
-import { api } from '../config/api'
 
 interface ConsentModalProps {
     userId: string
@@ -27,7 +26,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
         setSubmitting(true)
         setError(null)
         try {
-            await api.post('/api/consent', {
+            await api.post(ENDPOINTS.CONSENT_RECORD, {
                 userId,
                 terms: true,
                 privacy: true,

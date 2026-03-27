@@ -63,8 +63,9 @@ class AnalyticsService {
 
             let totalValue = 0
             const allocations: Record<string, number> = {}
-
             const balancesMap = portfolio.balances ?? {}
+
+
             for (const [asset, balance] of Object.entries(balancesMap)) {
                 const price = prices[asset]?.price || 0
                 const value = Number(balance) * price
