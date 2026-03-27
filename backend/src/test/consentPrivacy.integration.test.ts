@@ -258,6 +258,62 @@ describe('consent and privacy API', () => {
         expect(portfoliosRes.body.data.portfolios.every((p: any) => p.userAddress === userId)).toBe(true)
     })
 
+    it('GET /api/portfolio/:id/export allows authenticated owner export', async () => {
+        const { generateAccessToken } = await import('../services/authService.js')
+        const owner = `GOWNEREXP${Math.random().toString(36).slice(2, 10)}`
+
+        const createRes = await request(app)
+            .post('/api/portfolio')
+            .send({
+                userAddress: owner,
+                allocations: { XLM: 60, USDC: 40 },
+                threshold: 5
+            })
+        expect([200, 201]).toContain(createRes.status)
+        const portfolioId = (createRes.body?.data?.portfolioId ?? createRes.body?.portfolioId) as string
+        expect(portfolioId).toBeTruthy()
+
+        const token = generateAccessToken(owner)
+        const exportRes = await request(app)
+            .get(`/api/portfolio/${portfolioId}/export`)
+            .query({ format: 'json' })
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(exportRes.headers['content-type']).toContain('application/json')
+        expect(exportRes.headers['content-disposition']).toContain('attachment; filename=')
+        const payload = JSON.parse(exportRes.text)
+        expect(payload.portfolioId).toBe(portfolioId)
+        expect(payload.portfolio.userAddress).toBe(owner)
+        expect(payload.meta?.purpose).toBe('GDPR data export')
+    })
+
+    it('GET /api/portfolio/:id/export returns 403 for authenticated non-owner', async () => {
+        const { generateAccessToken } = await import('../services/authService.js')
+        const owner = `GOWNERVICT${Math.random().toString(36).slice(2, 10)}`
+        const attacker = `GATTACKER${Math.random().toString(36).slice(2, 10)}`
+
+        const createRes = await request(app)
+            .post('/api/portfolio')
+            .send({
+                userAddress: owner,
+                allocations: { XLM: 55, USDC: 45 },
+                threshold: 5
+            })
+        expect([200, 201]).toContain(createRes.status)
+        const portfolioId = (createRes.body?.data?.portfolioId ?? createRes.body?.portfolioId) as string
+        expect(portfolioId).toBeTruthy()
+
+        const token = generateAccessToken(attacker)
+        const res = await request(app)
+            .get(`/api/portfolio/${portfolioId}/export`)
+            .query({ format: 'json' })
+            .set('Authorization', `Bearer ${token}`)
+            .expect(403)
+
+        expect(res.body.error?.code).toBe('FORBIDDEN')
+    })
+
     it('after DELETE user data, refresh token is rejected', async () => {
         const userId = `GREFRESH${Math.random().toString(36).slice(2, 12)}`
         const loginRes = await request(app).post('/api/auth/login').send({ address: userId }).expect(200)
