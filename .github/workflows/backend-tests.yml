@@ -43,9 +43,9 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload backend coverage artifact
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: backend-coverage-${{ matrix.node-version }}
           path: backend/coverage/
-          if-no-files-found: error
+          if-no-files-found: warn

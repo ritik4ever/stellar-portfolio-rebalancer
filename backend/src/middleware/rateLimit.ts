@@ -110,9 +110,13 @@ function createKeyGenerator(prefix: string) {
 }
 
 // Skip rate limiting for health checks and internal requests
+function isProbePath(path: string): boolean {
+    return path === '/health' || path === '/ready' || path === '/metrics'
+}
+
 function skipSuccessfulRequests(req: import('express').Request, res: import('express').Response): boolean {
     // Skip health checks
-    if (req.path === '/health' || req.path === '/metrics') {
+    if (isProbePath(req.path)) {
         return true
     }
     
@@ -155,7 +159,7 @@ export const burstProtectionLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     store: redisStore,
-    skip: (req) => req.path === '/health' || req.path === '/metrics', // Only skip health checks
+    skip: (req) => isProbePath(req.path),
 })
 
 // Write operations rate limiter - stricter limits for mutating operations
@@ -167,7 +171,6 @@ export const writeRateLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     store: redisStore,
-    skip: (req) => req.path === '/health' || req.path === '/metrics', // Only skip health checks
 })
 
 // Write burst protection - prevent rapid write attempts
@@ -179,7 +182,7 @@ export const writeBurstLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     store: redisStore,
-    skip: (req) => req.path === '/health' || req.path === '/metrics',
+    skip: (req) => isProbePath(req.path),
 })
 
 // Authentication rate limiter - protect login/refresh endpoints

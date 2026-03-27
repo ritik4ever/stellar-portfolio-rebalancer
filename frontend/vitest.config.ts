@@ -8,6 +8,7 @@ export default defineConfig({
         exclude: ['tests/e2e/**', '**/node_modules/**'],
         coverage: {
             provider: 'v8',
+            reportsDirectory: './coverage',
             reporter: ['text', 'json-summary', 'lcov', 'html'],
             include: ['src/utils/calculations.ts'],
             thresholds: {

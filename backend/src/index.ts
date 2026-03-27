@@ -22,13 +22,12 @@ const corsOptions: cors.CorsOptions = {
 
 app.use(cors(corsOptions))
 app.options('*', cors(corsOptions))
-
 app.use(requestContextMiddleware)
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.set('trust proxy', 1)
 
-/** Plain-text liveness for load balancers, curl, and frontend clients using GET /health on the API host. */
+/** Plain-text liveness for load balancers */
 app.get('/health', (_req, res) => {
     res.status(200).type('text/plain').send('ok')
 })

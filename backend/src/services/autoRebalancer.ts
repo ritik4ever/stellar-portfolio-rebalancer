@@ -12,6 +12,9 @@ export class AutoRebalancerService {
     private stellarService: StellarService
     private reflectorService: ReflectorService
     private isRunning = false
+    private initialized = false
+    private lastStartedAt?: string
+    private lastInitializationError?: string
 
     // Configuration (kept for getStatus() compatibility)
     private readonly CHECK_INTERVAL = 30 * 60 * 1000        // 30 minutes
@@ -30,28 +33,50 @@ export class AutoRebalancerService {
      * check so the first run happens without waiting 30 min.
      */
     async start(): Promise<void> {
-        if (this.isRunning) {
+        if (this.isRunning && this.initialized) {
             logger.warn('[AUTO-REBALANCER] Already running')
             return
         }
 
+        if (this.isRunning && !this.initialized) {
+            logger.warn('[AUTO-REBALANCER] Retrying initialization after previous incomplete startup')
+        }
+
+        this.lastStartedAt = new Date().toISOString()
+        this.lastInitializationError = undefined
         this.isRunning = true
         logger.info('[AUTO-REBALANCER] Service started (queue-backed)')
         logAudit('auto_rebalancer_started', { backend: 'bullmq' })
 
-        const redisUp = await isRedisAvailable()
-        if (redisUp) {
-            const queue = getPortfolioCheckQueue()
-            if (queue) {
+        try {
+            const redisUp = await isRedisAvailable()
+            if (redisUp) {
+                const queue = getPortfolioCheckQueue()
+                if (!queue) {
+                    this.initialized = false
+                    this.lastInitializationError = 'Portfolio check queue unavailable'
+                    logger.warn('[AUTO-REBALANCER] Portfolio check queue unavailable during startup')
+                    return
+                }
+
                 await queue.add(
                     'startup-portfolio-check',
                     { triggeredBy: 'startup' },
                     { priority: 1 }
                 )
+                this.initialized = true
                 logger.info('[AUTO-REBALANCER] Enqueued startup portfolio-check job')
+                return
             }
-        } else {
+
+            this.initialized = false
+            this.lastInitializationError = 'Redis unavailable'
             logger.warn('[AUTO-REBALANCER] Redis not available – startup check skipped')
+        } catch (error) {
+            this.initialized = false
+            this.lastInitializationError = error instanceof Error ? error.message : String(error)
+            logger.error('[AUTO-REBALANCER] Startup failed', { error: this.lastInitializationError })
+            throw error
         }
     }
 
@@ -61,6 +86,7 @@ export class AutoRebalancerService {
     stop(): void {
         if (!this.isRunning) return
         this.isRunning = false
+        this.initialized = false
         logger.info('[AUTO-REBALANCER] Service stopped')
         logAudit('auto_rebalancer_stopped', { backend: 'bullmq' })
     }
@@ -86,17 +112,23 @@ export class AutoRebalancerService {
      */
     getStatus(): {
         isRunning: boolean
+        initialized: boolean
         checkInterval: number
         minRebalanceInterval: number
         maxRebalancesPerDay: number
         backend: string
+        lastStartedAt?: string
+        lastInitializationError?: string
     } {
         return {
             isRunning: this.isRunning,
+            initialized: this.initialized,
             checkInterval: this.CHECK_INTERVAL,
             minRebalanceInterval: this.MIN_REBALANCE_INTERVAL,
             maxRebalancesPerDay: this.MAX_AUTO_REBALANCES_PER_DAY,
             backend: 'bullmq',
+            lastStartedAt: this.lastStartedAt,
+            lastInitializationError: this.lastInitializationError,
         }
     }
 

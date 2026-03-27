@@ -159,6 +159,13 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+# SQLite runtime artifacts are local machine state and must never be versioned.
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+backend/data/*.db-*
+backend/data/*.sqlite*
 
 # Local development
 .local/

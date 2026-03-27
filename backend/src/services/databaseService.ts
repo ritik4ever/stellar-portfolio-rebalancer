@@ -4,9 +4,13 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { ConflictError } from '../types/index.js'
-import { logger } from '../utils/logger.js'
-import type { Portfolio } from '../types/index.js'
+
+
+
+function isSqliteAssetSymbolUniqueViolation(err: unknown): boolean {
+    const msg = err instanceof Error ? err.message : String(err)
+    return msg.includes('UNIQUE constraint failed') && msg.includes('assets.symbol')
+}
 
 // ─────────────────────────────────────────────
 // Exported type used by rebalanceHistory.ts
@@ -574,6 +578,9 @@ export class DatabaseService {
                 'INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
             ).run(sym, name, options.contractAddress ?? null, options.issuerAccount ?? null, options.coingeckoId ?? null, now, now)
         } catch (err) {
+            if (isSqliteAssetSymbolUniqueViolation(err)) {
+                throw new AssetRegistryConflictError(`Asset with symbol '${symbol.toUpperCase()}' already exists`)
+            }
             throw new Error(`Failed to add asset '${symbol}': ${err}`)
         }
     }

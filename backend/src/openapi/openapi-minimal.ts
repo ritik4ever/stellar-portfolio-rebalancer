@@ -23,6 +23,7 @@ const base = {
     paths: {
         '/': { get: { tags: ['Health'], summary: 'Root', description: 'API info and feature flags.', responses: { '200': { description: 'OK' } } } },
         '/health': { get: { tags: ['Health'], summary: 'Health check', responses: { '200': { description: 'OK' } } } },
+        '/ready': { get: { tags: ['Health'], summary: 'Readiness check', responses: { '200': { description: 'Ready' }, '503': { description: 'Not ready' } } } },
         '/api/rebalance/history': {
             get: { tags: ['Rebalance history'], summary: 'Get rebalance history', parameters: [{ name: 'portfolioId', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer' } }], responses: { '200': { description: 'OK' } } },
             post: { tags: ['Rebalance history'], summary: 'Record rebalance event', requestBody: { content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'OK' } } },

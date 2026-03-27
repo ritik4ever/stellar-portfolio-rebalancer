@@ -11,7 +11,7 @@ import { AutoRebalancerService } from '../services/autoRebalancer.js'
 import { logger, logAudit } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
-import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
+import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { writeRateLimiter, protectedWriteLimiter, protectedCriticalLimiter, adminRateLimiter } from '../middleware/rateLimit.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
@@ -24,13 +24,17 @@ import type { Portfolio } from '../types/index.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { assetRegistryService } from '../services/assetRegistryService.js'
+import {
+    AssetRegistryConflictError,
+    AssetRegistryValidationError
+} from '../services/assetRegistryValidation.js'
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
+import { autoRebalancer } from '../services/runtimeServices.js'
 
 const router = Router()
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
-const autoRebalancer = new AutoRebalancerService()
 const featureFlags = getFeatureFlags()
 const publicFeatureFlags = getPublicFeatureFlags()
 
@@ -84,7 +88,7 @@ router.get('/consent/status', (req: Request, res: Response) => {
 })
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-router.post('/consent', ...protectedWriteLimiter, (req: Request, res: Response) => {
+router.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, (req: Request, res: Response) => {
     try {
         const { userId, terms, privacy, cookies } = req.body ?? {}
         if (!userId || typeof userId !== 'string') return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
@@ -171,18 +175,21 @@ router.get('/admin/rate-limits/metrics', requireAdmin, (_req: Request, res: Resp
 })
 
 /** Admin: add asset */
-router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+router.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body ?? {}
-        if (!symbol || typeof symbol !== 'string' || !name || typeof name !== 'string') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'symbol and name are required')
-        }
-        assetRegistryService.add(symbol.trim(), name.trim(), {
-            contractAddress: typeof contractAddress === 'string' ? contractAddress : undefined,
-            issuerAccount: typeof issuerAccount === 'string' ? issuerAccount : undefined,
-            coingeckoId: typeof coingeckoId === 'string' ? coingeckoId : undefined
-        })
-        const asset = assetRegistryService.getBySymbol(symbol.trim().toUpperCase())
+        assetRegistryService.add(
+            symbol,
+            name,
+            {
+                contractAddress,
+                issuerAccount,
+                coingeckoId
+            }
+        )
+        const parsedSymbol =
+            typeof symbol === 'string' ? symbol.trim().toUpperCase() : ''
+        const asset = assetRegistryService.getBySymbol(parsedSymbol)
         if (asset) {
             const auditFields: Record<string, unknown> = {
                 domain: 'asset_registry',
@@ -198,6 +205,12 @@ router.post('/admin/assets', requireAdmin, adminRateLimiter, async (req: Request
         }
         return ok(res, { asset }, { status: 201 })
     } catch (error) {
+        if (error instanceof AssetRegistryValidationError) {
+            return fail(res, 400, 'VALIDATION_ERROR', error.message)
+        }
+        if (error instanceof AssetRegistryConflictError) {
+            return fail(res, 409, 'ASSET_CONFLICT', error.message)
+        }
         logger.error('[ERROR] Admin add asset failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
@@ -232,7 +245,7 @@ router.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (re
 })
 
 /** Admin: enable/disable asset */
-router.patch('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
+router.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         const enabled = req.body?.enabled
@@ -399,6 +412,11 @@ router.get('/portfolio/:id/export', requireJwtWhenEnabled, async (req: Request, 
         if (!['json', 'csv', 'pdf'].includes(format)) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Query parameter format must be one of: json, csv, pdf')
         }
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        if (req.user && portfolio.userAddress !== req.user.address) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only export your own portfolio')
+        }
         const result = await getPortfolioExport(portfolioId, format as 'json' | 'csv' | 'pdf')
         if (!result) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         res.setHeader('Content-Type', result.contentType)
@@ -417,7 +435,26 @@ router.get('/user/:address/portfolios', async (req: Request, res: Response) => {
     try {
         const address = req.params.address
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
-        const list = portfolioStorage.getUserPortfolios(address)
+        const authConfig = getAuthConfig()
+        const allowPublicInDemo =
+            authConfig.enabled &&
+            featureFlags.demoMode &&
+            featureFlags.allowPublicUserPortfoliosInDemo
+
+        // Privacy model:
+        // - When JWT auth is enabled, only the token subject may list portfolios for `:address`.
+        // - In demo mode, we can explicitly allow unauthenticated public listing via feature flag.
+        if (authConfig.enabled && !allowPublicInDemo) {
+            let nextCalled = false
+            requireJwt(req, res, () => { nextCalled = true })
+            if (!nextCalled) return
+
+            if (req.user?.address !== address) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
+            }
+        }
+
+        const list = await portfolioStorage.getUserPortfolios(address)
 
         return ok(res, { portfolios: list })
     } catch (error) {
@@ -691,13 +728,13 @@ router.get('/auto-rebalancer/status', async (req: Request, res: Response) => {
     }
 })
 
-router.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, (req: Request, res: Response) => {
+router.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
         }
 
-        autoRebalancer.start()
+        await autoRebalancer.start()
 
         return ok(res, {
             message: 'Auto-rebalancer started successfully',

@@ -7,8 +7,10 @@ import ConsentGate from './components/ConsentGate'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
-import { api } from './config/api'
+import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
+import RealtimeStatusBanner from './components/RealtimeStatusBanner'
+import { useRealtimeConnection } from './context/RealtimeConnectionContext'
 
 function App() {
     const [currentView, setCurrentView] = useState('landing')
@@ -17,6 +19,7 @@ function App() {
     const [legalDoc, setLegalDoc] = useState<LegalDocType | null>(null)
     const [isConnecting, setIsConnecting] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const { state: realtimeState } = useRealtimeConnection()
 
     useEffect(() => {
         checkWalletConnection()
@@ -24,11 +27,27 @@ function App() {
 
     const checkConsent = async (userId: string): Promise<boolean> => {
         try {
-            const res = await api.get<{ accepted: boolean }>(`/api/consent/status?userId=${encodeURIComponent(userId)}`)
+            const res = await api.get<{ accepted: boolean }>(
+                `${ENDPOINTS.CONSENT_STATUS}?userId=${encodeURIComponent(userId)}`
+            )
             return !!res?.accepted
         } catch {
             return false
         }
+    }
+
+    /**
+     * Returns true when the authLogin error is a soft/infrastructure failure
+     * (e.g. JWT not configured on the server) that should not block the user.
+     * All other failures are hard auth errors that must be surfaced.
+     */
+    const isAuthServiceUnavailable = (err: unknown): boolean => {
+        const msg = String((err as any)?.message ?? '')
+        return (
+            msg.includes('503') ||
+            msg.toLowerCase().includes('service_unavailable') ||
+            msg.toLowerCase().includes('not configured')
+        )
     }
 
     const checkWalletConnection = async () => {
@@ -37,7 +56,23 @@ function App() {
             if (pk) {
                 const accepted = await checkConsent(pk)
                 if (accepted) {
-                    try { await authLogin(pk) } catch (_) {}
+                    try {
+                        await authLogin(pk)
+                    } catch (authErr: unknown) {
+                        if (isAuthServiceUnavailable(authErr)) {
+                            // Auth service not configured – soft fail, allow access.
+                            console.warn('Auth service unavailable during reconnect; proceeding without JWT:', authErr)
+                        } else {
+                            // Hard auth failure: wallet is reconnected but the backend
+                            // rejected authentication.  Do NOT navigate to the dashboard.
+                            console.error('Auth login failed during wallet reconnect:', authErr)
+                            setError(
+                                'Wallet reconnected but authentication failed. ' +
+                                'Please reconnect your wallet to try again.'
+                            )
+                            return
+                        }
+                    }
                     setPublicKey(pk)
                     setCurrentView('dashboard')
                 } else {
@@ -45,8 +80,19 @@ function App() {
                     setPendingConsentPublicKey(pk)
                 }
             }
-        } catch (err) {
-            console.error('Error checking wallet connection:', err)
+        } catch (err: unknown) {
+            // Reconnect itself failed – surface a clear message instead of
+            // swallowing the error.
+            console.error('Wallet reconnect failed:', err)
+            if (err instanceof WalletError) {
+                if (err.code === 'USER_DECLINED') {
+                    setError('Wallet reconnect was declined. Please approve in your wallet.')
+                } else {
+                    setError('Failed to reconnect wallet. Please try connecting again.')
+                }
+            } else {
+                setError('Failed to reconnect wallet. Please try connecting again.')
+            }
         }
     }
 
@@ -56,7 +102,24 @@ function App() {
         try {
             const pk = walletManager.getPublicKey()
             if (pk) {
-                try { await authLogin(pk) } catch (_) {}
+                try {
+                    await authLogin(pk)
+                } catch (authErr: unknown) {
+                    if (isAuthServiceUnavailable(authErr)) {
+                        // Auth service not configured – soft fail, allow access.
+                        console.warn('Auth service unavailable during connect; proceeding without JWT:', authErr)
+                    } else {
+                        // Hard auth failure: wallet is connected but the backend
+                        // rejected authentication.  Do NOT navigate to the dashboard.
+                        console.error('Auth login failed during wallet connect:', authErr)
+                        setError(
+                            'Wallet connected but authentication failed. ' +
+                            'Please try reconnecting your wallet.'
+                        )
+                        setIsConnecting(false)
+                        return
+                    }
+                }
                 setPublicKey(pk)
                 setCurrentView('dashboard')
             } else {
@@ -100,10 +163,18 @@ function App() {
         setCurrentView(view)
     }
 
+    const errorTop =
+        realtimeState === 'connected'
+            ? 'top-4'
+            : 'top-[4.5rem]'
+
     return (
-        <div className="App">
+        <div className={`App min-h-screen ${realtimeState === 'connected' ? '' : 'pt-14'}`}>
+            <RealtimeStatusBanner />
             {error && (
-                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md">
+                <div
+                    className={`fixed left-1/2 transform -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md ${errorTop}`}
+                >
                     <div className="flex items-center text-red-800 dark:text-red-300">
                         <span className="mr-2">⚠️</span>
                         <span>{error}</span>

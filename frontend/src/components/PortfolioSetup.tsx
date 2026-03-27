@@ -203,44 +203,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation();
 
-  // ── Static data ────────────────────────────────────────────────────────────
-
-  /** All supported assets the user can allocate to */
-  const assetOptions = [
-    { value: "XLM", label: "XLM (Stellar Lumens)" },
-    { value: "USDC", label: "USDC (USD Coin)" },
-    { value: "BTC", label: "BTC (Bitcoin)" },
-    { value: "ETH", label: "ETH (Ethereum)" },
-  ];
-
-  /** Pre-built allocation sets for quick setup */
-  const presetPortfolios = [
-    {
-      name: "Conservative",
-      allocations: [
-        { asset: "XLM", percentage: 50 },
-        { asset: "USDC", percentage: 40 },
-        { asset: "BTC", percentage: 10 },
-      ],
-    },
-    {
-      name: "Balanced",
-      allocations: [
-        { asset: "XLM", percentage: 40 },
-        { asset: "USDC", percentage: 35 },
-        { asset: "BTC", percentage: 25 },
-      ],
-    },
-    {
-      name: "Aggressive",
-      allocations: [
-        { asset: "BTC", percentage: 50 },
-        { asset: "ETH", percentage: 30 },
-        { asset: "XLM", percentage: 20 },
-      ],
-    },
-  ];
-
   // ── Validation ─────────────────────────────────────────────────────────────
 
   /**
@@ -404,6 +366,38 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
     setError(null);
 
+    try {
+      const allocationsMap = allocations.reduce(
+        (acc, alloc) => {
+          acc[alloc.asset] = alloc.percentage;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+
+      await createPortfolioMutation.mutateAsync({
+        userAddress: publicKey || "demo-user",
+        allocations: allocationsMap,
+        threshold,
+        slippageTolerance,
+        strategy: strategy || "threshold",
+        strategyConfig:
+          Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
+      });
+
+      setSuccess(true);
+      setTimeout(() => onNavigate("dashboard"), 2000);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Network error. Please try again.",
+      );
+    }
+  };
+
+    }
+  };
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
@@ -1033,7 +1027,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              * Disabled when any of these conditions are true:
              *   - hasAnyFieldError: at least one percentage input is out of range
              *   - !isValidTotal: percentages don't add up to 100%
-             *   - isCreating: API call is already in progress
+             *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
              <button
