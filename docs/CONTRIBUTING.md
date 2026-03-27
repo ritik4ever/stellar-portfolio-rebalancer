@@ -64,28 +64,38 @@ All other variables have working defaults for local development.
 
 ## 3. Database migrations
 
-SQLite is used automatically when `DATABASE_URL` is not set. For PostgreSQL:
+Use PostgreSQL when you want the SQL migration runner:
 
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/stellar_portfolio
 ```
 
-Run migrations (works for both SQLite and PostgreSQL):
+Then run migrations:
 
 ```bash
 cd backend
 npm run db:migrate          # apply all pending migrations
-npm run db:migrate --status # show applied/pending migrations
-npm run db:migrate --dry-run # preview without applying
+npm run db:migrate -- --status # show applied/pending migrations
+npm run db:migrate -- --dry-run # preview without applying
 ```
 
 To roll back the last migration:
 
 ```bash
-npm run db:migrate --rollback
+npm run db:migrate -- --rollback
 ```
 
-Migration files live in `backend/src/db/migrations/`. Add new ones as `NNN_description.up.sql` / `.down.sql`.
+For local SQLite development, leave `DATABASE_URL` unset. You can optionally set `DB_PATH`; otherwise the backend uses `./data/portfolio.db` from inside `backend`.
+
+```env
+DB_PATH=./data/portfolio.db
+```
+
+Start the backend and `DatabaseService` will create the SQLite schema on first run. Runtime files under `backend/data/` such as `.db`, `.db-wal`, and `.db-shm` are local-only artifacts and are intentionally ignored by git.
+
+If you want a fresh local SQLite database, stop the backend and delete `backend/data/portfolio.db`, `backend/data/portfolio.db-wal`, and `backend/data/portfolio.db-shm`. The next backend start recreates the database automatically.
+
+Migration files live in `backend/src/db/migrations/`. Add new PostgreSQL migrations as `NNN_description.up.sql` / `.down.sql`. For SQLite schema changes, update `backend/src/services/databaseService.ts`.
 
 ---
 
