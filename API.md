@@ -115,6 +115,7 @@ A retry with the same `Idempotency-Key` and body returns the cached `200` respon
 
 - **GET /** — API info, version, feature flags, and endpoint list.
 - **GET /health** — Health check; includes auto-rebalancer status.
+- **GET /ready** — Deep readiness probe covering database, Redis/queues, workers, indexer, and auto-rebalancer startup.
 
 ### Portfolio
 
