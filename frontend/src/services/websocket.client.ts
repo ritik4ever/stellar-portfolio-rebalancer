@@ -1,17 +1,4 @@
-import { WS_PROTOCOL_VERSION } from '../constants/wsProtocol'
 
-export type RealtimeConnectionState =
-    | 'disconnected'
-    | 'connecting'
-    | 'connected'
-    | 'reconnecting'
-
-export type RebalancerWSOptions = {
-    maxReconnectAttempts?: number
-    maxBackoffMs?: number
-    onStateChange?: (state: RealtimeConnectionState) => void
-    onMessage?: (data: unknown) => void
-    onStatusDetail?: (detail: string | null) => void
 }
 
 const DEFAULT_MAX_ATTEMPTS = 12

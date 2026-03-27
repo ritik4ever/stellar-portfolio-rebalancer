@@ -4,10 +4,7 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { RebalanceEvent } from './rebalanceHistory.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { ConflictError } from '../types/index.js'
-import { logger } from '../utils/logger.js'
-import type { Portfolio } from '../types/index.js'
-import { AssetRegistryConflictError } from './assetRegistryValidation.js'
+
 
 function isSqliteAssetSymbolUniqueViolation(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err)

@@ -587,7 +587,7 @@
           "Portfolio"
         ],
         "summary": "List user portfolios",
-        "description": "Get all portfolios for a Stellar address.",
+        "description": "Get all portfolios for a Stellar address. When JWT auth is enabled, only the authenticated user (token subject) may list portfolios for their own address. In demo mode, public-by-address listing is allowed only when ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO is enabled.",
         "parameters": [
           {
             "name": "address",
@@ -596,6 +596,11 @@
             "schema": {
               "type": "string"
             }
+          }
+        ],
+        "security": [
+          {
+            "adminAuth": []
           }
         ],
         "responses": {
@@ -635,6 +640,26 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {

@@ -1,8 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
-import { api, ENDPOINTS } from '../config/api'
-import { usePrices, priceKeys } from '../hooks/queries/usePricesQuery'
+
 
 interface PriceTrackerProps {
     compact?: boolean
@@ -56,15 +52,6 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
             .catch(() => {})
     }, [])
 
-    const prices = useMemo(() => normalizePrices(rawPrices), [rawPrices])
-    const loading = isLoading && Object.keys(prices).length === 0
-    const error = queryError ? 'Failed to fetch real-time prices' : null
-    const isConnected = !queryError
-    const lastUpdate = useMemo(() => new Date().toLocaleTimeString(), [rawPrices])
-
-    const retryConnection = () => {
-        void queryClient.invalidateQueries({ queryKey: priceKeys.all })
-    }
 
     if (loading && Object.keys(prices).length === 0) {
         return (

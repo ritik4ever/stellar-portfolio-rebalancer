@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Bell, Send, CheckCircle, XCircle, Loader } from 'lucide-react'
-import { api } from '../config/api'
+import { api, ENDPOINTS } from '../config/api'
 
 interface NotificationTestProps {
   userId: string
@@ -65,7 +65,7 @@ export function NotificationTest({ userId }: NotificationTestProps) {
         message: string
         sentTo: { email: string | null; webhook: string | null }
         timestamp: string
-      }>('/api/notifications/test', {
+      }>(ENDPOINTS.NOTIFICATIONS_TEST, {
         userId,
         eventType
       })
@@ -109,7 +109,7 @@ export function NotificationTest({ userId }: NotificationTestProps) {
     try {
       const data = await api.post<{
         results: Array<{ eventType: EventType; success: boolean; error?: string; sentTo?: { email: string | null; webhook: string | null }; timestamp: string }>
-      }>('/api/notifications/test-all', { userId })
+      }>(ENDPOINTS.NOTIFICATIONS_TEST_ALL, { userId })
 
       // Update results for each event type
       const newResults: Record<EventType, TestResult | null> = {

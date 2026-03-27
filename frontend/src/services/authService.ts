@@ -1,3 +1,8 @@
+/**
+ * Auth uses the versionless `/api/auth/*` namespace (see backend `mountApiRoutes`).
+ * Paths should stay aligned with `API_CONFIG.ENDPOINTS.AUTH_*` in `config/api.ts`
+ * (this module avoids importing `api.ts` to prevent a circular dependency).
+ */
 const STORAGE_KEY_ACCESS = 'auth_access_token'
 const STORAGE_KEY_REFRESH = 'auth_refresh_token'
 const STORAGE_KEY_EXPIRES = 'auth_expires_at'

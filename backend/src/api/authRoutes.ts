@@ -71,13 +71,14 @@ router.post('/logout', requireJwt, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/logout-all', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
     try {
-        const address = req.body?.address
-        if (!address || typeof address !== 'string') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'address is required')
+        const address = req.user!.address
+        const bodyAddress = req.body?.address
+        if (bodyAddress && typeof bodyAddress === 'string' && bodyAddress.trim() !== address) {
+            return fail(res, 403, 'FORBIDDEN', 'Address mismatch')
         }
-        await logout(undefined, address.trim())
+        await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))

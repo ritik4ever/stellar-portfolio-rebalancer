@@ -34,7 +34,7 @@ test.describe('Portfolio Creation Flow', () => {
     await expect(submitBtn).toBeEnabled();
 
     // Intercept the API call to mock a successful response since the backend isn't running in this UI test
-    await page.route('**/api/portfolio', async route => {
+    await page.route('**/api/v1/portfolio', async route => {
       await route.fulfill({ json: { success: true }, status: 200 });
     });
 

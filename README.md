@@ -84,12 +84,21 @@ cp frontend/.env.example frontend/.env
 ```
 >Edit `.env` files with your own configuration (contract addresses, API keys, etc.)
 
-## Database Migrations (PostgreSQL)
+The frontend HTTP client targets **`/api/v1/*`** for resource routes by default (`VITE_API_VERSION=v1` in `frontend/.env.example`). JWT auth still uses **`/api/auth/*`**. See [API.md](API.md) for versioning details.
+
+## Database Setup
+PostgreSQL migrations are available for environments configured with `DATABASE_URL` or the `PGHOST` / `PGDATABASE` / `PGUSER` variables.
+
 ```bash
 cd backend
 npm run db:migrate       # Apply migrations
-npm run db:migrate --dry-run   # Preview migrations
+npm run db:migrate -- --dry-run   # Preview migrations
 ```
+
+For local SQLite development, leave PostgreSQL unset and use `DB_PATH` instead. The default path is `backend/data/portfolio.db`, and the backend creates the database file plus its parent directory automatically on startup. Fresh clones should not include any prebuilt `.db`, `.db-wal`, or `.db-shm` files.
+
+SQLite demo data appears only when demo seeding is enabled through `ENABLE_DEMO_DB_SEED` or demo mode. Otherwise, the local database starts empty and bootstraps from the checked-in schema and seed sources.
+
 ## Email Notifications (Optional)
 Gmail Example:
 ```env
@@ -104,7 +113,7 @@ Other providers: SendGrid, Mailgun, AWS SES.
 
 Test Notifications:
 ```bash
-curl -X POST http://localhost:3001/api/notifications/test \
+curl -X POST http://localhost:3001/api/v1/notifications/test \
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 ```
@@ -252,7 +261,6 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
 - Community wallet integrations
 
 Built with ❤️ for the Stellar ecosystem
-
 
 
 

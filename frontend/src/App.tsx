@@ -7,7 +7,7 @@ import ConsentGate from './components/ConsentGate'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
-import { api } from './config/api'
+import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
 import { useRealtimeConnection } from './context/RealtimeConnectionContext'
@@ -27,7 +27,9 @@ function App() {
 
     const checkConsent = async (userId: string): Promise<boolean> => {
         try {
-            const res = await api.get<{ accepted: boolean }>(`/api/consent/status?userId=${encodeURIComponent(userId)}`)
+            const res = await api.get<{ accepted: boolean }>(
+                `${ENDPOINTS.CONSENT_STATUS}?userId=${encodeURIComponent(userId)}`
+            )
             return !!res?.accepted
         } catch {
             return false

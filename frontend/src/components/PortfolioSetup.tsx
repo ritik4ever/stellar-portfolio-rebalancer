@@ -366,46 +366,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
     setError(null);
 
-    const DEMO_USER_ADDRESS =
-      "GA2C5RFPE6GCKIG3EQRUUYYTQ27WXYVHTP73HZY4MDF4M7Q2W4M2OWH7";
-    const userAddress = publicKey ?? DEMO_USER_ADDRESS;
-    const allocationsRecord = Object.fromEntries(
-      allocations.map((a) => [a.asset, a.percentage]),
-    );
-    const strategyEnum = ["threshold", "periodic", "volatility", "custom"] as const;
-    const strategySafe = strategyEnum.includes(strategy as (typeof strategyEnum)[number])
-      ? (strategy as (typeof strategyEnum)[number])
-      : "threshold";
-    const strategyConfigBody: {
-      intervalDays?: number;
-      volatilityThresholdPct?: number;
-      minDaysBetweenRebalance?: number;
-    } = {};
-    if (strategyConfig.intervalDays != null) {
-      strategyConfigBody.intervalDays = strategyConfig.intervalDays;
-    }
-    if (strategyConfig.volatilityThresholdPct != null) {
-      strategyConfigBody.volatilityThresholdPct = strategyConfig.volatilityThresholdPct;
-    }
-    if (strategyConfig.minDaysBetweenRebalance != null) {
-      strategyConfigBody.minDaysBetweenRebalance = strategyConfig.minDaysBetweenRebalance;
-    }
 
-    try {
-      await createPortfolioMutation.mutateAsync({
-        userAddress,
-        allocations: allocationsRecord,
-        threshold,
-        slippageTolerance,
-        strategy: strategySafe,
-        strategyConfig: strategyConfigBody,
-      });
-      setSuccess(true);
-      setTimeout(() => onNavigate("dashboard"), 2000);
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create portfolio";
-      setError(message);
     }
   };
 
@@ -1037,7 +998,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              * Disabled when any of these conditions are true:
              *   - hasAnyFieldError: at least one percentage input is out of range
              *   - !isValidTotal: percentages don't add up to 100%
-             *   - isCreating: API call is already in progress
+             *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
              <button
