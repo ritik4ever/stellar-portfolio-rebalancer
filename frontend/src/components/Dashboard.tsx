@@ -534,7 +534,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </p>
                                         {hasHighGasWarning && (
                                             <p className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 rounded px-2 py-1 mb-3">
-                                                Warning: estimated gas is unusually high (&gt; 0.5 XLM). Consider reducing trade count.
+                                                Warning: estimated gas is unusually high ({'>'} 0.5 XLM). Consider reducing trade count.
                                             </p>
                                         )}
                                         {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 && (

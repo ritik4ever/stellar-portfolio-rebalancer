@@ -12,6 +12,7 @@ import { logger, logAudit } from '../utils/logger.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
+import { getAuthConfig } from '../services/authService.js'
 import { writeRateLimiter, protectedWriteLimiter, protectedCriticalLimiter, adminRateLimiter } from '../middleware/rateLimit.js'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
@@ -992,7 +993,20 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 // Subscribe to notifications
 router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(notificationSubscribeSchema), async (req: Request, res: Response) => {
     try {
-        const userId = req.user?.address ?? req.body.userId
+        // Issue #178: when auth is enabled, derive userId from the token only.
+        // Reject requests that try to subscribe on behalf of a different address.
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const bodyId = req.body?.userId as string | undefined
+            if (bodyId && bodyId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot manage notification preferences for another user')
+            }
+        } else {
+            userId = req.body?.userId
+        }
+
+        // Validation
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
@@ -1019,7 +1033,17 @@ router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWrite
 // Get notification preferences
 router.get('/notifications/preferences', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
     try {
-        const userId = req.user?.address ?? (req.query.userId as string)
+        // Issue #178: when auth is enabled, only allow reading own preferences.
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot read notification preferences for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
 
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
@@ -1041,7 +1065,17 @@ router.get('/notifications/preferences', requireJwtWhenEnabled, validateQuery(no
 // Unsubscribe from notifications
 router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimiter, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
     try {
-        const userId = req.user?.address ?? (req.query.userId as string)
+        // Issue #178: when auth is enabled, only allow unsubscribing own preferences.
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot unsubscribe notification preferences for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
 
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
