@@ -7,23 +7,21 @@ import {
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { authRateLimiter } from '../middleware/rateLimit.js'
+import { validateRequest } from '../middleware/validate.js'
+import { loginSchema, refreshTokenSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
 
 const router = Router()
 
-router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'JWT auth not configured (set JWT_SECRET)')
         }
-        const address = req.body?.address
-        if (!address || typeof address !== 'string' || !address.trim()) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'address is required')
-        }
-        const trimmed = address.trim()
-        const tokens = await issueTokens(trimmed)
+        const { address } = req.body
+        const tokens = await issueTokens(address)
         return ok(res, {
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
@@ -35,16 +33,13 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/refresh', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/refresh', authRateLimiter, validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'JWT auth not configured')
         }
-        const refreshToken = req.body?.refreshToken
-        if (!refreshToken || typeof refreshToken !== 'string') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'refreshToken is required')
-        }
+        const { refreshToken } = req.body
         const tokens = await refreshTokens(refreshToken)
         if (!tokens) {
             return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired refresh token')
