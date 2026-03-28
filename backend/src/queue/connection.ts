@@ -33,7 +33,9 @@ export async function isRedisAvailable(): Promise<boolean> {
       connectTimeout: 3000,
       maxRetriesPerRequest: 1,
       enableReadyCheck: false,
+      retryStrategy: () => null,
     });
+    probe.on("error", () => {});
     await probe.connect();
     await probe.ping();
     await probe.quit();
