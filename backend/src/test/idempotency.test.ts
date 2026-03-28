@@ -77,7 +77,9 @@ describe('idempotencyDb', () => {
         vi.resetModules()
     })
 
-    afterEach(() => {
+    afterEach(async () => {
+        const { closeIdempotencyDb } = await import('../db/idempotencyDb.js')
+        closeIdempotencyDb()
         if (existsSync(dbPath)) rmSync(dbPath, { force: true, recursive: true })
         delete process.env.DB_PATH
     })
@@ -142,7 +144,9 @@ describe('idempotencyMiddleware', () => {
         vi.resetModules()
     })
 
-    afterEach(() => {
+    afterEach(async () => {
+        const { closeIdempotencyDb } = await import('../db/idempotencyDb.js')
+        closeIdempotencyDb()
         if (existsSync(dbPath)) rmSync(dbPath, { force: true, recursive: true })
         delete process.env.DB_PATH
     })

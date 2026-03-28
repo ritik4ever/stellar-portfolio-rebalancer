@@ -62,7 +62,7 @@ Portfolios can use different strategies to decide when to rebalance. You choose 
 |--------------------------|--------|--------|--------------------------------------|
 | `minDaysBetweenRebalance`| number | 1      | Minimum days between rebalances (0–365). |
 
-**Use case:** Reduce trading frequency while still reacting to drift (e.g. “rebalance at most once per week, and only when drift &gt; 5%”).
+**Use case:** Reduce trading frequency while still reacting to drift (e.g. “rebalance at most once per week, and only when drift > 5%”).
 
 ---
 

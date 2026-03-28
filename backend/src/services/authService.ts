@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { randomBytes } from "node:crypto";
+import { Keypair } from "@stellar/stellar-sdk";
 import {
   createRefreshToken,
   findRefreshToken,
@@ -116,6 +117,50 @@ export async function refreshTokens(
   }
   await deleteRefreshTokenById(row.id);
   return issueTokens(row.user_address);
+}
+
+// ── Issue #171: wallet-signed challenge authentication ────────────────────
+
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+interface ChallengeEntry {
+  nonce: string;
+  expiresAt: number;
+}
+
+const challengeStore = new Map<string, ChallengeEntry>();
+
+export function issueChallenge(address: string): string {
+  challengeStore.delete(address);
+  const nonce = randomBytes(32).toString("hex");
+  const message = `stellar-rebalancer:auth:${nonce}`;
+  challengeStore.set(address, {
+    nonce: message,
+    expiresAt: Date.now() + CHALLENGE_TTL_MS,
+  });
+  logger.info("Auth challenge issued", { address });
+  return message;
+}
+
+export function verifyWalletSignature(
+  address: string,
+  signatureB64: string,
+): boolean {
+  const entry = challengeStore.get(address);
+  if (!entry) return false;
+  if (Date.now() > entry.expiresAt) {
+    challengeStore.delete(address);
+    return false;
+  }
+  challengeStore.delete(address);
+  try {
+    const keypair = Keypair.fromPublicKey(address);
+    const messageBuffer = Buffer.from(entry.nonce, "utf8");
+    const sigBuffer = Buffer.from(signatureB64, "base64");
+    return keypair.verify(messageBuffer, sigBuffer);
+  } catch {
+    return false;
+  }
 }
 
 export async function logout(

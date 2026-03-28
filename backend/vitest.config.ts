@@ -7,6 +7,8 @@ export default defineConfig({
         setupFiles: ['./src/test/setup.ts'],
         include: ['src/test/**/*.test.ts'],
         exclude: ['src/test/api.integration.test.ts'],
+        /** SQLite temp files + singleton DB modules: sequential files avoid EBUSY flakes on Windows/CI. */
+        fileParallelism: false,
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json-summary', 'lcov', 'html'],
