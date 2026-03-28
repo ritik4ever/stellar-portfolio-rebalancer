@@ -111,7 +111,7 @@ function createKeyGenerator(prefix: string) {
 
 // Skip rate limiting for health checks and internal requests
 function isProbePath(path: string): boolean {
-    return path === '/health' || path === '/ready' || path === '/metrics'
+    return path === '/health' || path === '/ready' || path === '/readiness' || path === '/metrics'
 }
 
 function skipSuccessfulRequests(req: import('express').Request, res: import('express').Response): boolean {

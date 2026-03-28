@@ -8,8 +8,12 @@ import { requestContextMiddleware } from './middleware/requestContext.js'
 import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
 import { buildReadinessReport } from './monitoring/readiness.js'
 import { startQueueScheduler } from './queue/scheduler.js'
+import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
+import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
 
 const config = validateStartupConfigOrThrow()
+initializeSentry()
+setupProcessErrorHandlers()
 
 const app = express()
 
@@ -23,6 +27,7 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions))
 app.options('*', cors(corsOptions))
 app.use(requestContextMiddleware)
+app.use(metricsMiddleware)
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.set('trust proxy', 1)
@@ -38,6 +43,16 @@ app.get('/readiness', async (_req, res) => {
     res.status(report.status === 'ready' ? 200 : 503).json(report)
 })
 
+app.get('/metrics', async (_req, res, next) => {
+    try {
+        res.setHeader('Content-Type', getMetricsContentType())
+        res.status(200).send(await getMetricsPayload())
+    } catch (error) {
+        captureException(error, { route: '/metrics' })
+        next(error)
+    }
+})
+
 // /api/v1/* — canonical namespace (no deprecation headers)
 // /api/*    — legacy compatibility layer (Deprecation + Sunset + Link headers)
 // /api/auth — auth routes (unversioned, no deprecation)
@@ -50,5 +65,6 @@ app.listen(config.port, () => {
     logger.info('[SERVER] Listening', buildStartupSummary(config) as Record<string, unknown>)
     void startQueueScheduler().catch((err: unknown) => {
         logger.warn('[SERVER] Queue scheduler did not start', { error: String(err) })
+        captureException(err, { subsystem: 'queue_scheduler' })
     })
 })
