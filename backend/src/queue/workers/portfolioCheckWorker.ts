@@ -8,10 +8,22 @@ import { getRebalanceQueue } from '../queues.js'
 import type { PortfolioCheckJobData } from '../queues.js'
 import { getConnectionOptions } from '../connection.js'
 import { logger } from '../../utils/logger.js'
+import {
+    createWorkerRuntimeStatus,
+    markWorkerFailed,
+    markWorkerJobCompleted,
+    markWorkerJobFailed,
+    markWorkerReady,
+    markWorkerStarting,
+    markWorkerStopped,
+    snapshotWorkerRuntimeStatus,
+    type WorkerRuntimeStatus,
+} from './workerRuntime.js'
 
 const DEMO_PORTFOLIO_IDS = new Set(['demo', 'demo-portfolio-1'])
 
 let worker: Worker | null = null
+const runtimeStatus = createWorkerRuntimeStatus('portfolio-check', 1)
 
 export async function processPortfolioCheckJob(job: Job<PortfolioCheckJobData>): Promise<void> {
     const triggeredBy = job.data.triggeredBy ?? 'scheduler'
@@ -59,23 +71,40 @@ export async function processPortfolioCheckJob(job: Job<PortfolioCheckJobData>):
 
 export function startPortfolioCheckWorker(): Worker | null {
     if (worker) return worker
+
     try {
+        markWorkerStarting(runtimeStatus)
         worker = new Worker('portfolio-check', processPortfolioCheckJob, {
             connection: getConnectionOptions(),
             concurrency: 1
         })
     } catch (err) {
-        logger.warn('[WORKER:portfolio-check] Failed to start – Redis may be unavailable', {
+        markWorkerFailed(runtimeStatus, err)
+        logger.warn('[WORKER:portfolio-check] Failed to start - Redis may be unavailable', {
             error: err instanceof Error ? err.message : String(err)
         })
         return null
     }
 
+    void worker.waitUntilReady()
+        .then(() => {
+            markWorkerReady(runtimeStatus)
+            logger.info('[WORKER:portfolio-check] Worker ready')
+        })
+        .catch((err) => {
+            markWorkerFailed(runtimeStatus, err)
+            logger.error('[WORKER:portfolio-check] Worker failed readiness check', {
+                error: err instanceof Error ? err.message : String(err),
+            })
+        })
+
     worker.on('completed', (j) => {
+        markWorkerJobCompleted(runtimeStatus)
         logger.info('[WORKER:portfolio-check] Job completed', { jobId: j.id })
     })
 
     worker.on('failed', (j, err) => {
+        markWorkerJobFailed(runtimeStatus, err)
         logger.error('[WORKER:portfolio-check] Job failed', {
             jobId: j?.id,
             error: err.message,
@@ -91,10 +120,19 @@ export async function stopPortfolioCheckWorker(): Promise<void> {
     if (worker) {
         await worker.close()
         worker = null
+        markWorkerStopped(runtimeStatus)
         logger.info('[WORKER:portfolio-check] Worker stopped')
     }
 }
 
 export function isPortfolioCheckWorkerRunning(): boolean {
     return worker !== null
+}
+
+export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
+    return snapshotWorkerRuntimeStatus(runtimeStatus)
+}
+
+export function setPortfolioCheckSchedulerRegistered(registered: boolean): void {
+    runtimeStatus.schedulerRegistered = registered
 }

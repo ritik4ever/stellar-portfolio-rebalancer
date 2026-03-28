@@ -17,6 +17,9 @@ import { writeRateLimiter, protectedWriteLimiter, protectedCriticalLimiter, admi
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWorker.js'
+import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
+import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/helpers.js'
 import { createPortfolioSchema } from './validation.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
@@ -1327,10 +1330,16 @@ router.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Re
 router.get('/queue/health', async (req: Request, res: Response) => {
     try {
         const metrics = await getQueueMetrics()
-        if (metrics.redisConnected) {
-            return ok(res, metrics)
+        const workers = {
+            portfolioCheck: getPortfolioCheckWorkerStatus(),
+            rebalance: getRebalanceWorkerStatus(),
+            analyticsSnapshot: getAnalyticsSnapshotWorkerStatus(),
         }
-        return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Redis unavailable', metrics)
+        const payload = { ...metrics, workers }
+        if (metrics.redisConnected) {
+            return ok(res, payload)
+        }
+        return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Redis unavailable', payload)
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
             redisConnected: false

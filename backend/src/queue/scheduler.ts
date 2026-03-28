@@ -1,5 +1,7 @@
 import { getPortfolioCheckQueue, getAnalyticsSnapshotQueue } from './queues.js'
 import { logger } from '../utils/logger.js'
+import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWorker.js'
+import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnapshotWorker.js'
 
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
 const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
@@ -51,6 +53,9 @@ export async function startQueueScheduler(): Promise<void> {
         { priority: 1 }
     )
 
+    setPortfolioCheckSchedulerRegistered(true)
+    setAnalyticsSnapshotSchedulerRegistered(true)
+
     logger.info('[SCHEDULER] Repeatable jobs registered', {
         portfolioCheck: PORTFOLIO_CHECK_CRON,
         analyticsSnapshot: ANALYTICS_SNAPSHOT_CRON,
@@ -77,6 +82,9 @@ export async function stopQueueScheduler(): Promise<void> {
             await analyticsSnapshotQueue.removeRepeatableByKey(job.key)
         }
     }
+
+    setPortfolioCheckSchedulerRegistered(false)
+    setAnalyticsSnapshotSchedulerRegistered(false)
 
     logger.info('[SCHEDULER] Repeatable jobs removed')
 }
