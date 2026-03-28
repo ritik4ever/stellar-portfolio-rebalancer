@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { randomBytes } from 'node:crypto'
+import { Keypair } from '@stellar/stellar-sdk'
 import {
     createRefreshToken,
     findRefreshToken,
@@ -84,6 +85,56 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens | 
     }
     await deleteRefreshTokenById(row.id)
     return issueTokens(row.user_address)
+}
+
+// ── Issue #171: wallet-signed challenge authentication ────────────────────
+
+const CHALLENGE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+interface ChallengeEntry {
+    nonce: string
+    expiresAt: number
+}
+
+/** In-memory store: address → pending challenge */
+const challengeStore = new Map<string, ChallengeEntry>()
+
+/**
+ * Generate a one-time challenge nonce for the given Stellar address.
+ * The client must sign this exact string (UTF-8 bytes) with the wallet
+ * private key and return it to POST /auth/login.
+ */
+export function issueChallenge(address: string): string {
+    challengeStore.delete(address)
+    const nonce = randomBytes(32).toString('hex')
+    const message = `stellar-rebalancer:auth:${nonce}`
+    challengeStore.set(address, { nonce: message, expiresAt: Date.now() + CHALLENGE_TTL_MS })
+    logger.info('Auth challenge issued', { address })
+    return message
+}
+
+/**
+ * Verify a base64-encoded Ed25519 signature over the previously issued
+ * challenge nonce for `address`. Consumes the challenge on first use so it
+ * cannot be replayed.
+ */
+export function verifyWalletSignature(address: string, signatureB64: string): boolean {
+    const entry = challengeStore.get(address)
+    if (!entry) return false
+    if (Date.now() > entry.expiresAt) {
+        challengeStore.delete(address)
+        return false
+    }
+    // Consume the challenge regardless of outcome to prevent brute-force.
+    challengeStore.delete(address)
+    try {
+        const keypair = Keypair.fromPublicKey(address)
+        const messageBuffer = Buffer.from(entry.nonce, 'utf8')
+        const sigBuffer = Buffer.from(signatureB64, 'base64')
+        return keypair.verify(messageBuffer, sigBuffer)
+    } catch {
+        return false
+    }
 }
 
 export async function logout(refreshToken: string | undefined, address: string | undefined): Promise<boolean> {
