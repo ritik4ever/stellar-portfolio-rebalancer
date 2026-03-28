@@ -1,0 +1,26 @@
+# Contributing to Stellar Portfolio Rebalancer
+
+Thanks for your interest in contributing!
+
+The full contributor setup guide is at **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
+
+It covers:
+
+- Minimum local setup (backend + frontend)
+- Optional services: PostgreSQL, Redis, SMTP
+- Database migrations (PostgreSQL and SQLite paths)
+- Running backend and frontend tests
+- API doc generation (`npm run codegen`)
+- Queue worker setup and expectations
+- Frontend E2E tests with Playwright
+- Contract build and deploy steps
+- Common setup failures and fixes
+
+For a quick overview of the API contract see [API.md](API.md).
+
+## Workflow
+
+1. Fork the repository and create a feature branch: `git checkout -b feature/your-feature`
+2. Follow the setup guide in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+3. Make your changes and ensure all tests pass: `cd backend && npm test && cd ../frontend && npm test`
+4. Open a pull request targeting `main`
