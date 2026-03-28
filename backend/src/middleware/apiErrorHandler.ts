@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express'
 import { logger } from '../utils/logger.js'
 import { mapUnknownError } from '../utils/apiErrors.js'
 import { fail } from '../utils/apiResponse.js'
+import { captureException } from '../observability/sentry.js'
 
 export function apiErrorHandler(err: unknown, req: Request, res: Response, next: NextFunction): void {
     if (res.headersSent) {
@@ -17,6 +18,13 @@ export function apiErrorHandler(err: unknown, req: Request, res: Response, next:
         status: mapped.status,
         code: mapped.code,
         details: mapped.details
+    })
+    captureException(err, {
+        requestId: req.requestId,
+        method: req.method,
+        url: req.originalUrl,
+        status: mapped.status,
+        code: mapped.code
     })
 
     fail(res, mapped.status, mapped.code, mapped.message, mapped.details)

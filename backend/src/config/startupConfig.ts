@@ -10,6 +10,7 @@ export interface StartupConfig {
   autoRebalancerEnabled: boolean;
   corsOrigins: string[];
   hasRebalanceSigner: boolean;
+  jwtAuthEnabled: boolean;
   featureFlags: FeatureFlags;
 }
 
@@ -138,6 +139,14 @@ export function validateStartupConfigOrThrow(
     );
   }
 
+  const jwtSecretRaw = (env.JWT_SECRET || "").trim();
+  if (jwtSecretRaw && jwtSecretRaw.length < 32) {
+    errors.push(
+      `JWT_SECRET is set but only ${jwtSecretRaw.length} characters — must be at least 32.`,
+    );
+  }
+  const jwtAuthEnabled = jwtSecretRaw.length >= 32;
+
   if (stellarNetwork && horizonUrl) {
     const host = horizonUrl.hostname.toLowerCase();
     const isTestnetHost = host.includes("testnet");
@@ -190,6 +199,7 @@ export function validateStartupConfigOrThrow(
     autoRebalancerEnabled,
     corsOrigins,
     hasRebalanceSigner: !!signerSecret,
+    jwtAuthEnabled,
     featureFlags,
   };
 }
@@ -221,6 +231,7 @@ export function buildStartupSummary(
         ? "Redis unreachable — set REDIS_URL to enable BullMQ workers"
         : undefined,
     },
+    jwtAuthEnabled: config.jwtAuthEnabled,
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       allowFallbackPrices: config.featureFlags.allowFallbackPrices,

@@ -1,0 +1,52 @@
+groups:
+  - name: portfolio-observability
+    rules:
+      - alert: BackendDown
+        expr: up{job="portfolio-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: Backend metrics endpoint is unavailable
+          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes.
+
+      - alert: BackendReadinessFailed
+        expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/readiness"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: Backend readiness probe is failing
+          description: The backend /readiness endpoint is returning a non-2xx response.
+
+      - alert: FrontendUptimeProbeFailed
+        expr: probe_success{job="portfolio-readiness", instance="http://frontend:80/"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: frontend
+        annotations:
+          summary: Frontend uptime probe failed
+          description: The frontend root endpoint has been unavailable for 5 minutes.
+
+      - alert: Elevated5xxRate
+        expr: sum(rate(stellar_portfolio_http_requests_total{status_code=~"5.."}[5m])) / clamp_min(sum(rate(stellar_portfolio_http_requests_total[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: Elevated backend 5xx rate
+          description: More than 5% of backend requests have been failing with 5xx responses for 10 minutes.
+
+      - alert: RebalanceQueueFailures
+        expr: stellar_portfolio_queue_jobs{queue="rebalance", state="failed"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: Failed rebalance jobs detected
+          description: The rebalance queue has failed jobs that need investigation.
