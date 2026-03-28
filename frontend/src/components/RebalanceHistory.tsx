@@ -416,7 +416,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                             {(event.details?.gasBreakdown?.length ?? 0) > 0 && (
                                                 <div className="text-xs text-gray-600 dark:text-gray-400 mb-2">
                                                     {event.details?.gasWarning && (
-                                                        <div className="text-red-600 dark:text-red-400 mb-1 font-medium">High gas warning (&gt; 0.5 XLM)</div>
+                                                        <div className="text-red-600 dark:text-red-400 mb-1 font-medium">High gas warning ({'>'} 0.5 XLM)</div>
                                                     )}
                                                     {event.details?.gasBreakdown?.map((item) => (
                                                         <div key={item.tradeId} className="flex justify-between">

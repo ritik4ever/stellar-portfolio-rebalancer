@@ -1356,7 +1356,18 @@ router.post(
   idempotencyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const userId = req.user?.address ?? req.body?.userId;
+      // Issue #178: when auth is enabled, derive userId from the token only.
+      // Reject requests that try to subscribe on behalf of a different address.
+      let userId: string | undefined;
+      if (getAuthConfig().enabled) {
+        userId = req.user!.address;
+        const bodyId = req.body?.userId as string | undefined;
+        if (bodyId && bodyId !== userId) {
+          return fail(res, 403, "FORBIDDEN", "Cannot manage notification preferences for another user");
+        }
+      } else {
+        userId = req.body?.userId;
+      }
       const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } =
         req.body ?? {};
 
@@ -1459,7 +1470,17 @@ router.get(
   requireJwtWhenEnabled,
   async (req: Request, res: Response) => {
     try {
-      const userId = req.user?.address ?? (req.query.userId as string);
+      // Issue #178: when auth is enabled, only allow reading own preferences.
+      let userId: string | undefined;
+      if (getAuthConfig().enabled) {
+        userId = req.user!.address;
+        const queryId = req.query.userId as string | undefined;
+        if (queryId && queryId !== userId) {
+          return fail(res, 403, "FORBIDDEN", "Cannot read notification preferences for another user");
+        }
+      } else {
+        userId = req.query.userId as string | undefined;
+      }
 
       if (!userId) {
         return fail(
@@ -1496,7 +1517,17 @@ router.delete(
   writeRateLimiter,
   async (req: Request, res: Response) => {
     try {
-      const userId = req.user?.address ?? (req.query.userId as string);
+      // Issue #178: when auth is enabled, only allow unsubscribing own preferences.
+      let userId: string | undefined;
+      if (getAuthConfig().enabled) {
+        userId = req.user!.address;
+        const queryId = req.query.userId as string | undefined;
+        if (queryId && queryId !== userId) {
+          return fail(res, 403, "FORBIDDEN", "Cannot unsubscribe notification preferences for another user");
+        }
+      } else {
+        userId = req.query.userId as string | undefined;
+      }
 
       if (!userId) {
         return fail(
