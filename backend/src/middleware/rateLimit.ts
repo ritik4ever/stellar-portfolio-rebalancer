@@ -4,7 +4,7 @@ import IORedis from "ioredis";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
-import { REDIS_URL } from "../queue/connection.js";
+import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
 
 // Rate limiting configuration from environment
 const GLOBAL_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000;
@@ -13,47 +13,47 @@ const WRITE_MAX = Number(process.env.RATE_LIMIT_WRITE_MAX) || 10;
 const AUTH_MAX = Number(process.env.RATE_LIMIT_AUTH_MAX) || 5;
 const CRITICAL_MAX = Number(process.env.RATE_LIMIT_CRITICAL_MAX) || 3;
 
-// Burst protection - shorter windows with lower limits
 const BURST_WINDOW_MS =
   Number(process.env.RATE_LIMIT_BURST_WINDOW_MS) || 10 * 1000;
 const BURST_MAX = Number(process.env.RATE_LIMIT_BURST_MAX) || 20;
 const WRITE_BURST_MAX = Number(process.env.RATE_LIMIT_WRITE_BURST_MAX) || 3;
 
-// Redis store for shared rate limiting across instances
-let redisStore: RedisStore | undefined;
 let redisClient: IORedis | undefined;
 
-// Only try to connect to Redis if not in test environment
+// express-rate-limit requires a *separate* RedisStore instance per limiter.
+// We share one ioredis client but wrap it in a fresh RedisStore with a unique
+// prefix each time — no store object is ever reused across limiters.
+function makeStore(prefix: string): RedisStore | undefined {
+  if (!redisClient) return undefined;
+  return new RedisStore({
+    prefix: `rl:${prefix}:`,
+    sendCommand: (...args: Parameters<IORedis["call"]>) =>
+      redisClient!.call(...args) as Promise<any>,
+  });
+}
+
 if (process.env.NODE_ENV !== "test") {
   try {
     redisClient = new IORedis(REDIS_URL, {
       lazyConnect: true,
       connectTimeout: 3000,
-      maxRetriesPerRequest: 1,
+      maxRetriesPerRequest: null,
       enableReadyCheck: false,
     });
-
-    redisStore = new RedisStore({
-      sendCommand: (...args: Parameters<IORedis["call"]>) =>
-        redisClient!.call(...args) as Promise<any>,
+    // Absorb all connection errors so a missing Redis never crashes the process.
+    // express-rate-limit will degrade gracefully to its in-memory store if any
+    // Redis command fails.
+    redisClient.on("error", () => {});
+    logger.info("[RATE-LIMIT] Redis store configured (lazy connect)", {
+      redisUrl: REDIS_URL.replace(/:\/\/[^@]*@/, "://***@"),
     });
-
-    logger.info(
-      "[RATE-LIMIT] Redis store initialized for distributed rate limiting",
-      {
-        redisUrl: REDIS_URL.replace(/:\/\/[^@]*@/, "://***@"),
-      },
-    );
   } catch (error) {
-    logger.warn(
-      "[RATE-LIMIT] Redis unavailable - falling back to memory store (single instance only)",
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-    );
+    logger.warn("[RATE-LIMIT] Redis store init failed — using memory store", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 } else {
-  logger.info("[RATE-LIMIT] Test environment detected - using memory store");
+  logger.info("[RATE-LIMIT] Test environment — using memory store");
 }
 
 // Enhanced rate limit handler with detailed metrics
@@ -140,14 +140,6 @@ function skipSuccessfulRequests(
   return res.statusCode < 400;
 }
 
-// Base options for all rate limiters
-const baseOptions: Partial<Options> = {
-  standardHeaders: "draft-7", // Use latest standard headers
-  legacyHeaders: false,
-  store: redisStore, // Will fall back to memory store if Redis unavailable
-  skip: skipSuccessfulRequests,
-};
-
 // Global rate limiter - applies to all requests
 export const globalRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
@@ -156,7 +148,7 @@ export const globalRateLimiter = rateLimit({
   handler: createHandler(GLOBAL_WINDOW_MS, "global"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
+  store: makeStore("global"),
   skip: skipSuccessfulRequests,
   message: "Too many requests from this IP, please try again later.",
 });
@@ -169,7 +161,7 @@ export const burstProtectionLimiter = rateLimit({
   handler: createHandler(BURST_WINDOW_MS, "burst-protection"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
+  store: makeStore("burst"),
   skip: (req) => isProbePath(req.path),
 });
 
@@ -181,7 +173,7 @@ export const writeRateLimiter = rateLimit({
   handler: createHandler(GLOBAL_WINDOW_MS, "write-operations"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
+  store: makeStore("write"),
 });
 
 // Write burst protection - prevent rapid write attempts
@@ -192,7 +184,7 @@ export const writeBurstLimiter = rateLimit({
   handler: createHandler(BURST_WINDOW_MS, "write-burst-protection"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
+  store: makeStore("write-burst"),
   skip: (req) => isProbePath(req.path),
 });
 
@@ -204,8 +196,8 @@ export const authRateLimiter = rateLimit({
   handler: createHandler(GLOBAL_WINDOW_MS, "authentication"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
-  skip: () => false, // Never skip auth rate limiting
+  store: makeStore("auth"),
+  skip: () => false,
 });
 
 // Critical operations rate limiter - for rebalancing and high-value operations
@@ -216,19 +208,19 @@ export const criticalRateLimiter = rateLimit({
   handler: createHandler(GLOBAL_WINDOW_MS, "critical-operations"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
-  skip: () => false, // Never skip critical operation rate limiting
+  store: makeStore("critical"),
+  skip: () => false,
 });
 
 // Admin operations rate limiter - protect admin endpoints
 export const adminRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
-  limit: AUTH_MAX, // Same as auth for admin operations
+  limit: AUTH_MAX,
   keyGenerator: createKeyGenerator("admin"),
   handler: createHandler(GLOBAL_WINDOW_MS, "admin-operations"),
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  store: redisStore,
+  store: makeStore("admin"),
   skip: () => false,
 });
 
@@ -266,5 +258,7 @@ export async function closeRateLimitStore(): Promise<void> {
 }
 
 export function getRateLimitStoreType(): "redis" | "memory" {
-  return redisStore !== undefined ? "redis" : "memory";
+  // getCachedRedisAvailability() returns the result of probeRedis() from
+  // index.ts — by the time this is called at startup, the probe has run.
+  return getCachedRedisAvailability() === true ? "redis" : "memory";
 }
