@@ -92,9 +92,11 @@ describe('Portfolio Management - POST /api/portfolio', () => {
                 expect([200, 201]).toContain(res.status)
             })
 
-        expect(response.body.portfolioId).toBeDefined()
-        expect(response.body.status).toBe('created')
-        expect(response.body.mode).toBe('demo')
+        expect(response.body.success).toBe(true)
+        expect(response.body.error).toBeNull()
+        expect(response.body.data.portfolioId).toBeDefined()
+        expect(response.body.data.status).toBe('created')
+        expect(response.body.data.mode).toBe('demo')
     })
 
     it('should return 400 for missing required fields', async () => {
@@ -108,8 +110,10 @@ describe('Portfolio Management - POST /api/portfolio', () => {
             .send(testPayload)
             .expect(400)
 
+        expect(response.body.success).toBe(false)
+        expect(response.body.data).toBeNull()
         expect(response.body.error).toBeDefined()
-        expect(response.body.error).toContain('Missing required fields')
+        expect(response.body.error.code).toBe('VALIDATION_ERROR')
     })
 
     it('should return 400 if allocations do not sum to 100%', async () => {
@@ -124,7 +128,9 @@ describe('Portfolio Management - POST /api/portfolio', () => {
             .send(testPayload)
             .expect(400)
 
-        expect(response.body.error).toContain('100%')
+        expect(response.body.success).toBe(false)
+        expect(response.body.data).toBeNull()
+        expect(response.body.error.code).toBe('VALIDATION_ERROR')
     })
 
     it('should return 400 if threshold is out of range', async () => {
@@ -139,13 +145,15 @@ describe('Portfolio Management - POST /api/portfolio', () => {
             .send(testPayload)
             .expect(400)
 
-        expect(response.body.error).toContain('Threshold')
+        expect(response.body.success).toBe(false)
+        expect(response.body.data).toBeNull()
+        expect(response.body.error.code).toBe('VALIDATION_ERROR')
     })
 
     it('should return 400 if asset allocation is invalid', async () => {
         const testPayload = {
             userAddress: 'GTEST123456789ABCDEF3',
-            allocations: { XLM: 120, USDC: -20 }, 
+            allocations: { XLM: 120, USDC: -20 },
             threshold: 5
         }
 
@@ -154,7 +162,10 @@ describe('Portfolio Management - POST /api/portfolio', () => {
             .send(testPayload)
             .expect(400)
 
+        expect(response.body.success).toBe(false)
+        expect(response.body.data).toBeNull()
         expect(response.body.error).toBeDefined()
+        expect(response.body.error.code).toBe('VALIDATION_ERROR')
     })
 })
 
@@ -176,7 +187,7 @@ describe('Portfolio Management - GET /api/portfolio/:id', () => {
                 expect([200, 201]).toContain(res.status)
             })
 
-        const portfolioId = createResponse.body.portfolioId
+        const portfolioId = createResponse.body.data.portfolioId
         expect(portfolioId).toBeDefined()
 
         // Now fetch it
@@ -186,9 +197,11 @@ describe('Portfolio Management - GET /api/portfolio/:id', () => {
                 expect([200, 201]).toContain(res.status)
             })
 
-        expect(getResponse.body.portfolio).toBeDefined()
-        expect(getResponse.body.prices).toBeDefined()
-        expect(getResponse.body.mode).toBe('demo')
+        expect(getResponse.body.success).toBe(true)
+        expect(getResponse.body.error).toBeNull()
+        expect(getResponse.body.data.portfolio).toBeDefined()
+        expect(getResponse.body.data.prices).toBeDefined()
+        expect(getResponse.body.data.mode).toBe('demo')
     })
 
     it('should return 400 for missing portfolio ID', async () => {
@@ -207,7 +220,8 @@ describe('Portfolio Management - GET /api/portfolio/:id', () => {
                 expect([400, 404, 500]).toContain(res.status)
             })
 
-        expect(response.body.error || response.body.message).toBeDefined()
+        expect(response.body.success).toBe(false)
+        expect(response.body.error).toBeDefined()
     })
 })
 
@@ -219,11 +233,13 @@ describe('Price Data - GET /api/prices', () => {
             .get('/api/prices')
             .expect(200)
 
+        expect(response.body.success).toBe(true)
+        expect(response.body.error).toBeNull()
         // Should have at least one asset
-        expect(Object.keys(response.body).length).toBeGreaterThan(0)
+        expect(Object.keys(response.body.data).length).toBeGreaterThan(0)
 
         // Check for common assets (might be fallback data)
-        const hasAssets = response.body.XLM || response.body.BTC || response.body.ETH || response.body.USDC
+        const hasAssets = response.body.data.XLM || response.body.data.BTC || response.body.data.ETH || response.body.data.USDC
         expect(hasAssets).toBeTruthy()
     })
 
@@ -232,7 +248,8 @@ describe('Price Data - GET /api/prices', () => {
             .get('/api/prices')
             .expect(200)
 
-        const assets = Object.values(response.body) as any[]
+        expect(response.body.success).toBe(true)
+        const assets = Object.values(response.body.data) as any[]
         expect(assets.length).toBeGreaterThan(0)
 
         const firstAsset = assets[0]
@@ -247,8 +264,9 @@ describe('Price Data - GET /api/prices', () => {
             .get('/api/prices')
             .expect(200)
 
+        expect(response.body.success).toBe(true)
         // All assets should have consistent structure
-        for (const [assetName, assetData] of Object.entries(response.body)) {
+        for (const [, assetData] of Object.entries(response.body.data)) {
             const asset = assetData as any
             expect(asset.price).toBeDefined()
             expect(typeof asset.price).toBe('number')
@@ -275,7 +293,7 @@ describe('Rebalancing - POST /api/portfolio/:id/rebalance', () => {
                 expect([200, 201]).toContain(res.status)
             })
 
-        const portfolioId = createResponse.body.portfolioId
+        const portfolioId = createResponse.body.data.portfolioId
         expect(portfolioId).toBeDefined()
 
         // Now try to rebalance
@@ -286,12 +304,15 @@ describe('Rebalancing - POST /api/portfolio/:id/rebalance', () => {
                 expect([200, 201, 400, 409]).toContain(res.status)
             })
 
-        // Response should contain either status or error
-        expect(
-            rebalanceResponse.body.status ||
-            rebalanceResponse.body.error ||
-            rebalanceResponse.body.reason
-        ).toBeDefined()
+        // Response must be a standard envelope
+        expect(typeof rebalanceResponse.body.success).toBe('boolean')
+        if (rebalanceResponse.body.success) {
+            expect(rebalanceResponse.body.data).toBeDefined()
+            expect(rebalanceResponse.body.error).toBeNull()
+        } else {
+            expect(rebalanceResponse.body.error).toBeDefined()
+            expect(rebalanceResponse.body.data).toBeNull()
+        }
     })
 
     it('should return error for invalid portfolio ID', async () => {
@@ -302,7 +323,8 @@ describe('Rebalancing - POST /api/portfolio/:id/rebalance', () => {
                 expect([400, 404, 500]).toContain(res.status)
             })
 
-        expect(response.body.error || response.body.message).toBeDefined()
+        expect(response.body.success).toBe(false)
+        expect(response.body.error).toBeDefined()
     })
 
     it('should require portfolio ID in URL', async () => {
