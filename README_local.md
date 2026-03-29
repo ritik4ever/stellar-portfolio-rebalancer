@@ -72,3 +72,4 @@ cd frontend && npm run dev
 - **Backend**: Node.js API with real-time monitoring
 - **Frontend**: React with TypeScript and Tailwind CSS
 - **Oracle**: Reflector price feeds for accurate pricing
+ 
