@@ -1,4 +1,7 @@
 
+import jwt from "jsonwebtoken";
+import { randomBytes } from "node:crypto";
+import { Keypair } from "@stellar/stellar-sdk";
 import {
   createRefreshToken,
   findRefreshToken,
@@ -162,6 +165,15 @@ export function verifyWalletSignature(
 }
 
 
+export async function logout(
+  refreshToken: string | undefined,
+  address: string | undefined,
+): Promise<boolean> {
+  if (refreshToken) {
+    const row = await findRefreshToken(refreshToken);
+    if (row) {
+      await deleteRefreshTokenById(row.id).catch(() => {});
+      return true;
     }
   }
   if (address) {
