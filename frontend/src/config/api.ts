@@ -1,5 +1,11 @@
 import { browserPriceService } from '../services/browserPriceService'
 import { getAccessToken, refresh } from '../services/authService'
+import {
+    debugLog,
+    getFrontendDebugConfig,
+    logApiRequest,
+    logApiResponse,
+} from '../utils/debug'
 import { getApiResourceRoot } from './apiVersion'
 
 /** Resolved once at load; see `getApiResourceRoot` and `frontend/src/config/apiVersion.ts`. */
@@ -123,14 +129,13 @@ export function getWebSocketUrl(): string {
     return path.startsWith('/') ? `${base}${path}` : `${base}/${path}`
 }
 
-// Debug logging
 const viteEnv = (import.meta as any).env
-console.log('API Configuration:', {
+debugLog('API Configuration', {
     baseUrl: API_CONFIG.BASE_URL,
     apiResourceRoot: API_RESOURCE_ROOT,
-    isDev: !viteEnv?.PROD,
+    isDev: getFrontendDebugConfig(viteEnv).isDevelopment,
     envApiUrl: viteEnv?.VITE_API_URL,
-    mode: viteEnv?.MODE
+    mode: viteEnv?.MODE,
 })
 
 export const createApiUrl = (endpoint: string, params?: Record<string, string>): string => {
@@ -150,7 +155,7 @@ export const apiRequest = async <T>(
 ): Promise<T> => {
     // Special handling for prices endpoint - use browser service
     if (API_CONFIG.USE_BROWSER_PRICES && endpoint.includes('/prices') && !endpoint.includes('enhanced')) {
-        console.log('Using browser price service instead of backend')
+        debugLog('Using browser price service instead of backend')
         try {
             const prices = await browserPriceService.getCurrentPrices()
             return prices as unknown as T
@@ -195,14 +200,18 @@ export const apiRequest = async <T>(
     defaultOptions.signal = controller.signal
 
     try {
-        console.log(`API Request: ${options.method || 'GET'} ${url}`)
-        console.log('Request headers:', headers)
+        logApiRequest(`API Request: ${options.method || 'GET'} ${url}`, {
+            headers,
+            body: defaultOptions.body,
+        }, viteEnv)
 
         const response = await fetch(url, defaultOptions)
         clearTimeout(timeoutId)
 
-        console.log(`API Response: ${response.status} ${response.statusText}`)
-        console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+        logApiResponse(`API Response: ${response.status} ${response.statusText}`, {
+            status: response.status,
+            headers: response.headers,
+        }, viteEnv)
 
         const contentType = response.headers.get('content-type')
         if (!contentType || !contentType.includes('application/json')) {
@@ -211,7 +220,10 @@ export const apiRequest = async <T>(
         }
 
         const body = await response.json()
-        console.log('API Response Data:', body)
+        logApiResponse('API Response Data', {
+            status: response.status,
+            body,
+        }, viteEnv)
 
         if (response.status === 401 && retryCount === 0 && isApiRequest) {
             const refreshed = await refresh()
@@ -254,7 +266,9 @@ export const apiRequest = async <T>(
             if (retryCount < API_CONFIG.RETRY_ATTEMPTS &&
                 !endpoint.includes('/prices') &&
                 (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('Failed to fetch'))) {
-                console.log(`Retrying request (${retryCount + 1}/${API_CONFIG.RETRY_ATTEMPTS})...`)
+                debugLog(`Retrying request (${retryCount + 1}/${API_CONFIG.RETRY_ATTEMPTS})...`, {
+                    url,
+                })
                 await new Promise(resolve => setTimeout(resolve, API_CONFIG.RETRY_DELAY * (retryCount + 1)))
                 return apiRequest<T>(endpoint, options, retryCount + 1)
             }
@@ -341,9 +355,9 @@ export const fetchPricesDirectly = async () => {
 // Test functions
 export const testBrowserPrices = async (): Promise<boolean> => {
     try {
-        console.log('Testing browser price service...')
+        debugLog('Testing browser price service...')
         const testResult = await browserPriceService.testConnection()
-        console.log('Browser price test result:', testResult)
+        debugLog('Browser price test result', testResult)
         return testResult.success
     } catch (error) {
         console.error('Browser price test failed:', error)

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const failMock = vi.fn()
 const loggerErrorMock = vi.fn()
+const captureExceptionMock = vi.fn()
 
 vi.mock('../utils/apiResponse.js', () => ({
     fail: failMock
@@ -13,10 +14,15 @@ vi.mock('../utils/logger.js', () => ({
     }
 }))
 
+vi.mock('../observability/sentry.js', () => ({
+    captureException: captureExceptionMock
+}))
+
 describe('apiErrorHandler', () => {
     beforeEach(() => {
         failMock.mockReset()
         loggerErrorMock.mockReset()
+        captureExceptionMock.mockReset()
     })
 
     it('delegates to next when headers already sent', async () => {
@@ -48,6 +54,7 @@ describe('apiErrorHandler', () => {
         } as any, next)
 
         expect(loggerErrorMock).toHaveBeenCalled()
+        expect(captureExceptionMock).toHaveBeenCalled()
         expect(failMock).toHaveBeenCalledWith(
             expect.anything(),
             500,

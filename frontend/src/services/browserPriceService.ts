@@ -1,3 +1,5 @@
+import { debugLog } from '../utils/debug'
+
 interface PriceData {
     price: number
     change?: number
@@ -16,10 +18,10 @@ class BrowserPriceService {
     private readonly REQUEST_TIMEOUT = 10000 // 10 seconds
 
     private readonly COIN_IDS = {
-        'XLM': 'stellar',
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'USDC': 'usd-coin'
+        XLM: 'stellar',
+        BTC: 'bitcoin',
+        ETH: 'ethereum',
+        USDC: 'usd-coin'
     }
 
     async getCurrentPrices(): Promise<PricesMap> {
@@ -27,13 +29,12 @@ class BrowserPriceService {
             // Check cache first
             const cached = this.cache.get('prices')
             if (cached && (Date.now() - cached.timestamp) < this.CACHE_DURATION) {
-                console.log('Using cached prices from browser service')
+                debugLog('Using cached prices from browser service')
                 return cached.data
             }
 
-            console.log('Fetching fresh prices from CoinGecko (browser)')
+            debugLog('Fetching fresh prices from CoinGecko (browser)')
 
-            // Build the API URL
             const coinIds = Object.values(this.COIN_IDS).join(',')
             const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinIds}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`
 
@@ -43,7 +44,7 @@ class BrowserPriceService {
             const response = await fetch(url, {
                 method: 'GET',
                 headers: {
-                    'Accept': 'application/json',
+                    Accept: 'application/json',
                 },
                 signal: controller.signal
             })
@@ -55,9 +56,10 @@ class BrowserPriceService {
             }
 
             const data = await response.json()
-            console.log('CoinGecko browser response:', data)
+            debugLog('CoinGecko browser response', {
+                assets: Object.keys(data as Record<string, unknown>)
+            })
 
-            // Transform the data to match your existing format
             const prices: PricesMap = {}
 
             Object.entries(this.COIN_IDS).forEach(([asset, coinId]) => {
@@ -70,7 +72,11 @@ class BrowserPriceService {
                         source: 'coingecko_browser',
                         volume: coinData.usd_24h_vol || 0
                     }
-                    console.log(`✓ ${asset}: $${coinData.usd} (${coinData.usd_24h_change > 0 ? '+' : ''}${(coinData.usd_24h_change || 0).toFixed(2)}%)`)
+
+                    debugLog(`Price loaded for ${asset}`, {
+                        price: coinData.usd,
+                        hasChange: coinData.usd_24h_change !== undefined
+                    })
                 }
             })
 
@@ -78,7 +84,6 @@ class BrowserPriceService {
                 throw new Error('No price data received from CoinGecko')
             }
 
-            // Cache the results
             this.cache.set('prices', {
                 data: prices,
                 timestamp: Date.now()
@@ -89,20 +94,18 @@ class BrowserPriceService {
         } catch (error) {
             console.error('Browser price fetch failed:', error)
 
-            // Return cached data if available
             const cached = this.cache.get('prices')
             if (cached) {
-                console.log('Using stale cached data due to error')
+                debugLog('Using stale cached data due to error')
                 return cached.data
             }
 
-            // Final fallback
             return this.getFallbackPrices()
         }
     }
 
     private getFallbackPrices(): PricesMap {
-        console.warn('Using fallback prices in browser service')
+        debugLog('Using fallback prices in browser service')
 
         const now = Math.floor(Date.now() / 1000)
         const addVariation = (basePrice: number) => {
@@ -140,7 +143,7 @@ class BrowserPriceService {
 
     clearCache(): void {
         this.cache.clear()
-        console.log('Browser price cache cleared')
+        debugLog('Browser price cache cleared')
     }
 
     async testConnection(): Promise<{ success: boolean, error?: string }> {

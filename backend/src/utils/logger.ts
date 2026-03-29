@@ -8,8 +8,12 @@ const baseLogger = pino({
     level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
     base: {
         service: 'stellar-portfolio-backend',
+        environment: process.env.NODE_ENV || 'development',
     },
     timestamp: pino.stdTimeFunctions.isoTime,
+    formatters: {
+        level: (label) => ({ level: label }),
+    },
     mixin() {
         const requestId = getRequestId()
         return requestId ? { requestId } : {}

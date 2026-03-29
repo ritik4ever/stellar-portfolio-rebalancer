@@ -3,16 +3,28 @@ import {
     getAuthConfig,
     issueTokens,
     refreshTokens,
-    logout
+    logout,
+    issueChallenge,
+    verifyWalletSignature
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { authRateLimiter } from '../middleware/rateLimit.js'
+import { validateRequest } from '../middleware/validate.js'
+import { loginSchema, refreshTokenSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
 
 const router = Router()
 
-router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
+/**
+ * Issue a one-time challenge nonce that the client must sign with their
+ * Stellar wallet private key.
+ *
+ * POST /api/auth/challenge
+ * Body: { address: string }
+ * Response: { challenge: string }  — sign this exact string (UTF-8) with the wallet
+ */
+router.post('/challenge', authRateLimiter, async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -22,7 +34,41 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
         if (!address || typeof address !== 'string' || !address.trim()) {
             return fail(res, 400, 'VALIDATION_ERROR', 'address is required')
         }
+        const challenge = issueChallenge(address.trim())
+        return ok(res, { challenge })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * Complete wallet-signed challenge authentication and receive JWT tokens.
+ *
+ * POST /api/auth/login
+ * Body: { address: string, signature: string }
+ *   address   — Stellar public key (G…)
+ *   signature — base64-encoded Ed25519 signature over the challenge string
+ *               returned by POST /api/auth/challenge
+ */
+router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const config = getAuthConfig()
+        if (!config.enabled) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'JWT auth not configured (set JWT_SECRET)')
+        }
+        const address = req.body?.address
+        const signature = req.body?.signature
+        if (!address || typeof address !== 'string' || !address.trim()) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'address is required')
+        }
+        if (!signature || typeof signature !== 'string' || !signature.trim()) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'signature is required — request a challenge first via POST /auth/challenge')
+        }
         const trimmed = address.trim()
+        const valid = verifyWalletSignature(trimmed, signature.trim())
+        if (!valid) {
+            return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired signature — request a new challenge and sign it with your wallet')
+        }
         const tokens = await issueTokens(trimmed)
         return ok(res, {
             accessToken: tokens.accessToken,
@@ -35,16 +81,13 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/refresh', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/refresh', authRateLimiter, validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'JWT auth not configured')
         }
-        const refreshToken = req.body?.refreshToken
-        if (!refreshToken || typeof refreshToken !== 'string') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'refreshToken is required')
-        }
+        const { refreshToken } = req.body
         const tokens = await refreshTokens(refreshToken)
         if (!tokens) {
             return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired refresh token')

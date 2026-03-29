@@ -18,7 +18,19 @@ import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/helpers.js'
-import { createPortfolioSchema } from './validation.js'
+import { validateRequest, validateQuery } from '../middleware/validate.js'
+import {
+    createPortfolioSchema,
+    recordConsentSchema,
+    consentStatusQuerySchema,
+    notificationSubscribeSchema,
+    notificationQuerySchema,
+    adminAddAssetSchema,
+    adminPatchAssetSchema,
+    portfolioExportQuerySchema,
+    rebalanceHistoryQuerySchema,
+    debugTestNotificationSchema
+} from './validation.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import type { Portfolio } from '../types/index.js'
@@ -32,6 +44,7 @@ import {
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
+import { getAuthConfig } from '../services/authService.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -70,10 +83,9 @@ router.get('/strategies', (_req: Request, res: Response) => {
 
 // ─── Legal consent (GDPR/CCPA) ─────────────────────────────────────────────
 /** Get consent status for a user. Required before using the app. */
-router.get('/consent/status', (req: Request, res: Response) => {
+router.get('/consent/status', validateQuery(consentStatusQuerySchema), (req: Request, res: Response) => {
     try {
         const userId = (req.query.userId ?? req.query.user_id) as string
-        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         const consent = databaseService.getConsent(userId)
         const accepted = databaseService.hasFullConsent(userId)
         return ok(res, {
@@ -89,16 +101,9 @@ router.get('/consent/status', (req: Request, res: Response) => {
 })
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-router.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, (req: Request, res: Response) => {
+router.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
     try {
-        const { userId, terms, privacy, cookies } = req.body ?? {}
-        if (!userId || typeof userId !== 'string') return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
-        if (typeof terms !== 'boolean' || typeof privacy !== 'boolean' || typeof cookies !== 'boolean') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'terms, privacy, and cookies must be booleans')
-        }
-        if (!terms || !privacy || !cookies) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'You must accept Terms of Service, Privacy Policy, and Cookie Policy')
-        }
+        const { userId, terms, privacy, cookies } = req.body
         const ipAddress = req.ip ?? req.socket?.remoteAddress
         const userAgent = req.get('user-agent')
         databaseService.recordConsent(userId, { terms, privacy, cookies, ipAddress, userAgent })
@@ -176,9 +181,9 @@ router.get('/admin/rate-limits/metrics', requireAdmin, (_req: Request, res: Resp
 })
 
 /** Admin: add asset */
-router.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
     try {
-        const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body ?? {}
+        const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
         assetRegistryService.add(
             symbol,
             name,
@@ -246,12 +251,10 @@ router.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (re
 })
 
 /** Admin: enable/disable asset */
-router.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
-        const enabled = req.body?.enabled
-        if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
-        if (typeof enabled !== 'boolean') return fail(res, 400, 'VALIDATION_ERROR', 'body.enabled must be boolean')
+        const { enabled } = req.body
         const prior = assetRegistryService.getBySymbol(symbol)
         const updated = assetRegistryService.setEnabled(symbol, enabled)
         if (!updated) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
@@ -273,14 +276,14 @@ router.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotenc
     }
 })
 
-router.get('/rebalance/history', async (req: Request, res: Response) => {
+router.get('/rebalance/history', validateQuery(rebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.query.portfolioId as string
-        const limit = parseInt(req.query.limit as string) || 50
+        const portfolioId = req.query.portfolioId as string | undefined
+        const limit = (req.query.limit as unknown as number | undefined) ?? 50
         const source = parseHistorySource(req.query.source)
         const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp)
         const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
-        const syncOnChain = parseOptionalBoolean(req.query.syncOnChain) === true
+        const syncOnChain = (req.query.syncOnChain as unknown as boolean | undefined) === true
 
         logger.info('Rebalance history request', { portfolioId: portfolioId || 'all' })
         if (syncOnChain) {
@@ -405,20 +408,17 @@ router.get('/portfolio/:id', async (req: Request, res: Response) => {
 })
 
 // Portfolio export (JSON, CSV, PDF) — GDPR data portability
-router.get('/portfolio/:id/export', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+router.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQuery(portfolioExportQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
-        const format = (req.query.format as string)?.toLowerCase()
+        const format = req.query.format as 'json' | 'csv' | 'pdf'
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        if (!['json', 'csv', 'pdf'].includes(format)) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Query parameter format must be one of: json, csv, pdf')
-        }
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         if (req.user && portfolio.userAddress !== req.user.address) {
             return fail(res, 403, 'FORBIDDEN', 'You can only export your own portfolio')
         }
-        const result = await getPortfolioExport(portfolioId, format as 'json' | 'csv' | 'pdf')
+        const result = await getPortfolioExport(portfolioId, format)
         if (!result) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         res.setHeader('Content-Type', result.contentType)
         res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
@@ -991,7 +991,7 @@ router.get('/portfolio/:id/performance-summary', async (req: Request, res: Respo
 // ================================
 
 // Subscribe to notifications
-router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(notificationSubscribeSchema), async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, derive userId from the token only.
         // Reject requests that try to subscribe on behalf of a different address.
@@ -1006,41 +1006,13 @@ router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWrite
             userId = req.body?.userId
         }
 
-        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body ?? {}
 
         // Validation
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
+        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body
 
-
-        if (emailEnabled === undefined || webhookEnabled === undefined || !events) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Missing required fields: emailEnabled, webhookEnabled, events')
-        }
-
-        // Validate events object
-        const requiredEvents = ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']
-        for (const event of requiredEvents) {
-            if (events[event] === undefined) {
-                return fail(res, 400, 'VALIDATION_ERROR', `Missing event configuration: ${event}`)
-            }
-        }
-
-        // Validate email address if email is enabled
-        if (emailEnabled && !emailAddress) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'email address is required when emailEnabled is true')
-        }
-
-        // Validate webhook URL if webhook is enabled
-        if (webhookEnabled && !webhookUrl) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'webhookUrl is required when webhookEnabled is true')
-        }
-
-        if (webhookUrl && !webhookUrl.match(/^https?:\/\/.+/)) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Invalid webhook URL format. Must start with http:// or https://')
-        }
-
-        // Subscribe user
         notificationService.subscribe({
             userId,
             emailEnabled,
@@ -1060,7 +1032,7 @@ router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWrite
 })
 
 // Get notification preferences
-router.get('/notifications/preferences', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+router.get('/notifications/preferences', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, only allow reading own preferences.
         let userId: string | undefined
@@ -1092,7 +1064,7 @@ router.get('/notifications/preferences', requireJwtWhenEnabled, async (req: Requ
 })
 
 // Unsubscribe from notifications
-router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimiter, async (req: Request, res: Response) => {
+router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimiter, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, only allow unsubscribing own preferences.
         let userId: string | undefined
@@ -1129,17 +1101,12 @@ router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimi
  * Debug-only + admin-gated endpoint for sending a single test notification.
  * This keeps test-notification behavior explicit and isolated from production routes.
  */
-router.post('/debug/notifications/test', blockDebugInProduction, requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+router.post('/debug/notifications/test', blockDebugInProduction, requireAdmin, adminRateLimiter, validateRequest(debugTestNotificationSchema), async (req: Request, res: Response) => {
     try {
-        const userId = (req.body?.userId ?? req.user?.address) as string | undefined
-        const eventType = req.body?.eventType as 'rebalance' | 'circuitBreaker' | 'priceMovement' | 'riskChange' | undefined
-        const normalizedEventType = eventType ?? 'rebalance'
-        const allowedEvents = new Set(['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange'])
+        const userId = (req.body.userId ?? req.user?.address) as string | undefined
+        const normalizedEventType = (req.body.eventType ?? 'rebalance') as 'rebalance' | 'circuitBreaker' | 'priceMovement' | 'riskChange'
 
         if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
-        if (!allowedEvents.has(normalizedEventType)) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'eventType must be one of: rebalance, circuitBreaker, priceMovement, riskChange')
-        }
 
         const preferences = notificationService.getPreferences(userId)
         if (!preferences) {
