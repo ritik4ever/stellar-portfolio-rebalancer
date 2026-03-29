@@ -7,8 +7,20 @@ import { rebalanceHistoryService } from '../../services/serviceContainer.js'
 import { notificationService } from '../../services/notificationService.js'
 import { getConnectionOptions } from '../connection.js'
 import type { RebalanceJobData } from '../queues.js'
+import {
+    createWorkerRuntimeStatus,
+    markWorkerFailed,
+    markWorkerJobCompleted,
+    markWorkerJobFailed,
+    markWorkerReady,
+    markWorkerStarting,
+    markWorkerStopped,
+    snapshotWorkerRuntimeStatus,
+    type WorkerRuntimeStatus,
+} from './workerRuntime.js'
 
 let worker: Worker | null = null
+const runtimeStatus = createWorkerRuntimeStatus('rebalance', 3)
 
 /**
  * Core processor: executes a single portfolio rebalance.
@@ -128,18 +140,33 @@ export function startRebalanceWorker(): Worker | null {
     if (worker) return worker
 
     try {
+        markWorkerStarting(runtimeStatus)
         worker = new Worker('rebalance', processRebalanceJob, {
             connection: getConnectionOptions(),
             concurrency: 3
         })
     } catch (err) {
-        logger.warn('[WORKER:rebalance] Failed to start – Redis may be unavailable', {
+        markWorkerFailed(runtimeStatus, err)
+        logger.warn('[WORKER:rebalance] Failed to start - Redis may be unavailable', {
             error: err instanceof Error ? err.message : String(err)
         })
         return null
     }
 
+    void worker.waitUntilReady()
+        .then(() => {
+            markWorkerReady(runtimeStatus)
+            logger.info('[WORKER:rebalance] Worker ready')
+        })
+        .catch((err) => {
+            markWorkerFailed(runtimeStatus, err)
+            logger.error('[WORKER:rebalance] Worker failed readiness check', {
+                error: err instanceof Error ? err.message : String(err),
+            })
+        })
+
     worker.on('completed', (j: Job) => {
+        markWorkerJobCompleted(runtimeStatus)
         logger.info('[WORKER:rebalance] Job completed', {
             jobId: j.id,
             portfolioId: j.data.portfolioId
@@ -147,6 +174,7 @@ export function startRebalanceWorker(): Worker | null {
     })
 
     worker.on('failed', (j: Job | undefined, err: Error) => {
+        markWorkerJobFailed(runtimeStatus, err)
         logger.error('[WORKER:rebalance] Job failed', {
             jobId: j?.id,
             portfolioId: j?.data.portfolioId,
@@ -163,10 +191,15 @@ export async function stopRebalanceWorker(): Promise<void> {
     if (worker) {
         await worker.close()
         worker = null
+        markWorkerStopped(runtimeStatus)
         logger.info('[WORKER:rebalance] Worker stopped')
     }
 }
 
 export function isRebalanceWorkerRunning(): boolean {
     return worker !== null
+}
+
+export function getRebalanceWorkerStatus(): WorkerRuntimeStatus {
+    return snapshotWorkerRuntimeStatus(runtimeStatus)
 }

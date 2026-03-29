@@ -6,11 +6,13 @@ import type { AnalyticsSnapshotJobData } from '../queues.js'
 import {
     createWorkerRuntimeStatus,
     markWorkerFailed,
+    markWorkerJobCompleted,
+    markWorkerJobFailed,
     markWorkerReady,
     markWorkerStarting,
     markWorkerStopped,
     snapshotWorkerRuntimeStatus,
-    type WorkerRuntimeStatus
+    type WorkerRuntimeStatus,
 } from './workerRuntime.js'
 
 let worker: Worker | null = null
@@ -72,16 +74,18 @@ export function startAnalyticsSnapshotWorker(): Worker | null {
         })
 
     worker.on('completed', (job) => {
+        markWorkerJobCompleted(runtimeStatus)
         logger.info('[WORKER:analytics-snapshot] Job completed', { jobId: job.id })
     })
 
-  worker.on("failed", (job, err) => {
-    logger.error("[WORKER:analytics-snapshot] Job failed", {
-      jobId: job?.id,
-      error: err.message,
-      attemptsMade: job?.attemptsMade,
-    });
-  });
+    worker.on('failed', (job, err) => {
+        markWorkerJobFailed(runtimeStatus, err)
+        logger.error('[WORKER:analytics-snapshot] Job failed', {
+            jobId: job?.id,
+            error: err.message,
+            attemptsMade: job?.attemptsMade,
+        })
+    })
 
   logger.info("[WORKER:analytics-snapshot] Worker started");
   return worker;
@@ -98,4 +102,8 @@ export async function stopAnalyticsSnapshotWorker(): Promise<void> {
 
 export function getAnalyticsSnapshotWorkerStatus(): WorkerRuntimeStatus {
     return snapshotWorkerRuntimeStatus(runtimeStatus)
+}
+
+export function setAnalyticsSnapshotSchedulerRegistered(registered: boolean): void {
+    runtimeStatus.schedulerRegistered = registered
 }
