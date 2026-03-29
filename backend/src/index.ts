@@ -1,6 +1,7 @@
 import 'dotenv/config'
-import express from 'express'
+import express, { type Request, type Response } from 'express'
 import cors from 'cors'
+import swaggerUi from 'swagger-ui-express'
 import { validateStartupConfigOrThrow, buildStartupSummary } from './config/startupConfig.js'
 import { logger } from './utils/logger.js'
 import { v1Router } from './api/v1Router.js'
@@ -10,6 +11,7 @@ import { legacyApiDeprecation } from './middleware/legacyApiDeprecation.js'
 import { startQueueScheduler } from './queue/scheduler.js'
 import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
 import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
+import spec from './openapi/spec.js'
 
 const config = validateStartupConfigOrThrow()
 initializeSentry()
@@ -33,11 +35,18 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.set('trust proxy', 1)
 
 /** Plain-text liveness for load balancers */
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
     res.status(200).type('text/plain').send('ok')
 })
 
+/** Interactive API docs — served from the canonical spec.ts source of truth */
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
 
+/** Serve the raw OpenAPI JSON at a stable URL (useful for Postman / CI) */
+app.get('/api-docs.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.json(spec)
+})
 
 app.use(apiErrorHandler)
 
