@@ -46,8 +46,10 @@ Open `.env` and set at minimum:
 STELLAR_NETWORK=testnet
 STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 
-# Auth (required for JWT endpoints — must be ≥32 characters)
-JWT_SECRET=change-me-to-a-random-string-at-least-32-chars
+# Auth — leave blank to disable JWT auth, or set to a ≥32-char random string.
+# The server will refuse to start if this is set but too short.
+# Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+JWT_SECRET=
 
 # Admin (comma-separated Stellar public keys allowed to call /admin/* routes)
 ADMIN_PUBLIC_KEYS=G...YOUR_PUBLIC_KEY
@@ -132,12 +134,15 @@ redis-cli ping   # should return PONG
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `JWT_SECRET` | Yes (≥32 chars) | Signs access and refresh tokens |
+| `JWT_SECRET` | Required for auth (≥32 chars) | Signs access and refresh tokens — never falls back to a built-in value |
 | `JWT_ACCESS_EXPIRY_SEC` | No (default: 900) | Access token TTL in seconds |
 | `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800) | Refresh token TTL in seconds |
 | `ADMIN_PUBLIC_KEYS` | Yes for admin routes | Comma-separated Stellar public keys |
 
-If `JWT_SECRET` is shorter than 32 characters, JWT auth is automatically disabled and `/api/auth/*` routes return `503`.
+**Rules enforced at startup:**
+- If `JWT_SECRET` is **absent** — auth is disabled, `/api/auth/*` routes return `503`, and the server starts normally.
+- If `JWT_SECRET` is **set but shorter than 32 characters** — the server refuses to start with a clear error.
+- The backend **never** falls back to a built-in/default secret; tokens are always signed with your explicitly configured value.
 
 To generate a strong secret:
 

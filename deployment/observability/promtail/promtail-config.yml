@@ -1,0 +1,38 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: backend-logs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: backend
+          service: stellar-portfolio-backend
+          __path__: /var/log/portfolio-backend/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            msg: msg
+            service: service
+            environment: environment
+            requestId: requestId
+      - labels:
+          level:
+          service:
+          environment:
+
+  - job_name: frontend-logs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: frontend
+          service: stellar-portfolio-frontend
+          __path__: /var/log/portfolio-frontend/*.log

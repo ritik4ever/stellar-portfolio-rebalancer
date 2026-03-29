@@ -8,8 +8,12 @@ import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
 import { legacyApiDeprecation } from './middleware/legacyApiDeprecation.js'
 import { startQueueScheduler } from './queue/scheduler.js'
+import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
+import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
 
 const config = validateStartupConfigOrThrow()
+initializeSentry()
+setupProcessErrorHandlers()
 
 const app = express()
 
@@ -23,6 +27,7 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions))
 app.options('*', cors(corsOptions))
 app.use(requestContextMiddleware)
+app.use(metricsMiddleware)
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.set('trust proxy', 1)
@@ -32,8 +37,7 @@ app.get('/health', (_req, res) => {
     res.status(200).type('text/plain').send('ok')
 })
 
-app.use('/api/v1', v1Router)
-app.use('/api', legacyApiDeprecation, v1Router)
+
 
 app.use(apiErrorHandler)
 
@@ -41,5 +45,6 @@ app.listen(config.port, () => {
     logger.info('[SERVER] Listening', buildStartupSummary(config) as Record<string, unknown>)
     void startQueueScheduler().catch((err: unknown) => {
         logger.warn('[SERVER] Queue scheduler did not start', { error: String(err) })
+        captureException(err, { subsystem: 'queue_scheduler' })
     })
 })

@@ -244,10 +244,14 @@ docker compose -f deployment/docker-compose.yml up --build -d
 ```
 
 ## Contributing
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+
+Quick steps:
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/awesome-feature`
-3. Commit changes: `git commit -m "Add awesome feature"`
-4. Push: `git push origin feature/awesome-feature`
+3. Follow setup in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+4. Ensure tests pass: `cd backend && npm test && cd ../frontend && npm test`
 5. Open a Pull Request
 
 ## License
