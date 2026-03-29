@@ -1006,6 +1006,7 @@ router.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWrite
             userId = req.body?.userId
         }
 
+
         // Validation
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
