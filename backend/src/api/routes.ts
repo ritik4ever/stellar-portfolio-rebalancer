@@ -47,7 +47,6 @@ import {
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { databaseService } from '../services/databaseService.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
-import { getAuthConfig } from '../services/authService.js'
 
 const router = Router()
 const stellarService = new StellarService()
@@ -1099,6 +1098,40 @@ router.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimi
 // ================================
 // DEBUG ROUTES
 // ================================
+
+// Get notification delivery logs
+router.get('/notifications/logs', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        
+        // Authorization Logic:
+        // When global authentication is explicitly enabled, we extract the context directly from the token.
+        // If the user tries passing an arbitrary ?userId=... query that does not match their own authenticated address, 
+        // we forcefully block the request to prevent exposure of other users' delivery logs.
+        // If authentication is disabled, we simply fall back to taking the userId query parameter as given.
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot read notification logs for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
+        }
+
+        const logs = notificationService.getLogs(userId)
+
+        return ok(res, { logs })
+    } catch (error) {
+        logger.error('Failed to get notification logs', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 
 /**
  * Debug-only + admin-gated endpoint for sending a single test notification.

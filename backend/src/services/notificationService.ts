@@ -3,7 +3,10 @@ import {
   dbSaveNotificationPreferences,
   dbGetNotificationPreferences,
   dbGetAllNotificationPreferences,
+  dbLogNotificationOutcome,
+  dbGetNotificationLogs,
   type NotificationPreferences,
+  type NotificationLog,
 } from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
 
@@ -44,6 +47,8 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
+      // Log as 'skipped' since the webhook preconditions were not met
+      dbLogNotificationOutcome(payload.userId, 'webhook', payload.eventType, 'skipped', 'Webhook disabled or no URL provided');
       return;
     }
 
@@ -89,6 +94,8 @@ class WebhookProvider implements NotificationProvider {
         event: payload.event,
         userId: payload.userId,
       });
+      // Capture successful delivery outcome payload
+      dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'sent');
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -98,11 +105,15 @@ class WebhookProvider implements NotificationProvider {
         error: errorMessage,
       });
 
-      // Retry once
+      // Retry once prior to total failure assertion
       if (attempt < this.MAX_RETRIES) {
+        // Track the intermittent failure state as 'retried'
+        dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'retried', errorMessage);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         await this.sendWithRetry(url, payload, attempt + 1);
       } else {
+        // Log final failure out to the DB if the max retries parameter is exceeded
+        dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'failed', errorMessage);
         throw error;
       }
     }
@@ -173,6 +184,8 @@ class EmailProvider implements NotificationProvider {
         hasTransporter: !!this.transporter,
         userId: preferences.userId,
       });
+      // Record 'skipped' state if the app SMTP config or the user's config disables email sending
+      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'skipped', 'Email disabled or missing config');
       return;
     }
 
@@ -183,6 +196,7 @@ class EmailProvider implements NotificationProvider {
       logger.warn("No valid email address for user", {
         userId: preferences.userId,
       });
+      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'skipped', 'No valid email address');
       return;
     }
 
@@ -202,6 +216,7 @@ class EmailProvider implements NotificationProvider {
         userId: payload.userId,
         messageId: info.messageId,
       });
+      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'sent');
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -209,6 +224,8 @@ class EmailProvider implements NotificationProvider {
         to: recipientEmail,
         error: errorMessage,
       });
+      // Record failed transmission natively
+      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'failed', errorMessage);
       throw error;
     }
   }
@@ -383,6 +400,13 @@ export class NotificationService {
    */
   getAllPreferences(): NotificationPreferences[] {
     return dbGetAllNotificationPreferences();
+  }
+
+  /**
+   * Get delivery logs for a specific user
+   */
+  getLogs(userId: string): NotificationLog[] {
+    return dbGetNotificationLogs(userId);
   }
 }
 
