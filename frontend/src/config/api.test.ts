@@ -1,10 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../services/browserPriceService', () => ({
     browserPriceService: {
         getCurrentPrices: vi.fn(),
         testConnection: vi.fn()
     }
+}))
+
+vi.mock('../services/authService', () => ({
+    getAccessToken: vi.fn(() => null),
+    refresh: vi.fn(async () => false)
 }))
 
 describe('apiRequest envelope handling', () => {
@@ -53,6 +58,7 @@ describe('apiRequest envelope handling', () => {
 
         const { apiRequest } = await import('./api')
 
+        await expect(apiRequest('/api/v1/portfolio')).rejects.toMatchObject({
             name: 'ApiClientError',
             status: 409,
             code: 'CONFLICT',

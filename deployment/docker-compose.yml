@@ -3,12 +3,22 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+      args:
+        VITE_SENTRY_ENABLED: ${VITE_SENTRY_ENABLED:-false}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
+        VITE_SENTRY_RELEASE: ${VITE_SENTRY_RELEASE:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0.1}
+        VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE: ${VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE:-0}
+        VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: ${VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE:-1}
     container_name: portfolio-frontend
     restart: unless-stopped
     ports:
       - "3000:80"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
+    volumes:
+      - frontend_logs:/var/log/nginx
     depends_on:
       - backend
 
@@ -18,6 +28,7 @@ services:
       dockerfile: Dockerfile
     container_name: portfolio-backend
     restart: unless-stopped
+    command: ["sh", "-c", "npm start 2>&1 | tee -a /app/logs/backend.log"]
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=3001
@@ -30,6 +41,19 @@ services:
       - ALLOW_DEMO_BALANCE_FALLBACK=${ALLOW_DEMO_BALANCE_FALLBACK:-true}
       - ALLOW_FALLBACK_PRICES=${ALLOW_FALLBACK_PRICES:-true}
       - ENABLE_DEBUG_ROUTES=${ENABLE_DEBUG_ROUTES:-false}
+      - SENTRY_ENABLED=${SENTRY_ENABLED:-false}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-0.2}
+      - SENTRY_PROFILES_SAMPLE_RATE=${SENTRY_PROFILES_SAMPLE_RATE:-0.1}
+      - NEW_RELIC_ENABLED=${NEW_RELIC_ENABLED:-false}
+      - NEW_RELIC_APP_NAME=${NEW_RELIC_APP_NAME:-stellar-portfolio-backend}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
+      - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=${NEW_RELIC_DISTRIBUTED_TRACING_ENABLED:-true}
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - LOG_DEPLOYMENT_ENV=${LOG_DEPLOYMENT_ENV:-local}
+      - ALERT_CONTACT=${ALERT_CONTACT:-platform-oncall}
     ports:
       - "3001:3001"
     depends_on:
@@ -70,8 +94,109 @@ services:
       - redis
       - backend
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: portfolio-prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - alertmanager
+      - blackbox-exporter
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: portfolio-alertmanager
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: portfolio-grafana
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3003:3000"
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: portfolio-loki
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    container_name: portfolio-promtail
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ./logs:/var/log/portfolio-backend:ro
+      - frontend_logs:/var/log/portfolio-frontend:ro
+    depends_on:
+      - loki
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: portfolio-blackbox
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    volumes:
+      - ./observability/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    ports:
+      - "9115:9115"
+
 volumes:
   redis_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  alertmanager_data:
+  frontend_logs:
 
 networks:
   default:

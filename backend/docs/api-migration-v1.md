@@ -1,46 +1,18 @@
-# API Migration Guide: `/api` → `/api/v1`
+# API v1 Migration
 
-## Summary
+`/api/v1/*` is the canonical API namespace.
 
-`/api/v1` is the **canonical** API namespace. All new development should target `/api/v1/*`.
+Legacy `/api/*` routes are supported only as a compatibility alias and include deprecation metadata headers:
 
-The legacy `/api/*` prefix is still accepted for backwards compatibility but is **deprecated** and will be removed on **2026-07-01**.
+- `Deprecation: true`
+- `Sunset: Wed, 01 Jul 2026 00:00:00 GMT`
+- `Link: </docs/api-migration-v1.md>; rel="deprecation"`
 
-## Deprecation Headers
+## Canonical endpoints
 
-Every response from a legacy `/api/*` route includes:
+- Portfolio + market data routes: `/api/v1/*`
+- Authentication routes: `/api/v1/auth/*`
 
-| Header | Value |
-|--------|-------|
-| `Deprecation` | `true` |
-| `Sunset` | `Wed, 01 Jul 2026 00:00:00 GMT` |
-| `Link` | `</docs/api-migration-v1.md>; rel="deprecation"` |
+## Legacy alias behavior
 
-## Migration
-
-Replace the `/api` prefix with `/api/v1` in all client requests:
-
-```
-# Before (deprecated)
-GET /api/portfolio/:id
-POST /api/portfolio
-GET /api/prices
-
-# After (canonical)
-GET /api/v1/portfolio/:id
-POST /api/v1/portfolio
-GET /api/v1/prices
-```
-
-Auth routes remain at `/api/auth` (no version prefix):
-
-```
-POST /api/auth/login
-POST /api/auth/refresh
-POST /api/auth/logout
-```
-
-## Frontend
-
-The frontend defaults to `/api/v1` via `frontend/src/config/apiVersion.ts`.
-Set `VITE_USE_LEGACY_API=true` only as a temporary emergency override.
+Calls to `/api/*` are routed to the same v1 handlers while responses include deprecation headers so clients can migrate without ambiguity.

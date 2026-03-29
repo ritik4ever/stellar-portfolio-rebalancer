@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// Strict boolean parsing (handles "true", "false", true, false)
 const strictBoolean = z.preprocess((val) => {
     if (typeof val === 'string') {
         if (val.toLowerCase() === 'true') return true;
@@ -69,3 +68,98 @@ export const recordRebalanceEventSchema = z.object({
 
 // Auto-Rebalancer control schemas (must be entirely empty payloads)
 export const autoRebalancerControlSchema = z.object({}).strict();
+
+// ─── Auth schemas ────────────────────────────────────────────────────────────
+export const loginSchema = z.object({
+    address: z.string().min(1, 'address is required').trim()
+}).strict();
+
+export const refreshTokenSchema = z.object({
+    refreshToken: z.string().min(1, 'refreshToken is required')
+}).strict();
+
+// ─── Consent schemas ─────────────────────────────────────────────────────────
+export const consentStatusQuerySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional()
+}).refine(
+    (data) => !!(data.userId || data.user_id),
+    { message: 'userId is required', path: ['userId'] }
+);
+
+export const recordConsentSchema = z.object({
+    userId: z.string().min(1, 'userId is required'),
+    terms: z.boolean().refine((v) => v === true, { message: 'You must accept Terms of Service' }),
+    privacy: z.boolean().refine((v) => v === true, { message: 'You must accept Privacy Policy' }),
+    cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' })
+}).strict();
+
+// ─── Notification schemas ─────────────────────────────────────────────────────
+const notificationEventsSchema = z.object({
+    rebalance: z.boolean(),
+    circuitBreaker: z.boolean(),
+    priceMovement: z.boolean(),
+    riskChange: z.boolean()
+});
+
+export const notificationSubscribeSchema = z.object({
+    userId: z.string().min(1).optional(),
+    emailEnabled: z.boolean(),
+    webhookEnabled: z.boolean(),
+    emailAddress: z.string().email('Invalid email address').optional(),
+    webhookUrl: z.string().url('Invalid webhook URL format').optional(),
+    events: notificationEventsSchema
+}).superRefine((data, ctx) => {
+    if (data.emailEnabled && !data.emailAddress) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'emailAddress is required when emailEnabled is true', path: ['emailAddress'] });
+    }
+    if (data.webhookEnabled && !data.webhookUrl) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'webhookUrl is required when webhookEnabled is true', path: ['webhookUrl'] });
+    }
+});
+
+export const notificationQuerySchema = z.object({
+    userId: z.string().min(1, 'userId query parameter is required').optional()
+});
+
+// ─── Admin asset schemas ──────────────────────────────────────────────────────
+export const adminAddAssetSchema = z.object({
+    symbol: z.string().min(1, 'symbol is required').max(20),
+    name: z.string().min(1, 'name is required').max(100),
+    contractAddress: z.string().optional(),
+    issuerAccount: z.string().optional(),
+    coingeckoId: z.string().optional()
+}).strict();
+
+export const adminPatchAssetSchema = z.object({
+    enabled: z.boolean()
+}).strict();
+
+// ─── Export / query-param schemas ─────────────────────────────────────────────
+export const portfolioExportQuerySchema = z.object({
+    format: z.enum(['json', 'csv', 'pdf']).refine(
+        (v) => ['json', 'csv', 'pdf'].includes(v),
+        { message: 'Query parameter format must be one of: json, csv, pdf' }
+    )
+});
+
+export const rebalanceHistoryQuerySchema = z.object({
+    portfolioId: z.string().optional(),
+    limit: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(500).optional()
+    ),
+    source: z.enum(['offchain', 'simulated', 'onchain']).optional(),
+    startTimestamp: z.string().optional(),
+    endTimestamp: z.string().optional(),
+    syncOnChain: z.preprocess(
+        (v) => (v === 'true' ? true : v === 'false' ? false : v),
+        z.boolean().optional()
+    )
+});
+
+// ─── Debug / admin control schemas ───────────────────────────────────────────
+export const debugTestNotificationSchema = z.object({
+    userId: z.string().min(1).optional(),
+    eventType: z.enum(['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']).optional()
+});

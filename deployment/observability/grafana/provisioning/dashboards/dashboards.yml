@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: stellar-portfolio-dashboards
+    orgId: 1
+    folder: Stellar Portfolio
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
