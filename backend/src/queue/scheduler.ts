@@ -1,10 +1,12 @@
-import { getPortfolioCheckQueue, getAnalyticsSnapshotQueue } from './queues.js'
+import { getPortfolioCheckQueue, getAnalyticsSnapshotQueue, getIdempotencyCleanupQueue } from './queues.js'
 import { logger } from '../utils/logger.js'
 import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWorker.js'
 import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnapshotWorker.js'
+import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyCleanupWorker.js'
 
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
 const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
+const IDEMPOTENCY_CLEANUP_CRON = '15 * * * *'  // every 60 minutes (quarter past the hour)
 
 /**
  * Registers repeatable (recurring) BullMQ jobs.
@@ -13,8 +15,9 @@ const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
 export async function startQueueScheduler(): Promise<void> {
     const portfolioCheckQueue = getPortfolioCheckQueue()
     const analyticsSnapshotQueue = getAnalyticsSnapshotQueue()
+    const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
 
-    if (!portfolioCheckQueue || !analyticsSnapshotQueue) {
+    if (!portfolioCheckQueue || !analyticsSnapshotQueue || !idempotencyCleanupQueue) {
         logger.warn('[SCHEDULER] Redis unavailable – scheduler not started')
         return
     }
@@ -53,12 +56,31 @@ export async function startQueueScheduler(): Promise<void> {
         { priority: 1 }
     )
 
+    // ── Idempotency cleanup (every 60 min) ──────────────────────────────────
+    await idempotencyCleanupQueue.add(
+        'scheduled-idempotency-cleanup',
+        { triggeredBy: 'scheduler' },
+        {
+            repeat: { pattern: IDEMPOTENCY_CLEANUP_CRON },
+            jobId: 'repeatable-idempotency-cleanup',
+        }
+    )
+
+    // ── Immediate cleanup on startup ─────────────────────────────────────────
+    await idempotencyCleanupQueue.add(
+        'startup-idempotency-cleanup',
+        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup' },
+        { priority: 1 }
+    )
+
     setPortfolioCheckSchedulerRegistered(true)
     setAnalyticsSnapshotSchedulerRegistered(true)
+    setIdempotencyCleanupSchedulerRegistered(true)
 
     logger.info('[SCHEDULER] Repeatable jobs registered', {
         portfolioCheck: PORTFOLIO_CHECK_CRON,
         analyticsSnapshot: ANALYTICS_SNAPSHOT_CRON,
+        idempotencyCleanup: IDEMPOTENCY_CLEANUP_CRON,
     })
 }
 
@@ -68,6 +90,7 @@ export async function startQueueScheduler(): Promise<void> {
 export async function stopQueueScheduler(): Promise<void> {
     const portfolioCheckQueue = getPortfolioCheckQueue()
     const analyticsSnapshotQueue = getAnalyticsSnapshotQueue()
+    const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
 
     if (portfolioCheckQueue) {
         const repeatableJobs = await portfolioCheckQueue.getRepeatableJobs()
@@ -83,8 +106,16 @@ export async function stopQueueScheduler(): Promise<void> {
         }
     }
 
+    if (idempotencyCleanupQueue) {
+        const repeatableJobs = await idempotencyCleanupQueue.getRepeatableJobs()
+        for (const job of repeatableJobs) {
+            await idempotencyCleanupQueue.removeRepeatableByKey(job.key)
+        }
+    }
+
     setPortfolioCheckSchedulerRegistered(false)
     setAnalyticsSnapshotSchedulerRegistered(false)
+    setIdempotencyCleanupSchedulerRegistered(false)
 
     logger.info('[SCHEDULER] Repeatable jobs removed')
 }
