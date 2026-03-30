@@ -10,7 +10,9 @@ import { login as authLogin } from './services/authService'
 import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
+import BackendCapabilitiesBanner from './components/BackendCapabilitiesBanner'
 import { useRealtimeConnection } from './context/RealtimeConnectionContext'
+import { useReadinessReport } from './hooks/useReadinessReport'
 
 function App() {
     const [currentView, setCurrentView] = useState('landing')
@@ -20,6 +22,17 @@ function App() {
     const [isConnecting, setIsConnecting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const { state: realtimeState } = useRealtimeConnection()
+    const { notices, loadError, loading: readinessLoading } = useReadinessReport()
+
+    const showBackendBanner = loadError || notices.length > 0
+    const wsDisconnected = realtimeState !== 'connected'
+
+    let contentTopPad = ''
+    if (wsDisconnected) {
+        contentTopPad = showBackendBanner ? 'pt-28' : 'pt-14'
+    } else if (showBackendBanner) {
+        contentTopPad = 'pt-[4.5rem]'
+    }
 
     useEffect(() => {
         checkWalletConnection()
@@ -165,12 +178,22 @@ function App() {
 
     const errorTop =
         realtimeState === 'connected'
-            ? 'top-4'
-            : 'top-[4.5rem]'
+            ? showBackendBanner
+                ? 'top-[5.5rem]'
+                : 'top-4'
+            : showBackendBanner
+              ? 'top-[8.5rem]'
+              : 'top-[4.5rem]'
 
     return (
-        <div className={`App min-h-screen ${realtimeState === 'connected' ? '' : 'pt-14'}`}>
+        <div className={`App min-h-screen ${contentTopPad}`}>
             <RealtimeStatusBanner />
+            <BackendCapabilitiesBanner
+                notices={notices}
+                loadError={loadError}
+                loading={readinessLoading}
+                belowRealtimeBar={wsDisconnected}
+            />
             {error && (
                 <div
                     className={`fixed left-1/2 transform -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md ${errorTop}`}

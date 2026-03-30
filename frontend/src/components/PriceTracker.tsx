@@ -1,4 +1,8 @@
-
+import React, { useEffect, useMemo, useState } from 'react'
+import { Wifi, WifiOff, TrendingUp, TrendingDown } from 'lucide-react'
+import { api, ENDPOINTS } from '../config/api'
+import { usePrices } from '../hooks/queries/usePricesQuery'
+import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 
 interface PriceTrackerProps {
     compact?: boolean
@@ -41,8 +45,28 @@ function normalizePrices(data: unknown): Record<string, PriceData> {
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
-    const queryClient = useQueryClient()
-    const { data: rawPrices, isLoading, error: queryError } = usePrices()
+    const { data: rawPrices, isLoading, error: queryError, refetch } = usePrices()
+    const { state: realtimeState } = useRealtimeConnection()
+
+    const prices = useMemo(() => normalizePrices(rawPrices), [rawPrices])
+    const loading = isLoading
+    const isConnected = realtimeState === 'connected'
+    const error =
+        queryError instanceof Error ? queryError.message : queryError ? String(queryError) : null
+
+    const lastUpdate = useMemo(() => {
+        const vals = Object.values(prices)
+        if (!vals.length) return '—'
+        const maxTs = Math.max(
+            ...vals.map((p) => (p.timestamp < 1e12 ? p.timestamp * 1000 : p.timestamp)),
+        )
+        if (!Number.isFinite(maxTs)) return '—'
+        return new Date(maxTs).toLocaleTimeString()
+    }, [prices])
+
+    const retryConnection = () => {
+        void refetch()
+    }
 
     useEffect(() => {
         api.get<{ assets: Array<{ symbol: string }> }>(ENDPOINTS.ASSETS)
@@ -51,8 +75,6 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
             })
             .catch(() => {})
     }, [])
-
-
 
     if (loading && Object.keys(prices).length === 0) {
         return (

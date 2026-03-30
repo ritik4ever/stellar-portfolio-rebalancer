@@ -13,6 +13,8 @@ import { probeRedis } from './queue/connection.js'
 import { getRateLimitStoreType } from './middleware/rateLimit.js'
 import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
 import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
+import { buildReadinessReport } from './monitoring/readiness.js'
+import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
 import spec from './openapi/spec.js'
 
 async function main() {
@@ -46,10 +48,12 @@ async function main() {
     app.use(express.urlencoded({ extended: true, limit: '10mb' }))
     app.set('trust proxy', 1)
 
-    app.get('/readiness', async (_req, res) => {
+    const sendReadiness = async (_req: Request, res: Response) => {
         const report = await buildReadinessReport()
         res.status(report.status === 'ready' ? 200 : 503).json(report)
-    })
+    }
+    app.get('/readiness', sendReadiness)
+    app.get('/ready', sendReadiness)
 
     app.get('/metrics', async (_req, res, next) => {
         try {
