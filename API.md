@@ -6,13 +6,13 @@ This document describes the HTTP API for the Stellar Portfolio Rebalancer backen
 
 | Resource | URL / action |
 |----------|----------------|
-| **Swagger UI** (interactive docs) | [http://localhost:3000/api-docs](http://localhost:3000/api-docs) (when backend is running) |
-| **OpenAPI 3.0 spec (JSON)** | [http://localhost:3000/api-docs/openapi.json](http://localhost:3000/api-docs/openapi.json) — use this URL to import into **Postman** (Import → Link) or other tools |
+| **Swagger UI** (interactive docs) | [http://localhost:3001/api-docs](http://localhost:3001/api-docs) (when the backend is running on the default port) |
+| **OpenAPI 3.0 spec (JSON)** | [http://localhost:3001/api-docs.json](http://localhost:3001/api-docs.json) or `/api-docs/openapi.json` (same document) — use for **Postman** (Import → Link) or other tools |
 | **Postman collection** | Import the OpenAPI spec: see [Postman collection](#postman-collection) below |
 
 ## Base URL
 
-- **Development:** `http://localhost:3000` (or the port set by `PORT`)
+- **Development:** `http://localhost:3001` (or the port set by `PORT` on the backend)
 - **Production:** Your deployed backend URL
 
 All API routes below are relative to the base URL.
@@ -181,7 +181,7 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 The API is described in full by an **OpenAPI 3.0** specification:
 
 - **Served by backend:** When the backend is running, the spec is available at:
-  - **JSON:** `GET /api-docs/openapi.json`
+  - **JSON:** `GET /api-docs.json` (alias: `GET /api-docs/openapi.json`)
 - **Swagger UI** at `/api-docs` uses this spec and provides:
   - All endpoints with descriptions
   - Request and response schemas
@@ -195,7 +195,7 @@ You can use the OpenAPI spec as a Postman collection source:
 
 1. **Import from URL (recommended)**  
    - In Postman: **Import** → **Link**.  
-   - Enter: `http://localhost:3000/api-docs/openapi.json`  
+   - Enter: `http://localhost:3001/api-docs.json`  
    - Ensure the backend is running so the URL is reachable.
 
 2. **Import from file**  
@@ -214,7 +214,9 @@ This writes `backend/openapi.json`. In Postman: **Import** → **Upload** → se
 
 ### Maintaining Documentation Sync
 
-To ensure that `API.md`, `openapi.json`, and the code-defined specification (`backend/src/openapi/spec.ts`) stay in sync, we use an automated validation script.
+The **authoritative spec** is `backend/src/openapi/spec.ts` (what Swagger and the server use). The checked-in `backend/openapi.json` is produced from it for Postman and CI diffing. See [backend/docs/openapi.md](backend/docs/openapi.md).
+
+To ensure that `API.md`, `openapi.json`, and `spec.ts` stay aligned, run the validation script below.
 
 **To validate sync:**
 ```bash

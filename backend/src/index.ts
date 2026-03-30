@@ -1,7 +1,9 @@
 import 'dotenv/config'
+import { createServer } from 'node:http'
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import swaggerUi from 'swagger-ui-express'
+import { WebSocketServer } from 'ws'
 import { validateStartupConfigOrThrow, buildStartupSummary, logStartupSubsystems } from './config/startupConfig.js'
 import { logger } from './utils/logger.js'
 import { v1Router } from './api/v1Router.js'
@@ -16,6 +18,7 @@ import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './o
 import { buildReadinessReport } from './monitoring/readiness.js'
 import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
 import spec from './openapi/spec.js'
+import { initRobustWebSocket } from './services/websocket.service.js'
 
 async function main() {
     const config = validateStartupConfigOrThrow()
@@ -77,18 +80,25 @@ app.get('/health', (_req: Request, res: Response) => {
 /** Interactive API docs — served from the canonical spec.ts source of truth */
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
 
-/** Serve the raw OpenAPI JSON at a stable URL (useful for Postman / CI) */
-app.get('/api-docs.json', (_req: Request, res: Response) => {
+const serveOpenApiJson = (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/json')
     res.json(spec)
-})
+}
+
+app.get('/api-docs.json', serveOpenApiJson)
+app.get('/api-docs/openapi.json', serveOpenApiJson)
 
 app.use(apiErrorHandler)
 
-    app.listen(config.port, () => {
+    const server = createServer(app)
+    const wss = new WebSocketServer({ server })
+    initRobustWebSocket(wss)
+
+    server.listen(config.port, () => {
         const rateLimitStore = getRateLimitStoreType()
         logger.info('[SERVER] Listening', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)
         logStartupSubsystems(config, redisAvailable, rateLimitStore)
+        logger.info('[SERVER] WebSocket robust mode active (heartbeat, protocol validation, inactive cleanup)')
 
         if (redisAvailable) {
             void startQueueScheduler().catch((err: unknown) => {

@@ -128,6 +128,8 @@ Verify:
 redis-cli ping   # should return PONG
 ```
 
+For how queues, workers, the contract indexer, and `/ready` interact in practice, see **[OPERATIONS.md](OPERATIONS.md)**.
+
 ---
 
 ## 5. Auth environment variables
@@ -294,6 +296,8 @@ cargo test
 
 ## Further reading
 
+- [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
+- [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)

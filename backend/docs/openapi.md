@@ -21,8 +21,8 @@ All API documentation, the Swagger UI endpoint, and the exported JSON artifact a
 
 At runtime, `swagger-ui-express` imports `spec.ts` directly, so the live `/api-docs` endpoint is **always in sync** with the source file. No generated artifact is needed to serve docs.
 
-- **Interactive docs (Swagger UI):** `http://localhost:3000/api-docs`
-- **Raw JSON (stable URL):** `http://localhost:3000/api-docs.json`
+- **Interactive docs (Swagger UI):** `http://localhost:3001/api-docs` (backend port from `PORT`, default `3001`)
+- **Raw JSON (canonical URLs, same payload):** `http://localhost:3001/api-docs.json` or `http://localhost:3001/api-docs/openapi.json`
 
 ## Adding or Changing an Endpoint
 

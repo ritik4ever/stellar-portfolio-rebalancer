@@ -4,6 +4,8 @@ import request from 'supertest'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { Keypair } from '@stellar/stellar-sdk'
+import { loginWithWalletChallenge } from './loginWalletHelper.js'
 
 let app: Express
 let testDbPath: string
@@ -315,9 +317,10 @@ describe('consent and privacy API', () => {
     })
 
     it('after DELETE user data, refresh token is rejected', async () => {
-        const userId = `GREFRESH${Math.random().toString(36).slice(2, 12)}`
-        const loginRes = await request(app).post('/api/auth/login').send({ address: userId }).expect(200)
-        const refreshToken = loginRes.body.data.refreshToken
+        const kp = Keypair.random()
+        const userId = kp.publicKey()
+        const { data } = await loginWithWalletChallenge(app, kp)
+        const refreshToken = data.refreshToken
         expect(refreshToken).toBeTruthy()
 
         const { generateAccessToken } = await import('../services/authService.js')
