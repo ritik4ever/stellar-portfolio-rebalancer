@@ -158,8 +158,8 @@ export const apiRequest = async <T>(
     if (API_CONFIG.USE_BROWSER_PRICES && endpoint.includes('/prices') && !endpoint.includes('enhanced')) {
         debugLog('Using browser price service instead of backend')
         try {
-            const prices = await browserPriceService.getCurrentPrices()
-            return prices as unknown as T
+            const payload = await browserPriceService.getCurrentPrices()
+            return payload as unknown as T
         } catch (error) {
             console.error('Browser price service failed, falling back to backend:', error)
             // Fall through to backend call

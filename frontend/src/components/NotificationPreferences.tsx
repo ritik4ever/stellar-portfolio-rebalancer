@@ -1,80 +1,60 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader, Download } from 'lucide-react'
-import { api, downloadPortfolioExport, ENDPOINTS } from '../config/api'
+import { downloadPortfolioExport } from '../config/api'
+import { useNotificationPreferencesQuery } from '../hooks/queries/useNotificationPreferencesQuery'
+import {
+    useSaveNotificationPreferencesMutation,
+    useUnsubscribeNotificationsMutation,
+} from '../hooks/mutations/useNotificationMutations'
+import type { NotificationPreferencesModel as Preferences } from '../hooks/queries/useNotificationPreferencesQuery'
 
 interface NotificationPreferencesProps {
     userId: string
-    /** When set, show export buttons for GDPR data portability */
     portfolioId?: string | null
 }
 
-interface EventPreferences {
-    rebalance: boolean
-    circuitBreaker: boolean
-    priceMovement: boolean
-    riskChange: boolean
-}
-
-interface Preferences {
-    emailEnabled: boolean
-    emailAddress: string
-    webhookEnabled: boolean
-    webhookUrl: string
-    events: EventPreferences
+const defaultPreferences: Preferences = {
+    emailEnabled: false,
+    emailAddress: '',
+    webhookEnabled: false,
+    webhookUrl: '',
+    events: {
+        rebalance: true,
+        circuitBreaker: true,
+        priceMovement: true,
+        riskChange: true,
+    },
 }
 
 const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userId, portfolioId }) => {
-    const [preferences, setPreferences] = useState<Preferences>({
-        emailEnabled: false,
-        emailAddress: '',
-        webhookEnabled: false,
-        webhookUrl: '',
-        events: {
-            rebalance: true,
-            circuitBreaker: true,
-            priceMovement: true,
-            riskChange: true
-        }
-    })
+    const [preferences, setPreferences] = useState<Preferences>(defaultPreferences)
 
     const [originalPreferences, setOriginalPreferences] = useState<Preferences | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [saving, setSaving] = useState(false)
+    const { data: prefData, isLoading: loading, error: loadError } = useNotificationPreferencesQuery(userId)
+    const saveMutation = useSaveNotificationPreferencesMutation(userId)
+    const unsubscribeMutation = useUnsubscribeNotificationsMutation(userId)
     const [saveSuccess, setSaveSuccess] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [webhookError, setWebhookError] = useState<string | null>(null)
     const [emailError, setEmailError] = useState<string | null>(null)
     const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
 
+    const saving = saveMutation.isPending || unsubscribeMutation.isPending
 
     useEffect(() => {
-        fetchPreferences()
-    }, [userId])
-
-    const fetchPreferences = async () => {
-        try {
-            setLoading(true)
-            setError(null)
-
-            const data = await api.get<{ preferences: Preferences | null; message?: string }>(
-                ENDPOINTS.NOTIFICATIONS_PREFERENCES,
-                { userId }
-            )
-
-            if (data.preferences) {
-                setPreferences(data.preferences)
-                setOriginalPreferences(data.preferences)
-            } else {
-                // No preferences found, use defaults
-                setOriginalPreferences(preferences)
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to load preferences')
-        } finally {
-            setLoading(false)
+        if (!prefData) return
+        if (prefData.preferences) {
+            setPreferences(prefData.preferences)
+            setOriginalPreferences(prefData.preferences)
+        } else {
+            setPreferences(defaultPreferences)
+            setOriginalPreferences(defaultPreferences)
         }
-    }
+    }, [prefData])
+
+    const loadErrMsg =
+        loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
     const validateWebhookUrl = (url: string): boolean => {
         if (!url) return true // Empty is valid when webhook is disabled
@@ -134,25 +114,18 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
-        setSaving(true)
         setError(null)
         setSaveSuccess(false)
 
         try {
-            await api.post(ENDPOINTS.NOTIFICATIONS_SUBSCRIBE, {
-                userId,
-                ...preferences
-            })
+            await saveMutation.mutateAsync(preferences)
 
             setOriginalPreferences(preferences)
             setSaveSuccess(true)
 
-            // Hide success message after 3 seconds
             setTimeout(() => setSaveSuccess(false), 3000)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to save preferences')
-        } finally {
-            setSaving(false)
         }
     }
 
@@ -161,30 +134,30 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
-        setSaving(true)
         setError(null)
 
         try {
-            await api.delete(ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE(userId))
+            await unsubscribeMutation.mutateAsync()
 
-            // Update local state
             setPreferences(prev => ({
                 ...prev,
                 emailEnabled: false,
-                webhookEnabled: false
+                webhookEnabled: false,
             }))
-            setOriginalPreferences(prev => prev ? {
-                ...prev,
-                emailEnabled: false,
-                webhookEnabled: false
-            } : null)
+            setOriginalPreferences(prev =>
+                prev
+                    ? {
+                          ...prev,
+                          emailEnabled: false,
+                          webhookEnabled: false,
+                      }
+                    : null
+            )
 
             setSaveSuccess(true)
             setTimeout(() => setSaveSuccess(false), 3000)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to unsubscribe')
-        } finally {
-            setSaving(false)
         }
     }
 
@@ -234,14 +207,14 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             </div>
 
             {/* Error Message */}
-            {error && (
+            {(error || loadErrMsg) && (
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-800"
                 >
                     <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
-                    <span className="text-sm">{error}</span>
+                    <span className="text-sm">{error || loadErrMsg}</span>
                 </motion.div>
             )}
 

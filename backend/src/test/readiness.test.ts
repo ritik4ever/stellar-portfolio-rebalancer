@@ -93,7 +93,9 @@ describe('buildReadinessReport', () => {
             enabled: false,
             running: false,
             pollIntervalMs: 15000,
-            lastIngestedCount: 0
+            lastIngestedCount: 0,
+            expectedEventSchemaVersion: 1,
+            contractEventSchemaOk: true
         })
         mockGetAutoRebalancerStatus.mockReturnValue({
             isRunning: false,
@@ -129,5 +131,24 @@ describe('buildReadinessReport', () => {
 
         expect(report.status).toBe('not_ready')
         expect(report.checks.autoRebalancer.status).toBe('not_ready')
+    })
+
+    it('returns not_ready when indexer is enabled and contract event schema check failed', async () => {
+        mockGetIndexerStatus.mockReturnValue({
+            enabled: true,
+            running: false,
+            pollIntervalMs: 15000,
+            lastIngestedCount: 0,
+            expectedEventSchemaVersion: 1,
+            contractEventSchemaOk: false,
+            lastError: 'CONTRACT_EVENT_SCHEMA_VERSION mismatch'
+        })
+
+        const { buildReadinessReport } = await import('../monitoring/readiness.js')
+        const report = await buildReadinessReport()
+
+        expect(report.status).toBe('not_ready')
+        expect(report.checks.contractEventIndexer.status).toBe('not_ready')
+        expect(report.checks.contractEventIndexer.message).toContain('mismatch')
     })
 })

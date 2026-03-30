@@ -14,7 +14,7 @@ import { API_CONFIG } from '../config/api'
 
 // TanStack Query Hooks
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate } from '../hooks/queries/usePortfolioQuery'
-import { usePrices } from '../hooks/queries/usePricesQuery'
+import { usePrices, formatPriceFeedSummary } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
@@ -27,6 +27,8 @@ interface DashboardProps {
     onNavigate: (view: string) => void
     publicKey: string | null
 }
+
+type DashboardPriceRow = { price?: number; change?: number; [key: string]: unknown }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'test-notifications'>('overview')
@@ -44,7 +46,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const { data: portfolioDetails, isLoading: detailsLoading } = usePortfolioDetails(latestPortfolioId)
 
     // Query for prices
-    const { data: priceData, isLoading: pricesLoading } = usePrices()
+    const { data: priceBundle, isLoading: pricesLoading } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
 
     // Mutation for rebalancing
@@ -72,9 +74,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     // Determine finalized data and loading state
     const portfolioData = publicKey ? (portfolioDetails || (portfolios && portfolios.length > 0 ? portfolios[portfolios.length - 1] : null)) : demoData
-    const prices = priceData || demoPrices
+    const priceRows = priceBundle?.prices ?? {}
+    const hasLivePriceRows = typeof priceRows === 'object' && Object.keys(priceRows).length > 0
+    const prices: Record<string, DashboardPriceRow> = hasLivePriceRows
+        ? (priceRows as Record<string, DashboardPriceRow>)
+        : demoPrices
     const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
-    const priceSource = priceData ? 'CoinGecko Browser API' : (publicKey ? 'Fallback Data' : 'Demo Data')
+    const priceSource = hasLivePriceRows
+        ? formatPriceFeedSummary(priceBundle?.feedMeta, true, false)
+        : publicKey
+          ? 'No price data'
+          : 'Demo data'
+    const feedMeta = priceBundle?.feedMeta
+    const showPriceQualityNote = !!(feedMeta?.degraded || feedMeta?.staleOrLimited)
 
     const executeRebalance = async () => {
         if (!portfolioData?.id || portfolioData.id === 'demo') {
@@ -434,7 +446,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     <div className="bg-gray-100 dark:bg-gray-800 p-2 rounded mb-4 text-xs dark:text-gray-300">
                         <div>Portfolio ID: {portfolioData?.id}</div>
                         <div>Allocations: {JSON.stringify(allocationData)}</div>
-                        <div>Price Source: {priceSource}</div>
+                        <div>Price source: {priceSource}</div>
+                        {feedMeta ? (
+                            <div>
+                                Feed: {feedMeta.provider} / {feedMeta.resolutionHint} / degraded=
+                                {String(feedMeta.degraded)}
+                            </div>
+                        ) : null}
                     </div>
                 )}
 
@@ -470,15 +488,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
                                                 <span>Last updated: just now</span>
                                                 <span
-                                                    className={`px-2 py-1 rounded text-xs ${priceSource.includes('Browser')
-                                                        ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
-                                                        : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'
-                                                        }`}
+                                                    className={`px-2 py-1 rounded text-xs ${
+                                                        feedMeta?.degraded
+                                                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
+                                                            : feedMeta?.staleOrLimited
+                                                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                                                              : hasLivePriceRows
+                                                                ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
+                                                                : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'
+                                                    }`}
                                                 >
                                                     {priceSource}
                                                 </span>
                                             </div>
                                         </div>
+                                        {showPriceQualityNote && (
+                                            <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg px-3 py-2">
+                                                {feedMeta?.degraded
+                                                    ? 'Displayed prices are synthetic or fallback — not primary market data.'
+                                                    : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
+                                            </p>
+                                        )}
                                         <div className="mb-4">
                                             <div className="text-3xl font-bold text-gray-900 dark:text-white">
                                                 ${portfolioData?.totalValue?.toLocaleString() || '0'}
@@ -650,9 +680,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 ))
                             ) : (
                                 // Show actual asset cards when data is loaded
-                                allocationData.map((asset: any, index: number) => (
-                                    <AssetCard key={index} asset={asset} price={prices[asset.name]} />
-                                ))
+                                allocationData.map((asset: any, index: number) => {
+                                    const row = prices[asset.name]
+                                    const priceCard =
+                                        row?.price !== undefined
+                                            ? { price: row.price, change: row.change ?? 0 }
+                                            : undefined
+                                    return <AssetCard key={index} asset={asset} price={priceCard} />
+                                })
                             )}
                         </div>
 

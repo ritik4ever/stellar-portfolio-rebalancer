@@ -1,7 +1,16 @@
+import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import NotificationPreferences from './NotificationPreferences'
 import { api } from '../config/api'
+
+function renderWithQuery(ui: React.ReactElement) {
+    const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
 
 describe('NotificationPreferences', () => {
     beforeEach(() => {
@@ -12,7 +21,7 @@ describe('NotificationPreferences', () => {
 
     it('validates email format and blocks save', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
-        render(<NotificationPreferences userId="user-1" />)
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
 
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
@@ -30,7 +39,7 @@ describe('NotificationPreferences', () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
 
-        render(<NotificationPreferences userId="user-1" />)
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
         const saveBtn = screen.getByRole('button', { name: /Save Preferences/i })

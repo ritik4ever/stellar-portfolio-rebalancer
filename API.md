@@ -253,6 +253,8 @@ Content-Type: application/json
 GET /api/prices
 ```
 
+Successful `data` is `{ prices, feedMeta }`: `prices` is a map of assets to quote fields (including optional `source`, `servedFromCache`, `quoteAgeSeconds`, `dataTier`), and `feedMeta` describes resolution path and whether the feed is degraded. The same `feedMeta` shape is included on **GET /api/prices/enhanced** and **GET /api/portfolio/{id}/rebalance-plan** as `priceFeedMeta`.
+
 ### Execute rebalance
 
 ```http

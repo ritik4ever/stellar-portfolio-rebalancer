@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
-import { api, ENDPOINTS } from '../config/api'
+import { useRecordConsentMutation } from '../hooks/mutations/useConsentMutation'
 
 interface ConsentModalProps {
     userId: string
@@ -17,29 +17,23 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
     const [terms, setTerms] = useState(false)
     const [privacy, setPrivacy] = useState(false)
     const [cookies, setCookies] = useState(false)
-    const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const recordConsent = useRecordConsentMutation(userId)
 
     const allAccepted = terms && privacy && cookies
 
     const handleAccept = async () => {
         if (!allAccepted) return
-        setSubmitting(true)
         setError(null)
         try {
-            await api.post(ENDPOINTS.CONSENT_RECORD, {
-                userId,
-                terms: true,
-                privacy: true,
-                cookies: true
-            })
+            await recordConsent.mutateAsync()
             onAccept()
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to save consent. Please try again.')
-        } finally {
-            setSubmitting(false)
         }
     }
+
+    const submitting = recordConsent.isPending
 
     return (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
