@@ -396,9 +396,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     }
   };
 
-    }
-  };
-
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
 
