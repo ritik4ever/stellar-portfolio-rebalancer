@@ -9,6 +9,7 @@ import {
   type NotificationLog,
 } from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
+import { normalizeNotificationPreferences } from "./notificationPreferences.js";
 
 // ─────────────────────────────────────────────
 // Types
@@ -298,19 +299,7 @@ export class NotificationService {
    * Subscribe or update notification preferences
    */
   subscribe(preferences: NotificationPreferences): void {
-    // Validate webhook URL if provided
-    if (preferences.webhookEnabled && preferences.webhookUrl) {
-      if (!this.isValidWebhookUrl(preferences.webhookUrl)) {
-        throw new Error("Invalid webhook URL format");
-      }
-    }
-
-    if (preferences.emailEnabled && !preferences.emailAddress) {
-      throw new Error("Email address is required when email is enabled");
-    }
-
-    // Save to database
-    dbSaveNotificationPreferences(preferences);
+    dbSaveNotificationPreferences(normalizeNotificationPreferences(preferences));
 
     logger.info("User subscribed to notifications", {
       userId: preferences.userId,
@@ -383,21 +372,6 @@ export class NotificationService {
     await Promise.allSettled(promises);
   }
 
-  /**
-   * Validate webhook URL format
-   */
-  private isValidWebhookUrl(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Get all subscribed users
-   */
   getAllPreferences(): NotificationPreferences[] {
     return dbGetAllNotificationPreferences();
   }
