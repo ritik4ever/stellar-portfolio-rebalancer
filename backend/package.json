@@ -17,6 +17,7 @@
         "test:coverage": "vitest run --coverage",
         "test:ci": "npm run test:coverage",
         "test:rate-limits": "node scripts/test-rate-limits.js",
+        "test:notifications:dev": "node scripts/test-notifications-dev.mjs",
         "openapi:export": "tsx scripts/export-openapi.ts",
         "api:validate": "tsx scripts/validate-api-docs.ts"
     },
