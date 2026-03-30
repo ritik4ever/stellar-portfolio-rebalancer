@@ -7,6 +7,11 @@ import ConsentGate from './components/ConsentGate'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
+import {
+    isAuthServiceUnavailable,
+    resolveConsentAcceptedNavigation,
+    runWalletReconnectBoot,
+} from './app/walletBoot'
 import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
@@ -49,63 +54,32 @@ function App() {
         }
     }
 
-    /**
-     * Returns true when the authLogin error is a soft/infrastructure failure
-     * (e.g. JWT not configured on the server) that should not block the user.
-     * All other failures are hard auth errors that must be surfaced.
-     */
-    const isAuthServiceUnavailable = (err: unknown): boolean => {
-        const msg = String((err as any)?.message ?? '')
-        return (
-            msg.includes('503') ||
-            msg.toLowerCase().includes('service_unavailable') ||
-            msg.toLowerCase().includes('not configured')
-        )
-    }
-
     const checkWalletConnection = async () => {
-        try {
-            const pk = await walletManager.reconnect()
-            if (pk) {
-                const accepted = await checkConsent(pk)
-                if (accepted) {
-                    try {
-                        await authLogin(pk)
-                    } catch (authErr: unknown) {
-                        if (isAuthServiceUnavailable(authErr)) {
-                            // Auth service not configured – soft fail, allow access.
-                            console.warn('Auth service unavailable during reconnect; proceeding without JWT:', authErr)
-                        } else {
-                            // Hard auth failure: wallet is reconnected but the backend
-                            // rejected authentication.  Do NOT navigate to the dashboard.
-                            console.error('Auth login failed during wallet reconnect:', authErr)
-                            setError(
-                                'Wallet reconnected but authentication failed. ' +
-                                'Please reconnect your wallet to try again.'
-                            )
-                            return
-                        }
-                    }
-                    setPublicKey(pk)
-                    setCurrentView('dashboard')
-                } else {
-                    setPublicKey(pk)
-                    setPendingConsentPublicKey(pk)
-                }
-            }
-        } catch (err: unknown) {
-            // Reconnect itself failed – surface a clear message instead of
-            // swallowing the error.
-            console.error('Wallet reconnect failed:', err)
-            if (err instanceof WalletError) {
-                if (err.code === 'USER_DECLINED') {
-                    setError('Wallet reconnect was declined. Please approve in your wallet.')
-                } else {
-                    setError('Failed to reconnect wallet. Please try connecting again.')
-                }
-            } else {
-                setError('Failed to reconnect wallet. Please try connecting again.')
-            }
+        const result = await runWalletReconnectBoot({
+            reconnect: () => walletManager.reconnect(),
+            checkConsent,
+            authLogin,
+        })
+
+        if (result.outcome === 'no_wallet') {
+            return
+        }
+        if (result.outcome === 'needs_consent') {
+            setPublicKey(result.publicKey)
+            setPendingConsentPublicKey(result.publicKey)
+            return
+        }
+        if (result.outcome === 'dashboard') {
+            setPublicKey(result.publicKey)
+            setCurrentView('dashboard')
+            return
+        }
+        if (result.outcome === 'auth_failed') {
+            setError(result.message)
+            return
+        }
+        if (result.outcome === 'reconnect_failed') {
+            setError(result.message)
         }
     }
 
@@ -161,10 +135,11 @@ function App() {
     }
 
     const handleConsentAccepted = () => {
-        if (pendingConsentPublicKey) {
-            setPublicKey(pendingConsentPublicKey)
+        const next = resolveConsentAcceptedNavigation(pendingConsentPublicKey)
+        if (next) {
+            setPublicKey(next.publicKey)
             setPendingConsentPublicKey(null)
-            setCurrentView('dashboard')
+            setCurrentView(next.targetView)
         }
     }
 

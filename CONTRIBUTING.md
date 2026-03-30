@@ -10,13 +10,13 @@ It covers:
 - Optional services: PostgreSQL, Redis, SMTP
 - Database migrations (PostgreSQL and SQLite paths)
 - Running backend and frontend tests
-- API doc generation (`npm run codegen`)
+- OpenAPI maintenance (`cd backend && npm run openapi:export` and `npm run api:validate` — see [backend/docs/openapi.md](backend/docs/openapi.md))
 - Queue worker setup and expectations
 - Frontend E2E tests with Playwright
 - Contract build and deploy steps
 - Common setup failures and fixes
 
-For a quick overview of the API contract see [API.md](API.md).
+For a quick overview of the API contract see [API.md](API.md). Background services and troubleshooting are covered in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Workflow
 
