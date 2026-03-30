@@ -138,7 +138,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: 
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        const prices = await reflectorService.getCurrentPrices()
+        const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
         const totalValue = Object.entries(portfolio.balances || {}).reduce((sum, [asset, bal]) => sum + (bal * (prices[asset]?.price ?? 0)), 0)
         const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? 1
         const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
@@ -147,7 +147,8 @@ portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: 
             totalValue,
             maxSlippagePercent: slippageTolerancePercent,
             estimatedSlippageBps,
-            prices: Object.keys(prices).length > 0 ? prices : undefined
+            prices: Object.keys(prices).length > 0 ? prices : undefined,
+            priceFeedMeta: feedMeta
         })
     } catch (error) {
         logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })

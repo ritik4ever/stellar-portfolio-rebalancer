@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Wifi, WifiOff, TrendingUp, TrendingDown } from 'lucide-react'
 import { api, ENDPOINTS } from '../config/api'
-import { usePrices } from '../hooks/queries/usePricesQuery'
+import { usePrices, type PriceFeedClientMeta } from '../hooks/queries/usePricesQuery'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 
 interface PriceTrackerProps {
@@ -14,6 +14,29 @@ interface PriceData {
     source: string
     timestamp: number
     volume?: number
+    servedFromCache?: boolean
+    quoteAgeSeconds?: number
+    dataTier?: string
+}
+
+function sourceBadgeClass(source: string): string {
+    if (source === 'coingecko_pro') return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
+    if (source === 'coingecko_free' || source === 'coingecko' || source === 'coingecko_browser')
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+    if (source === 'reflector') return 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
+    if (source === 'fallback' || source === 'fallback_browser')
+        return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+    return 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200'
+}
+
+function sourceBadgeLabel(source: string): string {
+    if (source === 'coingecko_pro') return 'Pro'
+    if (source === 'coingecko_free' || source === 'coingecko') return 'CoinGecko'
+    if (source === 'coingecko_browser') return 'Browser CG'
+    if (source === 'reflector') return 'Reflector'
+    if (source === 'fallback_browser') return 'Browser fallback'
+    if (source === 'fallback') return 'Fallback'
+    return source || 'Unknown'
 }
 
 function normalizePrices(data: unknown): Record<string, PriceData> {
@@ -22,13 +45,16 @@ function normalizePrices(data: unknown): Record<string, PriceData> {
     for (const asset of Object.keys(data as Record<string, unknown>)) {
         const assetData = (data as Record<string, unknown>)[asset]
         if (assetData && typeof assetData === 'object') {
-            const o = assetData as Record<string, number>
+            const o = assetData as Record<string, number | string | boolean | undefined>
             out[asset] = {
-                price: o.price ?? o.usd ?? 0,
-                change: o.change ?? o.usd_24h_change ?? 0,
+                price: Number(o.price ?? o.usd ?? 0),
+                change: Number(o.change ?? o.usd_24h_change ?? 0),
                 source: String(o.source ?? 'coingecko'),
-                timestamp: o.timestamp ?? Date.now() / 1000,
-                volume: o.volume ?? o.usd_24h_vol,
+                timestamp: Number(o.timestamp ?? Date.now() / 1000),
+                volume: o.volume !== undefined ? Number(o.volume) : o.usd_24h_vol !== undefined ? Number(o.usd_24h_vol) : undefined,
+                servedFromCache: typeof o.servedFromCache === 'boolean' ? o.servedFromCache : undefined,
+                quoteAgeSeconds: o.quoteAgeSeconds !== undefined ? Number(o.quoteAgeSeconds) : undefined,
+                dataTier: o.dataTier !== undefined ? String(o.dataTier) : undefined,
             }
         } else if (typeof assetData === 'number') {
             out[asset] = {
@@ -43,12 +69,25 @@ function normalizePrices(data: unknown): Record<string, PriceData> {
     return out
 }
 
+function qualityMessage(meta: PriceFeedClientMeta | undefined): string | null {
+    if (!meta) return null
+    if (meta.degraded) {
+        return 'Prices are synthetic or fallback data — do not treat as live exchange quotes.'
+    }
+    if (meta.staleOrLimited) {
+        return 'Quotes may be stale or served from cache after an upstream error or rate limit.'
+    }
+    return null
+}
+
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
-    const { data: rawPrices, isLoading, error: queryError, refetch } = usePrices()
+    const { data: priceBundle, isLoading, error: queryError, refetch } = usePrices()
     const { state: realtimeState } = useRealtimeConnection()
 
-    const prices = useMemo(() => normalizePrices(rawPrices), [rawPrices])
+    const prices = useMemo(() => normalizePrices(priceBundle?.prices), [priceBundle?.prices])
+    const feedMeta = priceBundle?.feedMeta
+    const qualityHint = useMemo(() => qualityMessage(feedMeta), [feedMeta])
     const loading = isLoading
     const isConnected = realtimeState === 'connected'
     const error =
@@ -169,6 +208,18 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                 </div>
             </div>
 
+            {qualityHint && (
+                <div
+                    className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
+                        feedMeta?.degraded
+                            ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200'
+                            : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-300'
+                    }`}
+                >
+                    {qualityHint}
+                </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {assets.map((asset) => {
                     const data = prices[asset]
@@ -186,24 +237,8 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         >
                             <div className="flex items-center justify-between mb-2">
                                 <span className="font-medium text-gray-900 dark:text-white">{asset}</span>
-                                <div
-                                    className={`px-2 py-1 rounded text-xs ${
-                                        data.source === 'coingecko_pro'
-                                            ? 'bg-green-100 text-green-800'
-                                            : data.source === 'coingecko_free' || data.source === 'coingecko'
-                                              ? 'bg-blue-100 text-blue-800'
-                                              : data.source === 'reflector'
-                                                ? 'bg-purple-100 text-purple-800'
-                                                : 'bg-red-100 text-red-800'
-                                    }`}
-                                >
-                                    {data.source === 'coingecko_pro'
-                                        ? 'Pro'
-                                        : data.source === 'coingecko_free' || data.source === 'coingecko'
-                                          ? 'CoinGecko'
-                                          : data.source === 'reflector'
-                                            ? 'Reflector'
-                                            : 'Fallback'}
+                                <div className={`px-2 py-1 rounded text-xs ${sourceBadgeClass(data.source)}`}>
+                                    {sourceBadgeLabel(data.source)}
                                 </div>
                             </div>
 
@@ -223,11 +258,17 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                                 </span>
                             </div>
 
-                            {data.volume ? (
-                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                    Vol: ${data.volume.toLocaleString()}
+                            {(data.volume ||
+                                (data.quoteAgeSeconds !== undefined && Number.isFinite(data.quoteAgeSeconds)) ||
+                                data.servedFromCache) && (
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 space-y-0.5">
+                                    {data.volume ? <div>Vol: ${data.volume.toLocaleString()}</div> : null}
+                                    {data.quoteAgeSeconds !== undefined && Number.isFinite(data.quoteAgeSeconds) ? (
+                                        <div>Quote age: {Math.round(data.quoteAgeSeconds)}s</div>
+                                    ) : null}
+                                    {data.servedFromCache ? <div>From app cache</div> : null}
                                 </div>
-                            ) : null}
+                            )}
                         </div>
                     )
                 })}

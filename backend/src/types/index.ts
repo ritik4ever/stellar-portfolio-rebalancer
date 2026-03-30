@@ -1,10 +1,41 @@
+export type PriceDataSource =
+    | 'reflector'
+    | 'coingecko_pro'
+    | 'coingecko_free'
+    | 'coingecko_browser'
+    | 'external'
+    | 'fallback'
+    | 'fallback_browser'
+
+export type PriceDataTier = 'primary' | 'cached_primary' | 'stale_cached' | 'synthetic_fallback'
+
+export interface PriceFeedMeta {
+    provider: 'backend'
+    resolvedAtMs: number
+    degraded: boolean
+    /** True when quotes may be stale or API could not be reached (still not synthetic fallback). */
+    staleOrLimited: boolean
+    resolutionHint: 'fresh_primary' | 'cached_only' | 'partial_merge' | 'rate_limited_cache' | 'error_recovery_cache' | 'synthetic_fallback'
+    assetsCount: number
+}
+
 // Core price data interface
 export interface PriceData {
     price: number
     change: number
     timestamp: number
-    source?: 'reflector' | 'coingecko_pro' | 'coingecko_free' | 'external' | 'fallback'
+    source?: PriceDataSource
     volume?: number
+    servedFromCache?: boolean
+    serverFetchedAtMs?: number
+    cacheAgeMs?: number
+    quoteAgeSeconds?: number
+    dataTier?: PriceDataTier
+}
+
+export interface PricesFeedPayload {
+    prices: PricesMap
+    feedMeta: PriceFeedMeta
 }
 
 // Price map type - using type alias as expected by risk management service

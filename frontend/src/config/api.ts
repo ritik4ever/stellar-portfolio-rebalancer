@@ -197,6 +197,8 @@ export const apiRequest = async <T>(
             debugFlagEnabled: (import.meta as any).env?.VITE_ENABLE_BROWSER_PRICE_DEBUG === 'true'
         })
         try {
+            const payload = await browserPriceService.getCurrentPrices()
+            return payload as unknown as T
             const prices = await browserPriceService.getCurrentPrices()
             // Source information is embedded in each price entry via the 'source' field
             debugLog('Price source: Browser (CoinGecko API or fallback)', {

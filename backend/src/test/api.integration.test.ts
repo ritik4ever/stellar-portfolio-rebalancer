@@ -235,11 +235,14 @@ describe('Price Data - GET /api/prices', () => {
 
         expect(response.body.success).toBe(true)
         expect(response.body.error).toBeNull()
-        // Should have at least one asset
-        expect(Object.keys(response.body.data).length).toBeGreaterThan(0)
+        const payload = response.body.data
+        expect(payload.prices).toBeDefined()
+        expect(Object.keys(payload.prices).length).toBeGreaterThan(0)
+        expect(payload.feedMeta).toBeDefined()
+        expect(payload.feedMeta.provider).toBe('backend')
 
-        // Check for common assets (might be fallback data)
-        const hasAssets = response.body.data.XLM || response.body.data.BTC || response.body.data.ETH || response.body.data.USDC
+        const p = payload.prices
+        const hasAssets = p.XLM || p.BTC || p.ETH || p.USDC
         expect(hasAssets).toBeTruthy()
     })
 
@@ -249,7 +252,8 @@ describe('Price Data - GET /api/prices', () => {
             .expect(200)
 
         expect(response.body.success).toBe(true)
-        const assets = Object.values(response.body.data) as any[]
+        const priceMap = response.body.data.prices as Record<string, any>
+        const assets = Object.values(priceMap) as any[]
         expect(assets.length).toBeGreaterThan(0)
 
         const firstAsset = assets[0]
@@ -265,8 +269,7 @@ describe('Price Data - GET /api/prices', () => {
             .expect(200)
 
         expect(response.body.success).toBe(true)
-        // All assets should have consistent structure
-        for (const [, assetData] of Object.entries(response.body.data)) {
+        for (const [, assetData] of Object.entries(response.body.data.prices as Record<string, any>)) {
             const asset = assetData as any
             expect(asset.price).toBeDefined()
             expect(typeof asset.price).toBe('number')
