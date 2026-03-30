@@ -34,6 +34,7 @@ import {
     rebalanceHistoryQuerySchema,
     debugTestNotificationSchema
 } from './validation.js'
+import { normalizeNotificationPreferences } from '../services/notificationPreferences.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import type { Portfolio } from '../types/index.js'
@@ -1383,10 +1384,9 @@ router.post(
   requireJwtWhenEnabled,
   ...protectedWriteLimiter,
   idempotencyMiddleware,
+  validateRequest(notificationSubscribeSchema),
   async (req: Request, res: Response) => {
     try {
-      // Issue #178: when auth is enabled, derive userId from the token only.
-      // Reject requests that try to subscribe on behalf of a different address.
       let userId: string | undefined;
       if (getAuthConfig().enabled) {
         userId = req.user!.address;
@@ -1397,88 +1397,19 @@ router.post(
       } else {
         userId = req.body?.userId;
       }
-      const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } =
-        req.body ?? {};
 
-      // Validation
       if (!userId) {
         return fail(res, 400, "VALIDATION_ERROR", "userId is required");
       }
 
-      if (
-        emailEnabled === undefined ||
-        webhookEnabled === undefined ||
-        !events
-      ) {
-        return fail(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "Missing required fields: emailEnabled, webhookEnabled, events",
-        );
-      }
-
-      // Validate events object
-      const requiredEvents = [
-        "rebalance",
-        "circuitBreaker",
-        "priceMovement",
-        "riskChange",
-      ];
-      for (const event of requiredEvents) {
-        if (events[event] === undefined) {
-          return fail(
-            res,
-            400,
-            "VALIDATION_ERROR",
-            `Missing event configuration: ${event}`,
-          );
-        }
-      }
-
-      // Validate email address if email is enabled
-      if (emailEnabled && !emailAddress) {
-        return fail(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "email address is required when emailEnabled is true",
-        );
-      }
-
-      // Validate webhook URL if webhook is enabled
-      if (webhookEnabled && !webhookUrl) {
-        return fail(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "webhookUrl is required when webhookEnabled is true",
-        );
-      }
-
-      if (webhookUrl && !webhookUrl.match(/^https?:\/\/.+/)) {
-        return fail(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "Invalid webhook URL format. Must start with http:// or https://",
-        );
-      }
-
-      // Subscribe user
-      notificationService.subscribe({
-        userId,
-        emailEnabled,
-        emailAddress,
-        webhookEnabled,
-        webhookUrl,
-        events,
-      });
+      notificationService.subscribe(
+        normalizeNotificationPreferences({ ...req.body, userId }),
+      );
 
       logger.info("User subscribed to notifications", {
         userId,
-        emailEnabled,
-        webhookEnabled,
+        emailEnabled: req.body.emailEnabled,
+        webhookEnabled: req.body.webhookEnabled,
       });
 
       return ok(res, {
