@@ -4,6 +4,8 @@ import request, { type Response as SupertestResponse } from 'supertest'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { Keypair } from '@stellar/stellar-sdk'
+import { loginWithWalletChallenge } from './loginWalletHelper.js'
 
 let app: Express
 let testDbPath: string
@@ -26,6 +28,7 @@ beforeAll(async () => {
     process.env.RATE_LIMIT_WRITE_MAX = '100'
     process.env.RATE_LIMIT_WRITE_BURST_MAX = '200'
     process.env.RATE_LIMIT_BURST_MAX = '200'
+    process.env.RATE_LIMIT_AUTH_MAX = '500'
 
     const express = (await import('express')).default
     const cors = (await import('cors')).default
@@ -203,10 +206,11 @@ describe('API path compatibility matrix', () => {
     })
 
     it('notifications GET preferences: JWT auth parity (canonical vs legacy resource roots)', async () => {
-        const address = 'GNOTIFY123456789ABCDEF0000001'
-        const login = await request(app).post('/api/auth/login').send({ address }).expect(200)
+        const kp = Keypair.random()
+        const address = kp.publicKey()
+        const { data, loginRes: login } = await loginWithWalletChallenge(app, kp)
         expectNoDeprecationHeaders(login)
-        const token = login.body.data.accessToken as string
+        const token = data.accessToken
 
         const v1 = await request(app)
             .get('/api/v1/notifications/preferences')
@@ -225,9 +229,10 @@ describe('API path compatibility matrix', () => {
     })
 
     it('notifications POST subscribe: validation errors match on canonical and legacy (with JWT)', async () => {
-        const address = 'GSUBSCRIBE123456789ABCDEF00001'
-        const login = await request(app).post('/api/auth/login').send({ address }).expect(200)
-        const token = login.body.data.accessToken as string
+        const kp = Keypair.random()
+        const address = kp.publicKey()
+        const { data } = await loginWithWalletChallenge(app, kp)
+        const token = data.accessToken
         const invalidBody = { userId: address }
 
         const v1 = await request(app)
@@ -254,7 +259,8 @@ describe('API path compatibility matrix', () => {
     })
 
     it('POST /api/auth/refresh and /api/auth/login are never marked deprecated', async () => {
-        const loginRes = await request(app).post('/api/auth/login').send({ address: 'GREFRESH0000000000000000001' }).expect(200)
+        const kp = Keypair.random()
+        const { loginRes } = await loginWithWalletChallenge(app, kp)
         expectNoDeprecationHeaders(loginRes)
 
         const refreshMissing = await request(app).post('/api/auth/refresh').send({}).expect(400)

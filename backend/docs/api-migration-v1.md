@@ -11,7 +11,7 @@ Legacy `/api/*` routes are supported only as a compatibility alias and include d
 ## Canonical endpoints
 
 - Portfolio + market data routes: `/api/v1/*`
-- Authentication routes: `/api/v1/auth/*`
+- Authentication routes: `/api/auth/*` (JWT challenge/login/refresh remain outside the versioned prefix; see root `API.md`)
 
 ## Legacy alias behavior
 
