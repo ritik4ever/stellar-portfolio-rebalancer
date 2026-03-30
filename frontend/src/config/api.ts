@@ -78,6 +78,7 @@ export const API_CONFIG = {
 
     ENDPOINTS: {
         HEALTH: '/health',
+        READINESS: '/readiness',
         ROOT: '/',
         /** Versionless auth namespace (matches backend `app.use('/api/auth', authRouter)`) */
         AUTH_LOGIN: '/api/auth/login',

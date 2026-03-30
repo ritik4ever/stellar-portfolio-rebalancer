@@ -11,6 +11,8 @@ import { logger } from "../../utils/logger.js";
 import {
   createWorkerRuntimeStatus,
   markWorkerFailed,
+  markWorkerJobCompleted,
+  markWorkerJobFailed,
   markWorkerReady,
   markWorkerStarting,
   markWorkerStopped,
@@ -116,27 +118,9 @@ export function startPortfolioCheckWorker(): Worker | null {
             attemptsMade: j?.attemptsMade
         })
     })
-    .catch((err) => {
-      markWorkerFailed(runtimeStatus, err);
-      logger.error("[WORKER:portfolio-check] Worker failed readiness check", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
 
-  worker.on("completed", (j) => {
-    logger.info("[WORKER:portfolio-check] Job completed", { jobId: j.id });
-  });
-
-  worker.on("failed", (j, err) => {
-    logger.error("[WORKER:portfolio-check] Job failed", {
-      jobId: j?.id,
-      error: err.message,
-      attemptsMade: j?.attemptsMade,
-    });
-  });
-
-  logger.info("[WORKER:portfolio-check] Worker started");
-  return worker;
+    logger.info('[WORKER:portfolio-check] Worker started')
+    return worker
 }
 
 export async function stopPortfolioCheckWorker(): Promise<void> {
@@ -154,10 +138,6 @@ export function isPortfolioCheckWorkerRunning(): boolean {
 
 export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
   return snapshotWorkerRuntimeStatus(runtimeStatus);
-}
-
-export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
-    return snapshotWorkerRuntimeStatus(runtimeStatus)
 }
 
 export function setPortfolioCheckSchedulerRegistered(registered: boolean): void {

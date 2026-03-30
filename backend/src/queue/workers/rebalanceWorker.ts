@@ -209,7 +209,3 @@ export function isRebalanceWorkerRunning(): boolean {
 export function getRebalanceWorkerStatus(): WorkerRuntimeStatus {
   return snapshotWorkerRuntimeStatus(runtimeStatus);
 }
-
-export function getRebalanceWorkerStatus(): WorkerRuntimeStatus {
-    return snapshotWorkerRuntimeStatus(runtimeStatus)
-}

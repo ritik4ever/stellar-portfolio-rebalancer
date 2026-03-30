@@ -41,45 +41,6 @@ import { ok, fail } from '../utils/apiResponse.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { assetRegistryService } from '../services/assetRegistryService.js'
 import {
-  riskManagementService,
-  rebalanceHistoryService,
-} from "../services/serviceContainer.js";
-import { portfolioStorage } from "../services/portfolioStorage.js";
-import { CircuitBreakers } from "../services/circuitBreakers.js";
-import { analyticsService } from "../services/analyticsService.js";
-import { notificationService } from "../services/notificationService.js";
-import { contractEventIndexerService } from "../services/contractEventIndexer.js";
-import { AutoRebalancerService } from "../services/autoRebalancer.js";
-import { logger, logAudit } from "../utils/logger.js";
-import { idempotencyMiddleware } from "../middleware/idempotency.js";
-import { requireAdmin } from "../middleware/auth.js";
-import { requireJwt, requireJwtWhenEnabled } from "../middleware/requireJwt.js";
-import { getAuthConfig } from "../services/authService.js";
-import {
-  writeRateLimiter,
-  protectedWriteLimiter,
-  protectedCriticalLimiter,
-  adminRateLimiter,
-} from "../middleware/rateLimit.js";
-import { blockDebugInProduction } from "../middleware/debugGate.js";
-import {
-  getFeatureFlags,
-  getPublicFeatureFlags,
-} from "../config/featureFlags.js";
-import { getQueueMetrics } from "../queue/queueMetrics.js";
-import {
-  getErrorMessage,
-  getErrorObject,
-  parseOptionalBoolean,
-} from "../utils/helpers.js";
-import { createPortfolioSchema } from "./validation.js";
-import { rebalanceLockService } from "../services/rebalanceLock.js";
-import { REBALANCE_STRATEGIES } from "../services/rebalancingStrategyService.js";
-import type { Portfolio } from "../types/index.js";
-import { ok, fail } from "../utils/apiResponse.js";
-import { getPortfolioExport } from "../services/portfolioExportService.js";
-import { assetRegistryService } from "../services/assetRegistryService.js";
-import {
   AssetRegistryConflictError,
   AssetRegistryValidationError,
 } from "../services/assetRegistryValidation.js";
@@ -419,36 +380,6 @@ router.get('/rebalance/history', validateQuery(rebalanceHistoryQuerySchema), asy
         logger.error('[ERROR] Rebalance history failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
-
-    const history = await rebalanceHistoryService.getRebalanceHistory(
-      portfolioId || undefined,
-      limit,
-      {
-        eventSource: source,
-        startTimestamp,
-        endTimestamp,
-      },
-    );
-
-    return ok(
-      res,
-      {
-        history,
-        portfolioId: portfolioId || undefined,
-        filters: {
-          source,
-          startTimestamp,
-          endTimestamp,
-        },
-      },
-      { meta: { count: history.length } },
-    );
-  } catch (error) {
-    logger.error("[ERROR] Rebalance history failed", {
-      error: getErrorObject(error),
-    });
-    return fail(res, 500, "INTERNAL_ERROR", getErrorMessage(error));
-  }
 });
 
 // Record new rebalance event
@@ -1908,12 +1839,6 @@ router.get('/queue/health', async (req: Request, res: Response) => {
             redisConnected: false
         })
     }
-    return fail(res, 503, "SERVICE_UNAVAILABLE", "Redis unavailable", metrics);
-  } catch (error) {
-    return fail(res, 500, "INTERNAL_ERROR", getErrorMessage(error), {
-      redisConnected: false,
-    });
-  }
 });
 
 export { router as portfolioRouter };
