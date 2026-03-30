@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  notificationEventsSchema,
+  notificationPreferencesSchema,
+} from '../services/notificationPreferences.js';
 
 const strictBoolean = z.preprocess((val) => {
     if (typeof val === 'string') {
@@ -95,28 +99,8 @@ export const recordConsentSchema = z.object({
 }).strict();
 
 // ─── Notification schemas ─────────────────────────────────────────────────────
-const notificationEventsSchema = z.object({
-    rebalance: z.boolean(),
-    circuitBreaker: z.boolean(),
-    priceMovement: z.boolean(),
-    riskChange: z.boolean()
-});
-
-export const notificationSubscribeSchema = z.object({
-    userId: z.string().min(1).optional(),
-    emailEnabled: z.boolean(),
-    webhookEnabled: z.boolean(),
-    emailAddress: z.string().email('Invalid email address').optional(),
-    webhookUrl: z.string().url('Invalid webhook URL format').optional(),
-    events: notificationEventsSchema
-}).superRefine((data, ctx) => {
-    if (data.emailEnabled && !data.emailAddress) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'emailAddress is required when emailEnabled is true', path: ['emailAddress'] });
-    }
-    if (data.webhookEnabled && !data.webhookUrl) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'webhookUrl is required when webhookEnabled is true', path: ['webhookUrl'] });
-    }
-});
+export { notificationEventsSchema };
+export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
     userId: z.string().min(1, 'userId query parameter is required').optional()
