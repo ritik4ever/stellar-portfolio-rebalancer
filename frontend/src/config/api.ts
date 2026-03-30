@@ -65,12 +65,47 @@ const getBaseUrl = (): string => {
         : 'http://localhost:3001'
 }
 
+/**
+ * Determines if browser-side price fetching should be used.
+ * 
+ * Environment-aware fallback strategy:
+ * - Production: Disabled (always use backend prices) unless VITE_ENABLE_BROWSER_PRICE_DEBUG=true
+ * - Development: Enabled (prefer browser prices, fallback to backend on error)
+ * - Demo mode: Can be enabled via VITE_ENABLE_BROWSER_PRICE_DEBUG flag
+ * 
+ * This prevents silent backend failures in production while allowing convenience in development.
+ */
+function shouldUseBrowserPrices(): boolean {
+    const viteEnv = (import.meta as any).env
+    
+    // Explicit debug flag allows browser prices even in production
+    if (viteEnv?.VITE_ENABLE_BROWSER_PRICE_DEBUG === 'true') {
+        debugLog('Browser price fallback enabled via debug flag')
+        return true
+    }
+    
+    // Production: default to backend (prefer explicit backend prices)
+    if (viteEnv?.PROD === true || viteEnv?.MODE === 'production') {
+        debugLog('Browser price fallback disabled in production (use backend prices)')
+        return false
+    }
+    
+    // Development: default to browser prices
+    debugLog('Browser price fallback enabled in development')
+    return true
+}
+
 export const API_CONFIG = {
     BASE_URL: getBaseUrl(),
     WEBSOCKET_URL: getBaseUrl().replace(/^http/, 'ws'),
 
-    // Use browser-based prices to bypass backend API issues
-    USE_BROWSER_PRICES: true,
+    /**
+     * Environment-aware price fallback strategy.
+     * - Production: false (always use backend prices)
+     * - Development: true (prefer browser prices, fallback to backend on error)
+     * - Demo/Debug mode: true if VITE_ENABLE_BROWSER_PRICE_DEBUG=true
+     */
+    USE_BROWSER_PRICES: shouldUseBrowserPrices(),
 
     TIMEOUT: 15000,
     RETRY_ATTEMPTS: 3,
@@ -154,16 +189,33 @@ export const apiRequest = async <T>(
     options: RequestInit = {},
     retryCount = 0
 ): Promise<T> => {
-    // Special handling for prices endpoint - use browser service
+    // Special handling for prices endpoint - use browser service (if enabled)
     if (API_CONFIG.USE_BROWSER_PRICES && endpoint.includes('/prices') && !endpoint.includes('enhanced')) {
-        debugLog('Using browser price service instead of backend')
+        debugLog('Price source strategy: Browser prices enabled (development mode or debug flag)', {
+            endpoint,
+            isDev: !((import.meta as any).env?.PROD === true || (import.meta as any).env?.MODE === 'production'),
+            debugFlagEnabled: (import.meta as any).env?.VITE_ENABLE_BROWSER_PRICE_DEBUG === 'true'
+        })
         try {
             const payload = await browserPriceService.getCurrentPrices()
             return payload as unknown as T
+            const prices = await browserPriceService.getCurrentPrices()
+            // Source information is embedded in each price entry via the 'source' field
+            debugLog('Price source: Browser (CoinGecko API or fallback)', {
+                assets: Object.keys(prices),
+                sourceSample: prices[Object.keys(prices)[0]]?.source
+            })
+            return prices as unknown as T
         } catch (error) {
             console.error('Browser price service failed, falling back to backend:', error)
+            debugLog('Price fallback triggered: Attempting backend API')
             // Fall through to backend call
         }
+    } else if (endpoint.includes('/prices') && !endpoint.includes('enhanced')) {
+        debugLog('Price source strategy: Backend prices (production mode or browser fallback disabled)', {
+            isDev: !((import.meta as any).env?.PROD === true || (import.meta as any).env?.MODE === 'production'),
+            browserPricesWouldBeEnabled: shouldUseBrowserPrices()
+        })
     }
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_CONFIG.BASE_URL}${endpoint}`
@@ -225,6 +277,15 @@ export const apiRequest = async <T>(
             status: response.status,
             body,
         }, viteEnv)
+
+        // Track backend price source for prices endpoint
+        if (endpoint.includes('/prices') && !endpoint.includes('enhanced')) {
+            debugLog('Price source: Backend API', {
+                endpoint,
+                assets: body?.data ? Object.keys(body.data) : 'unknown',
+                hasMeta: !!body?.meta
+            })
+        }
 
         if (response.status === 401 && retryCount === 0 && isApiRequest) {
             const refreshed = await refresh()

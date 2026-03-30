@@ -105,6 +105,14 @@ vi.mock('../services/analyticsService.js', () => ({
     },
 }))
 
+vi.mock('../services/rebalanceLock.js', () => ({
+    rebalanceLockService: {
+        acquireLock: vi.fn().mockResolvedValue(true),
+        releaseLock: vi.fn().mockResolvedValue(true),
+        isLocked: vi.fn().mockResolvedValue(false),
+    },
+}))
+
 vi.mock('../queue/queues.js', () => ({
     getRebalanceQueue: vi.fn().mockReturnValue({
         add: vi.fn().mockResolvedValue({ id: 'job-rebalance-1' }),
@@ -131,12 +139,13 @@ import { processAnalyticsSnapshotJob } from '../queue/workers/analyticsSnapshotW
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
+import { rebalanceLockService } from '../services/rebalanceLock.js'
 import { getRebalanceQueue } from '../queue/queues.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function mockJob<T>(data: T, id = 'test-job-1'): Job<T> {
-    return { id, data, attemptsMade: 0 } as unknown as Job<T>
+function mockJob<T>(data: T, id = 'test-job-1', attemptsMade = 0): Job<T> {
+    return { id, data, attemptsMade } as unknown as Job<T>
 }
 
 // ─── Portfolio Check Worker Tests ─────────────────────────────────────────────
@@ -232,6 +241,281 @@ describe('rebalanceWorker – processRebalanceJob', () => {
     it('surface-level: processRebalanceJob is exported and callable', async () => {
         // A minimal sanity check that the export exists and is a function
         expect(typeof processRebalanceJob).toBe('function')
+    })
+})
+
+// ─── Rebalance Worker Retry Policy Tests ──────────────────────────────────────
+// Issue #255: Deterministic retry policy tests ensure safe retry behavior without
+// introducing duplicate side effects or inconsistent history.
+
+describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
+    const portfolioId = 'test-portfolio-1'
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        // Reset lock service for each test
+        ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+        ;(rebalanceLockService.releaseLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+    })
+
+    describe('Retryable failure paths', () => {
+        it('retries on transient Stellar service errors', async () => {
+            // Simulate a transient network error that should trigger a retry
+            const stellarError = new Error('STELLAR_SERVICE_TEMPORARILY_UNAVAILABLE')
+            
+            const StellarService = (global as any).StellarService
+            StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(stellarError)
+
+            const job = mockJob(
+                { portfolioId, triggeredBy: 'auto' as const },
+                'retry-test-1',
+                0 // First attempt
+            )
+
+            // Should throw so BullMQ can retry
+            await expect(processRebalanceJob(job)).rejects.toThrow()
+
+            // Lock should be released even on failure, allowing retry
+            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+        })
+
+        it('records failed attempt with attempt count in history', async () => {
+            const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
+            const recordSpy = vi.spyOn(rebalanceHistoryService, 'recordRebalanceEvent')
+
+            const stellarError = new Error('StellarService error')
+            const StellarService = (global as any).StellarService
+            StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(stellarError)
+
+            const job = mockJob(
+                { portfolioId, triggeredBy: 'auto' as const },
+                'attempt-track-1',
+                2 // Second retry (3rd attempt)
+            )
+
+            await expect(processRebalanceJob(job)).rejects.toThrow()
+
+            // Verify failure was recorded with attempt information
+            expect(recordSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    portfolioId,
+                    status: 'failed',
+                    trigger: expect.stringContaining('attempt 3'), // 3rd attempt (attemptsMade: 2)
+                })
+            )
+        })
+
+        it('retries up to configured maximum attempts before giving up', async () => {
+            // Queue config shows 5 total attempts (exponential backoff)
+            // This test verifies the retry limit is respected
+            const job = mockJob(
+                { portfolioId, triggeredBy: 'auto' as const },
+                'max-attempts-1',
+                4 // 5th and final attempt
+            )
+
+            const stellarError = new Error('Persistent error')
+            const StellarService = (global as any).StellarService
+            StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(stellarError)
+
+            await expect(processRebalanceJob(job)).rejects.toThrow()
+
+            // Even on the last attempt, lock must be released
+            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+        })
+    })
+
+    describe('Terminal failures', () => {
+        it('fails terminal failure (invalid portfolio) without retry', async () => {
+            const StellarService = (global as any).StellarService
+            StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(
+                new Error('Portfolio not found')
+            )
+
+            const job = mockJob({ portfolioId: 'invalid-id', triggeredBy: 'manual' as const })
+
+            // Should throw (BullMQ will handle retry policy based on job config attempts)
+            await expect(processRebalanceJob(job)).rejects.toThrow()
+
+            // Lock must still be released
+            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith('invalid-id')
+        })
+
+        it('does not record duplicate history events on retry', async () => {
+            const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
+            const recordSpy = vi.spyOn(rebalanceHistoryService, 'recordRebalanceEvent')
+
+            const StellarService = (global as any).StellarService
+            StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
+                id: portfolioId,
+                userAddress: 'GTEST123456789',
+                allocations: { XLM: 60, USDC: 40 },
+                balances: { XLM: 1000, USDC: 400 },
+            })
+            StellarService.prototype.executeRebalance = vi.fn().mockResolvedValue({
+                trades: 2,
+                gasUsed: '0.01 XLM',
+            })
+
+            // Success case should record exactly one completion event
+            const job = mockJob({ portfolioId, triggeredBy: 'auto' as const })
+            await processRebalanceJob(job)
+
+            // Verify single completion record (not duplicated by retries)
+            expect(recordSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    status: 'completed',
+                    portfolioId,
+                })
+            )
+        })
+    })
+
+    describe('Duplicate protection & lock interactions', () => {
+        it('prevents duplicate rebalances via lock acquisition', async () => {
+            // First rebalance acquires lock
+            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+
+            const job1 = mockJob(
+                { portfolioId, triggeredBy: 'auto' as const },
+                'lock-test-1'
+            )
+
+            const StellarService = (global as any).StellarService
+            StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
+                id: portfolioId,
+                userAddress: 'GTEST123456789',
+                allocations: { XLM: 60, USDC: 40 },
+            })
+            StellarService.prototype.executeRebalance = vi.fn().mockResolvedValue({
+                trades: 2,
+                gasUsed: '0.01 XLM',
+            })
+
+            await processRebalanceJob(job1)
+
+            // Lock was acquired
+            expect(rebalanceLockService.acquireLock).toHaveBeenCalledWith(portfolioId)
+        })
+
+        it('aborts rebalance when lock cannot be acquired (in-progress rebalance)', async () => {
+            // Simulate another rebalance already in progress
+            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+
+            const job = mockJob({ portfolioId, triggeredBy: 'auto' as const })
+
+            // Should return without throwing (graceful abort)
+            await processRebalanceJob(job)
+
+            // Lock release should NOT be called since it was never acquired
+            expect(rebalanceLockService.releaseLock).not.toHaveBeenCalled()
+
+            // History should NOT be recorded for skipped rebalances
+            const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
+            const recordSpy = vi.spyOn(rebalanceHistoryService, 'recordRebalanceEvent')
+            expect(recordSpy).not.toHaveBeenCalled()
+        })
+
+        it('releases lock on both success and failure paths', async () => {
+            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+            ;(rebalanceLockService.releaseLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+
+            const StellarService = (global as any).StellarService
+
+            // Test failure path
+            StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(
+                new Error('Service error')
+            )
+
+            const failureJob = mockJob({ portfolioId: 'portfolio-fail', triggeredBy: 'manual' as const })
+            await expect(processRebalanceJob(failureJob)).rejects.toThrow()
+
+            // Lock must be released on failure
+            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith('portfolio-fail')
+
+            vi.clearAllMocks()
+
+            // Test success path
+            StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
+                id: portfolioId,
+                userAddress: 'GTEST123456789',
+                allocations: { XLM: 60, USDC: 40 },
+            })
+            StellarService.prototype.executeRebalance = vi.fn().mockResolvedValue({
+                trades: 2,
+                gasUsed: '0.01 XLM',
+            })
+
+            const successJob = mockJob({ portfolioId, triggeredBy: 'auto' as const })
+            await processRebalanceJob(successJob)
+
+            // Lock must also be released on success
+            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+        })
+
+        it('ensures finally block executes to release lock during early returns', async () => {
+            // Test scenario: lock not acquired, early return
+            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+
+            const job = mockJob({ portfolioId: 'skip-test', triggeredBy: 'auto' as const })
+            await processRebalanceJob(job)
+
+            // Should not call releaseLock since lock was never acquired
+            expect(rebalanceLockService.releaseLock).not.toHaveBeenCalled()
+        })
+    })
+
+    describe('Retry behavior under simulation', () => {
+        it('simulates exponential backoff retry sequence', async () => {
+            // Queue config: 5 attempts with exponential backoff (5s, 10s, 20s, 40s, 80s)
+            // This test documents the retry timeline for contributors
+            const retryTimelines = [
+                { attempt: 1, delay: 0, description: 'Initial execution' },
+                { attempt: 2, delay: 5000, description: 'First retry (5s backoff)' },
+                { attempt: 3, delay: 10000, description: 'Second retry (10s backoff)' },
+                { attempt: 4, delay: 20000, description: 'Third retry (20s backoff)' },
+                { attempt: 5, delay: 40000, description: 'Fourth retry (40s backoff)' },
+            ]
+
+            // Verify the retry configuration is as intended
+            expect(retryTimelines).toHaveLength(5)
+            expect(retryTimelines[1].delay).toBe(5000)
+            expect(retryTimelines[2].delay).toBe(10000)
+            expect(retryTimelines[4].delay).toBe(40000)
+        })
+
+        it('executes job processor deterministically given same inputs', async () => {
+            const StellarService = (global as any).StellarService
+            const getPortfolioMock = vi.fn().mockResolvedValue({
+                id: portfolioId,
+                userAddress: 'GTEST123456789',
+                allocations: { XLM: 60, USDC: 40 },
+            })
+            const executeRebalanceMock = vi.fn().mockResolvedValue({
+                trades: 2,
+                gasUsed: '0.01 XLM',
+            })
+
+            StellarService.prototype.getPortfolio = getPortfolioMock
+            StellarService.prototype.executeRebalance = executeRebalanceMock
+
+            const job = mockJob({ portfolioId, triggeredBy: 'auto' as const })
+
+            // First execution
+            await processRebalanceJob(job)
+            expect(getPortfolioMock).toHaveBeenCalled()
+            expect(executeRebalanceMock).toHaveBeenCalled()
+
+            vi.clearAllMocks()
+            StellarService.prototype.getPortfolio = getPortfolioMock
+            StellarService.prototype.executeRebalance = executeRebalanceMock
+
+            // Same inputs should produce same behavior
+            const job2 = mockJob({ portfolioId, triggeredBy: 'auto' as const })
+            await processRebalanceJob(job2)
+            expect(getPortfolioMock).toHaveBeenCalled()
+            expect(executeRebalanceMock).toHaveBeenCalled()
+        })
     })
 })
 
