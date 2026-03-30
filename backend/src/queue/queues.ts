@@ -8,6 +8,7 @@ export const QUEUE_NAMES = {
     PORTFOLIO_CHECK: 'portfolio-check',
     REBALANCE: 'rebalance',
     ANALYTICS_SNAPSHOT: 'analytics-snapshot',
+    IDEMPOTENCY_CLEANUP: 'idempotency-cleanup',
 } as const
 
 // ─── Job Data Types ───────────────────────────────────────────────────────────
@@ -25,11 +26,16 @@ export interface AnalyticsSnapshotJobData {
     triggeredBy?: 'scheduler' | 'manual' | 'startup'
 }
 
+export interface IdempotencyCleanupJobData {
+    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+}
+
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
 
 let portfolioCheckQueue: Queue<PortfolioCheckJobData> | null = null
 let rebalanceQueue: Queue<RebalanceJobData> | null = null
 let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null
+let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null
 
 function getDefaultJobOptions() {
     return {
@@ -88,6 +94,21 @@ export function getAnalyticsSnapshotQueue(): Queue<AnalyticsSnapshotJobData> | n
     }
 }
 
+export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> | null {
+    try {
+        if (!idempotencyCleanupQueue) {
+            idempotencyCleanupQueue = new Queue(QUEUE_NAMES.IDEMPOTENCY_CLEANUP, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.IDEMPOTENCY_CLEANUP}`)
+        }
+        return idempotencyCleanupQueue
+    } catch {
+        return null
+    }
+}
+
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
@@ -95,9 +116,11 @@ export async function closeAllQueues(): Promise<void> {
         portfolioCheckQueue?.close(),
         rebalanceQueue?.close(),
         analyticsSnapshotQueue?.close(),
+        idempotencyCleanupQueue?.close(),
     ])
     portfolioCheckQueue = null
     rebalanceQueue = null
     analyticsSnapshotQueue = null
+    idempotencyCleanupQueue = null
     logger.info('[QUEUE] All queues closed')
 }

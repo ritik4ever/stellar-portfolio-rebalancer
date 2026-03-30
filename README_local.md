@@ -1,4 +1,4 @@
-markdown# Stellar Portfolio Rebalancer
+# Stellar Portfolio Rebalancer
 
 An intelligent portfolio rebalancing service built for the Stellar ecosystem, leveraging Reflector's price oracles for accurate, manipulation-resistant pricing data.
 
@@ -24,10 +24,11 @@ An intelligent portfolio rebalancing service built for the Stellar ecosystem, le
 ```bash
 git clone https://github.com/your-username/stellar-portfolio-rebalancer
 cd stellar-portfolio-rebalancer
+```
 
-Install dependencies
-
-bash# Install contract dependencies
+2. Install dependencies
+```bash
+# Install contract dependencies
 cd contracts && cargo build
 
 # Install frontend dependencies
@@ -35,34 +36,40 @@ cd ../frontend && npm install
 
 # Install backend dependencies
 cd ../backend && npm install
+```
 
-Configure environment
-
-bash# Create .env files with your configuration
+3. Configure environment
+```bash
+# Create .env files with your configuration
 cp .env.example .env
+```
 
-Deploy smart contract
-
-bashcd contracts
+4. Deploy smart contract
+```bash
+cd contracts
 make deploy-testnet
+```
 
-Start development servers
-
-bash# Terminal 1 - Backend
+5. Start development servers
+```bash
+# Terminal 1 - Backend
 cd backend && npm run dev
 
 # Terminal 2 - Frontend
 cd frontend && npm run dev
-Usage
+```
 
-Connect Wallet: Connect your Stellar wallet
-Create Portfolio: Set target allocations and rebalance threshold
-Monitor: View real-time portfolio status and drift
-Rebalance: Manual or automatic rebalancing based on your settings
+## Usage
 
-Architecture
+- **Connect Wallet**: Connect your Stellar wallet
+- **Create Portfolio**: Set target allocations and rebalance threshold
+- **Monitor**: View real-time portfolio status and drift
+- **Rebalance**: Manual or automatic rebalancing based on your settings
 
-Smart Contracts: Soroban contracts for portfolio management
-Backend: Node.js API with real-time monitoring
-Frontend: React with TypeScript and Tailwind CSS
-Oracle: Reflector price feeds for accurate pricing
+## Architecture
+
+- **Smart Contracts**: Soroban contracts for portfolio management
+- **Backend**: Node.js API with real-time monitoring
+- **Frontend**: React with TypeScript and Tailwind CSS
+- **Oracle**: Reflector price feeds for accurate pricing
+ 

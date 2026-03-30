@@ -109,6 +109,18 @@ Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 
 A retry with the same `Idempotency-Key` and body returns the cached `200` response immediately. A retry with a different body returns `409 CONFLICT`.
 
+### Key retention and cleanup
+
+Idempotency keys are automatically cleaned up to prevent unbounded table growth:
+
+| Setting | Value |
+|---------|-------|
+| **Key TTL** | 24 hours from creation |
+| **Cleanup cadence** | Every 60 minutes (via BullMQ scheduled job) |
+| **Startup cleanup** | Runs once on server startup |
+
+Expired keys (older than 24 hours) are permanently deleted during each cleanup cycle. The cleanup job logs the number of removed keys on every run for operational visibility. When Redis is unavailable, the cleanup job is not scheduled; expired keys are still filtered out at query time and will be purged once the scheduler resumes.
+
 ## Endpoints overview
 
 ### Health and info
