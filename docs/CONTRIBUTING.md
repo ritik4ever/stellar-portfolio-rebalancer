@@ -167,11 +167,53 @@ SMTP_FROM=your-email@gmail.com
 
 For Gmail, use an [App Password](https://myaccount.google.com/apppasswords) instead of your account password. Other supported providers: SendGrid, Mailgun, AWS SES.
 
-Test that notifications are wired up:
+For local harness testing without SMTP or webhook infrastructure, keep `SMTP_*` unset and run the dev-only notification test harness.
+
+### Dev-only notification harness
+
+This harness is isolated from production behavior:
+- It calls a debug endpoint gated by `ENABLE_DEBUG_ROUTES=true`.
+- It still requires admin request signing.
+- Debug routes remain disabled by default.
+
+Required env for local harness:
+
+```env
+ENABLE_DEBUG_ROUTES=true
+ADMIN_PUBLIC_KEYS=G...YOUR_ADMIN_PUBLIC_KEY
+ADMIN_SECRET_KEY=S...YOUR_ADMIN_SECRET_KEY
+```
+
+Run all safe sample events locally:
 
 ```bash
-curl -X POST http://localhost:3001/api/v1/notifications/test \
+cd backend
+npm run test:notifications:dev
+```
+
+Run a single event type:
+
+```bash
+cd backend
+npm run test:notifications:dev -- --event-type rebalance
+```
+
+Optional flags:
+- `--base-url http://localhost:3001`
+- `--user-id G...` (defaults to admin public key)
+- `--email dev@example.com` (enables email path)
+- `--webhook https://example.com/webhook` (enables webhook path)
+
+When `--email` and `--webhook` are omitted, the harness still verifies notification plumbing with safe no-delivery preferences and sample payloads.
+
+Manual debug endpoint example (if needed):
+
+```bash
+curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
   -H "Content-Type: application/json" \
+  -H "X-Public-Key: G..." \
+  -H "X-Message: <unix_ms_timestamp>" \
+  -H "X-Signature: <base64_signature_of_message>" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 ```
 

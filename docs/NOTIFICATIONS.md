@@ -334,10 +334,13 @@ DELETE /api/notifications/unsubscribe?userId=GXXXXXXX...
 }
 ```
 
-### Test Notification Delivery
+### Dev-only Test Notification Delivery
 ```http
-POST /api/notifications/test
+POST /api/v1/debug/notifications/test
 Content-Type: application/json
+X-Public-Key: G...
+X-Message: <unix_ms_timestamp>
+X-Signature: <base64_signature_of_message>
 
 {
   "userId": "GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
@@ -359,38 +362,20 @@ Content-Type: application/json
 }
 ```
 
-### Test All Notification Types
-```http
-POST /api/notifications/test-all
-Content-Type: application/json
+To test all event types locally, use the backend script:
 
-{
-  "userId": "GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-}
+```bash
+cd backend
+npm run test:notifications:dev
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Test notifications sent",
-  "results": [
-    { "eventType": "rebalance", "status": "sent" },
-    { "eventType": "circuitBreaker", "status": "sent" },
-    { "eventType": "priceMovement", "status": "sent" },
-    { "eventType": "riskChange", "status": "sent" }
-  ],
-  "sentTo": {
-    "email": "user@example.com",
-    "webhook": "https://your-domain.com/webhook"
-  },
-  "timestamp": "2024-02-20T10:30:00.000Z"
-}
-```
+The script iterates through `rebalance`, `circuitBreaker`, `priceMovement`, and `riskChange` using safe sample payloads.
 
 ## Testing
 
 ### Test with webhook.site
+
+Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 1. **Create Test Webhook**
    - Go to https://webhook.site
@@ -398,7 +383,7 @@ Content-Type: application/json
 
 2. **Configure Notification Preferences**
    ```bash
-   curl -X POST http://localhost:3001/api/notifications/subscribe \
+   curl -X POST http://localhost:3001/api/v1/notifications/subscribe \
      -H "Content-Type: application/json" \
      -d '{
        "userId": "YOUR_STELLAR_ADDRESS",
@@ -417,8 +402,11 @@ Content-Type: application/json
 
 3. **Send Test Notification**
    ```bash
-   curl -X POST http://localhost:3001/api/notifications/test \
+   curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
      -H "Content-Type: application/json" \
+     -H "X-Public-Key: G..." \
+     -H "X-Message: <unix_ms_timestamp>" \
+     -H "X-Signature: <base64_signature_of_message>" \
      -d '{
        "userId": "YOUR_STELLAR_ADDRESS",
        "eventType": "rebalance"
@@ -444,7 +432,7 @@ Content-Type: application/json
 
 2. **Subscribe with Email**
    ```bash
-   curl -X POST http://localhost:3001/api/notifications/subscribe \
+  curl -X POST http://localhost:3001/api/v1/notifications/subscribe \
      -H "Content-Type: application/json" \
      -d '{
        "userId": "YOUR_STELLAR_ADDRESS",
@@ -463,8 +451,11 @@ Content-Type: application/json
 
 3. **Send Test Email**
    ```bash
-   curl -X POST http://localhost:3001/api/notifications/test \
+   curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
      -H "Content-Type: application/json" \
+     -H "X-Public-Key: G..." \
+     -H "X-Message: <unix_ms_timestamp>" \
+     -H "X-Signature: <base64_signature_of_message>" \
      -d '{
        "userId": "YOUR_STELLAR_ADDRESS",
        "eventType": "rebalance"
@@ -509,16 +500,20 @@ Content-Type: application/json
 2. Check event type is enabled in preferences
 3. Verify userId matches wallet address
 4. Check backend logs for notification attempts
-5. Test with `/api/notifications/test` endpoint
+5. Test with `/api/v1/debug/notifications/test` endpoint (requires debug routes enabled and admin headers)
 
 ## Security Considerations
 
-1. **SMTP Credentials**
+1. **Debug test surface isolation**
+  - `/api/v1/debug/*` routes are intended for local development and are blocked unless `ENABLE_DEBUG_ROUTES=true`
+  - Keep `ENABLE_DEBUG_ROUTES=false` in production
+
+2. **SMTP Credentials**
    - Never commit .env files with real credentials
    - Use app passwords, not regular passwords
    - Rotate credentials regularly
 
-2. **Webhook URLs**
+3. **Webhook URLs**
    - Use HTTPS in production
    - Validate webhook URLs before saving
    - Implement webhook signature verification (future enhancement)
