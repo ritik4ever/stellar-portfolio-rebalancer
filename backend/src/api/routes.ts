@@ -1,6 +1,45 @@
-import { Router, Request, Response } from "express";
-import { StellarService } from "../services/stellar.js";
-import { ReflectorService } from "../services/reflector.js";
+import { Router, Request, Response } from 'express'
+import { StellarService } from '../services/stellar.js'
+import { ReflectorService } from '../services/reflector.js'
+import { riskManagementService, rebalanceHistoryService } from '../services/serviceContainer.js'
+import { portfolioStorage } from '../services/portfolioStorage.js'
+import { CircuitBreakers } from '../services/circuitBreakers.js'
+import { analyticsService } from '../services/analyticsService.js'
+import { notificationService } from '../services/notificationService.js'
+import { contractEventIndexerService } from '../services/contractEventIndexer.js'
+import { AutoRebalancerService } from '../services/autoRebalancer.js'
+import { logger, logAudit } from '../utils/logger.js'
+import { idempotencyMiddleware } from '../middleware/idempotency.js'
+import { requireAdmin } from '../middleware/auth.js'
+import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
+import { getAuthConfig } from '../services/authService.js'
+import { writeRateLimiter, protectedWriteLimiter, protectedCriticalLimiter, adminRateLimiter } from '../middleware/rateLimit.js'
+import { blockDebugInProduction } from '../middleware/debugGate.js'
+import { getFeatureFlags, getPublicFeatureFlags } from '../config/featureFlags.js'
+import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWorker.js'
+import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
+import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
+import { getErrorMessage, getErrorObject, parseOptionalBoolean } from '../utils/helpers.js'
+import { validateRequest, validateQuery } from '../middleware/validate.js'
+import {
+    createPortfolioSchema,
+    recordConsentSchema,
+    consentStatusQuerySchema,
+    notificationSubscribeSchema,
+    notificationQuerySchema,
+    adminAddAssetSchema,
+    adminPatchAssetSchema,
+    portfolioExportQuerySchema,
+    rebalanceHistoryQuerySchema,
+    debugTestNotificationSchema
+} from './validation.js'
+import { rebalanceLockService } from '../services/rebalanceLock.js'
+import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
+import type { Portfolio } from '../types/index.js'
+import { ok, fail } from '../utils/apiResponse.js'
+import { getPortfolioExport } from '../services/portfolioExportService.js'
+import { assetRegistryService } from '../services/assetRegistryService.js'
 import {
   riskManagementService,
   rebalanceHistoryService,
@@ -87,67 +126,31 @@ router.get("/strategies", (_req: Request, res: Response) => {
 
 // ─── Legal consent (GDPR/CCPA) ─────────────────────────────────────────────
 /** Get consent status for a user. Required before using the app. */
-router.get("/consent/status", (req: Request, res: Response) => {
-  try {
-    const userId = (req.query.userId ?? req.query.user_id) as string;
-    if (!userId)
-      return fail(res, 400, "VALIDATION_ERROR", "userId is required");
-    const consent = databaseService.getConsent(userId);
-    const accepted = databaseService.hasFullConsent(userId);
-    return ok(res, {
-      accepted,
-      termsAcceptedAt: consent?.termsAcceptedAt ?? null,
-      privacyAcceptedAt: consent?.privacyAcceptedAt ?? null,
-      cookieAcceptedAt: consent?.cookieAcceptedAt ?? null,
-    });
-  } catch (error) {
-    logger.error("[ERROR] Consent status failed", {
-      error: getErrorObject(error),
-    });
-    return fail(res, 500, "INTERNAL_ERROR", getErrorMessage(error));
-  }
-});
+router.get('/consent/status', validateQuery(consentStatusQuerySchema), (req: Request, res: Response) => {
+    try {
+        const userId = (req.query.userId ?? req.query.user_id) as string
+        const consent = databaseService.getConsent(userId)
+        const accepted = databaseService.hasFullConsent(userId)
+        return ok(res, {
+            accepted,
+            termsAcceptedAt: consent?.termsAcceptedAt ?? null,
+            privacyAcceptedAt: consent?.privacyAcceptedAt ?? null,
+            cookieAcceptedAt: consent?.cookieAcceptedAt ?? null
+        })
+    } catch (error) {
+        logger.error('[ERROR] Consent status failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-router.post(
-  "/consent",
-  ...protectedWriteLimiter,
-  idempotencyMiddleware,
-  (req: Request, res: Response) => {
+router.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
     try {
-      const { userId, terms, privacy, cookies } = req.body ?? {};
-      if (!userId || typeof userId !== "string")
-        return fail(res, 400, "VALIDATION_ERROR", "userId is required");
-      if (
-        typeof terms !== "boolean" ||
-        typeof privacy !== "boolean" ||
-        typeof cookies !== "boolean"
-      ) {
-        return fail(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "terms, privacy, and cookies must be booleans",
-        );
-      }
-      if (!terms || !privacy || !cookies) {
-        return fail(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "You must accept Terms of Service, Privacy Policy, and Cookie Policy",
-        );
-      }
-      const ipAddress = req.ip ?? req.socket?.remoteAddress;
-      const userAgent = req.get("user-agent");
-      databaseService.recordConsent(userId, {
-        terms,
-        privacy,
-        cookies,
-        ipAddress,
-        userAgent,
-      });
-      return ok(res, { message: "Consent recorded", accepted: true });
+        const { userId, terms, privacy, cookies } = req.body
+        const ipAddress = req.ip ?? req.socket?.remoteAddress
+        const userAgent = req.get('user-agent')
+        databaseService.recordConsent(userId, { terms, privacy, cookies, ipAddress, userAgent })
+        return ok(res, { message: 'Consent recorded', accepted: true })
     } catch (error) {
       logger.error("[ERROR] Record consent failed", {
         error: getErrorObject(error),
@@ -372,23 +375,49 @@ router.patch(
       });
       return fail(res, 500, "INTERNAL_ERROR", getErrorMessage(error));
     }
-  },
-);
+})
 
-router.get("/rebalance/history", async (req: Request, res: Response) => {
-  try {
-    const portfolioId = req.query.portfolioId as string;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const source = parseHistorySource(req.query.source);
-    const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp);
-    const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp);
-    const syncOnChain = parseOptionalBoolean(req.query.syncOnChain) === true;
+router.get('/rebalance/history', validateQuery(rebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.query.portfolioId as string | undefined
+        const limit = (req.query.limit as unknown as number | undefined) ?? 50
+        const source = parseHistorySource(req.query.source)
+        const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp)
+        const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
+        const syncOnChain = (req.query.syncOnChain as unknown as boolean | undefined) === true
 
-    logger.info("Rebalance history request", {
-      portfolioId: portfolioId || "all",
-    });
-    if (syncOnChain) {
-      await contractEventIndexerService.syncOnce();
+        logger.info('Rebalance history request', { portfolioId: portfolioId || 'all' })
+        if (syncOnChain) {
+            await contractEventIndexerService.syncOnce()
+        }
+
+        const history = await rebalanceHistoryService.getRebalanceHistory(
+            portfolioId || undefined,
+            limit,
+            {
+                eventSource: source,
+                startTimestamp,
+                endTimestamp
+            }
+        )
+
+        return ok(
+            res,
+            {
+                history,
+                portfolioId: portfolioId || undefined,
+                filters: {
+                    source,
+                    startTimestamp,
+                    endTimestamp
+                }
+            },
+            { meta: { count: history.length } }
+        )
+
+    } catch (error) {
+        logger.error('[ERROR] Rebalance history failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 
     const history = await rebalanceHistoryService.getRebalanceHistory(
@@ -1558,6 +1587,40 @@ router.delete(
 // DEBUG ROUTES
 // ================================
 
+// Get notification delivery logs
+router.get('/notifications/logs', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        
+        // Authorization Logic:
+        // When global authentication is explicitly enabled, we extract the context directly from the token.
+        // If the user tries passing an arbitrary ?userId=... query that does not match their own authenticated address, 
+        // we forcefully block the request to prevent exposure of other users' delivery logs.
+        // If authentication is disabled, we simply fall back to taking the userId query parameter as given.
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot read notification logs for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
+        }
+
+        const logs = notificationService.getLogs(userId)
+
+        return ok(res, { logs })
+    } catch (error) {
+        logger.error('Failed to get notification logs', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+
 /**
  * Debug-only + admin-gated endpoint for sending a single test notification.
  * This keeps test-notification behavior explicit and isolated from production routes.
@@ -1827,11 +1890,23 @@ router.get(
  * Returns BullMQ queue depths and Redis connectivity status.
  * Used for worker health monitoring and alerting (issue #38).
  */
-router.get("/queue/health", async (req: Request, res: Response) => {
-  try {
-    const metrics = await getQueueMetrics();
-    if (metrics.redisConnected) {
-      return ok(res, metrics);
+router.get('/queue/health', async (req: Request, res: Response) => {
+    try {
+        const metrics = await getQueueMetrics()
+        const workers = {
+            portfolioCheck: getPortfolioCheckWorkerStatus(),
+            rebalance: getRebalanceWorkerStatus(),
+            analyticsSnapshot: getAnalyticsSnapshotWorkerStatus(),
+        }
+        const payload = { ...metrics, workers }
+        if (metrics.redisConnected) {
+            return ok(res, payload)
+        }
+        return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Redis unavailable', payload)
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
+            redisConnected: false
+        })
     }
     return fail(res, 503, "SERVICE_UNAVAILABLE", "Redis unavailable", metrics);
   } catch (error) {

@@ -7,6 +7,9 @@ export interface WorkerRuntimeStatus {
     lastReadyAt?: string
     lastStoppedAt?: string
     lastError?: string
+    lastSuccessfulRunAt?: string
+    lastErrorAt?: string
+    schedulerRegistered: boolean
 }
 
 export function createWorkerRuntimeStatus(name: string, concurrency: number): WorkerRuntimeStatus {
@@ -15,6 +18,7 @@ export function createWorkerRuntimeStatus(name: string, concurrency: number): Wo
         concurrency,
         started: false,
         ready: false,
+        schedulerRegistered: false,
     }
 }
 
@@ -41,6 +45,19 @@ export function markWorkerStopped(status: WorkerRuntimeStatus): void {
     status.started = false
     status.ready = false
     status.lastStoppedAt = new Date().toISOString()
+}
+
+export function markWorkerJobCompleted(status: WorkerRuntimeStatus): void {
+    status.lastSuccessfulRunAt = new Date().toISOString()
+}
+
+export function markWorkerJobFailed(status: WorkerRuntimeStatus, error: unknown): void {
+    status.lastErrorAt = new Date().toISOString()
+    status.lastError = error instanceof Error ? error.message : String(error)
+}
+
+export function setSchedulerRegistered(status: WorkerRuntimeStatus, registered: boolean): void {
+    status.schedulerRegistered = registered
 }
 
 export function snapshotWorkerRuntimeStatus(status: WorkerRuntimeStatus): WorkerRuntimeStatus {

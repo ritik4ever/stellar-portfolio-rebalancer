@@ -68,6 +68,7 @@ function readyWorker(name: string) {
         concurrency: 1,
         started: true,
         ready: true,
+        schedulerRegistered: false,
     }
 }
 

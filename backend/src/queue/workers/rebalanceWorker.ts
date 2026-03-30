@@ -1,24 +1,26 @@
-import type { Job } from "bullmq";
-import { Worker } from "bullmq";
-import { logger, logAudit } from "../../utils/logger.js";
-import { rebalanceLockService } from "../../services/rebalanceLock.js";
-import { StellarService } from "../../services/stellar.js";
-import { rebalanceHistoryService } from "../../services/serviceContainer.js";
-import { notificationService } from "../../services/notificationService.js";
-import { getConnectionOptions } from "../connection.js";
-import type { RebalanceJobData } from "../queues.js";
+import type { Job } from 'bullmq'
+import { Worker } from 'bullmq'
+import { logger, logAudit } from '../../utils/logger.js'
+import { rebalanceLockService } from '../../services/rebalanceLock.js'
+import { StellarService } from '../../services/stellar.js'
+import { rebalanceHistoryService } from '../../services/serviceContainer.js'
+import { notificationService } from '../../services/notificationService.js'
+import { getConnectionOptions } from '../connection.js'
+import type { RebalanceJobData } from '../queues.js'
 import {
-  createWorkerRuntimeStatus,
-  markWorkerFailed,
-  markWorkerReady,
-  markWorkerStarting,
-  markWorkerStopped,
-  snapshotWorkerRuntimeStatus,
-  type WorkerRuntimeStatus,
-} from "./workerRuntime.js";
+    createWorkerRuntimeStatus,
+    markWorkerFailed,
+    markWorkerJobCompleted,
+    markWorkerJobFailed,
+    markWorkerReady,
+    markWorkerStarting,
+    markWorkerStopped,
+    snapshotWorkerRuntimeStatus,
+    type WorkerRuntimeStatus,
+} from './workerRuntime.js'
 
-let worker: Worker | null = null;
-const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
+let worker: Worker | null = null
+const runtimeStatus = createWorkerRuntimeStatus('rebalance', 3)
 
 /**
  * Core processor: executes a single portfolio rebalance.
@@ -206,4 +208,8 @@ export function isRebalanceWorkerRunning(): boolean {
 
 export function getRebalanceWorkerStatus(): WorkerRuntimeStatus {
   return snapshotWorkerRuntimeStatus(runtimeStatus);
+}
+
+export function getRebalanceWorkerStatus(): WorkerRuntimeStatus {
+    return snapshotWorkerRuntimeStatus(runtimeStatus)
 }

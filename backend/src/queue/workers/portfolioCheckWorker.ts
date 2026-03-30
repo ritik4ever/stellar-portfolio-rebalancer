@@ -75,29 +75,46 @@ export async function processPortfolioCheckJob(
 }
 
 export function startPortfolioCheckWorker(): Worker | null {
-  if (worker) return worker;
-  try {
-    markWorkerStarting(runtimeStatus);
-    worker = new Worker("portfolio-check", processPortfolioCheckJob, {
-      connection: getConnectionOptions(),
-      concurrency: 1,
-    });
-  } catch (err) {
-    markWorkerFailed(runtimeStatus, err);
-    logger.warn(
-      "[WORKER:portfolio-check] Failed to start – Redis may be unavailable",
-      {
-        error: err instanceof Error ? err.message : String(err),
-      },
-    );
-    return null;
-  }
+    if (worker) return worker
 
-  void worker
-    .waitUntilReady()
-    .then(() => {
-      markWorkerReady(runtimeStatus);
-      logger.info("[WORKER:portfolio-check] Worker ready");
+    try {
+        markWorkerStarting(runtimeStatus)
+        worker = new Worker('portfolio-check', processPortfolioCheckJob, {
+            connection: getConnectionOptions(),
+            concurrency: 1
+        })
+    } catch (err) {
+        markWorkerFailed(runtimeStatus, err)
+        logger.warn('[WORKER:portfolio-check] Failed to start - Redis may be unavailable', {
+            error: err instanceof Error ? err.message : String(err)
+        })
+        return null
+    }
+
+    void worker.waitUntilReady()
+        .then(() => {
+            markWorkerReady(runtimeStatus)
+            logger.info('[WORKER:portfolio-check] Worker ready')
+        })
+        .catch((err) => {
+            markWorkerFailed(runtimeStatus, err)
+            logger.error('[WORKER:portfolio-check] Worker failed readiness check', {
+                error: err instanceof Error ? err.message : String(err),
+            })
+        })
+
+    worker.on('completed', (j) => {
+        markWorkerJobCompleted(runtimeStatus)
+        logger.info('[WORKER:portfolio-check] Job completed', { jobId: j.id })
+    })
+
+    worker.on('failed', (j, err) => {
+        markWorkerJobFailed(runtimeStatus, err)
+        logger.error('[WORKER:portfolio-check] Job failed', {
+            jobId: j?.id,
+            error: err.message,
+            attemptsMade: j?.attemptsMade
+        })
     })
     .catch((err) => {
       markWorkerFailed(runtimeStatus, err);
@@ -137,4 +154,12 @@ export function isPortfolioCheckWorkerRunning(): boolean {
 
 export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
   return snapshotWorkerRuntimeStatus(runtimeStatus);
+}
+
+export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
+    return snapshotWorkerRuntimeStatus(runtimeStatus)
+}
+
+export function setPortfolioCheckSchedulerRegistered(registered: boolean): void {
+    runtimeStatus.schedulerRegistered = registered
 }

@@ -1,21 +1,19 @@
 import 'dotenv/config'
-import express from 'express'
+import express, { type Request, type Response } from 'express'
 import cors from 'cors'
-import {
-    validateStartupConfigOrThrow,
-    buildStartupSummary,
-    logStartupSubsystems,
-} from './config/startupConfig.js'
+import swaggerUi from 'swagger-ui-express'
+import { validateStartupConfigOrThrow, buildStartupSummary, logStartupSubsystems } from './config/startupConfig.js'
 import { logger } from './utils/logger.js'
+import { v1Router } from './api/v1Router.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
-import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
-import { buildReadinessReport } from './monitoring/readiness.js'
+import { legacyApiDeprecation } from './middleware/legacyApiDeprecation.js'
 import { startQueueScheduler } from './queue/scheduler.js'
 import { probeRedis } from './queue/connection.js'
 import { getRateLimitStoreType } from './middleware/rateLimit.js'
 import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
 import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
+import spec from './openapi/spec.js'
 
 async function main() {
     const config = validateStartupConfigOrThrow()
@@ -48,10 +46,6 @@ async function main() {
     app.use(express.urlencoded({ extended: true, limit: '10mb' }))
     app.set('trust proxy', 1)
 
-    app.get('/health', (_req, res) => {
-        res.status(200).type('text/plain').send('ok')
-    })
-
     app.get('/readiness', async (_req, res) => {
         const report = await buildReadinessReport()
         res.status(report.status === 'ready' ? 200 : 503).json(report)
@@ -71,6 +65,21 @@ async function main() {
     mountLegacyNonApiRedirects(app)
 
     app.use(apiErrorHandler)
+/** Plain-text liveness for load balancers */
+app.get('/health', (_req: Request, res: Response) => {
+    res.status(200).type('text/plain').send('ok')
+})
+
+/** Interactive API docs — served from the canonical spec.ts source of truth */
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
+
+/** Serve the raw OpenAPI JSON at a stable URL (useful for Postman / CI) */
+app.get('/api-docs.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.json(spec)
+})
+
+app.use(apiErrorHandler)
 
     app.listen(config.port, () => {
         const rateLimitStore = getRateLimitStoreType()

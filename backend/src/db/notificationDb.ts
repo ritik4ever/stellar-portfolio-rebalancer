@@ -56,6 +56,18 @@ function ensureNotificationTable() {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS notification_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
     `)
 }
 
@@ -140,4 +152,80 @@ export function dbDeleteNotificationPreferences(userId: string): boolean {
     
     const result = db.prepare('DELETE FROM notification_preferences WHERE user_id = ?').run(userId)
     return result.changes > 0
+}
+
+/**
+ * Represents a log entry for a notification delivery attempt.
+ * Used for tracking provider success/failure and troubleshooting.
+ */
+export interface NotificationLog {
+    id: number
+    userId: string
+    provider: 'email' | 'webhook'
+    eventType: string
+    status: 'sent' | 'failed' | 'retried' | 'skipped'
+    errorMessage?: string
+    createdAt: string
+}
+
+/**
+ * Logs the outcome of a notification delivery attempt (e.g., sent, failed) 
+ * and automatically prunes any log entries older than 30 days to save space.
+ * @param userId - The user receiving the notification
+ * @param provider - 'email' or 'webhook'
+ * @param eventType - The type of event (e.g., 'rebalance', 'circuitBreaker')
+ * @param status - Success/failure state of the delivery attempt
+ * @param errorMessage - Optional error details if the delivery failed or was skipped
+ */
+export function dbLogNotificationOutcome(
+    userId: string,
+    provider: 'email' | 'webhook',
+    eventType: string,
+    status: 'sent' | 'failed' | 'retried' | 'skipped',
+    errorMessage?: string
+): void {
+    ensureNotificationTable()
+    const db = getDb()
+    const now = new Date().toISOString()
+    
+    db.prepare(`
+        INSERT INTO notification_logs 
+            (user_id, provider, event_type, status, error_message, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(userId, provider, eventType, status, errorMessage || null, now)
+
+    // Run 30-day retention cleanup. Note: SQLite uses 'now', '-30 days' for datetime math.
+    // This effectively self-cleans old logs continuously during insertions.
+    db.prepare(`
+        DELETE FROM notification_logs 
+        WHERE created_at < datetime('now', '-30 days')
+    `).run();
+}
+
+/**
+ * Retrieves recent notification delivery logs for a given user.
+ * Useful for exposing operational visibility and debugging delivery issues.
+ * @param userId - ID of the user to fetch logs for
+ * @param limit - Max number of logs to return (default: 50)
+ */
+export function dbGetNotificationLogs(userId: string, limit: number = 50): NotificationLog[] {
+    ensureNotificationTable()
+    const db = getDb()
+
+    const rows = db.prepare<[string, number], any>(`
+        SELECT * FROM notification_logs 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT ?
+    `).all(userId, limit)
+
+    return rows.map((r: any) => ({
+        id: r.id,
+        userId: r.user_id,
+        provider: r.provider,
+        eventType: r.event_type,
+        status: r.status,
+        errorMessage: r.error_message || undefined,
+        createdAt: r.created_at
+    }))
 }

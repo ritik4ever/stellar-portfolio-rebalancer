@@ -9,6 +9,8 @@ import {
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { authRateLimiter } from '../middleware/rateLimit.js'
+import { validateRequest } from '../middleware/validate.js'
+import { loginSchema, refreshTokenSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
 
@@ -79,16 +81,13 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/refresh', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/refresh', authRateLimiter, validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'JWT auth not configured')
         }
-        const refreshToken = req.body?.refreshToken
-        if (!refreshToken || typeof refreshToken !== 'string') {
-            return fail(res, 400, 'VALIDATION_ERROR', 'refreshToken is required')
-        }
+        const { refreshToken } = req.body
         const tokens = await refreshTokens(refreshToken)
         if (!tokens) {
             return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired refresh token')

@@ -856,9 +856,23 @@ const spec: Record<string, any> = {
                                             type: 'object',
                                             properties: {
                                                 redisConnected: { type: 'boolean' },
-                                                portfolioCheck: { type: 'object' },
-                                                rebalance: { type: 'object' },
-                                                analyticsSnapshot: { type: 'object' },
+                                                queues: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        portfolioCheck: { type: 'object' },
+                                                        rebalance: { type: 'object' },
+                                                        analyticsSnapshot: { type: 'object' },
+                                                    },
+                                                },
+                                                workers: {
+                                                    type: 'object',
+                                                    description: 'Per-worker runtime status including lifecycle state, last-run timestamps, and scheduler registration',
+                                                    properties: {
+                                                        portfolioCheck: { type: 'object' },
+                                                        rebalance: { type: 'object' },
+                                                        analyticsSnapshot: { type: 'object' },
+                                                    },
+                                                },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
