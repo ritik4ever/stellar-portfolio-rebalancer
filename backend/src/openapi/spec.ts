@@ -773,27 +773,7 @@ const spec: Record<string, any> = {
                     required: true,
                     content: {
                         'application/json': {
-                            schema: {
-                                type: 'object',
-                                required: ['userId', 'emailEnabled', 'webhookEnabled', 'events'],
-                                properties: {
-                                    userId: { type: 'string' },
-                                    emailEnabled: { type: 'boolean' },
-                                    emailAddress: { type: 'string', format: 'email' },
-                                    webhookEnabled: { type: 'boolean' },
-                                    webhookUrl: { type: 'string', format: 'uri' },
-                                    events: {
-                                        type: 'object',
-                                        required: ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange'],
-                                        properties: {
-                                            rebalance: { type: 'boolean' },
-                                            circuitBreaker: { type: 'boolean' },
-                                            priceMovement: { type: 'boolean' },
-                                            riskChange: { type: 'boolean' },
-                                        },
-                                    },
-                                },
-                            },
+                            schema: { $ref: '#/components/schemas/NotificationPreferencesInput' },
                             example: {
                                 userId: 'user-123',
                                 emailEnabled: true,
@@ -904,6 +884,28 @@ const spec: Record<string, any> = {
             PriceData: { type: 'object' },
             RiskMetrics: { type: 'object' },
             RebalanceResult: { type: 'object' },
+            NotificationEventsInput: {
+                type: 'object',
+                required: ['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange'],
+                properties: {
+                    rebalance: { type: 'boolean' },
+                    circuitBreaker: { type: 'boolean' },
+                    priceMovement: { type: 'boolean' },
+                    riskChange: { type: 'boolean' },
+                },
+            },
+            NotificationPreferencesInput: {
+                type: 'object',
+                required: ['emailEnabled', 'webhookEnabled', 'events'],
+                properties: {
+                    userId: { type: 'string', description: 'Omitted when JWT auth is enabled (derived from token).' },
+                    emailEnabled: { type: 'boolean' },
+                    emailAddress: { type: 'string', format: 'email', description: 'Required when emailEnabled is true.' },
+                    webhookEnabled: { type: 'boolean' },
+                    webhookUrl: { type: 'string', format: 'uri', pattern: '^https?://', description: 'Required when webhookEnabled is true. Must use http or https.' },
+                    events: { $ref: '#/components/schemas/NotificationEventsInput' },
+                },
+            },
         },
     },
 };
