@@ -206,7 +206,9 @@ export function validateStartupConfigOrThrow(
 
 export function buildStartupSummary(
   config: StartupConfig,
+  redisAvailable?: boolean,
 ): Record<string, unknown> {
+  const queueEnabled = redisAvailable === true;
   return {
     nodeEnv: config.nodeEnv,
     port: config.port,
@@ -215,8 +217,21 @@ export function buildStartupSummary(
     contractAddress: maskValue(config.stellarContractAddress, 6, 4),
     autoRebalancerEnabled: config.autoRebalancerEnabled,
     rebalanceSignerConfigured: config.hasRebalanceSigner,
-    jwtAuthEnabled: config.jwtAuthEnabled,
     corsOriginsConfigured: config.corsOrigins.length,
+    redis: {
+      available: redisAvailable ?? null,
+      rateLimitStore: queueEnabled ? "redis" : "memory",
+    },
+    queueSubsystem: {
+      enabled: queueEnabled,
+      activeWorkers: queueEnabled
+        ? ["portfolio-check", "rebalance", "analytics-snapshot"]
+        : [],
+      disabledReason: !queueEnabled
+        ? "Redis unreachable — set REDIS_URL to enable BullMQ workers"
+        : undefined,
+    },
+    jwtAuthEnabled: config.jwtAuthEnabled,
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       allowFallbackPrices: config.featureFlags.allowFallbackPrices,
@@ -226,6 +241,45 @@ export function buildStartupSummary(
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
     },
   };
+}
+
+export function logStartupSubsystems(
+  config: StartupConfig,
+  redisAvailable: boolean,
+  rateLimitStore: "redis" | "memory",
+): void {
+  logger.info("[STARTUP] Subsystem status", {
+    required: {
+      database: "enabled",
+      stellarNetwork: config.stellarNetwork,
+      horizonUrl: safeUrlHost(config.stellarHorizonUrl),
+      contractAddress: maskValue(config.stellarContractAddress, 6, 4),
+      rebalanceSigner: config.hasRebalanceSigner ? "configured" : "missing",
+    },
+    optional: {
+      redis: redisAvailable ? "connected" : "unavailable — set REDIS_URL",
+      rateLimitStore: `${rateLimitStore} store`,
+      queueWorkers: redisAvailable
+        ? "enabled (portfolio-check, rebalance, analytics-snapshot)"
+        : "disabled — no Redis",
+      queueScheduler: redisAvailable ? "enabled" : "disabled — no Redis",
+      autoRebalancer: config.autoRebalancerEnabled
+        ? "enabled"
+        : "disabled (non-production)",
+    },
+    featureFlags: {
+      demoMode: config.featureFlags.demoMode,
+      debugRoutes: config.featureFlags.enableDebugRoutes,
+    },
+  });
+
+  if (!redisAvailable) {
+    logger.warn(
+      "[STARTUP] Redis unreachable — BullMQ workers, scheduled jobs, and distributed rate limiting are inactive. " +
+        "In-memory rate limiting is active as a single-instance fallback. " +
+        "Set REDIS_URL (default: redis://localhost:6379) and restart to enable the full queue subsystem.",
+    );
+  }
 }
 
 function safeUrlHost(url: string): string {
