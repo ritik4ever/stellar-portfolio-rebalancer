@@ -29,12 +29,13 @@ const runtimeStatus = createWorkerRuntimeStatus('rebalance', 3)
 export async function processRebalanceJob(
   job: Job<RebalanceJobData>,
 ): Promise<void> {
-  const { portfolioId, triggeredBy } = job.data;
+  const { portfolioId, triggeredBy, correlationId } = job.data;
 
   logger.info("[WORKER:rebalance] Executing rebalance", {
     jobId: job.id,
     portfolioId,
     triggeredBy,
+    correlationId,
   });
   if (triggeredBy === "auto") {
     logAudit("auto_rebalance_started", {

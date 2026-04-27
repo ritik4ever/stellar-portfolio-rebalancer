@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { getPortfolioCheckQueue, getAnalyticsSnapshotQueue, getIdempotencyCleanupQueue } from './queues.js'
 import { logger } from '../utils/logger.js'
 import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWorker.js'
@@ -7,6 +8,10 @@ import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyC
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
 const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
 const IDEMPOTENCY_CLEANUP_CRON = '15 * * * *'  // every 60 minutes (quarter past the hour)
+
+function generateSchedulerCorrelationId(prefix: string): string {
+    return `${prefix}-${randomUUID().slice(0, 8)}`
+}
 
 /**
  * Registers repeatable (recurring) BullMQ jobs.
@@ -25,7 +30,7 @@ export async function startQueueScheduler(): Promise<void> {
     // ── Portfolio check (every 30 min) ──────────────────────────────────────
     await portfolioCheckQueue.add(
         'scheduled-portfolio-check',
-        { triggeredBy: 'scheduler' },
+        { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('scheduled') },
         {
             repeat: { pattern: PORTFOLIO_CHECK_CRON },
             jobId: 'repeatable-portfolio-check',
@@ -35,14 +40,14 @@ export async function startQueueScheduler(): Promise<void> {
     // ── Immediate startup check ──────────────────────────────────────────────
     await portfolioCheckQueue.add(
         'startup-portfolio-check',
-        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup' },
+        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup', correlationId: generateSchedulerCorrelationId('startup') },
         { priority: 1 }
     )
 
     // ── Analytics snapshot (every 60 min) ───────────────────────────────────
     await analyticsSnapshotQueue.add(
         'scheduled-analytics-snapshot',
-        { triggeredBy: 'scheduler' },
+        { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('scheduled') },
         {
             repeat: { pattern: ANALYTICS_SNAPSHOT_CRON },
             jobId: 'repeatable-analytics-snapshot',
@@ -52,14 +57,14 @@ export async function startQueueScheduler(): Promise<void> {
     // ── Immediate analytics snapshot on startup ──────────────────────────────
     await analyticsSnapshotQueue.add(
         'startup-analytics-snapshot',
-        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup' },
+        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup', correlationId: generateSchedulerCorrelationId('startup') },
         { priority: 1 }
     )
 
     // ── Idempotency cleanup (every 60 min) ──────────────────────────────────
     await idempotencyCleanupQueue.add(
         'scheduled-idempotency-cleanup',
-        { triggeredBy: 'scheduler' },
+        { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('scheduled') },
         {
             repeat: { pattern: IDEMPOTENCY_CLEANUP_CRON },
             jobId: 'repeatable-idempotency-cleanup',
@@ -69,7 +74,7 @@ export async function startQueueScheduler(): Promise<void> {
     // ── Immediate cleanup on startup ─────────────────────────────────────────
     await idempotencyCleanupQueue.add(
         'startup-idempotency-cleanup',
-        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup' },
+        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup', correlationId: generateSchedulerCorrelationId('startup') },
         { priority: 1 }
     )
 

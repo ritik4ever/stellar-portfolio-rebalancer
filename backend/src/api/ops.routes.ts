@@ -18,6 +18,9 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
+import { runContractDiagnostics } from '../services/contractDiagnostics.js'
+import { getFailedJobs } from '../queue/queueMetrics.js'
+import { QUEUE_NAMES } from '../queue/queues.js'
 
 export const opsRouter = Router()
 
@@ -142,6 +145,55 @@ opsRouter.get('/queue/health', async (req: Request, res: Response) => {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
             redisConnected: false
         })
+    }
+})
+
+opsRouter.get('/queue/failed', async (req: Request, res: Response) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit as string) || 20, 100)
+        const failedJobs = await getFailedJobs(limit)
+        return ok(res, failedJobs)
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response) => {
+    try {
+        const { jobId } = req.params
+        const { queue: queueName } = req.body
+
+        const queueMap: Record<string, any> = {
+            [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue(),
+            [QUEUE_NAMES.REBALANCE]: getRebalanceQueue(),
+            [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue(),
+        }
+
+        const queue = queueMap[queueName]
+        if (!queue) {
+            return fail(res, 400, 'INVALID_QUEUE', 'Invalid queue name')
+        }
+
+        const job = await queue.getJob(jobId)
+        if (!job) {
+            return fail(res, 404, 'JOB_NOT_FOUND', 'Job not found')
+        }
+
+        await job.retry()
+        return ok(res, { message: 'Job retried', jobId, queue: queueName })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.get('/contract/diagnostics', async (_req: Request, res: Response) => {
+    try {
+        const diagnostics = await runContractDiagnostics()
+        const status = diagnostics.success ? 200 : 503
+        return res.status(status).json(diagnostics)
+    } catch (error) {
+        logger.error('[ERROR] Contract diagnostics failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 

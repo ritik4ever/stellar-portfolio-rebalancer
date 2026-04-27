@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { StellarService } from './stellar.js'
 import { ReflectorService } from './reflector.js'
 import { rebalanceHistoryService } from './serviceContainer.js'
@@ -7,6 +8,7 @@ import { notificationService } from './notificationService.js'
 import { logger, logAudit } from '../utils/logger.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { isRedisAvailable } from '../queue/connection.js'
+import { getRequestId } from '../utils/requestContext.js'
 
 export class AutoRebalancerService {
     private stellarService: StellarService
@@ -59,9 +61,9 @@ export class AutoRebalancerService {
                     return
                 }
 
-                await queue.add(
+await queue.add(
                     'startup-portfolio-check',
-                    { triggeredBy: 'startup' },
+                    { triggeredBy: 'startup', correlationId: getRequestId() || randomUUID() },
                     { priority: 1 }
                 )
                 this.initialized = true
@@ -98,9 +100,9 @@ export class AutoRebalancerService {
         const queue = getPortfolioCheckQueue()
         if (!queue) throw new Error('Redis unavailable – cannot force check')
 
-        await queue.add(
+await queue.add(
             'force-portfolio-check',
-            { triggeredBy: 'manual' },
+            { triggeredBy: 'manual', correlationId: getRequestId() || randomUUID() },
             { priority: 1 }
         )
         logger.info('[AUTO-REBALANCER] Force check job enqueued')
