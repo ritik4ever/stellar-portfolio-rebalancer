@@ -69,3 +69,57 @@ Prometheus alerts are preconfigured for:
 - failed rebalance queue jobs
 
 Alertmanager ships alerts to `http://host.docker.internal:5001/alerts` by default. Replace that receiver with your Slack, PagerDuty, Opsgenie, or webhook destination before production rollout.
+
+## Real-time Event Flow
+
+The backend currently has two connected real-time paths:
+
+1. **On-chain ingestion path** (`contractEventIndexer`) that syncs Soroban contract events into backend persistence.
+2. **WebSocket push path** (`RebalancingService` + `websocket.service.ts`) that broadcasts runtime portfolio/risk events to connected frontend clients.
+
+```mermaid
+flowchart LR
+    A[Soroban Contract Event<br/>portfolio.created / deposit / rebalanced]
+    B[contractEventIndexer.syncOnce<br/>backend/src/services/contractEventIndexer.ts]
+    C[(Database: rebalance history + indexer cursor)]
+    D[BullMQ Queue<br/>portfolio-check / rebalance workers]
+    E[RebalancingService notifyClients<br/>portfolio_update / market_update]
+    F[WebSocket server<br/>initRobustWebSocket]
+    G[Frontend RebalancerWSClient]
+    H[Frontend RealtimeConnectionContext state]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+```
+
+### WebSocket Message Schema
+
+Protocol envelope validated in `backend/src/types/websocket.ts`:
+
+- `version: string` (must equal `1.0.0`)
+- `type: "PING" | "PONG" | "PRICE_UPDATE" | "REBALANCE_STATUS" | "ERROR"`
+- `payload?: unknown`
+- `timestamp: number` (milliseconds since epoch; defaults server-side when parsed)
+
+Additional server-sent broadcast message shapes used by `RebalancingService`:
+
+- `type: "portfolio_update"`
+  - `portfolioId: string`
+  - `event: string` (example: `rebalance_queued`, `rebalance_blocked`, `risk_alert`)
+  - `data?: object`
+  - `timestamp: string` (ISO datetime)
+- `type: "market_update"`
+  - `event: string`
+  - `data?: object`
+  - `timestamp: string` (ISO datetime)
+
+Connection lifecycle messages used in `websocket.service.ts`:
+
+- On connect: `{ "type": "connection", "message": "Validation and Monitoring Active", "version": "1.0.0" }`
+- Protocol mismatch / invalid frame: `{ "type": "ERROR", "payload": "Incompatible version or format. Use v1.0.0" }`
+- Ping response: `{ "type": "PONG", "version": "1.0.0" }`

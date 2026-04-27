@@ -322,6 +322,83 @@ cargo test
 
 ---
 
+## Local Soroban Setup
+
+Use this when working on `contracts/` or validating end-to-end contract + backend behavior locally.
+
+### Prerequisites
+
+- Rust toolchain (stable): `rustup default stable`
+- WASM target: `rustup target add wasm32-unknown-unknown`
+- Soroban CLI (latest locked release):
+
+```bash
+cargo install --locked soroban-cli
+```
+
+### One-command setup
+
+From repository root:
+
+```bash
+cd contracts
+make setup-testnet
+```
+
+`setup-testnet` verifies required tools, adds the WASM target if missing, creates a local `deployer` identity when needed, and configures a `testnet` network profile for Soroban CLI.
+
+### Fund deployer on Stellar testnet
+
+After `make setup-testnet`, get your deployer public key and fund it via faucet:
+
+```bash
+soroban keys address deployer
+```
+
+Use the returned `G...` address with the [Stellar Laboratory friendbot](https://laboratory.stellar.org/#account-creator?network=test) (or any testnet faucet workflow) before deployment.
+
+### Deploy command sequence
+
+```bash
+cd contracts
+
+# 1) Build WASM
+make build
+
+# 2) Deploy to testnet
+soroban contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \
+  --source deployer \
+  --network testnet
+
+# 3) Initialize deployed contract
+soroban contract invoke \
+  --id <CONTRACT_ID_FROM_DEPLOY_STEP> \
+  --source deployer \
+  --network testnet \
+  -- initialize \
+  --admin <ADMIN_G_ADDRESS> \
+  --reflector_address <REFLECTOR_CONTRACT_ADDRESS>
+```
+
+Then update `backend/.env`:
+
+```env
+STELLAR_NETWORK=testnet
+STELLAR_CONTRACT_ADDRESS=<CONTRACT_ID_FROM_DEPLOY_STEP>
+STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
+```
+
+### Soroban troubleshooting
+
+| Error | Cause | Solution |
+|---|---|---|
+| `error: target 'wasm32-unknown-unknown' not found` | WASM target is missing from toolchain | Run `rustup target add wasm32-unknown-unknown`, then rebuild. |
+| `request timed out` / `connection error` during `soroban contract deploy` | RPC endpoint unreachable or unstable | Re-run with network connectivity verified, or point to a responsive endpoint via `SOROBAN_RPC_URL` (backend) / updated Soroban network profile (CLI). |
+| `deployer identity not found` | Local Soroban key not created yet | Run `soroban keys generate deployer` and retry setup/deploy. |
+
+---
+
 ## 10. Common setup failures
 
 | Symptom | Cause | Fix |
