@@ -84,6 +84,8 @@ cp frontend/.env.example frontend/.env
 ```
 >Edit `.env` files with your own configuration (contract addresses, API keys, etc.)
 
+Full backend environment reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
+
 The frontend HTTP client targets **`/api/v1/*`** for resource routes by default (`VITE_API_VERSION=v1` in `frontend/.env.example`). JWT auth still uses **`/api/auth/*`**. See [API.md](API.md) for versioning details.
 
 ## Database Setup
@@ -156,6 +158,8 @@ soroban contract invoke \
   --reflector_address CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO
 ```
 Contract address example: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I`
+
+Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
 
 ### Usage
 1. Connect your Stellar wallet

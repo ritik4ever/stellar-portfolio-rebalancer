@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test bench clean deploy-testnet deploy-mainnet
+.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet
 
 # Default target
 all: build
@@ -100,6 +100,37 @@ install-tools:
 		rustup target add wasm32-unknown-unknown; \
 	fi
 
+# Local Soroban testnet bootstrap for fresh clones
+setup-testnet:
+	@echo "Setting up local Soroban testnet prerequisites..."
+	@if ! command -v rustup >/dev/null 2>&1; then \
+		echo "Error: rustup is required (https://rustup.rs/)"; \
+		exit 1; \
+	fi
+	@if ! rustup target list --installed | grep -q wasm32-unknown-unknown; then \
+		echo "Adding WASM target..."; \
+		rustup target add wasm32-unknown-unknown; \
+	fi
+	@if ! command -v soroban >/dev/null 2>&1; then \
+		echo "Installing soroban-cli via cargo..."; \
+		cargo install --locked soroban-cli; \
+	fi
+	@if ! soroban keys address deployer >/dev/null 2>&1; then \
+		echo "Creating local deployer identity..."; \
+		soroban keys generate deployer; \
+	fi
+	@if ! soroban network ls | grep -q '^testnet$$'; then \
+		echo "Adding Soroban testnet network profile..."; \
+		soroban network add testnet \
+			--rpc-url https://soroban-testnet.stellar.org \
+			--network-passphrase "Test SDF Network ; September 2015"; \
+	fi
+	@echo "Soroban testnet setup complete."
+	@echo "Next steps:"
+	@echo "  1) Fund deployer: soroban keys address deployer"
+	@echo "  2) Build: make build"
+	@echo "  3) Deploy: soroban contract deploy --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm --source deployer --network testnet"
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -112,4 +143,5 @@ help:
 	@echo "  deploy-mainnet  - Deploy to Stellar mainnet (with confirmation)"
 	@echo "  init-contract   - Initialize deployed contract"
 	@echo "  install-tools   - Install required tools"
+	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
 	@echo "  help            - Show this help message"
