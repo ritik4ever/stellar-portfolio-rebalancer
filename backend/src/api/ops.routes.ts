@@ -102,6 +102,20 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
     }
 })
 
+opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
+    try {
+        const cursorInfo = contractEventIndexerService.getCursorInfo()
+        const status = contractEventIndexerService.getStatus()
+        return ok(res, {
+            enabled: status.enabled,
+            running: status.running,
+            ...cursorInfo
+        })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 // ================================
 // QUEUE HEALTH ROUTE
 // ================================
