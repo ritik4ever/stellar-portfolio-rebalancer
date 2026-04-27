@@ -175,28 +175,40 @@ export async function buildReadinessReport() {
 
   const indexerStatus = contractEventIndexerService.getStatus();
   const indexerRequired = indexerStatus.enabled;
-  const indexerCheck = !indexerRequired
-    ? buildCheck(
-        "disabled",
-        false,
-        "Contract event indexer is disabled",
-        indexerStatus as unknown as Record<string, unknown>,
-      )
-    : indexerStatus.running &&
-        !!indexerStatus.lastSuccessfulRunAt &&
-        !indexerStatus.lastError
-      ? buildCheck(
-          "ready",
-          true,
-          "Contract event indexer is ready",
-          indexerStatus as unknown as Record<string, unknown>,
-        )
-      : buildCheck(
-          "not_ready",
-          true,
-          "Contract event indexer has not completed a successful startup sync",
-          indexerStatus as unknown as Record<string, unknown>,
-        );
+  let indexerCheck: ReadinessCheck;
+  if (!indexerRequired) {
+    indexerCheck = buildCheck(
+      "disabled",
+      false,
+      "Contract event indexer is disabled",
+      indexerStatus as unknown as Record<string, unknown>,
+    );
+  } else if (
+    indexerStatus.running &&
+    !!indexerStatus.lastSuccessfulRunAt &&
+    !indexerStatus.lastError
+  ) {
+    indexerCheck = buildCheck(
+      "ready",
+      true,
+      "Contract event indexer is ready",
+      indexerStatus as unknown as Record<string, unknown>,
+    );
+  } else if (indexerStatus.consecutiveFailures > 0 && indexerStatus.lastSuccessfulRunAt) {
+    indexerCheck = buildCheck(
+      "not_ready",
+      true,
+      `Contract event indexer degraded (${indexerStatus.consecutiveFailures} consecutive failures)`,
+      indexerStatus as unknown as Record<string, unknown>,
+    );
+  } else {
+    indexerCheck = buildCheck(
+      "not_ready",
+      true,
+      "Contract event indexer has not completed a successful startup sync",
+      indexerStatus as unknown as Record<string, unknown>,
+    );
+  }
 
   const autoRebalancerEnabled =
     process.env.NODE_ENV === "production" ||

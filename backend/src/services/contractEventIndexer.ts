@@ -25,14 +25,23 @@ interface ContractEventIndexerStatus {
     pollIntervalMs: number
     lastRunAt?: string
     lastSuccessfulRunAt?: string
+    lastFailedRunAt?: string
     lastError?: string
     lastIngestedCount: number
     cursor?: string
     latestLedger?: number
+    consecutiveFailures: number
+    recentErrors: string[]
 }
 
 const INDEXER_CURSOR_KEY = 'soroban_event_indexer.cursor'
 const INDEXER_LATEST_LEDGER_KEY = 'soroban_event_indexer.latest_ledger'
+
+const MAX_RECENT_ERRORS = 10
+const MAX_RPC_RETRIES = 3
+const RPC_BASE_DELAY_MS = 1000
+const RPC_MAX_DELAY_MS = 30000
+const MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF = 5
 
 export class ContractEventIndexerService {
     private readonly contractAddress = (process.env.CONTRACT_ADDRESS || process.env.STELLAR_CONTRACT_ADDRESS || '').trim()
@@ -53,11 +62,15 @@ export class ContractEventIndexerService {
 
     private pollingTimer: NodeJS.Timeout | null = null
     private isSyncing = false
+    private consecutiveFailures = 0
+    private recentErrors: string[] = []
     private status: ContractEventIndexerStatus = {
         enabled: false,
         running: false,
         pollIntervalMs: this.pollIntervalMs,
-        lastIngestedCount: 0
+        lastIngestedCount: 0,
+        consecutiveFailures: 0,
+        recentErrors: []
     }
 
     constructor() {
@@ -73,8 +86,49 @@ export class ContractEventIndexerService {
     getStatus(): ContractEventIndexerStatus {
         return {
             ...this.status,
-            running: this.pollingTimer !== null
+            running: this.pollingTimer !== null,
+            consecutiveFailures: this.consecutiveFailures,
+            recentErrors: [...this.recentErrors]
         }
+    }
+
+    getCursorInfo(): {
+        cursor: string | undefined
+        latestLedger: number | undefined
+        lastSuccessfulSyncAt: string | undefined
+        lastFailedSyncAt: string | undefined
+        lastError: string | undefined
+        pollIntervalMs: number
+        bootstrapWindowLedgers: number
+        consecutiveFailures: number
+        recentErrors: string[]
+    } {
+        const storedCursor = databaseService.getIndexerState(INDEXER_CURSOR_KEY)
+        const storedLatestLedger = Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || undefined
+
+        return {
+            cursor: storedCursor,
+            latestLedger: storedLatestLedger,
+            lastSuccessfulSyncAt: this.status.lastSuccessfulRunAt,
+            lastFailedSyncAt: this.status.lastFailedRunAt,
+            lastError: this.status.lastError,
+            pollIntervalMs: this.pollIntervalMs,
+            bootstrapWindowLedgers: this.bootstrapWindowLedgers,
+            consecutiveFailures: this.consecutiveFailures,
+            recentErrors: [...this.recentErrors]
+        }
+    }
+
+    resetCursor(fromLedger?: number): void {
+        databaseService.setIndexerState(INDEXER_CURSOR_KEY, '')
+        if (fromLedger !== undefined) {
+            databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(fromLedger))
+        } else {
+            databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, '')
+        }
+        this.status.cursor = undefined
+        this.status.latestLedger = fromLedger
+        logger.info('[CHAIN-INDEXER] Cursor reset', { fromLedger })
     }
 
     async start(): Promise<void> {
@@ -92,7 +146,7 @@ export class ContractEventIndexerService {
 
         await this.syncOnce()
         this.pollingTimer = setInterval(() => {
-            void this.syncOnce()
+            void this.syncWithBackoff()
         }, this.pollIntervalMs)
     }
 
@@ -101,6 +155,21 @@ export class ContractEventIndexerService {
         clearInterval(this.pollingTimer)
         this.pollingTimer = null
         logger.info('[CHAIN-INDEXER] Stopped')
+    }
+
+    private async syncWithBackoff(): Promise<void> {
+        if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF) {
+            const backoffMs = Math.min(
+                RPC_BASE_DELAY_MS * Math.pow(2, this.consecutiveFailures - MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF),
+                RPC_MAX_DELAY_MS
+            )
+            logger.warn('[CHAIN-INDEXER] Backing off due to consecutive failures', {
+                consecutiveFailures: this.consecutiveFailures,
+                backoffMs
+            })
+            await this.sleep(backoffMs)
+        }
+        await this.syncOnce()
     }
 
     async syncOnce(): Promise<{ ingested: number; latestLedger?: number }> {
@@ -115,7 +184,7 @@ export class ContractEventIndexerService {
             let cursor = storedCursor
             let startLedger: number | undefined
             if (!cursor) {
-                const latest = await this.rpcServer.getLatestLedger()
+                const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
                 const floorLedger = Math.max(1, latest.sequence - this.bootstrapWindowLedgers)
                 startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
             }
@@ -125,12 +194,14 @@ export class ContractEventIndexerService {
             let pagesRead = 0
 
             while (pagesRead < this.maxPagesPerSync) {
-                const response = await this.rpcServer.getEvents({
-                    cursor,
-                    startLedger,
-                    limit: this.pageLimit,
-                    filters: [{ type: 'contract' }]
-                })
+                const response = await this.rpcCallWithRetry(() =>
+                    this.rpcServer.getEvents({
+                        cursor,
+                        startLedger,
+                        limit: this.pageLimit,
+                        filters: [{ type: 'contract' }]
+                    })
+                )
                 pagesRead++
                 latestLedger = response.latestLedger
 
@@ -177,17 +248,61 @@ export class ContractEventIndexerService {
             this.status.cursor = cursor
             this.status.latestLedger = latestLedger
             this.status.enabled = true
+            this.consecutiveFailures = 0
 
             return { ingested, latestLedger }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
-            this.status.lastRunAt = new Date().toISOString()
+            const now = new Date().toISOString()
+            this.status.lastRunAt = now
+            this.status.lastFailedRunAt = now
             this.status.lastError = message
-            logger.error('[CHAIN-INDEXER] Sync failed', { error: message })
+            this.consecutiveFailures++
+            this.pushRecentError(`[${now}] ${message}`)
+            logger.error('[CHAIN-INDEXER] Sync failed', {
+                error: message,
+                consecutiveFailures: this.consecutiveFailures
+            })
             return { ingested: 0, latestLedger: this.status.latestLedger }
         } finally {
             this.isSyncing = false
         }
+    }
+
+    private async rpcCallWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+        let lastError: Error | undefined
+        for (let attempt = 0; attempt <= MAX_RPC_RETRIES; attempt++) {
+            try {
+                return await fn()
+            } catch (err) {
+                lastError = err instanceof Error ? err : new Error(String(err))
+                if (attempt < MAX_RPC_RETRIES) {
+                    const delay = Math.min(
+                        RPC_BASE_DELAY_MS * Math.pow(2, attempt),
+                        RPC_MAX_DELAY_MS
+                    )
+                    logger.warn('[CHAIN-INDEXER] RPC call failed, retrying', {
+                        attempt: attempt + 1,
+                        maxRetries: MAX_RPC_RETRIES,
+                        delayMs: delay,
+                        error: lastError.message
+                    })
+                    await this.sleep(delay)
+                }
+            }
+        }
+        throw lastError
+    }
+
+    private pushRecentError(summary: string): void {
+        this.recentErrors.push(summary)
+        if (this.recentErrors.length > MAX_RECENT_ERRORS) {
+            this.recentErrors.shift()
+        }
+    }
+
+    private sleep(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms))
     }
 
     private toIndexedOnChainEvent(event: SorobanRpc.Api.EventResponse): IndexedOnChainEvent | null {

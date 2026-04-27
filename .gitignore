@@ -189,6 +189,15 @@ htmlcov/
 .pytest_cache/
 .cache
 
+# Playwright (generated E2E artifacts)
+playwright-report/
+test-results/
+playwright/.cache/
+blob-report/
+**/screenshots/
+**/traces/
+**/videos/
+
 # Build artifacts
 *.tar.gz
 *.zip
