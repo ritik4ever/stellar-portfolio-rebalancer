@@ -77,6 +77,32 @@ Use `/health` for load balancer liveness. Use `/ready` before traffic shifts in 
 - **Redis restart:** Queues and repeatable job metadata live in Redis. After Redis comes back, restart the API so `probeRedis()` and `startQueueScheduler()` run again; workers must reconnect via `getConnectionOptions()`.
 - **Database:** SQLite (`DB_PATH`) or PostgreSQL (`DATABASE_URL`) holds application data and indexer cursors. Deleting the DB resets consent and portfolios; indexer cursors reset to bootstrap behavior on next start.
 
+## JWT signing secret rotation
+
+The backend supports a dual-secret validation window so access tokens signed with the previous secret remain valid for a controlled grace period.
+
+### Environment variables
+
+- `JWT_SECRET`: active signing secret (required for issuing new access/refresh tokens).
+- `JWT_PREVIOUS_SECRET`: prior signing secret used before rotation.
+- `JWT_PREVIOUS_SECRET_GRACE_UNTIL`: ISO-8601 UTC timestamp. Old-secret access tokens are accepted only until this time.
+
+### Rotation runbook
+
+1. Generate a new `JWT_SECRET` value (minimum 32 chars).
+2. Set `JWT_PREVIOUS_SECRET` to the currently active secret.
+3. Set `JWT_PREVIOUS_SECRET_GRACE_UNTIL` to a future UTC timestamp that covers your rollout window (for example, 30-60 minutes).
+4. Deploy all API instances with all three variables (`JWT_SECRET`, `JWT_PREVIOUS_SECRET`, `JWT_PREVIOUS_SECRET_GRACE_UNTIL`) at the same time.
+5. Verify protected routes accept newly issued tokens and still accept tokens signed before deployment during the grace period.
+6. After the grace period has ended, remove `JWT_PREVIOUS_SECRET` and `JWT_PREVIOUS_SECRET_GRACE_UNTIL` from the environment.
+7. Perform a final deploy with only the new `JWT_SECRET` configured.
+
+### Expected behavior
+
+- Tokens signed with `JWT_SECRET` always validate normally.
+- Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
+- After grace expiry, old-secret tokens are rejected with `401`.
+
 ## Related docs
 
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
