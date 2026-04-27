@@ -17,6 +17,7 @@ import { initializeSentry, setupProcessErrorHandlers, captureException } from '.
 import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
 import { buildReadinessReport } from './monitoring/readiness.js'
 import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
+import { buildCorsOptions, enforceCorsOriginAllowlist } from './http/corsSecurity.js'
 import spec from './openapi/spec.js'
 import { initRobustWebSocket } from './services/websocket.service.js'
 
@@ -29,20 +30,9 @@ async function main() {
 
     const app = express()
 
-    const corsOptions: cors.CorsOptions = {
-        origin: config.corsOrigins.length > 0 ? config.corsOrigins : true,
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
-        allowedHeaders: [
-            'Content-Type',
-            'Authorization',
-            'Accept',
-            'Origin',
-            'X-Requested-With',
-            'X-Request-Id',
-        ],
-    }
+    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins)
 
+    app.use(enforceCorsOriginAllowlist(config.corsOrigins))
     app.use(cors(corsOptions))
     app.options('*', cors(corsOptions))
     app.use(requestContextMiddleware)
