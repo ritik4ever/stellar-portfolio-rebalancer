@@ -17,11 +17,16 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
         return
     }
 
-    // Fingerprint = method + path + canonicalised body
+    const requestUser = req.user?.address
+        ?? (req.headers['x-public-key'] as string | undefined)
+        ?? 'anonymous'
+
+    // Fingerprint = method + path + canonicalised body + caller identity
     const requestHash = createHash('sha256')
         .update(req.method)
         .update(req.path)
         .update(JSON.stringify(req.body ?? {}))
+        .update(requestUser)
         .digest('hex')
 
     const existing = dbGetIdempotencyResult(key)

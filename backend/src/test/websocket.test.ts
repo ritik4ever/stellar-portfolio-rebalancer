@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "node:http";
-import { initRobustWebSocket } from "../services/websocket.service.js";
+import { initRobustWebSocket, broadcastPortfolioEvent } from "../services/websocket.service.js";
 import { PROTOCOL_VERSION } from "../types/websocket.js";
 
 // Register the 'message' listener BEFORE 'open' so we never miss a greeting
 // that arrives in the same I/O callback as the upgrade confirmation.
 function connectAndAwaitGreeting(
   port: number,
+  query = "",
 ): Promise<{ ws: WebSocket; greeting: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
+    const ws = new WebSocket(`ws://localhost:${port}${query}`);
     ws.once("message", (data) =>
       resolve({ ws, greeting: JSON.parse(data.toString()) }),
     );
@@ -191,5 +192,95 @@ describe("WebSocket protocol", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("broadcasts portfolio drift as portfolio_update with portfolioId", async () => {
+    const { ws } = await connectAndAwaitGreeting(port, "?userId=user-a");
+
+    const nextMessage = waitForMessage(ws);
+    broadcastPortfolioEvent({
+      portfolioId: "portfolio-123",
+      event: "portfolio_drift",
+      userId: "user-a",
+      data: { driftPct: 7.1 },
+    });
+
+    const payload = await nextMessage;
+    expect(payload.type).toBe("portfolio_update");
+    expect(payload.portfolioId).toBe("portfolio-123");
+    expect(payload.event).toBe("portfolio_drift");
+    expect(payload.data).toEqual({ driftPct: 7.1 });
+
+    ws.close();
+  });
+
+  it("does not queue missed messages for disconnected clients on reconnect", async () => {
+    const firstConnection = await connectAndAwaitGreeting(port, "?userId=user-reconnect");
+    firstConnection.ws.close();
+
+    // Wait for close handshake to finish before emitting while disconnected.
+    await new Promise<void>((resolve) => firstConnection.ws.once("close", () => resolve()));
+
+    broadcastPortfolioEvent({
+      portfolioId: "portfolio-reconnect",
+      event: "portfolio_drift",
+      userId: "user-reconnect",
+      data: { driftPct: 3.5 },
+    });
+
+    const { ws: reconnected } = await connectAndAwaitGreeting(port, "?userId=user-reconnect");
+
+    const missedMessage = new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve("timeout"), 350);
+      reconnected.once("message", (data) => {
+        clearTimeout(timeout);
+        resolve(JSON.parse(data.toString()));
+      });
+    });
+
+    expect(await missedMessage).toBe("timeout");
+
+    const freshMessage = waitForMessage(reconnected);
+    broadcastPortfolioEvent({
+      portfolioId: "portfolio-reconnect",
+      event: "portfolio_drift",
+      userId: "user-reconnect",
+      data: { driftPct: 4.2 },
+    });
+    const payload = await freshMessage;
+    expect(payload.portfolioId).toBe("portfolio-reconnect");
+    expect(payload.event).toBe("portfolio_drift");
+
+    reconnected.close();
+  });
+
+  it("delivers portfolio events only to the matching user", async () => {
+    const { ws: userA } = await connectAndAwaitGreeting(port, "?userId=user-a");
+    const { ws: userB } = await connectAndAwaitGreeting(port, "?userId=user-b");
+
+    const userAMessage = waitForMessage(userA);
+    const userBShouldNotReceive = new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve("timeout"), 350);
+      userB.once("message", (data) => {
+        clearTimeout(timeout);
+        resolve(JSON.parse(data.toString()));
+      });
+    });
+
+    broadcastPortfolioEvent({
+      portfolioId: "portfolio-a1",
+      event: "rebalance_queued",
+      userId: "user-a",
+      data: { source: "integration-test" },
+    });
+
+    const payloadA = await userAMessage;
+    expect(payloadA.type).toBe("portfolio_update");
+    expect(payloadA.portfolioId).toBe("portfolio-a1");
+    expect(payloadA.event).toBe("rebalance_queued");
+    expect(await userBShouldNotReceive).toBe("timeout");
+
+    userA.close();
+    userB.close();
   });
 });

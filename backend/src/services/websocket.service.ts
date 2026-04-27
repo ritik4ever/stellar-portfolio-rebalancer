@@ -4,12 +4,38 @@ import { logger } from '../utils/logger.js';
 
 interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
+  userId?: string;
 }
 
 let attachedServer: WebSocketServer | null = null;
 
 export function getWebSocketServer(): WebSocketServer | null {
   return attachedServer;
+}
+
+interface PortfolioEventPayload {
+  portfolioId: string;
+  event: string;
+  userId?: string;
+  data?: Record<string, unknown>;
+}
+
+export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
+  if (!attachedServer) return;
+  const message = JSON.stringify({
+    type: 'portfolio_update',
+    portfolioId: payload.portfolioId,
+    event: payload.event,
+    data: payload.data ?? {},
+    timestamp: new Date().toISOString()
+  });
+
+  attachedServer.clients.forEach((ws) => {
+    const client = ws as ExtWebSocket;
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (payload.userId && client.userId !== payload.userId) return;
+    ws.send(message);
+  });
 }
 
 export const initRobustWebSocket = (wss: WebSocketServer) => {
@@ -32,9 +58,12 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
     attachedServer = null;
   });
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req) => {
     const extWs = ws as ExtWebSocket;
     extWs.isAlive = true;
+    const requestUrl = req.url ?? '';
+    const wsUrl = new URL(requestUrl, 'ws://localhost');
+    extWs.userId = wsUrl.searchParams.get('userId') ?? undefined;
 
     logger.info('[WS] Client connected');
 

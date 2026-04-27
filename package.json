@@ -23,6 +23,7 @@
         "test:backend": "cd backend && npm test",
         "test:frontend": "cd frontend && npm test",
         "test:vitest": "vitest run",
+        "changelog:update": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
         "validate:env-examples": "node scripts/validate-env-examples.mjs",
         "lint": "npm run lint:backend && npm run lint:frontend",
         "lint:backend": "cd backend && npm run lint",
@@ -32,6 +33,7 @@
     },
     "devDependencies": {
         "concurrently": "^8.2.2",
+        "conventional-changelog-cli": "^5.0.0",
         "jsdom": "^26.1.0",
         "vitest": "^4.0.18"
     },

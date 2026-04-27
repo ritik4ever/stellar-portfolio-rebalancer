@@ -50,3 +50,11 @@ export const getPublicFeatureFlags = (env: NodeJS.ProcessEnv = process.env): Rec
         ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: flags.allowPublicUserPortfoliosInDemo
     }
 }
+
+export const isFeatureFlagEnabled = (
+    flagName: string,
+    env: NodeJS.ProcessEnv = process.env
+): boolean => {
+    const flags = getFeatureFlags(env) as Record<string, boolean>
+    return flags[flagName] ?? false
+}
