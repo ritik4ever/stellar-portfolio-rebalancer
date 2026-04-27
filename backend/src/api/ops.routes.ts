@@ -52,8 +52,8 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
         // Check API health
         let priceSourcesHealthy = false
         try {
-            const prices = await reflectorService.getCurrentPrices()
-            priceSourcesHealthy = Object.keys(prices).length > 0
+            const payload = await reflectorService.getCurrentPricesWithMeta()
+            priceSourcesHealthy = Object.keys(payload.prices).length > 0
         } catch {
             priceSourcesHealthy = false
         }
@@ -214,11 +214,11 @@ opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) =>
 opsRouter.get('/prices', async (req: Request, res: Response) => {
     try {
         logger.info('[DEBUG] Fetching prices for frontend...')
-        const prices = await reflectorService.getCurrentPrices()
+        const payload = await reflectorService.getCurrentPricesWithMeta()
 
-        logger.info('[DEBUG] Raw prices from service', { prices })
+        logger.info('[DEBUG] Raw prices from service', { prices: payload.prices, feedMeta: payload.feedMeta })
 
-        return ok(res, prices)
+        return ok(res, payload)
     } catch (error) {
         logger.error('[ERROR] Prices endpoint failed', { error: getErrorObject(error) })
 
@@ -226,15 +226,51 @@ opsRouter.get('/prices', async (req: Request, res: Response) => {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Price feeds unavailable and ALLOW_FALLBACK_PRICES is disabled')
         }
 
+        const nowSec = Math.floor(Date.now() / 1000)
         const fallbackPrices = {
-            XLM: { price: 0.358878, change: -0.60, timestamp: Date.now() / 1000, source: 'fallback' },
-            BTC: { price: 111150, change: 0.23, timestamp: Date.now() / 1000, source: 'fallback' },
-            ETH: { price: 4384.56, change: -0.15, timestamp: Date.now() / 1000, source: 'fallback' },
-            USDC: { price: 0.999781, change: -0.002, timestamp: Date.now() / 1000, source: 'fallback' }
+            XLM: {
+                price: 0.358878,
+                change: -0.60,
+                timestamp: nowSec,
+                source: 'fallback' as const,
+                servedFromCache: false,
+                serverFetchedAtMs: Date.now(),
+                dataTier: 'synthetic_fallback' as const
+            },
+            BTC: {
+                price: 111150,
+                change: 0.23,
+                timestamp: nowSec,
+                source: 'fallback' as const,
+                servedFromCache: false,
+                serverFetchedAtMs: Date.now(),
+                dataTier: 'synthetic_fallback' as const
+            },
+            ETH: {
+                price: 4384.56,
+                change: -0.15,
+                timestamp: nowSec,
+                source: 'fallback' as const,
+                servedFromCache: false,
+                serverFetchedAtMs: Date.now(),
+                dataTier: 'synthetic_fallback' as const
+            },
+            USDC: {
+                price: 0.999781,
+                change: -0.002,
+                timestamp: nowSec,
+                source: 'fallback' as const,
+                servedFromCache: false,
+                serverFetchedAtMs: Date.now(),
+                dataTier: 'synthetic_fallback' as const
+            }
         }
 
-        logger.info('[DEBUG] Sending fallback prices', { fallbackPrices })
-        return ok(res, fallbackPrices)
+        const withAges = reflectorService.finalizePriceMap(fallbackPrices)
+        const feedMeta = reflectorService.buildFeedMeta(withAges, 'synthetic_fallback')
+
+        logger.info('[DEBUG] Sending fallback prices', { fallbackPrices: withAges })
+        return ok(res, { prices: withAges, feedMeta })
     }
 })
 
@@ -243,12 +279,10 @@ opsRouter.get('/prices/enhanced', async (req: Request, res: Response) => {
     try {
         logger.info('[INFO] Fetching enhanced prices with risk analysis')
 
-        const prices = await reflectorService.getCurrentPrices()
+        const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
 
-        // Update risk management with latest prices and get alerts
         const riskAlerts = riskManagementService.updatePriceData(prices)
 
-        // Add risk information to price data
         const enhancedPrices: Record<string, any> = {}
 
         Object.entries(prices).forEach(([asset, data]) => {
@@ -264,7 +298,8 @@ opsRouter.get('/prices/enhanced', async (req: Request, res: Response) => {
 
         return ok(res, {
             prices: enhancedPrices,
-            riskAlerts
+            riskAlerts,
+            feedMeta
         })
     } catch (error) {
         logger.error('[ERROR] Failed to fetch enhanced prices', { error: getErrorObject(error) })

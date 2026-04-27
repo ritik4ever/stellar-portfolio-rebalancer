@@ -127,13 +127,13 @@ debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, async (req:
         // Get cache status
         const cacheStatus = reflectorService.getCacheStatus()
 
-        // Force a fresh API call
-        const result = await reflectorService.getCurrentPrices()
+        const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
 
         return ok(res, {
             cacheCleared: true,
             cacheStatusAfterClear: cacheStatus,
-            freshPrices: result
+            freshPrices: prices,
+            feedMeta
         })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))

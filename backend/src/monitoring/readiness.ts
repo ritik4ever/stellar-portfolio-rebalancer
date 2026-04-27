@@ -209,6 +209,36 @@ export async function buildReadinessReport() {
       indexerStatus as unknown as Record<string, unknown>,
     );
   }
+  const indexerCheck = !indexerRequired
+    ? buildCheck(
+        "disabled",
+        false,
+        "Contract event indexer is disabled",
+        indexerStatus as unknown as Record<string, unknown>,
+      )
+    : !indexerStatus.contractEventSchemaOk
+      ? buildCheck(
+          "not_ready",
+          true,
+          indexerStatus.lastError ||
+            "Contract event schema version does not match this backend",
+          indexerStatus as unknown as Record<string, unknown>,
+        )
+      : indexerStatus.running &&
+          !!indexerStatus.lastSuccessfulRunAt &&
+          !indexerStatus.lastError
+        ? buildCheck(
+            "ready",
+            true,
+            "Contract event indexer is ready",
+            indexerStatus as unknown as Record<string, unknown>,
+          )
+        : buildCheck(
+            "not_ready",
+            true,
+            "Contract event indexer has not completed a successful startup sync",
+            indexerStatus as unknown as Record<string, unknown>,
+          );
 
   const autoRebalancerEnabled =
     process.env.NODE_ENV === "production" ||

@@ -1,8 +1,10 @@
 import { SorobanRpc } from '@stellar/stellar-sdk'
-import type { PricesMap, PriceData } from '../types/index.js'
+import type { PricesMap, PriceData, PriceFeedMeta, PricesFeedPayload } from '../types/index.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { logger } from '../utils/logger.js' // Added logger import
+import { logger } from '../utils/logger.js'
 import { assetRegistryService } from './assetRegistryService.js'
+
+type PriceResolutionHint = PriceFeedMeta['resolutionHint']
 
 const DEFAULT_SYMBOLS = ['XLM', 'BTC', 'ETH', 'USDC']
 const DEFAULT_COIN_IDS: Record<string, string> = {
@@ -15,7 +17,7 @@ const DEFAULT_COIN_IDS: Record<string, string> = {
 export class ReflectorService {
     private coinGeckoApiKey: string
     private coinGeckoIds: Record<string, string>
-    private priceCache: Map<string, { data: PriceData, timestamp: number }>
+    private priceCache: Map<string, { data: PriceData; cachedAtMs: number }>
     private readonly CACHE_DURATION = process.env.NODE_ENV === 'production' ? 600000 : 300000 // 10 min vs 5 min
     private lastRequestTime = 0
     private readonly MIN_REQUEST_INTERVAL = 90000 // Increased to 1.5 minutes for Pro API
@@ -39,53 +41,105 @@ export class ReflectorService {
     }
 
     async getCurrentPrices(): Promise<PricesMap> {
+        const { map } = await this.resolvePricesInternal()
+        return this.applyQuoteAges(map)
+    }
+
+    async getCurrentPricesWithMeta(): Promise<PricesFeedPayload> {
+        const { map, hint } = await this.resolvePricesInternal()
+        const prices = this.applyQuoteAges(map)
+        return { prices, feedMeta: this.buildFeedMeta(prices, hint) }
+    }
+
+    buildFeedMeta(prices: PricesMap, hint: PriceResolutionHint): PriceFeedMeta {
+        const entries = Object.values(prices)
+        const degraded =
+            hint === 'synthetic_fallback'
+            || entries.some((p) => p.dataTier === 'synthetic_fallback' || p.source === 'fallback')
+        const staleOrLimited =
+            hint === 'error_recovery_cache'
+            || hint === 'rate_limited_cache'
+        return {
+            provider: 'backend',
+            resolvedAtMs: Date.now(),
+            degraded,
+            staleOrLimited,
+            resolutionHint: hint,
+            assetsCount: Object.keys(prices).length
+        }
+    }
+
+    private async resolvePricesInternal(): Promise<{ map: PricesMap; hint: PriceResolutionHint }> {
         try {
             logger.info('[DEBUG] Fetching prices from CoinGecko with smart caching')
             const assets = this.getAssetList()
 
-            // Check if we have fresh cached data for all assets
             const cachedPrices = this.getCachedPrices(assets)
             if (Object.keys(cachedPrices).length === assets.length) {
                 logger.info('[DEBUG] Using cached prices for all assets')
-                return cachedPrices
+                return { map: cachedPrices, hint: 'cached_only' }
             }
 
-            // Check rate limiting more strictly
             const now = Date.now()
             if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
                 logger.info('[DEBUG] Rate limiting - using cached prices only')
                 if (Object.keys(cachedPrices).length > 0) {
-                    return cachedPrices
+                    return { map: cachedPrices, hint: 'rate_limited_cache' }
                 }
                 if (getFeatureFlags().allowFallbackPrices) {
-                    return this.getFallbackPrices()
+                    return { map: this.getFallbackPrices(), hint: 'synthetic_fallback' }
                 }
                 throw new Error('Price request rate-limited and ALLOW_FALLBACK_PRICES is disabled')
             }
 
-            // Get fresh data only if cache is stale AND rate limit allows
             const coinIds = this.getCoinIdMap()
             const freshPrices = await this.getFreshPrices(assets, coinIds)
-
-            // Merge cached and fresh data
-            return { ...cachedPrices, ...freshPrices }
+            const merged = { ...cachedPrices, ...freshPrices } as PricesMap
+            const hint: PriceResolutionHint =
+                Object.keys(freshPrices).length === assets.length
+                    ? 'fresh_primary'
+                    : Object.keys(cachedPrices).length > 0
+                      ? 'partial_merge'
+                      : 'fresh_primary'
+            return { map: merged, hint }
         } catch (error) {
             logger.error('[ERROR] Price fetch failed', { error })
 
-            // Try to return cached data first before falling back
             const assets = this.getAssetList()
             const cachedPrices = this.getCachedPrices(assets)
             if (Object.keys(cachedPrices).length > 0) {
                 logger.info('[DEBUG] Using cached prices due to API error')
-                return cachedPrices
+                return { map: cachedPrices, hint: 'error_recovery_cache' }
             }
 
             if (!getFeatureFlags().allowFallbackPrices) {
                 throw new Error('Price sources unavailable and ALLOW_FALLBACK_PRICES is disabled')
             }
 
-            return this.getFallbackPrices()
+            return { map: this.getFallbackPrices(), hint: 'synthetic_fallback' }
         }
+    }
+
+    finalizePriceMap(map: PricesMap): PricesMap {
+        return this.applyQuoteAges(map)
+    }
+
+    private applyQuoteAges(map: PricesMap): PricesMap {
+        const nowSec = Math.floor(Date.now() / 1000)
+        const out: PricesMap = {}
+        for (const [asset, row] of Object.entries(map)) {
+            const tsSec = row.timestamp < 1e12 ? Math.floor(row.timestamp) : Math.floor(row.timestamp / 1000)
+            const serverMs = row.serverFetchedAtMs ?? Date.now()
+            out[asset] = {
+                ...row,
+                quoteAgeSeconds: Math.max(0, nowSec - tsSec),
+                cacheAgeMs:
+                    row.servedFromCache && row.serverFetchedAtMs !== undefined
+                        ? Math.max(0, Date.now() - row.serverFetchedAtMs)
+                        : undefined
+            }
+        }
+        return out
     }
 
     private getCachedPrices(assets: string[]): PricesMap {
@@ -94,8 +148,20 @@ export class ReflectorService {
 
         assets.forEach(asset => {
             const cached = this.priceCache.get(asset)
-            if (cached && (now - cached.timestamp) < this.CACHE_DURATION) {
-                cachedPrices[asset] = cached.data
+            if (cached && (now - cached.cachedAtMs) < this.CACHE_DURATION) {
+                const base = { ...cached.data }
+                delete base.servedFromCache
+                delete base.serverFetchedAtMs
+                delete base.cacheAgeMs
+                delete base.quoteAgeSeconds
+                delete base.dataTier
+                cachedPrices[asset] = {
+                    ...base,
+                    servedFromCache: true,
+                    serverFetchedAtMs: cached.cachedAtMs,
+                    cacheAgeMs: now - cached.cachedAtMs,
+                    dataTier: base.source === 'fallback' ? 'synthetic_fallback' : 'cached_primary'
+                }
             }
         })
 
@@ -199,15 +265,23 @@ export class ReflectorService {
                         change: coinData.usd_24h_change || 0,
                         timestamp: coinData.last_updated_at || Math.floor(Date.now() / 1000),
                         source: apiKey ? 'coingecko_pro' : 'coingecko_free',
-                        volume: coinData.usd_24h_vol || 0
+                        volume: coinData.usd_24h_vol || 0,
+                        servedFromCache: false,
+                        serverFetchedAtMs: Date.now(),
+                        dataTier: 'primary'
                     }
 
                     prices[asset] = priceData
 
-                    // Cache the fresh data
                     this.priceCache.set(asset, {
-                        data: priceData,
-                        timestamp: Date.now()
+                        data: {
+                            price: priceData.price,
+                            change: priceData.change,
+                            timestamp: priceData.timestamp,
+                            source: priceData.source,
+                            volume: priceData.volume
+                        },
+                        cachedAtMs: Date.now()
                     })
 
                     logger.info('[SUCCESS] Fresh price', {
@@ -404,7 +478,10 @@ export class ReflectorService {
                 price: addVariation(def.price),
                 change: (Math.random() - 0.5) * def.changeRange,
                 timestamp: now,
-                source: 'fallback'
+                source: 'fallback',
+                servedFromCache: false,
+                serverFetchedAtMs: Date.now(),
+                dataTier: 'synthetic_fallback'
             }
         })
         return result
@@ -467,7 +544,7 @@ export class ReflectorService {
         this.priceCache.forEach((value, key) => {
             status[key] = {
                 cached: true,
-                age: Date.now() - value.timestamp,
+                age: Date.now() - value.cachedAtMs,
                 price: value.data.price,
                 source: value.data.source
             }

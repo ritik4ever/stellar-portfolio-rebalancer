@@ -1,6 +1,10 @@
 import { Address, SorobanRpc, scValToNative } from '@stellar/stellar-sdk'
 import { databaseService } from './databaseService.js'
 import { logger } from '../utils/logger.js'
+import {
+    BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
+    checkContractEventSchemaVersion
+} from '../config/contractEventSchema.js'
 
 type IndexedEventKind = 'portfolio_created' | 'deposit' | 'rebalance_executed'
 
@@ -32,6 +36,9 @@ interface ContractEventIndexerStatus {
     latestLedger?: number
     consecutiveFailures: number
     recentErrors: string[]
+    expectedEventSchemaVersion: number
+    declaredEventSchemaVersion?: number
+    contractEventSchemaOk: boolean
 }
 
 const INDEXER_CURSOR_KEY = 'soroban_event_indexer.cursor'
@@ -71,12 +78,19 @@ export class ContractEventIndexerService {
         lastIngestedCount: 0,
         consecutiveFailures: 0,
         recentErrors: []
+        expectedEventSchemaVersion: BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
+        contractEventSchemaOk: true
     }
 
     constructor() {
         this.status.enabled = this.isEnabled()
         this.status.contractAddress = this.contractAddress || undefined
         this.status.rpcUrl = this.rpcUrl || undefined
+        const declared = process.env.CONTRACT_EVENT_SCHEMA_VERSION?.trim()
+        if (declared) {
+            const n = parseInt(declared, 10)
+            if (/^\d+$/.test(declared)) this.status.declaredEventSchemaVersion = n
+        }
     }
 
     isEnabled(): boolean {
@@ -175,6 +189,16 @@ export class ContractEventIndexerService {
     async syncOnce(): Promise<{ ingested: number; latestLedger?: number }> {
         if (!this.isEnabled()) return { ingested: 0 }
         if (this.isSyncing) return { ingested: 0, latestLedger: this.status.latestLedger }
+
+        const schemaCheck = checkContractEventSchemaVersion()
+        if (!schemaCheck.ok) {
+            this.status.lastRunAt = new Date().toISOString()
+            this.status.lastError = schemaCheck.message
+            this.status.contractEventSchemaOk = false
+            logger.error('[CHAIN-INDEXER] Contract event schema mismatch', { message: schemaCheck.message })
+            return { ingested: 0, latestLedger: this.status.latestLedger }
+        }
+        this.status.contractEventSchemaOk = true
 
         this.isSyncing = true
         try {

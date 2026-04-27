@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api, ENDPOINTS } from '../config/api'
+import { unwrapPriceFeedPayload } from './queries/usePricesQuery'
 
 interface PriceData {
     [asset: string]: {
@@ -17,8 +18,9 @@ export const useReflector = () => {
     useEffect(() => {
         const fetchPrices = async () => {
             try {
-                const data = await api.get<PriceData>(ENDPOINTS.PRICES)
-                setPrices(data)
+                const raw = await api.get<unknown>(ENDPOINTS.PRICES)
+                const { prices: row } = unwrapPriceFeedPayload(raw)
+                setPrices(row as PriceData)
                 setError(null)
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Failed to fetch prices')
@@ -29,7 +31,6 @@ export const useReflector = () => {
 
         fetchPrices()
 
-        // Update prices every 30 seconds
         const interval = setInterval(fetchPrices, 30000)
         return () => clearInterval(interval)
     }, [])
