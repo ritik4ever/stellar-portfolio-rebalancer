@@ -45,8 +45,7 @@ pub fn calculate_rebalance_trades(
             let target_balance = (target_value * 10i128.pow(14)) / price;
             let trade_amount = target_balance - current_balance;
 
-            if trade_amount.abs() > 1000000 {
-                // Minimum trade threshold
+            if trade_amount.abs() > MIN_TRADE_AMOUNT_STROOPS {
                 trades.set(asset, trade_amount);
             }
         }

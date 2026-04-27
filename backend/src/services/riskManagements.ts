@@ -451,6 +451,18 @@ export class RiskManagementService {
             return acc
         }, {})
 
+        if (sampleSize < this.MIN_RETURNS_FOR_STATS) {
+            return {
+                ewmaVolatility: 0,
+                var95: 0,
+                cvar95: 0,
+                maxDrawdown: 0,
+                drawdownBand: 'normal',
+                correlations: this.buildIdentityCorrelations(assets),
+                sampleSize
+            }
+        }
+
         const portfolioReturns = this.calculatePortfolioReturns(weights, aligned, sampleSize)
         const ewmaVolatility = this.computeEwmaVolatility(portfolioReturns)
         const { var95, cvar95 } = this.calculateVaRAndCVaR(portfolioReturns)
