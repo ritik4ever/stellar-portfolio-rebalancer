@@ -1,8 +1,7 @@
 import { Queue } from 'bullmq'
 import { getConnectionOptions } from './connection.js'
 import { logger } from '../utils/logger.js'
-
-// ─── Queue Names ─────────────────────────────────────────────────────────────
+import { getRequestId } from '../utils/requestContext.js'
 
 export const QUEUE_NAMES = {
     PORTFOLIO_CHECK: 'portfolio-check',
@@ -11,10 +10,25 @@ export const QUEUE_NAMES = {
     IDEMPOTENCY_CLEANUP: 'idempotency-cleanup',
 } as const
 
-// ─── Job Data Types ───────────────────────────────────────────────────────────
-
 export interface PortfolioCheckJobData {
     triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
+}
+
+export interface RebalanceJobData {
+    portfolioId: string
+    triggeredBy?: 'auto' | 'manual' | 'force'
+    correlationId?: string
+}
+
+export interface AnalyticsSnapshotJobData {
+    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
+}
+
+export interface IdempotencyCleanupJobData {
+    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
 }
 
 export interface RebalanceJobData {
