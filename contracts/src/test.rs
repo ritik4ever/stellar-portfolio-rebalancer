@@ -1,8 +1,18 @@
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env, Map,
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    vec, Address, Env, IntoVal, Map,
 };
+
+const BENCHMARK_TOLERANCE_PERCENT: u64 = 20;
+const BASELINE_INITIALIZE_CPU: u64 = 1_500_000;
+const BASELINE_INITIALIZE_MEM: u64 = 200_000;
+const BASELINE_CREATE_PORTFOLIO_CPU: u64 = 2_500_000;
+const BASELINE_CREATE_PORTFOLIO_MEM: u64 = 300_000;
+const BASELINE_EXECUTE_REBALANCE_CPU: u64 = 5_000_000;
+const BASELINE_EXECUTE_REBALANCE_MEM: u64 = 500_000;
+const BASELINE_DEPOSIT_CPU: u64 = 2_000_000;
+const BASELINE_DEPOSIT_MEM: u64 = 250_000;
 
 // Mock Reflector Contract
 mod reflector_contract {
@@ -40,6 +50,93 @@ mod reflector_contract {
         }
         pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
             Some(100_00000000000000i128)
+        }
+    }
+}
+
+mod reflector_with_missing_price {
+    use crate::reflector::{Asset, PriceData};
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+
+    #[contract]
+    pub struct ReflectorWithMissingPrice;
+
+    #[contracttype]
+    pub enum DataKey {
+        MissingAsset,
+    }
+
+    #[contractimpl]
+    impl ReflectorWithMissingPrice {
+        pub fn base(env: Env) -> Asset {
+            Asset::Other(Symbol::new(&env, "USD"))
+        }
+
+        pub fn assets(env: Env) -> Vec<Asset> {
+            Vec::new(&env)
+        }
+
+        pub fn decimals(_env: Env) -> u32 {
+            14
+        }
+
+        pub fn set_missing_asset(env: Env, asset: Address) {
+            env.storage().instance().set(&DataKey::MissingAsset, &asset);
+        }
+
+        pub fn lastprice(env: Env, asset: Asset) -> Option<PriceData> {
+            let missing_asset = env
+                .storage()
+                .instance()
+                .get::<DataKey, Address>(&DataKey::MissingAsset);
+            match asset {
+                Asset::Stellar(address) => {
+                    if missing_asset == Some(address.clone()) {
+                        None
+                    } else {
+                        Some(PriceData {
+                            price: 100_00000000000000i128,
+                            timestamp: env.ledger().timestamp(),
+                        })
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
+            Some(100_00000000000000i128)
+        }
+    }
+}
+
+mod reflector_without_prices {
+    use crate::reflector::{Asset, PriceData};
+    use soroban_sdk::{contract, contractimpl, Env, Symbol, Vec};
+
+    #[contract]
+    pub struct ReflectorWithoutPrices;
+
+    #[contractimpl]
+    impl ReflectorWithoutPrices {
+        pub fn base(env: Env) -> Asset {
+            Asset::Other(Symbol::new(&env, "USD"))
+        }
+
+        pub fn assets(env: Env) -> Vec<Asset> {
+            Vec::new(&env)
+        }
+
+        pub fn decimals(_env: Env) -> u32 {
+            14
+        }
+
+        pub fn lastprice(_env: Env, _asset: Asset) -> Option<PriceData> {
+            None
+        }
+
+        pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
+            None
         }
     }
 }
@@ -552,4 +649,307 @@ fn test_create_portfolio_slippage_too_high() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
     client.create_portfolio(&user, &allocations, &5, &501);
+}
+
+#[test]
+fn test_emergency_stop_admin_pause_and_reactivate() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    client.set_emergency_stop(&true);
+
+    client.set_emergency_stop(&false);
+
+    client.deposit(&pid, &asset, &100);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 100);
+}
+
+#[test]
+#[should_panic]
+fn test_emergency_stop_non_admin_rejected() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_emergency_stop",
+                args: vec![&env, true.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_emergency_stop(&true);
+}
+
+#[test]
+fn test_calculate_portfolio_value_all_prices_available() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 50);
+    allocations.set(asset2.clone(), 50);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset1, &100);
+    client.deposit(&pid, &asset2, &50);
+
+    let portfolio = client.get_portfolio(&pid);
+    let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let value =
+        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+    assert_eq!(value, 15000);
+}
+
+#[test]
+fn test_calculate_portfolio_value_missing_price_skips_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_with_missing_price::ReflectorWithMissingPrice);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let priced_asset = Address::generate(&env);
+    let missing_asset = Address::generate(&env);
+    let missing_price_reflector =
+        reflector_with_missing_price::ReflectorWithMissingPriceClient::new(&env, &reflector_id);
+    missing_price_reflector.set_missing_asset(&missing_asset);
+    allocations.set(priced_asset.clone(), 50);
+    allocations.set(missing_asset.clone(), 50);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &priced_asset, &100);
+    client.deposit(&pid, &missing_asset, &100);
+
+    let portfolio = client.get_portfolio(&pid);
+    let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let value =
+        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+
+    assert_eq!(value, 10000);
+}
+
+#[test]
+fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+
+    let portfolio = client.get_portfolio(&pid);
+    let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let value =
+        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+    assert_eq!(value, 0);
+}
+
+#[test]
+fn test_create_portfolio_max_assets_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut max_allocations = Map::new(&env);
+    for _ in 0..MAX_PORTFOLIO_ASSETS {
+        max_allocations.set(Address::generate(&env), 100 / MAX_PORTFOLIO_ASSETS);
+    }
+    let pid = client.create_portfolio(&user, &max_allocations, &5, &50);
+    assert!(pid > 0);
+
+    let mut too_many_allocations = Map::new(&env);
+    for _ in 0..20u32 {
+        too_many_allocations.set(Address::generate(&env), 5);
+    }
+    let result = client.try_create_portfolio(&user, &too_many_allocations, &5, &50);
+    assert_eq!(result, Err(Ok(Error::TooManyAssets)));
+}
+
+#[test]
+fn benchmark_initialize_gas() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    env.budget().reset_tracker();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let _ = client.initialize(&admin, &reflector_id);
+    assert_cost_within_tolerance(
+        env.budget().cpu_instruction_cost(),
+        env.budget().memory_bytes_cost(),
+        BASELINE_INITIALIZE_CPU,
+        BASELINE_INITIALIZE_MEM,
+    );
+}
+
+#[test]
+fn benchmark_create_portfolio_gas() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let _ = client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+
+    env.budget().reset_tracker();
+    let _ = client.create_portfolio(&user, &allocations, &5, &50);
+    assert_cost_within_tolerance(
+        env.budget().cpu_instruction_cost(),
+        env.budget().memory_bytes_cost(),
+        BASELINE_CREATE_PORTFOLIO_CPU,
+        BASELINE_CREATE_PORTFOLIO_MEM,
+    );
+}
+
+#[test]
+fn benchmark_execute_rebalance_gas() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let _ = client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20_000;
+    });
+
+    env.budget().reset_tracker();
+    let _ = client.execute_rebalance(&pid, &Map::new(&env));
+    assert_cost_within_tolerance(
+        env.budget().cpu_instruction_cost(),
+        env.budget().memory_bytes_cost(),
+        BASELINE_EXECUTE_REBALANCE_CPU,
+        BASELINE_EXECUTE_REBALANCE_MEM,
+    );
+}
+
+#[test]
+fn benchmark_deposit_gas() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let _ = client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    env.budget().reset_tracker();
+    client.deposit(&pid, &asset, &100);
+    assert_cost_within_tolerance(
+        env.budget().cpu_instruction_cost(),
+        env.budget().memory_bytes_cost(),
+        BASELINE_DEPOSIT_CPU,
+        BASELINE_DEPOSIT_MEM,
+    );
+}
+
+fn assert_cost_within_tolerance(cpu: u64, mem: u64, baseline_cpu: u64, baseline_mem: u64) {
+    let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
+    let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
+    assert!(
+        cpu <= cpu_limit,
+        "CPU instruction usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
+        cpu,
+        baseline_cpu,
+        cpu_limit
+    );
+    assert!(
+        mem <= mem_limit,
+        "Memory usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
+        mem,
+        baseline_mem,
+        mem_limit
+    );
 }

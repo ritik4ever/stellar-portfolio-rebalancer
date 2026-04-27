@@ -159,7 +159,7 @@ Contract address example: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JA
 
 ### Usage
 1. Connect your Stellar wallet
-2. Create a portfolio and set target allocations (sum must equal 100%)
+2. Create a portfolio and set target allocations (sum must equal 100%, maximum 10 assets per portfolio)
 3. Configure rebalance thresholds (1–50%)
 4. Enable/disable automatic rebalancing
 5. Submit transaction
@@ -234,6 +234,9 @@ cd backend && npm test
 
 # Smart contracts
 cd contracts && cargo test
+
+# Smart contract gas benchmarks
+cd contracts && make bench
 ```
 
 ## Docker Deployment

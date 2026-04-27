@@ -39,6 +39,9 @@ impl PortfolioRebalancer {
         if !portfolio::validate_allocations(&target_allocations) {
             return Err(Error::InvalidAllocation);
         }
+        if target_allocations.len() > MAX_PORTFOLIO_ASSETS {
+            return Err(Error::TooManyAssets);
+        }
 
         if !(1..=50).contains(&rebalance_threshold) {
             return Err(Error::InvalidThreshold);
