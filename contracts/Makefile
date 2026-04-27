@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test clean deploy-testnet deploy-mainnet
+.PHONY: build test bench clean deploy-testnet deploy-mainnet
 
 # Default target
 all: build
@@ -21,6 +21,10 @@ build-optimized:
 # Run tests
 test:
 	cargo test
+
+# Run gas/cost benchmarks
+bench:
+	cargo test benchmark_
 
 # Clean build artifacts
 clean:
@@ -102,6 +106,7 @@ help:
 	@echo "  build           - Build the contract"
 	@echo "  build-optimized - Build with optimization"
 	@echo "  test            - Run tests"
+	@echo "  bench           - Run gas benchmark tests"
 	@echo "  clean           - Clean build artifacts"
 	@echo "  deploy-testnet  - Deploy to Stellar testnet"
 	@echo "  deploy-mainnet  - Deploy to Stellar mainnet (with confirmation)"

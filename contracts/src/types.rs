@@ -3,6 +3,7 @@ use soroban_sdk::{contracterror, contracttype, Address, Map};
 // Stellar assets use 7-decimal precision where 1 XLM = 10^7 stroops.
 // 1_000_000 stroops equals 0.1 XLM, which acts as the minimum executable trade size.
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
+pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,4 +43,5 @@ pub enum Error {
     InvalidThreshold = 8,
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
+    TooManyAssets = 11,
 }
