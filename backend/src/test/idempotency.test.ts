@@ -29,6 +29,7 @@ function mockReqRes(opts: {
     path?: string
     body?: unknown
     headers?: Record<string, string>
+    userAddress?: string
 }): { req: any; res: any; next: () => void; state: MockState } {
     const state: MockState = {
         sentHeaders: {},
@@ -41,7 +42,8 @@ function mockReqRes(opts: {
         method: opts.method ?? 'POST',
         path: opts.path ?? '/test',
         body: opts.body ?? {},
-        headers: opts.headers ?? {}
+        headers: opts.headers ?? {},
+        user: opts.userAddress ? { address: opts.userAddress } : undefined
     }
 
     const res: any = {
@@ -245,5 +247,59 @@ describe('idempotencyMiddleware', () => {
         expect(second.state.sentStatus).toBe(400)
         expect((second.state.sentBody as any).error.message).toBe('Missing required field')
         expect(second.state.sentHeaders['Idempotency-Replayed']).toBe('true')
+    })
+
+    it('rejects same idempotency key when replayed by a different user', async () => {
+        const { idempotencyMiddleware } = await import('../middleware/idempotency.js')
+
+        const key = 'cross-user-key-001'
+        const body = { portfolioId: 'shared-portfolio' }
+
+        const first = mockReqRes({
+            headers: { 'idempotency-key': key },
+            body,
+            userAddress: 'GUSER1111111111111111111111111111111111111111111111111111111111'
+        })
+        idempotencyMiddleware(first.req, first.res, first.next)
+        first.res.status(200).json({ success: true, id: 'resource-1' })
+
+        const second = mockReqRes({
+            headers: { 'idempotency-key': key },
+            body,
+            userAddress: 'GUSER2222222222222222222222222222222222222222222222222222222222'
+        })
+        idempotencyMiddleware(second.req, second.res, second.next)
+
+        expect(second.state.nextCalled).toBe(false)
+        expect(second.state.sentStatus).toBe(409)
+        expect((second.state.sentBody as any).error.message).toMatch(/different request payload/)
+    })
+
+    it('allows a fresh request after key expiry and cleanup', async () => {
+        const { idempotencyMiddleware } = await import('../middleware/idempotency.js')
+        const {
+            dbStoreIdempotencyResult,
+            dbCleanupExpiredIdempotencyKeys
+        } = await import('../db/idempotencyDb.js')
+
+        const key = 'expired-key-001'
+        const body = { portfolioId: 'p-expire' }
+
+        dbStoreIdempotencyResult(
+            key,
+            'expired-hash',
+            'POST',
+            '/test',
+            200,
+            { stale: true },
+            -2000
+        )
+        expect(dbCleanupExpiredIdempotencyKeys()).toBe(1)
+
+        const fresh = mockReqRes({ headers: { 'idempotency-key': key }, body })
+        idempotencyMiddleware(fresh.req, fresh.res, fresh.next)
+
+        expect(fresh.state.nextCalled).toBe(true)
+        expect(fresh.state.sentHeaders['Idempotency-Replayed']).toBeUndefined()
     })
 })
