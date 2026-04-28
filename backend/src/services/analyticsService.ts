@@ -116,6 +116,70 @@ class AnalyticsService {
         })
     }
 
+    getAggregatedAnalytics(portfolioId: string, interval: 'daily' | 'weekly' | 'monthly', days: number = 30): PortfolioSnapshot[] {
+        const snapshots = this.getAnalytics(portfolioId, days)
+        if (snapshots.length === 0) return []
+
+        const sorted = [...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        const aggregated: PortfolioSnapshot[] = []
+        
+        const getBucketTime = (date: Date): number => {
+            const d = new Date(date)
+            d.setUTCHours(0, 0, 0, 0) // Midnight UTC
+            if (interval === 'weekly') {
+                const day = d.getUTCDay()
+                const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1) // Start on Monday
+                d.setUTCDate(diff)
+            } else if (interval === 'monthly') {
+                d.setUTCDate(1)
+            }
+            return d.getTime()
+        }
+
+        const incrementBucket = (time: number): number => {
+            const d = new Date(time)
+            if (interval === 'daily') d.setUTCDate(d.getUTCDate() + 1)
+            else if (interval === 'weekly') d.setUTCDate(d.getUTCDate() + 7)
+            else if (interval === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1)
+            return d.getTime()
+        }
+
+        const startDate = new Date(sorted[0].timestamp)
+        const endDate = new Date(sorted[sorted.length - 1].timestamp)
+        
+        let bucketTime = getBucketTime(startDate)
+        const endTime = getBucketTime(endDate)
+
+        let snapshotIndex = 0
+        let lastKnownSnapshot = sorted[0]
+
+        while (bucketTime <= endTime) {
+            const nextBucketTime = incrementBucket(bucketTime)
+            
+            while (snapshotIndex < sorted.length) {
+                const t = new Date(sorted[snapshotIndex].timestamp).getTime()
+                if (t < nextBucketTime) {
+                    lastKnownSnapshot = sorted[snapshotIndex]
+                    snapshotIndex++
+                } else {
+                    break
+                }
+            }
+
+            const totalValue = Math.max(0, lastKnownSnapshot.totalValue)
+
+            aggregated.push({
+                ...lastKnownSnapshot,
+                totalValue,
+                timestamp: new Date(bucketTime).toISOString()
+            })
+
+            bucketTime = nextBucketTime
+        }
+
+        return aggregated
+    }
+
     calculatePerformanceMetrics(portfolioId: string): PerformanceMetrics {
         const snapshots = this.getAnalytics(portfolioId, 90)
 

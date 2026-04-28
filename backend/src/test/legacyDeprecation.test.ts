@@ -54,7 +54,9 @@ afterAll(() => {
     process.env = envBackup
     if (testDbPath) {
         const dir = join(testDbPath, '..')
-        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+        if (existsSync(dir)) {
+            try { rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+        }
     }
 })
 
