@@ -166,17 +166,32 @@ describe("StellarDEXService", () => {
       // For a 3-hop trade like XLM -> USDC -> EURT -> BTC,
       // we need to verify path selection logic
 
+      // Create a mock spy with chained responses for each hop
+      const mockOrderbookCall = vi.fn();
+
       // First hop: XLM -> USDC
       const orderbook1 = createOrderbook(
         [{ price: 0.185, amount: 5000 }],
         [{ price: 0.186, amount: 4000 }],
       );
-      const mockOrderbookCall1 = vi.fn().mockResolvedValue(orderbook1);
-      // Chain the mocks using mockResolvedValueOnce
-      mockOrderbookCall1.mockResolvedValueOnce(orderbook1);
+      mockOrderbookCall.mockResolvedValueOnce(orderbook1);
+
+      // Second hop: USDC -> EURT (using same USDC issuer for simplicity)
+      const orderbook2 = createOrderbook(
+        [{ price: 0.215, amount: 3000 }],
+        [{ price: 0.217, amount: 2500 }],
+      );
+      mockOrderbookCall.mockResolvedValueOnce(orderbook2);
+
+      // Third hop: EURT -> BTC (using same USDC for simplicity)
+      const orderbook3 = createOrderbook(
+        [{ price: 0.000045, amount: 100 }],
+        [{ price: 0.000047, amount: 80 }],
+      );
+      mockOrderbookCall.mockResolvedValueOnce(orderbook3);
 
       vi.spyOn(service["server"], "orderbook").mockReturnValue({
-        call: mockOrderbookCall1,
+        call: mockOrderbookCall,
       } as any);
 
       const market1 = await (service as any).assessMarket(
@@ -187,18 +202,6 @@ describe("StellarDEXService", () => {
 
       expect(market1.referencePrice).toBeCloseTo(0.185, 4);
 
-      // Second hop: USDC -> EURT (using same USDC issuer for simplicity)
-      const orderbook2 = createOrderbook(
-        [{ price: 0.215, amount: 3000 }],
-        [{ price: 0.217, amount: 2500 }],
-      );
-      const mockOrderbookCall2 = vi.fn().mockResolvedValue(orderbook2);
-      mockOrderbookCall2.mockResolvedValueOnce(orderbook2);
-
-      vi.spyOn(service["server"], "orderbook").mockReturnValue({
-        call: mockOrderbookCall2,
-      } as any);
-
       const market2 = await (service as any).assessMarket(
         TEST_ASSETS.USDC,
         TEST_ASSETS.USDC,
@@ -206,18 +209,6 @@ describe("StellarDEXService", () => {
       );
 
       expect(market2.referencePrice).toBeCloseTo(0.215, 4);
-
-      // Third hop: EURT -> BTC (using same USDC for simplicity)
-      const orderbook3 = createOrderbook(
-        [{ price: 0.000045, amount: 100 }],
-        [{ price: 0.000047, amount: 80 }],
-      );
-      const mockOrderbookCall3 = vi.fn().mockResolvedValue(orderbook3);
-      mockOrderbookCall3.mockResolvedValueOnce(orderbook3);
-
-      vi.spyOn(service["server"], "orderbook").mockReturnValue({
-        call: mockOrderbookCall3,
-      } as any);
 
       const market3 = await (service as any).assessMarket(
         TEST_ASSETS.USDC,
