@@ -77,7 +77,7 @@ export class ContractEventIndexerService {
         pollIntervalMs: this.pollIntervalMs,
         lastIngestedCount: 0,
         consecutiveFailures: 0,
-        recentErrors: []
+        recentErrors: [],
         expectedEventSchemaVersion: BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
         contractEventSchemaOk: true
     }

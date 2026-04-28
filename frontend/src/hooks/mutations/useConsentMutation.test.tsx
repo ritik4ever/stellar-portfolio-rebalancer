@@ -63,8 +63,8 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-        const mutationPromise = act(async () => {
-            await result.current.mutateAsync()
+        act(() => {
+            result.current.mutate()
         })
 
         await vi.waitFor(() => {
@@ -75,7 +75,6 @@ describe('useRecordConsentMutation', () => {
 
         await act(async () => {
             resolveRequest({ recorded: true })
-            await mutationPromise
         })
     })
 
@@ -89,7 +88,15 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-        await expect(result.current.mutateAsync()).rejects.toThrow(/network down/i)
+        let err: any;
+        await act(async () => {
+            try {
+                await result.current.mutateAsync()
+            } catch (e) {
+                err = e;
+            }
+        })
+        expect(err?.message).toMatch(/network down/i)
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
     })
 
@@ -139,11 +146,15 @@ describe('useRevokeConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-        const pending = result.current.mutateAsync()
-        await vi.waitFor(() => {
-            expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
+        let err: any;
+        await act(async () => {
+            try {
+                await result.current.mutateAsync()
+            } catch (e) {
+                err = e;
+            }
         })
-        await expect(pending).rejects.toThrow(/delete failed/i)
+        expect(err?.message).toMatch(/delete failed/i)
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: true })
     })
 
