@@ -1,0 +1,87 @@
+name: Contract Smoke Test
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contract-smoke.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contract-smoke.yml'
+
+jobs:
+  soroban-testnet-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_SECRET_KEY }}
+      SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      SOROBAN_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure testnet secret exists
+        run: |
+          if [ -z "${STELLAR_SECRET_KEY}" ]; then
+            echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
+            exit 1
+          fi
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo and Soroban
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.soroban
+            contracts/target
+          key: contract-smoke-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            contract-smoke-${{ runner.os }}-
+
+      - name: Install Soroban CLI
+        run: cargo install --locked soroban-cli
+
+      - name: Build contract wasm
+        working-directory: ./contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Deploy and initialize on testnet
+        working-directory: ./contracts
+        run: |
+          soroban network add testnet --global \
+            --rpc-url "${SOROBAN_RPC_URL}" \
+            --network-passphrase "${SOROBAN_NETWORK_PASSPHRASE}" || true
+
+          soroban keys add ci-deployer --global --secret-key "${STELLAR_SECRET_KEY}" || true
+          ADMIN_ADDRESS="$(soroban keys address ci-deployer --global)"
+
+          CONTRACT_ID="$(soroban contract deploy \
+            --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \
+            --source ci-deployer \
+            --network testnet)"
+
+          if [ -z "${CONTRACT_ID}" ]; then
+            echo "::error::Contract deployment did not return a contract ID"
+            exit 1
+          fi
+
+          soroban contract invoke \
+            --id "${CONTRACT_ID}" \
+            --source ci-deployer \
+            --network testnet \
+            -- initialize \
+            --admin "${ADMIN_ADDRESS}" \
+            --reflector_address "${ADMIN_ADDRESS}"

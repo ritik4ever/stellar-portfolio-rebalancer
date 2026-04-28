@@ -51,3 +51,67 @@ jobs:
           name: backend-coverage-${{ matrix.node-version }}
           path: backend/coverage/
           if-no-files-found: warn
+
+  migration-dry-run:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        db: [sqlite, postgres]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: migration_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect migration changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            migrations:
+              - 'backend/src/db/migrations/**'
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.migrations == 'true' || github.event_name != 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.changes.outputs.migrations == 'true' || github.event_name != 'pull_request'
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Dry-run migrations (SQLite)
+        if: (steps.changes.outputs.migrations == 'true' || github.event_name != 'pull_request') && matrix.db == 'sqlite'
+        working-directory: ./backend
+        env:
+          DB_PATH: /tmp/stellar-migration-dryrun.sqlite
+        run: npm run db:migrate -- --dry-run
+
+      - name: Dry-run migrations (PostgreSQL)
+        if: (steps.changes.outputs.migrations == 'true' || github.event_name != 'pull_request') && matrix.db == 'postgres'
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/migration_ci
+          PGUSER: testuser
+          PGPASSWORD: testpassword
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGDATABASE: migration_ci
+        run: npm run db:migrate -- --dry-run
