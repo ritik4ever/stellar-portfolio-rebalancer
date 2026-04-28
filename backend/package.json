@@ -19,6 +19,7 @@
         "test:rate-limits": "node scripts/test-rate-limits.js",
         "test:notifications:dev": "node scripts/test-notifications-dev.mjs",
         "openapi:export": "tsx scripts/export-openapi.ts",
+        "spec:check": "npm run openapi:export && git diff --exit-code -- openapi.json",
         "api:validate": "tsx scripts/validate-api-docs.ts",
         "indexer:reindex": "tsx scripts/reindex-events.ts"
     },

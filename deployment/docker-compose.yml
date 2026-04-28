@@ -54,10 +54,19 @@ services:
       - METRICS_ENABLED=${METRICS_ENABLED:-true}
       - LOG_DEPLOYMENT_ENV=${LOG_DEPLOYMENT_ENV:-local}
       - ALERT_CONTACT=${ALERT_CONTACT:-platform-oncall}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://portfolio:portfolio@postgres:5432/portfolio}
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGDATABASE=portfolio
+      - PGUSER=portfolio
+      - PGPASSWORD=portfolio
     ports:
       - "3001:3001"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
       - ./logs:/app/logs
 
@@ -70,6 +79,33 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
+    # Health check retries up to ~30s before marking unhealthy.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: portfolio-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=portfolio
+      - POSTGRES_USER=portfolio
+      - POSTGRES_PASSWORD=portfolio
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Health check retries up to ~40s before marking unhealthy.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portfolio -d portfolio"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+      start_period: 5s
 
   monitoring:
     build:
@@ -192,6 +228,7 @@ services:
 
 volumes:
   redis_data:
+  postgres_data:
   prometheus_data:
   grafana_data:
   loki_data:

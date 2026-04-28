@@ -34,9 +34,11 @@ jobs:
         working-directory: ./backend
         run: npm ci
 
-      - name: Validate API documentation sync
+      - name: OpenAPI contract check
         working-directory: ./backend
-        run: npm run api:validate
+        run: |
+          npm run spec:check
+          npm run api:validate
 
       - name: Run backend tests with coverage
         working-directory: ./backend
