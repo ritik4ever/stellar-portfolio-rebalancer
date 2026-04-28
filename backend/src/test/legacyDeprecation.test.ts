@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import type { Express } from 'express'
 import request from 'supertest'
+import express from 'express'
 import { mkdirSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { legacyApiDeprecation } from '../middleware/legacyApiDeprecation.js'
 
 let app: Express
 let testDbPath: string
@@ -155,5 +157,51 @@ describe('Legacy API Deprecation Headers', () => {
             expect(canonicalRes.status).toBe(legacyRes.status)
             expect(canonicalRes.body.status).toBe(legacyRes.body.status)
         })
+    })
+})
+
+describe('legacyApiDeprecation redirect compatibility', () => {
+    const redirectApp = express()
+    redirectApp.use(express.json())
+    redirectApp.use('/api', legacyApiDeprecation)
+
+    redirectApp.get('/api/v1/portfolios', (_req, res) => {
+        res.status(200).json({ ok: true })
+    })
+    redirectApp.post('/api/v1/portfolios', (req, res) => {
+        res.status(200).json({ body: req.body })
+    })
+    redirectApp.use('/api/*', (_req, res) => {
+        res.status(404).json({ code: 'NOT_FOUND' })
+    })
+
+    it('redirects GET /api/portfolios to /api/v1/portfolios with 301', async () => {
+        const res = await request(redirectApp).get('/api/portfolios')
+        expect(res.status).toBe(301)
+        expect(res.headers.location).toBe('/api/v1/portfolios')
+    })
+
+    it('includes RFC 8594 deprecation headers on legacy redirects', async () => {
+        const res = await request(redirectApp).get('/api/portfolios')
+        expect(res.headers['deprecation']).toBe('true')
+        expect(res.headers['sunset']).toMatch(/^\w{3}, \d{2} \w{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/)
+        expect(res.headers['link']).toContain('rel="deprecation"')
+    })
+
+    it('preserves POST body through redirect', async () => {
+        const payload = { userAddress: 'GTEST', allocations: { XLM: 100 } }
+        const res = await request(redirectApp)
+            .post('/api/portfolios')
+            .send(payload)
+            .redirects(1)
+
+        expect(res.status).toBe(200)
+        expect(res.body.body).toEqual(payload)
+    })
+
+    it('returns 404 for unknown legacy paths without misdirecting', async () => {
+        const res = await request(redirectApp).get('/api/unknown-legacy-path')
+        expect(res.status).toBe(404)
+        expect(res.headers.location).toBeUndefined()
     })
 })
