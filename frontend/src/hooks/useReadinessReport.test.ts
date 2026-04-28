@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { buildCapabilityNotices, type ReadinessReport } from './useReadinessReport'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { renderHook, waitFor, act } from '@testing-library/react'
+import { buildCapabilityNotices, useReadinessReport, type ReadinessReport } from './useReadinessReport'
 
 function baseReport(over: Partial<ReadinessReport['checks']> = {}): ReadinessReport {
     const ready = { status: 'ready' as const, required: true, message: 'ok' }
@@ -59,5 +60,80 @@ describe('buildCapabilityNotices', () => {
             autoRebalancer: { status: 'not_ready', required: true, message: 'broken' },
         })
         expect(buildCapabilityNotices(bad).find((x) => x.id === 'auto-rebalancer')?.kind).toBe('limited')
+    })
+})
+
+describe('useReadinessReport hook', () => {
+    beforeEach(() => {
+        vi.stubGlobal('fetch', vi.fn())
+        vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+        vi.unstubAllGlobals()
+        vi.useRealTimers()
+        vi.restoreAllMocks()
+    })
+
+    it('maps "ready" status correctly', async () => {
+        const mockReport = baseReport()
+        vi.mocked(fetch).mockResolvedValueOnce({
+            ok: true,
+            headers: new Map([['content-type', 'application/json']]),
+            json: async () => mockReport,
+        } as any)
+
+        const { result } = renderHook(() => useReadinessReport())
+
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.report?.status).toBe('ready')
+        expect(result.current.loadError).toBe(false)
+        expect(result.current.notices).toHaveLength(0)
+    })
+
+    it('maps degraded services to warning notices', async () => {
+        const mockReport = baseReport({
+            database: { status: 'not_ready', required: true, message: 'db down' }
+        })
+        vi.mocked(fetch).mockResolvedValueOnce({
+            ok: true,
+            headers: new Map([['content-type', 'application/json']]),
+            json: async () => mockReport,
+        } as any)
+
+        const { result } = renderHook(() => useReadinessReport())
+
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.notices.some(n => n.id === 'database' && n.kind === 'limited')).toBe(true)
+    })
+
+    it('produces an error state on network failure', async () => {
+        vi.mocked(fetch).mockRejectedValueOnce(new Error('Network Error'))
+
+        const { result } = renderHook(() => useReadinessReport())
+
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.loadError).toBe(true)
+        expect(result.current.report).toBeNull()
+    })
+
+    it('re-fetches on the auto-refresh interval', async () => {
+        const mockReport = baseReport()
+        vi.mocked(fetch).mockResolvedValue({
+            ok: true,
+            headers: new Map([['content-type', 'application/json']]),
+            json: async () => mockReport,
+        } as any)
+
+        renderHook(() => useReadinessReport())
+
+        await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+
+        // Advance time by POLL_MS (45s)
+        act(() => {
+            vi.advanceTimersByTime(45000)
+        })
+
+        await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
     })
 })

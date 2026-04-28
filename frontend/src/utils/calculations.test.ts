@@ -67,4 +67,56 @@ describe('calculateRebalanceTrades', () => {
         expect(trades.find(t => t.asset === 'XLM')?.action).toBe('sell')
         expect(trades.find(t => t.asset === 'ETH')?.action).toBe('buy')
     })
+
+    it('returns no trades when drift is exactly at target (0%)', () => {
+        const portfolio = makePortfolio([
+            { asset: 'XLM', current: 50, target: 50, amount: 5000 },
+        ])
+        const trades = calculateRebalanceTrades(portfolio)
+        expect(trades).toHaveLength(0)
+    })
+
+    it('returns trades when drift is exactly at threshold boundary', () => {
+        // threshold is 5, drift is 5.1 -> should trade
+        const portfolio = makePortfolio([
+            { asset: 'XLM', current: 55.1, target: 50, amount: 5510 },
+        ], 10000, 5)
+        const trades = calculateRebalanceTrades(portfolio)
+        expect(trades).toHaveLength(1)
+        expect(trades[0].amount).toBeCloseTo(510)
+    })
+
+    it('handles a 10-asset portfolio without cumulative rounding errors', () => {
+        const allocations = Array.from({ length: 10 }, (_, i) => ({
+            asset: `ASSET_${i}`,
+            current: 10,
+            target: 10,
+            amount: 1000.00000001 // Tiny rounding noise
+        }))
+        const portfolio = makePortfolio(allocations, 10000, 1)
+        const trades = calculateRebalanceTrades(portfolio)
+        expect(trades).toHaveLength(0) // Noise should be ignored by the >$10 check
+    })
+
+    it('delta calculation matches hand-computed reference for deep rebalance', () => {
+        // Total Value = 20000. XLM Target 50% = 10000. Current Amount 4000. Delta = 6000 BUY.
+        const portfolio = makePortfolio([
+            { asset: 'XLM', current: 20, target: 50, amount: 4000 },
+        ], 20000, 5)
+        const trades = calculateRebalanceTrades(portfolio)
+        expect(trades[0]).toEqual({
+            asset: 'XLM',
+            action: 'buy',
+            amount: 6000
+        })
+    })
+
+    it('respects Stellar precision (8 decimal places) in math', () => {
+        const portfolio = makePortfolio([
+            { asset: 'XLM', current: 60, target: 50, amount: 6000.00000001 },
+        ])
+        const trades = calculateRebalanceTrades(portfolio)
+        // targetValue = 10000 * 0.5 = 5000. diff = 5000 - 6000.00000001 = -1000.00000001
+        expect(trades[0].amount).toBeCloseTo(1000.00000001, 8)
+    })
 })
