@@ -45,13 +45,26 @@ export const usePortfolio = (portfolioId?: string) => {
     const executeRebalance = async () => {
         if (!portfolioId) return
 
+        const previousPortfolio = portfolio
+        setError(null)
+        setPortfolio(prev =>
+            prev
+                ? {
+                      ...prev,
+                      needsRebalance: false,
+                      lastRebalance: new Date().toISOString(),
+                  }
+                : prev
+        )
+
         try {
             await api.post(ENDPOINTS.PORTFOLIO_REBALANCE(portfolioId))
 
-            // Refresh portfolio data
+            // Refresh portfolio data to invalidate optimistic snapshot
             const data = await api.get<{ portfolio: PortfolioData }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId))
             setPortfolio(data.portfolio)
         } catch (err) {
+            setPortfolio(previousPortfolio)
             setError(err instanceof Error ? err.message : 'Rebalance failed')
         }
     }
