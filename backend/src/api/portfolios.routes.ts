@@ -86,7 +86,8 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        if (req.user && portfolio.userAddress !== req.user.address) {
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
             return fail(res, 403, 'FORBIDDEN', 'You can only export your own portfolio')
         }
         const result = await getPortfolioExport(portfolioId, format)
@@ -170,7 +171,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
 })
 
 // Manual portfolio rebalance
-portfoliosRouter.post('/portfolio/:id/rebalance', ...protectedCriticalLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...protectedCriticalLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -188,8 +189,9 @@ portfoliosRouter.post('/portfolio/:id/rebalance', ...protectedCriticalLimiter, i
             if (!portfolio) {
                 return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
             }
-            if (req.user && portfolio.userAddress !== req.user.address) {
-                return fail(res, 403, 'FORBIDDEN', 'Portfolio not found');
+            const authConfig = getAuthConfig()
+            if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only rebalance your own portfolio');
             }
             const prices = await reflectorService.getCurrentPrices();
             const riskCheck = riskManagementService.shouldAllowRebalance(portfolio as unknown as Portfolio, prices);
