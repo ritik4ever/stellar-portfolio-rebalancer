@@ -48,8 +48,11 @@ interface RebalanceHistoryProps {
 }
 
 const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
+    const [page, setPage] = React.useState(1)
+    const limit = 10
+
     // Query for rebalance history
-    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId)
+    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit)
 
     // Demo history generator
     const getDemoHistory = (): RebalanceEvent[] => {
@@ -132,6 +135,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
     // Determine finalized data
     const history: RebalanceEvent[] = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : [])
+    const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
+    const totalPages = Math.ceil(totalCount / limit)
     const error = queryError ? 'Failed to load rebalance history' : null
     const loading = isLoading && !data
 
@@ -503,26 +508,53 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
             {history.length > 0 && (
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                    <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-                        <span>Showing {history.length} recent rebalance{history.length > 1 ? 's' : ''}</span>
-                        <div className="flex items-center space-x-4">
-                            <div className="flex items-center">
-                                <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
-                                <span>Automated</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-2 h-2 bg-orange-500 rounded-full mr-1"></div>
-                                <span>Risk Management</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-2 h-2 bg-red-500 rounded-full mr-1"></div>
-                                <span>Failed/High Risk</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-2 h-2 bg-blue-500 rounded-full mr-1"></div>
-                                <span>Stellar Network</span>
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
+                            <span>Showing {history.length} of {totalCount} rebalance{totalCount !== 1 ? 's' : ''}</span>
+                            <div className="hidden md:flex items-center space-x-4">
+                                <div className="flex items-center">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
+                                    <span>Automated</span>
+                                </div>
+                                <div className="flex items-center">
+                                    <div className="w-2 h-2 bg-orange-500 rounded-full mr-1"></div>
+                                    <span>Risk</span>
+                                </div>
                             </div>
                         </div>
+
+                        {totalPages > 1 && (
+                            <div className="flex items-center space-x-2">
+                                <button
+                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                    disabled={page === 1}
+                                    className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                    <ArrowRight className="w-4 h-4 rotate-180" />
+                                </button>
+                                <div className="flex items-center space-x-1">
+                                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                                        <button
+                                            key={p}
+                                            onClick={() => setPage(p)}
+                                            className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${page === p
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                }`}
+                                        >
+                                            {p}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button
+                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={page === totalPages}
+                                    className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                    <ArrowRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
