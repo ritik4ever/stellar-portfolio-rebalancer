@@ -1,4 +1,6 @@
 import { debugLog } from '../utils/debug'
+import { API_CONFIG } from '../config/api'
+import { unwrapPriceFeedPayload } from '../hooks/queries/usePricesQuery'
 
 export interface BrowserPriceRow {
     price: number
@@ -89,6 +91,47 @@ class BrowserPriceService {
                 }
             }
 
+            // Attempt 1: Primary Source (Reflector via Backend)
+            try {
+                debugLog('Fetching prices from primary source (Reflector via Backend)')
+                const reflectorUrl = `${API_CONFIG.BASE_URL.replace(/\/$/, '')}${API_CONFIG.ENDPOINTS.PRICES}`
+                const reflectorResponse = await fetch(reflectorUrl, {
+                    method: 'GET',
+                    headers: { Accept: 'application/json' },
+                    signal: AbortSignal.timeout(5000)
+                })
+
+                if (reflectorResponse.ok) {
+                    const raw = await reflectorResponse.json()
+                    const { prices: row } = unwrapPriceFeedPayload(raw)
+                    if (Object.keys(row).length > 0) {
+                        const prices: BrowserPricesMap = {}
+                        const fetchedAt = Date.now()
+                        Object.entries(row).forEach(([asset, data]: [string, any]) => {
+                            prices[asset] = {
+                                price: data.price,
+                                change: data.change || 0,
+                                timestamp: data.timestamp || Math.floor(Date.now() / 1000),
+                                source: 'reflector',
+                                servedFromCache: false,
+                                serverFetchedAtMs: fetchedAt,
+                                dataTier: 'primary'
+                            }
+                        })
+
+                        this.cache.set('prices', { data: prices, timestamp: fetchedAt })
+                        const finalized = this.finalizeRows(prices)
+                        return {
+                            prices: finalized,
+                            feedMeta: this.buildMeta(finalized, 'fresh_primary')
+                        }
+                    }
+                }
+            } catch (reflectorError) {
+                debugLog('Reflector fetch failed, falling back to CoinGecko', reflectorError)
+            }
+
+            // Attempt 2: Fallback to CoinGecko
             debugLog('Fetching fresh prices from CoinGecko (browser)')
 
             const coinIds = Object.values(this.COIN_IDS).join(',')
