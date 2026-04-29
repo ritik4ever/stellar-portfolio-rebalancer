@@ -32,35 +32,35 @@ describe("CircuitBreakers", () => {
       vi.useRealTimers();
     });
 
-    it("triggers circuit breaker when asset volatility exceeds 15%", () => {
+    it("triggers circuit breaker when asset volatility exceeds 15%", async () => {
       const prices = {
         BTC: { change: 16.5, timestamp: Date.now() / 1000 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("High volatility detected");
       expect(result.reason).toContain("BTC");
     });
 
-    it("does not trigger when volatility is below threshold", () => {
+    it("does not trigger when volatility is below threshold", async () => {
       const prices = {
         BTC: { change: 10, timestamp: Date.now() / 1000 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(true);
       expect(result.reason).toBeUndefined();
     });
 
-    it("triggers for negative volatility exceeding threshold", () => {
+    it("triggers for negative volatility exceeding threshold", async () => {
       const prices = {
         ETH: { change: -18.2, timestamp: Date.now() / 1000 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("High volatility detected");
@@ -78,31 +78,31 @@ describe("CircuitBreakers", () => {
       vi.useRealTimers();
     });
 
-    it("triggers circuit breaker when price data is older than 10 minutes", () => {
+    it("triggers circuit breaker when price data is older than 10 minutes", async () => {
       const staleTimestamp = Date.now() / 1000 - 11 * 60;
       const prices = {
         BTC: { change: 5, timestamp: staleTimestamp },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("Stale price data");
       expect(result.reason).toContain("BTC");
     });
 
-    it("does not trigger for fresh data within 10 minutes", () => {
+    it("does not trigger for fresh data within 10 minutes", async () => {
       const freshTimestamp = Date.now() / 1000 - 5 * 60;
       const prices = {
         BTC: { change: 5, timestamp: freshTimestamp },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(true);
     });
 
-    it("triggers when any asset has stale data", () => {
+    it("triggers when any asset has stale data", async () => {
       vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
 
       const freshTimestamp = Date.now() / 1000 - 5 * 60;
@@ -113,7 +113,7 @@ describe("CircuitBreakers", () => {
         ETH: { change: 3, timestamp: staleTimestamp },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("Stale price data");
@@ -130,53 +130,53 @@ describe("CircuitBreakers", () => {
       vi.useRealTimers();
     });
 
-    it("triggers when all major assets move in the same positive direction", () => {
+    it("triggers when all major assets move in the same positive direction", async () => {
       const prices = {
         BTC: { change: 6 },
         ETH: { change: 7 },
         XLM: { change: 8 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("Extreme market correlation detected");
       expect(result.reason).toContain("up");
     });
 
-    it("triggers when all major assets move in the same negative direction", () => {
+    it("triggers when all major assets move in the same negative direction", async () => {
       const prices = {
         BTC: { change: -6 },
         ETH: { change: -7 },
         XLM: { change: -8 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("Extreme market correlation detected");
       expect(result.reason).toContain("down");
     });
 
-    it("does not trigger when assets move in mixed directions", () => {
+    it("does not trigger when assets move in mixed directions", async () => {
       const prices = {
         BTC: { change: 6 },
         ETH: { change: -3 },
         XLM: { change: 2 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(true);
     });
 
-    it("does not trigger when fewer than 3 assets have significant moves", () => {
+    it("does not trigger when fewer than 3 assets have significant moves", async () => {
       const prices = {
         BTC: { change: 6 },
         ETH: { change: 2 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(true);
     });
@@ -268,24 +268,25 @@ describe("CircuitBreakers", () => {
       expect(afterCooldown.safe).toBe(true);
     });
 
-    it("recovers market conditions after volatility normalizes", () => {
+    it("recovers market conditions after volatility normalizes", async () => {
       const highVolatilityPrices = {
         BTC: { change: 20, timestamp: Date.now() / 1000 },
       };
 
       const highVolResult =
-        CircuitBreakers.checkMarketConditions(highVolatilityPrices);
+        await CircuitBreakers.checkMarketConditions(highVolatilityPrices);
       expect(highVolResult.safe).toBe(false);
 
       const normalPrices = {
         BTC: { change: 3, timestamp: Date.now() / 1000 },
       };
 
-      const normalResult = CircuitBreakers.checkMarketConditions(normalPrices);
+      const normalResult =
+        await CircuitBreakers.checkMarketConditions(normalPrices);
       expect(normalResult.safe).toBe(true);
     });
 
-    it("recovers after stale data becomes fresh", () => {
+    it("recovers after stale data becomes fresh", async () => {
       vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
 
       const staleTimestamp = Date.now() / 1000 - 15 * 60;
@@ -293,18 +294,20 @@ describe("CircuitBreakers", () => {
         BTC: { change: 5, timestamp: staleTimestamp },
       };
 
-      const staleResult = CircuitBreakers.checkMarketConditions(stalePrices);
+      const staleResult =
+        await CircuitBreakers.checkMarketConditions(stalePrices);
       expect(staleResult.safe).toBe(false);
 
       const freshPrices = {
         BTC: { change: 5, timestamp: Date.now() / 1000 },
       };
 
-      const freshResult = CircuitBreakers.checkMarketConditions(freshPrices);
+      const freshResult =
+        await CircuitBreakers.checkMarketConditions(freshPrices);
       expect(freshResult.safe).toBe(true);
     });
 
-    it("recovers after correlation normalizes", () => {
+    it("recovers after correlation normalizes", async () => {
       const correlatedPrices = {
         BTC: { change: 8 },
         ETH: { change: 7 },
@@ -312,7 +315,7 @@ describe("CircuitBreakers", () => {
       };
 
       const correlatedResult =
-        CircuitBreakers.checkMarketConditions(correlatedPrices);
+        await CircuitBreakers.checkMarketConditions(correlatedPrices);
       expect(correlatedResult.safe).toBe(false);
 
       const normalPrices = {
@@ -321,7 +324,8 @@ describe("CircuitBreakers", () => {
         XLM: { change: 3 },
       };
 
-      const normalResult = CircuitBreakers.checkMarketConditions(normalPrices);
+      const normalResult =
+        await CircuitBreakers.checkMarketConditions(normalPrices);
       expect(normalResult.safe).toBe(true);
     });
   });
@@ -336,31 +340,31 @@ describe("CircuitBreakers", () => {
       vi.useRealTimers();
     });
 
-    it("triggers circuit breaker for multiple assets independently", () => {
+    it("triggers circuit breaker for multiple assets independently", async () => {
       const prices = {
         BTC: { change: 18, timestamp: Date.now() / 1000 },
         ETH: { change: 20, timestamp: Date.now() / 1000 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toMatch(/BTC|ETH/);
     });
 
-    it("handles mixed trigger conditions across assets", () => {
+    it("handles mixed trigger conditions across assets", async () => {
       const prices = {
         BTC: { change: 16, timestamp: Date.now() / 1000 },
         ETH: { change: 3, timestamp: Date.now() / 1000 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("BTC");
     });
 
-    it("handles stale data for some assets but not others", () => {
+    it("handles stale data for some assets but not others", async () => {
       vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
 
       const freshTimestamp = Date.now() / 1000 - 5 * 60;
@@ -371,13 +375,13 @@ describe("CircuitBreakers", () => {
         ETH: { change: 3, timestamp: staleTimestamp },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
       expect(result.reason).toContain("ETH");
     });
 
-    it("processes all assets in portfolio for correlation check", () => {
+    it("processes all assets in portfolio for correlation check", async () => {
       const prices = {
         BTC: { change: 10 },
         ETH: { change: 12 },
@@ -385,7 +389,7 @@ describe("CircuitBreakers", () => {
         USDC: { change: 0.01 },
       };
 
-      const result = CircuitBreakers.checkMarketConditions(prices);
+      const result = await CircuitBreakers.checkMarketConditions(prices);
 
       expect(result.safe).toBe(false);
     });
@@ -449,13 +453,13 @@ describe("CircuitBreakers", () => {
       vi.useRealTimers();
     });
 
-    it("complete lifecycle: trigger → cooldown → recovery", () => {
+    it("complete lifecycle: trigger → cooldown → recovery", async () => {
       // Step 1: Trigger circuit breaker with high volatility
       const highVolPrices = {
         BTC: { change: 25, timestamp: Date.now() / 1000 },
       };
       const triggerResult =
-        CircuitBreakers.checkMarketConditions(highVolPrices);
+        await CircuitBreakers.checkMarketConditions(highVolPrices);
       expect(triggerResult.safe).toBe(false);
 
       // Step 2: Verify cooldown blocks rebalance
@@ -480,16 +484,17 @@ describe("CircuitBreakers", () => {
       const normalPrices = {
         BTC: { change: 5, timestamp: Date.now() / 1000 },
       };
-      const marketResult = CircuitBreakers.checkMarketConditions(normalPrices);
+      const marketResult =
+        await CircuitBreakers.checkMarketConditions(normalPrices);
       expect(marketResult.safe).toBe(true);
     });
 
-    it("handles multiple assets with staggered recovery", () => {
+    it("handles multiple assets with staggered recovery", async () => {
       const btcVolatilePrices = {
         BTC: { change: 20, timestamp: Date.now() / 1000 },
       };
       const btcTrigger =
-        CircuitBreakers.checkMarketConditions(btcVolatilePrices);
+        await CircuitBreakers.checkMarketConditions(btcVolatilePrices);
       expect(btcTrigger.safe).toBe(false);
 
       vi.advanceTimersByTime(60000);
@@ -497,7 +502,7 @@ describe("CircuitBreakers", () => {
         ETH: { change: 22, timestamp: Date.now() / 1000 },
       };
       const ethTrigger =
-        CircuitBreakers.checkMarketConditions(ethVolatilePrices);
+        await CircuitBreakers.checkMarketConditions(ethVolatilePrices);
       expect(ethTrigger.safe).toBe(false);
 
       const combinedPrices = {
