@@ -219,7 +219,7 @@ describe("CircuitBreakers", () => {
     });
 
     it("calculates remaining cooldown time correctly", () => {
-      vi.setSystemTime(new Date("2026-01-01T10:15:00.000Z"));
+      vi.setSystemTime(new Date("2026-01-01T10:42:00.000Z"));
       const lastRebalance = new Date("2026-01-01T10:00:00.000Z").toISOString();
 
       const result = CircuitBreakers.checkCooldownPeriod(lastRebalance, 1);
