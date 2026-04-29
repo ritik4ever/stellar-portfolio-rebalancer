@@ -138,11 +138,14 @@ impl PortfolioRebalancer {
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
         // Calculate total current value
-        let total_value = portfolio::calculate_portfolio_value(
+        let total_value = match portfolio::calculate_portfolio_value(
             &env,
             &portfolio.current_balances,
             &reflector_client,
-        );
+        ) {
+            Some(val) => val,
+            None => return false, // Cannot safely rebalance without all prices
+        };
 
         if total_value == 0 {
             return false;
@@ -219,7 +222,7 @@ impl PortfolioRebalancer {
                 &env,
                 &portfolio.current_balances,
                 &reflector_client,
-            );
+            ).unwrap(); // Already verified prices above
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client
