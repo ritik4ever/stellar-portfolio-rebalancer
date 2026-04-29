@@ -20,22 +20,30 @@ pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
 }
 
 pub fn calculate_portfolio_value(
-    _env: &Env, // Prefixed with underscore to indicate intentional non-use
+    env: &Env,
     balances: &Map<Address, i128>,
     reflector_client: &crate::reflector::ReflectorClient,
-) -> i128 {
+) -> Option<i128> {
     let mut total_value = 0i128;
+    let current_time = env.ledger().timestamp();
 
     for (asset, balance) in balances.iter() {
         if let Some(price_data) =
             reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
         {
+            // Check for stale price (e.g., 1 hour)
+            if price_data.timestamp + 3600 < current_time {
+                return None;
+            }
             let value = (balance * price_data.price) / 10i128.pow(14);
             total_value += value;
+        } else {
+            // If any asset price is missing, we can't calculate a reliable total value
+            return None;
         }
     }
 
-    total_value
+    Some(total_value)
 }
 
 #[allow(dead_code)]
