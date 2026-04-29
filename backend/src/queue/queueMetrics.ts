@@ -1,6 +1,7 @@
 import { Queue, Job } from 'bullmq'
 import { getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue, QUEUE_NAMES } from './queues.js'
 import { isRedisAvailable } from './connection.js'
+import { logger } from '../utils/logger.js'
 
 export interface QueueStats {
     waiting: number
@@ -116,10 +117,10 @@ export async function getFailedJobs(limit: number = 20): Promise<FailedJobsResul
                 allFailedJobs.push({
                     jobId: job.id ?? 'unknown',
                     queueName: name,
-                    failedAt: job.failedAt?.toISOString() ?? job.updatedAt?.toISOString() ?? new Date().toISOString(),
+                    failedAt: (job as any).failedAt?.toISOString() ?? (job as any).updatedAt?.toISOString() ?? (job as any).timestamp?.toString() ?? new Date().toISOString(),
                     error: job.stacktrace?.[0] ?? job.returnvalue ?? 'Unknown error',
                     attemptsMade: job.attemptsMade ?? 0,
-                    data: job.data
+                    data: job.data as Record<string, unknown>
                 })
             }
         } catch (err) {

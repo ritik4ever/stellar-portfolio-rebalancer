@@ -20,7 +20,7 @@ import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
-import { QUEUE_NAMES } from '../queue/queues.js'
+import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue } from '../queue/queues.js'
 
 export const opsRouter = Router()
 
