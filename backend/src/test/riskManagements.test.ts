@@ -155,6 +155,21 @@ describe('RiskManagementService statistical model', () => {
         expect(risk.drawdownBand).toBe('normal')
     })
 
+    it('classifies overall risk levels as low, medium, high, and critical', () => {
+        const service = new RiskManagementService()
+        const latest: PricesMap = {
+            BTC: { price: 100, change: 0, timestamp: 1, source: 'external' },
+            ETH: { price: 100, change: 0, timestamp: 1, source: 'external' },
+            XLM: { price: 1, change: 0, timestamp: 1, source: 'external' },
+            USDC: { price: 1, change: 0, timestamp: 1, source: 'external' }
+        }
+
+        expect(service.analyzePortfolioRisk({ BTC: 25, ETH: 25, XLM: 25, USDC: 25 }, latest).overallRiskLevel).toBe('low')
+        expect(service.analyzePortfolioRisk({ BTC: 40, ETH: 30, XLM: 20, USDC: 10 }, latest).overallRiskLevel).toBe('medium')
+        expect(service.analyzePortfolioRisk({ BTC: 50, ETH: 25, XLM: 15, USDC: 10 }, latest).overallRiskLevel).toBe('high')
+        expect(service.analyzePortfolioRisk({ BTC: 65, ETH: 15, XLM: 10, USDC: 10 }, latest).overallRiskLevel).toBe('critical')
+    })
+
     it('classifies drawdown bands as normal, elevated, and critical', () => {
         const service = new RiskManagementService()
         const latest = feedSeries(service, {
