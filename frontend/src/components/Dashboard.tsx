@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2 } from 'lucide-react'
@@ -13,9 +13,10 @@ import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
 
 // TanStack Query Hooks
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate } from '../hooks/queries/usePortfolioQuery'
-import { usePrices, formatPriceFeedSummary } from '../hooks/queries/usePricesQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
+import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
 
@@ -109,11 +110,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
     const hasHighGasWarning = rebalanceEstimate?.gasWarning || estimateXlm > 0.5
 
-    const refreshData = async () => {
-        // TanStack Query handles background refresh automatically, but we can force it
-        // by invalidating queries if needed. For now, simple manual refresh is fine.
-        window.location.reload()
-    }
+    const queryClient = useQueryClient()
+
+    const refreshData = useCallback(async () => {
+        // Invalidate all relevant queries to force a refetch without a full page reload.
+        // This leverages TanStack Query's cache invalidation instead of the naive window.location.reload().
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+        ])
+    }, [queryClient])
 
     const disconnectWallet = async () => {
         if (publicKey) {
