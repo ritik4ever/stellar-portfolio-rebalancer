@@ -488,6 +488,140 @@ fn test_portfolio_validation() {
     ));
 }
 
+fn allocation_map_from_percentages(env: &Env, percentages: &[u32]) -> Map<Address, u32> {
+    let mut allocations = Map::new(env);
+    for percentage in percentages {
+        allocations.set(Address::generate(env), *percentage);
+    }
+    allocations
+}
+
+fn random_percentages_with_target_sum(seed: &mut u64, count: usize, target_sum: u32) -> [u32; 12] {
+    let mut values = [0u32; 12];
+    let mut remaining = target_sum;
+    let limit = count.min(12);
+    for (i, value) in values.iter_mut().enumerate().take(limit) {
+        if i + 1 == limit {
+            *value = remaining;
+            break;
+        }
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        let next = if remaining == 0 {
+            0
+        } else {
+            ((*seed as u32) % (remaining + 1)).min(remaining)
+        };
+        *value = next;
+        remaining -= next;
+    }
+    values
+}
+
+#[test]
+fn test_validate_allocations_randomized_sum_100_accepts_500_vectors() {
+    let env = Env::default();
+    let mut seed = 0xC0FFEEu64;
+    for _ in 0..500 {
+        let mut adjusted = [0u32; 10];
+        let mut remaining = 100u32;
+        for (i, slot) in adjusted.iter_mut().enumerate() {
+            let slots_left = 10 - i;
+            if slots_left == 1 {
+                *slot = remaining;
+                break;
+            }
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let max_for_slot = remaining - (slots_left as u32 - 1);
+            let next = 1 + ((seed as u32) % max_for_slot);
+            *slot = next;
+            remaining -= next;
+        }
+        let allocations = allocation_map_from_percentages(&env, &adjusted);
+        assert!(crate::portfolio::validate_allocations(&allocations));
+    }
+}
+
+#[test]
+fn test_validate_allocations_randomized_sum_99_rejects_500_vectors() {
+    let env = Env::default();
+    let mut seed = 0xBAD5EEDu64;
+    for _ in 0..500 {
+        let raw = random_percentages_with_target_sum(&mut seed, 10, 99);
+        let allocations = allocation_map_from_percentages(&env, &raw[..10]);
+        assert!(!crate::portfolio::validate_allocations(&allocations));
+    }
+}
+
+#[test]
+fn test_validate_allocations_randomized_sum_101_rejects_500_vectors() {
+    let env = Env::default();
+    let mut seed = 0xDEADBEEFu64;
+    for _ in 0..500 {
+        let raw = random_percentages_with_target_sum(&mut seed, 10, 101);
+        let allocations = allocation_map_from_percentages(&env, &raw[..10]);
+        assert!(!crate::portfolio::validate_allocations(&allocations));
+    }
+}
+
+#[test]
+fn test_validate_allocations_empty_map_boundary() {
+    let env = Env::default();
+    let allocations = Map::new(&env);
+    assert!(!crate::portfolio::validate_allocations(&allocations));
+}
+
+#[test]
+fn test_validate_allocations_single_asset_hundred_percent_boundary() {
+    let env = Env::default();
+    let allocations = allocation_map_from_percentages(&env, &[100]);
+    assert!(crate::portfolio::validate_allocations(&allocations));
+}
+
+#[test]
+fn test_validate_allocations_ten_plus_assets_fractional_style_boundary() {
+    let env = Env::default();
+    // 11 assets with uneven integer percentages to mimic fractional weighting intent.
+    let allocations = allocation_map_from_percentages(&env, &[9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 10]);
+    assert!(crate::portfolio::validate_allocations(&allocations));
+}
+
+#[test]
+fn test_validate_allocations_overflow_rejected() {
+    let env = Env::default();
+    let allocations = allocation_map_from_percentages(&env, &[u32::MAX, 1]);
+    assert!(!crate::portfolio::validate_allocations(&allocations));
+}
+
+fn build_trade_test_portfolio(
+    env: &Env,
+    allocations: &[(Address, u32)],
+    balances: &[(Address, i128)],
+    total_value: i128,
+) -> Portfolio {
+    let mut target_allocations = Map::new(env);
+    for (asset, percentage) in allocations {
+        target_allocations.set(asset.clone(), *percentage);
+    }
+    let mut current_balances = Map::new(env);
+    for (asset, balance) in balances {
+        current_balances.set(asset.clone(), *balance);
+    }
+    Portfolio {
+        user: Address::generate(env),
+        target_allocations,
+        current_balances,
+        rebalance_threshold: 5,
+        slippage_tolerance: 50,
+        last_rebalance: 0,
+        total_value,
+        is_active: true,
+    }
+}
+
 #[test]
 fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
     let env = Env::default();
@@ -532,6 +666,125 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
         trades.get(asset3).unwrap(),
         MIN_TRADE_AMOUNT_STROOPS + 1
     );
+}
+
+#[test]
+fn test_calculate_rebalance_trades_two_asset_direction_correctness() {
+    let env = Env::default();
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let portfolio = build_trade_test_portfolio(
+        &env,
+        &[(asset1.clone(), 50), (asset2.clone(), 50)],
+        &[(asset1.clone(), 70_000_000), (asset2.clone(), 30_000_000)],
+        100_000_000,
+    );
+    let mut prices = Map::new(&env);
+    prices.set(asset1.clone(), 10i128.pow(14));
+    prices.set(asset2.clone(), 10i128.pow(14));
+
+    let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
+    assert_eq!(trades.get(asset1).unwrap(), -20_000_000);
+    assert_eq!(trades.get(asset2).unwrap(), 20_000_000);
+}
+
+#[test]
+fn test_calculate_rebalance_trades_three_asset_rebalance_path() {
+    let env = Env::default();
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let asset3 = Address::generate(&env);
+    let portfolio = build_trade_test_portfolio(
+        &env,
+        &[
+            (asset1.clone(), 50),
+            (asset2.clone(), 30),
+            (asset3.clone(), 20),
+        ],
+        &[
+            (asset1.clone(), 40_000_000),
+            (asset2.clone(), 40_000_000),
+            (asset3.clone(), 20_000_000),
+        ],
+        100_000_000,
+    );
+    let mut prices = Map::new(&env);
+    prices.set(asset1.clone(), 10i128.pow(14));
+    prices.set(asset2.clone(), 10i128.pow(14));
+    prices.set(asset3.clone(), 10i128.pow(14));
+
+    let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
+    assert_eq!(trades.get(asset1).unwrap(), 10_000_000);
+    assert_eq!(trades.get(asset2).unwrap(), -10_000_000);
+    assert!(!trades.contains_key(asset3));
+}
+
+#[test]
+fn test_calculate_rebalance_trades_five_asset_rebalance_path() {
+    let env = Env::default();
+    let a1 = Address::generate(&env);
+    let a2 = Address::generate(&env);
+    let a3 = Address::generate(&env);
+    let a4 = Address::generate(&env);
+    let a5 = Address::generate(&env);
+    let portfolio = build_trade_test_portfolio(
+        &env,
+        &[
+            (a1.clone(), 20),
+            (a2.clone(), 20),
+            (a3.clone(), 20),
+            (a4.clone(), 20),
+            (a5.clone(), 20),
+        ],
+        &[
+            (a1.clone(), 300_000_000),
+            (a2.clone(), 50_000_000),
+            (a3.clone(), 50_000_000),
+            (a4.clone(), 50_000_000),
+            (a5.clone(), 50_000_000),
+        ],
+        500_000_000,
+    );
+    let mut prices = Map::new(&env);
+    for asset in vec![&env, a1.clone(), a2.clone(), a3.clone(), a4.clone(), a5.clone()].iter() {
+        prices.set(asset.clone(), 10i128.pow(14));
+    }
+
+    let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
+    assert_eq!(trades.get(a1).unwrap(), -200_000_000);
+    assert_eq!(trades.get(a2).unwrap(), 50_000_000);
+    assert_eq!(trades.get(a3).unwrap(), 50_000_000);
+    assert_eq!(trades.get(a4).unwrap(), 50_000_000);
+    assert_eq!(trades.get(a5).unwrap(), 50_000_000);
+}
+
+#[test]
+fn test_calculate_rebalance_trades_price_precision_14_decimals_edge_case() {
+    let env = Env::default();
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let precise_price = 123_456_789_012_345i128;
+    let target_balance = 100_000_000i128;
+    let portfolio = build_trade_test_portfolio(
+        &env,
+        &[(asset1.clone(), 50), (asset2.clone(), 50)],
+        &[
+            (asset1.clone(), target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5)),
+            (asset2.clone(), target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5)),
+        ],
+        246_913_578,
+    );
+    let mut prices = Map::new(&env);
+    prices.set(asset1.clone(), precise_price);
+    prices.set(asset2.clone(), precise_price);
+
+    let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
+    let expected_target_value = (portfolio.total_value * 50) / 100;
+    let expected_target_balance = (expected_target_value * 10i128.pow(14)) / precise_price;
+    let expected_buy = expected_target_balance - (target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5));
+    let expected_sell = expected_target_balance - (target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5));
+    assert_eq!(trades.get(asset1).unwrap(), expected_buy);
+    assert_eq!(trades.get(asset2).unwrap(), expected_sell);
 }
 
 #[test]
