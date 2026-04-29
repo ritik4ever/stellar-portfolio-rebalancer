@@ -94,13 +94,13 @@ describe('JSON export — GET /api/portfolio/:id/export?format=json', () => {
         expect(disposition).toMatch(/\.json"$/)
     })
 
-    it('filename matches pattern portfolio_<8chars>_<timestamp>.json', async () => {
+    it('filename matches pattern portfolio-<8chars>-export-<timestamp>.json', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
             .expect(200)
         const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
         expect(match).not.toBeNull()
-        expect(match![1]).toMatch(/^portfolio_[0-9a-f-]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.json$/)
+        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.json$/)
     })
 
     it('body is valid JSON with GDPR meta fields', async () => {
@@ -135,15 +135,13 @@ describe('CSV export — GET /api/portfolio/:id/export?format=csv', () => {
         expect(disposition).toMatch(/\.csv"$/)
     })
 
-    it('filename matches pattern portfolio_<8chars>_rebalance_history_<timestamp>.csv', async () => {
+    it('filename matches pattern portfolio-<8chars>-export-<timestamp>.csv', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
             .expect(200)
         const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
         expect(match).not.toBeNull()
-        expect(match![1]).toMatch(
-            /^portfolio_[0-9a-f-]{8}_rebalance_history_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.csv$/
-        )
+        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.csv$/)
     })
 
     it('body first line is the canonical CSV header', async () => {
@@ -176,13 +174,13 @@ describe('PDF export — GET /api/portfolio/:id/export?format=pdf', () => {
         expect(disposition).toMatch(/\.pdf"$/)
     })
 
-    it('filename matches pattern portfolio_<8chars>_report_<timestamp>.pdf', async () => {
+    it('filename matches pattern portfolio-<8chars>-export-<timestamp>.pdf', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
             .buffer(true).expect(200)
         const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
         expect(match).not.toBeNull()
-        expect(match![1]).toMatch(/^portfolio_[0-9a-f-]{8}_report_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.pdf$/)
+        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.pdf$/)
     })
 
     it('body is a non-empty buffer starting with PDF magic bytes %PDF', async () => {
