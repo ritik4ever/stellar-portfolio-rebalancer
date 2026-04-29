@@ -724,6 +724,59 @@ fn test_emergency_stop_non_admin_rejected() {
 }
 
 #[test]
+fn test_emergency_stop_reactivation_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    // Pause
+    client.set_emergency_stop(&true);
+    
+    // Reactivate
+    client.set_emergency_stop(&false);
+    
+    // Resume operations
+    client.deposit(&pid, &asset, &100);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 100);
+}
+
+#[test]
+#[should_panic]
+fn test_emergency_stop_non_admin_snapshot_captured() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    
+    client.mock_all_auths().initialize(&admin, &reflector_id);
+    
+    // Non-admin auth should be rejected by require_auth on the admin address
+    client.mock_auths(&[MockAuth {
+        address: &non_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "set_emergency_stop",
+            args: vec![&env, true.into_val(&env)],
+            sub_invokes: &[],
+        },
+    }]).set_emergency_stop(&true);
+}
+
+#[test]
 fn test_calculate_portfolio_value_all_prices_available() {
     let env = Env::default();
     env.mock_all_auths();
@@ -748,7 +801,7 @@ fn test_calculate_portfolio_value_all_prices_available() {
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
-    assert_eq!(value, 15000);
+    assert_eq!(value, Some(15000));
 }
 
 #[test]
@@ -780,7 +833,7 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
 
-    assert_eq!(value, 10000);
+    assert_eq!(value, None); // Should be None now that we don't skip
 }
 
 #[test]
@@ -805,7 +858,7 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
-    assert_eq!(value, 0);
+    assert_eq!(value, None); // Should be None if all missing
 }
 
 #[test]
@@ -963,4 +1016,89 @@ fn assert_cost_within_tolerance(cpu: u64, mem: u64, baseline_cpu: u64, baseline_
         baseline_mem,
         mem_limit
     );
+}
+
+#[cfg(test)]
+mod fuzz_tests {
+    use super::*;
+    use proptest::prelude::*;
+    use soroban_sdk::{testutils::Address as _, Address, Env, Map};
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+        
+        #[test]
+        fn test_validate_allocations_random_sums(
+            // Generate a vector of 1-15 percentages
+            percentages in prop::collection::vec(0u32..200u32, 1..15)
+        ) {
+            let env = Env::default();
+            let mut allocations = Map::new(&env);
+            let mut expected_total = 0u32;
+            
+            for p in percentages {
+                allocations.set(Address::generate(&env), p);
+                expected_total += p;
+            }
+            
+            let is_valid = crate::portfolio::validate_allocations(&allocations);
+            if expected_total == 100 {
+                assert!(is_valid, "Should be valid when total is 100");
+            } else {
+                assert!(!is_valid, "Should be invalid when total is {} (not 100)", expected_total);
+            }
+        }
+
+        #[test]
+        fn test_validate_allocations_sum_100_fixed_count(
+            count in 1usize..15usize
+        ) {
+            let env = Env::default();
+            let mut allocations = Map::new(&env);
+            
+            // Distribute 100 across 'count' assets
+            let mut remaining = 100u32;
+            for i in 0..count {
+                let val = if i == count - 1 {
+                    remaining
+                } else {
+                    // Random value between 0 and remaining
+                    // Since proptest doesn't easily support dependent generators here without flat_map,
+                    // we'll just use a simple deterministic distribution for this specific test
+                    // or just use a simpler way.
+                    remaining / (count as u32 - i as u32)
+                };
+                allocations.set(Address::generate(&env), val);
+                remaining -= val;
+            }
+            
+            assert!(crate::portfolio::validate_allocations(&allocations), "Total should be 100");
+        }
+    }
+
+    #[test]
+    fn test_validate_allocations_empty() {
+        let env = Env::default();
+        let allocations = Map::new(&env);
+        assert!(!crate::portfolio::validate_allocations(&allocations), "Empty allocations should be invalid");
+    }
+
+    #[test]
+    fn test_validate_allocations_single_asset_100() {
+        let env = Env::default();
+        let mut allocations = Map::new(&env);
+        allocations.set(Address::generate(&env), 100);
+        assert!(crate::portfolio::validate_allocations(&allocations), "Single asset 100% should be valid");
+    }
+
+    #[test]
+    fn test_validate_allocations_multi_asset_fractional() {
+        let env = Env::default();
+        let mut allocations = Map::new(&env);
+        // 10 assets with 10% each
+        for _ in 0..10 {
+            allocations.set(Address::generate(&env), 10);
+        }
+        assert!(crate::portfolio::validate_allocations(&allocations), "10 assets with 10% each should be valid");
+    }
 }
