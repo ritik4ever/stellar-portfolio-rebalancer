@@ -18,6 +18,8 @@ export class ReflectorService {
     private coinGeckoApiKey: string
     private coinGeckoIds: Record<string, string>
     private priceCache: Map<string, { data: PriceData; cachedAtMs: number }>
+    private reflectorApiUrl: string
+    private readonly PRICE_DATA_MAX_AGE = Number.parseInt(process.env.PRICE_DATA_MAX_AGE || '600', 10)
     private readonly CACHE_DURATION = process.env.NODE_ENV === 'production' ? 600000 : 300000 // 10 min vs 5 min
     private lastRequestTime = 0
     private readonly MIN_REQUEST_INTERVAL = 90000 // Increased to 1.5 minutes for Pro API
@@ -26,6 +28,7 @@ export class ReflectorService {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
         this.priceCache = new Map()
         this.coinGeckoIds = { ...DEFAULT_COIN_IDS }
+        this.reflectorApiUrl = process.env.REFLECTOR_API_URL || ''
     }
 
     /** Asset list from registry; fallback to default 4 if registry empty */
@@ -71,7 +74,7 @@ export class ReflectorService {
 
     private async resolvePricesInternal(): Promise<{ map: PricesMap; hint: PriceResolutionHint }> {
         try {
-            logger.info('[DEBUG] Fetching prices from CoinGecko with smart caching')
+            logger.info('[DEBUG] Fetching prices with Reflector/CoinGecko and smart caching')
             const assets = this.getAssetList()
 
             const cachedPrices = this.getCachedPrices(assets)
@@ -92,11 +95,26 @@ export class ReflectorService {
                 throw new Error('Price request rate-limited and ALLOW_FALLBACK_PRICES is disabled')
             }
 
+            let reflectorPrices: PricesMap = {}
+            try {
+                reflectorPrices = await this.getReflectorPrices(assets)
+            } catch (reflectorError) {
+                logger.warn('[WARNING] Reflector fetch failed, falling back to CoinGecko', { reflectorError })
+            }
+
+            const missingAssets = assets.filter((asset) => reflectorPrices[asset] === undefined)
             const coinIds = this.getCoinIdMap()
-            const freshPrices = await this.getFreshPrices(assets, coinIds)
-            const merged = { ...cachedPrices, ...freshPrices } as PricesMap
+            const freshPrices = missingAssets.length > 0
+                ? await this.getFreshPrices(missingAssets, coinIds)
+                : {}
+
+            const merged = { ...cachedPrices, ...reflectorPrices, ...freshPrices } as PricesMap
+            if (Object.keys(merged).length === 0) {
+                throw new Error('No valid price data available from Reflector or CoinGecko')
+            }
+
             const hint: PriceResolutionHint =
-                Object.keys(freshPrices).length === assets.length
+                Object.keys(reflectorPrices).length + Object.keys(freshPrices).length === assets.length
                     ? 'fresh_primary'
                     : Object.keys(cachedPrices).length > 0
                       ? 'partial_merge'
@@ -166,6 +184,76 @@ export class ReflectorService {
         })
 
         return cachedPrices
+    }
+
+    private normalizeReflectorPrice(raw: string | number | bigint, decimals: number): number {
+        const numeric = typeof raw === 'bigint' ? Number(raw) : Number(raw)
+        if (!Number.isFinite(numeric)) {
+            throw new Error('Invalid Reflector price value')
+        }
+        if (decimals <= 0) return numeric
+        return numeric / (10 ** decimals)
+    }
+
+    private isPriceStale(timestamp: number): boolean {
+        const tsSec = timestamp >= 1e12 ? Math.floor(timestamp / 1000) : Math.floor(timestamp)
+        const nowSec = Math.floor(Date.now() / 1000)
+        return (nowSec - tsSec) > this.PRICE_DATA_MAX_AGE
+    }
+
+    private async getReflectorPrices(assets: string[]): Promise<PricesMap> {
+        if (!this.reflectorApiUrl) return {}
+
+        const url = `${this.reflectorApiUrl.replace(/\/$/, '')}/prices?assets=${encodeURIComponent(assets.join(','))}`
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'StellarPortfolioRebalancer/1.0'
+            }
+        })
+
+        if (!response.ok) {
+            throw new Error(`Reflector API error: ${response.status}`)
+        }
+
+        const payload = await response.json() as {
+            prices?: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
+        } | Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
+
+        const rows = ('prices' in payload && payload.prices)
+            ? payload.prices
+            : payload
+
+        const out: PricesMap = {}
+        let staleCount = 0
+
+        assets.forEach((asset) => {
+            const row = rows?.[asset]
+            if (!row) return
+
+            if (this.isPriceStale(row.timestamp)) {
+                staleCount += 1
+                return
+            }
+
+            out[asset] = {
+                price: this.normalizeReflectorPrice(row.price, row.decimals ?? 0),
+                change: row.change ?? 0,
+                timestamp: row.timestamp,
+                source: 'reflector',
+                volume: row.volume,
+                servedFromCache: false,
+                serverFetchedAtMs: Date.now(),
+                dataTier: 'primary'
+            }
+        })
+
+        if (Object.keys(out).length === 0 && staleCount > 0) {
+            throw new Error('Reflector data is stale')
+        }
+
+        return out
     }
 
     private async getFreshPrices(assets: string[], coinIds: Record<string, string>): Promise<PricesMap> {
