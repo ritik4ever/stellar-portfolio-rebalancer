@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { Wifi, WifiOff, TrendingUp, TrendingDown } from 'lucide-react'
-import { api, ENDPOINTS } from '../config/api'
 import { usePrices, type PriceFeedClientMeta } from '../hooks/queries/usePricesQuery'
+import { useAssets } from '../hooks/queries/useAssetsQuery'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 
 interface PriceTrackerProps {
@@ -81,7 +81,7 @@ function qualityMessage(meta: PriceFeedClientMeta | undefined): string | null {
 }
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
-    const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
+    const { data: assetList = ['XLM', 'BTC', 'ETH', 'USDC'] } = useAssets()
     const { data: priceBundle, isLoading, error: queryError, refetch } = usePrices()
     const { state: realtimeState } = useRealtimeConnection()
 
@@ -107,13 +107,8 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         void refetch()
     }
 
-    useEffect(() => {
-        api.get<{ assets: Array<{ symbol: string }> }>(ENDPOINTS.ASSETS)
-            .then((res) => {
-                if (res?.assets?.length) setAssetList(res.assets.map((a) => a.symbol))
-            })
-            .catch(() => {})
-    }, [])
+    // Assets list is now handled by useAssets() React Query hook above.
+    // This eliminates the manual useEffect fetch + setState pattern.
 
     if (loading && Object.keys(prices).length === 0) {
         return (

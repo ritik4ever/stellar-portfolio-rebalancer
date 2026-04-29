@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import jwt from "jsonwebtoken";
 
+vi.mock("../db/refreshTokenDb.js", () => ({
+  createRefreshToken: vi.fn(() => Promise.resolve()),
+  findRefreshToken: vi.fn(() => Promise.resolve(null)),
+  deleteRefreshTokenById: vi.fn(() => Promise.resolve(true)),
+  deleteAllRefreshTokensForUser: vi.fn(() => Promise.resolve(0)),
+  generateRefreshTokenId: vi.fn(() => "mock-jti"),
+}));
+
 describe("authService – JWT secret enforcement", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -149,6 +157,163 @@ describe("authService – JWT secret enforcement", () => {
       });
       const { verifyAccessToken } = await import("../services/authService.js");
       expect(verifyAccessToken(expired)).toBeNull();
+    });
+  });
+
+  describe("refreshTokens (rotation)", () => {
+    const secret = "a".repeat(32);
+    const address = "GADDRESS123";
+
+    beforeEach(() => {
+      vi.stubEnv("JWT_SECRET", secret);
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    });
+
+    it("returns new tokens and rotates (deletes old) on valid refresh", async () => {
+      const { refreshTokens } = await import("../services/authService.js");
+      const { findRefreshToken, deleteRefreshTokenById, createRefreshToken } =
+        await import("../db/refreshTokenDb.js");
+
+      const oldRefreshId = "old-jti";
+      const oldRefreshToken = jwt.sign(
+        { sub: address, type: "refresh", jti: oldRefreshId },
+        secret,
+      );
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce({
+        id: oldRefreshId,
+        user_address: address,
+        token_hash: "old-hash",
+        expires_at: new Date(Date.now() + 10000),
+        created_at: new Date(),
+      });
+
+      const result = await refreshTokens(oldRefreshToken);
+
+      expect(result).not.toBeNull();
+      expect(result?.accessToken).toBeDefined();
+      expect(result?.refreshToken).toBeDefined();
+      expect(result?.refreshToken).not.toBe(oldRefreshToken);
+
+      // Verify rotation: old token deleted, new one created
+      expect(deleteRefreshTokenById).toHaveBeenCalledWith(oldRefreshId);
+      expect(createRefreshToken).toHaveBeenCalled();
+    });
+
+    it("rejects and deletes token if JWT verification fails (e.g. expired)", async () => {
+      const { refreshTokens } = await import("../services/authService.js");
+      const { findRefreshToken, deleteRefreshTokenById } = await import(
+        "../db/refreshTokenDb.js"
+      );
+
+      const expiredToken = jwt.sign(
+        { sub: address, type: "refresh", jti: "expired-jti" },
+        secret,
+        { expiresIn: -1 },
+      );
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce({
+        id: "expired-jti",
+        user_address: address,
+        token_hash: "hash",
+        expires_at: new Date(Date.now() - 1000), // DB also thinks it's expired
+        created_at: new Date(),
+      });
+
+      const result = await refreshTokens(expiredToken);
+      expect(result).toBeNull();
+      // Should delete the expired token from DB
+      expect(deleteRefreshTokenById).toHaveBeenCalledWith("expired-jti");
+    });
+
+    it("rejects if token type is not refresh", async () => {
+      const { refreshTokens } = await import("../services/authService.js");
+      const { findRefreshToken } = await import("../db/refreshTokenDb.js");
+
+      const accessToken = jwt.sign(
+        { sub: address, type: "access", jti: "not-a-refresh-token" },
+        secret,
+      );
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce({
+        id: "id",
+        user_address: address,
+        token_hash: "hash",
+        expires_at: new Date(Date.now() + 10000),
+        created_at: new Date(),
+      });
+
+      const result = await refreshTokens(accessToken);
+      expect(result).toBeNull();
+    });
+
+    it("prevents reuse by failing if token is not in database", async () => {
+      const { refreshTokens } = await import("../services/authService.js");
+      const { findRefreshToken } = await import("../db/refreshTokenDb.js");
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce(null);
+
+      const result = await refreshTokens("some-already-used-token");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("logout functionality", () => {
+    const address = "GADDRESS123";
+
+    beforeEach(() => {
+      vi.stubEnv("JWT_SECRET", "a".repeat(32));
+    });
+
+    afterEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("invalidates a single session by refresh token", async () => {
+      const { logout } = await import("../services/authService.js");
+      const { findRefreshToken, deleteRefreshTokenById } = await import(
+        "../db/refreshTokenDb.js"
+      );
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce({
+        id: "target-id",
+      } as any);
+
+      const success = await logout("token-to-invalidate", undefined);
+      expect(success).toBe(true);
+      expect(deleteRefreshTokenById).toHaveBeenCalledWith("target-id");
+    });
+
+    it("invalidates all sessions for a user address", async () => {
+      const { logout } = await import("../services/authService.js");
+      const { deleteAllRefreshTokensForUser } = await import(
+        "../db/refreshTokenDb.js"
+      );
+
+      vi.mocked(deleteAllRefreshTokensForUser).mockResolvedValueOnce(3);
+
+      const success = await logout(undefined, address);
+      expect(success).toBe(true);
+      expect(deleteAllRefreshTokensForUser).toHaveBeenCalledWith(address);
+    });
+
+    it("returns false if nothing to invalidate", async () => {
+      const { logout } = await import("../services/authService.js");
+      const { findRefreshToken, deleteAllRefreshTokensForUser } = await import(
+        "../db/refreshTokenDb.js"
+      );
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce(null);
+      vi.mocked(deleteAllRefreshTokensForUser).mockResolvedValueOnce(0);
+
+      const success = await logout("not-found", "G-NO-TOKENS");
+      expect(success).toBe(false);
     });
   });
 });

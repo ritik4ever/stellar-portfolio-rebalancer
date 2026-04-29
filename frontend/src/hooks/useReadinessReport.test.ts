@@ -66,17 +66,20 @@ describe('buildCapabilityNotices', () => {
 describe('useReadinessReport hook', () => {
     beforeEach(() => {
         vi.stubGlobal('fetch', vi.fn())
-        vi.useFakeTimers({ shouldAdvanceTime: true })
+
     })
 
     afterEach(() => {
         vi.unstubAllGlobals()
-        vi.useRealTimers()
         vi.restoreAllMocks()
     })
 
     it('maps "ready" status correctly', async () => {
-        const mockReport = baseReport()
+        const ready = { status: 'ready' as const, required: true, message: 'ok' }
+        const mockReport = baseReport({
+            contractEventIndexer: ready,
+            autoRebalancer: ready,
+        })
         vi.mocked(fetch).mockResolvedValueOnce({
             ok: true,
             headers: new Map([['content-type', 'application/json']]),
@@ -118,6 +121,7 @@ describe('useReadinessReport hook', () => {
     })
 
     it('re-fetches on the auto-refresh interval', async () => {
+        vi.useFakeTimers()
         const mockReport = baseReport()
         vi.mocked(fetch).mockResolvedValue({
             ok: true,
@@ -127,13 +131,14 @@ describe('useReadinessReport hook', () => {
 
         renderHook(() => useReadinessReport())
 
-        await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+        expect(fetch).toHaveBeenCalledTimes(1)
 
         // Advance time by POLL_MS (45s)
-        act(() => {
+        await act(async () => {
             vi.advanceTimersByTime(45000)
         })
 
-        await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+        expect(fetch).toHaveBeenCalledTimes(2)
+        vi.useRealTimers()
     })
 })

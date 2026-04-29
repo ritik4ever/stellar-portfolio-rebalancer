@@ -1,0 +1,27 @@
+src/components/AssetCard.tsx(64,24): error TS18047: 'change' is possibly 'null'.
+src/components/AssetCard.tsx(65,24): error TS18047: 'change' is possibly 'null'.
+src/components/AssetCard.tsx(75,21): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: number | bigint): string', gave the following error.
+    Argument of type 'number | null' is not assignable to parameter of type 'number | bigint'.
+      Type 'null' is not assignable to type 'number | bigint'.
+  Overload 2 of 2, '(value: number): string', gave the following error.
+    Argument of type 'number | null' is not assignable to parameter of type 'number'.
+      Type 'null' is not assignable to type 'number'.
+src/components/AssetCard.tsx(98,65): error TS18047: 'change' is possibly 'null'.
+src/components/ConsentGate.test.tsx(3,37): error TS6133: 'waitFor' is declared but its value is never read.
+src/components/NotificationPreferences.test.tsx(112,9): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/config/api.ts(206,31): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'BrowserPricesPayload'.
+  No index signature with a parameter of type 'string' was found on type 'BrowserPricesPayload'.
+src/hooks/mutations/usePortfolioMutations.ts(72,39): error TS6133: 'context' is declared but its value is never read.
+src/hooks/mutations/usePortfolioMutations.ts(91,38): error TS6133: 'context' is declared but its value is never read.
+src/hooks/usePortfolio.test.tsx(64,9): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/hooks/usePortfolio.test.tsx(94,9): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/hooks/useReflector.test.tsx(30,18): error TS2304: Cannot find name 'global'.
+src/hooks/useReflector.test.tsx(44,18): error TS2304: Cannot find name 'global'.
+src/hooks/useReflector.test.tsx(56,18): error TS2304: Cannot find name 'global'.
+src/hooks/useReflector.test.tsx(68,35): error TS2304: Cannot find name 'global'.
+src/hooks/useReflector.test.tsx(87,18): error TS2304: Cannot find name 'global'.
+src/hooks/useReflector.test.tsx(99,18): error TS2304: Cannot find name 'global'.

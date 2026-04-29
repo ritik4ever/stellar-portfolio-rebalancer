@@ -187,7 +187,7 @@ export async function getPortfolioExport(
         const payload = buildExportJson(portfolio, history)
         return {
             contentType: 'application/json; charset=utf-8',
-            filename: `portfolio_${safeId}_${timestamp}.json`,
+            filename: `portfolio-${safeId}-export-${timestamp}.json`,
             body: JSON.stringify(payload, null, 2)
         }
     }
@@ -196,7 +196,7 @@ export async function getPortfolioExport(
         const csv = buildExportCsv(history)
         return {
             contentType: 'text/csv; charset=utf-8',
-            filename: `portfolio_${safeId}_rebalance_history_${timestamp}.csv`,
+            filename: `portfolio-${safeId}-export-${timestamp}.csv`,
             body: csv
         }
     }
@@ -213,7 +213,7 @@ export async function getPortfolioExport(
         const buffer = await buildExportPdf(portfolio, history, prices)
         return {
             contentType: 'application/pdf',
-            filename: `portfolio_${safeId}_report_${timestamp}.pdf`,
+            filename: `portfolio-${safeId}-export-${timestamp}.pdf`,
             body: buffer
         }
     }

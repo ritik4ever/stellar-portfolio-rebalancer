@@ -3,6 +3,15 @@ use soroban_sdk::{contracterror, contracttype, Address, Map};
 // Stellar assets use 7-decimal precision where 1 XLM = 10^7 stroops.
 // 1_000_000 stroops equals 0.1 XLM, which acts as the minimum executable trade size.
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
+/// Maximum number of assets allowed in a single portfolio (#296).
+///
+/// Soroban persistent storage entries are bounded by ledger entry size limits.
+/// Each additional asset adds two `Map` entries (target allocation + current
+/// balance) plus oracle price lookup overhead during rebalance.
+/// 10 assets is the tested practical maximum that keeps all operations within
+/// Soroban CPU and memory budgets.
+///
+/// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
 
 #[contracttype]

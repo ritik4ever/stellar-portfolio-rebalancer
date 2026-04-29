@@ -1,3 +1,24 @@
+/**
+ * @deprecated Use `usePortfolioDetails` from `./queries/usePortfolioQuery` instead.
+ *
+ * This hook used a manual `useEffect` + `setInterval` polling pattern.
+ * It has been replaced by TanStack Query hooks that provide:
+ * - Automatic caching & deduplication
+ * - Background refetching via `refetchInterval`
+ * - Built-in loading/error states
+ * - Cache invalidation on mutations
+ *
+ * Migration:
+ * ```ts
+ * // Before:
+ * const { portfolio, loading, error, executeRebalance } = usePortfolio(id)
+ *
+ * // After:
+ * const { data: portfolio, isLoading, error } = usePortfolioDetails(id)
+ * const { mutateAsync: executeRebalance } = useExecuteRebalanceMutation(id)
+ * ```
+ */
+
 import { useState, useEffect } from 'react'
 import { api, ENDPOINTS } from '../config/api'
 
@@ -15,6 +36,13 @@ interface PortfolioData {
 }
 
 export const usePortfolio = (portfolioId?: string) => {
+    if (import.meta.env.DEV) {
+        console.warn(
+            '[usePortfolio] DEPRECATED: Use usePortfolioDetails from ./queries/usePortfolioQuery instead. ' +
+            'This hook uses manual polling that duplicates TanStack Query functionality.',
+        )
+    }
+
     const [portfolio, setPortfolio] = useState<PortfolioData | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
