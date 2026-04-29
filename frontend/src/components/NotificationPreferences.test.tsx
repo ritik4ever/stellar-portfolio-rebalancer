@@ -89,7 +89,7 @@ describe('NotificationPreferences', () => {
 
     it('shows loading state during save and success toast after completion', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
-        let resolveSave: ((value: any) => void) | null = null
+        let resolveSave!: (value: any) => void
         vi.spyOn(api, 'post').mockImplementation(
             () =>
                 new Promise(res => {
@@ -109,7 +109,7 @@ describe('NotificationPreferences', () => {
         fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
         expect(await screen.findByText(/saving\.\.\./i)).toBeTruthy()
 
-        resolveSave?.({ success: true })
+        resolveSave({ success: true })
         expect(await screen.findByText(/preferences saved successfully/i)).toBeTruthy()
     })
 

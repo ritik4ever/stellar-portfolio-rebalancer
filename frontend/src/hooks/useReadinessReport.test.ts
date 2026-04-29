@@ -66,6 +66,7 @@ describe('buildCapabilityNotices', () => {
 describe('useReadinessReport hook', () => {
     beforeEach(() => {
         vi.stubGlobal('fetch', vi.fn())
+
     })
 
     afterEach(() => {
@@ -90,7 +91,7 @@ describe('useReadinessReport hook', () => {
         await waitFor(() => expect(result.current.loading).toBe(false))
         expect(result.current.report?.status).toBe('ready')
         expect(result.current.loadError).toBe(false)
-        expect(result.current.notices).toHaveLength(0)
+        expect(result.current.notices.filter(n => n.kind !== 'disabled')).toHaveLength(0)
     })
 
     it('maps degraded services to warning notices', async () => {

@@ -27,7 +27,7 @@ describe('useReflector', () => {
     })
 
     it('loads prices', async () => {
-        vi.spyOn(global, 'fetch').mockResolvedValue({
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
             json: async () => ({ XLM: { price: 0.1, change: 1, timestamp: Date.now() } }),
         } as Response)
@@ -41,7 +41,7 @@ describe('useReflector', () => {
     })
 
     it('marks prices stale at threshold boundary', async () => {
-        vi.spyOn(global, 'fetch').mockResolvedValue({
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
             json: async () => ({
                 XLM: { price: 0.1, change: 0, timestamp: Date.now() - (PRICE_STALENESS_THRESHOLD_MS - 1000) },
@@ -53,7 +53,7 @@ describe('useReflector', () => {
         first.unmount()
 
         vi.restoreAllMocks()
-        vi.spyOn(global, 'fetch').mockResolvedValue({
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
             json: async () => ({
                 XLM: { price: 0.1, change: 0, timestamp: Date.now() - (PRICE_STALENESS_THRESHOLD_MS + 1000) },
@@ -65,7 +65,7 @@ describe('useReflector', () => {
 
     it('polls at expected interval', async () => {
         vi.useFakeTimers()
-        const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
             json: async () => ({ XLM: { price: 0.1, change: 1, timestamp: Date.now() } }),
         } as Response)
@@ -84,7 +84,7 @@ describe('useReflector', () => {
     })
 
     it('falls back to backend API when reflector is unreachable', async () => {
-        vi.spyOn(global, 'fetch').mockRejectedValue(new Error('reflector down'))
+        vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('reflector down'))
         const apiGetSpy = vi
             .spyOn(api, 'get')
             .mockResolvedValue({ XLM: { price: 0.23, change: 1, timestamp: Date.now() } } as any)
@@ -96,7 +96,7 @@ describe('useReflector', () => {
 
     it('cancels in-flight request on unmount', async () => {
         const abortSpy = vi.spyOn(AbortController.prototype, 'abort')
-        vi.spyOn(global, 'fetch').mockImplementation(
+        vi.spyOn(globalThis, 'fetch').mockImplementation(
             () => new Promise(() => undefined) as Promise<Response>
         )
 

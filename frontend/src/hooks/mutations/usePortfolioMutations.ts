@@ -69,7 +69,7 @@ export const useCreatePortfolioMutation = () => {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
         },
-        onError: (_error, _variables, context) => {
+        onError: (_error, _variables, _context) => {
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
         }
     })
@@ -88,7 +88,7 @@ export const useExecuteRebalanceMutation = (portfolioId: string | null) => {
                 queryClient.invalidateQueries({ queryKey: analyticsKeys.portfolio(portfolioId) })
             }
         },
-        onError: (error, _variables, context) => {
+        onError: (error, _variables, _context) => {
             const failureInfo = parseFailureReason(error)
             console.error('[Mutation:ExecuteRebalance] Failed', {
                 portfolioId,
