@@ -117,10 +117,12 @@ export async function getFailedJobs(limit: number = 20): Promise<FailedJobsResul
                 allFailedJobs.push({
                     jobId: job.id ?? 'unknown',
                     queueName: name,
-                    failedAt: (job as any).failedAt?.toISOString() ?? (job as any).updatedAt?.toISOString() ?? (job as any).timestamp?.toString() ?? new Date().toISOString(),
+                    failedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : new Date(job.timestamp).toISOString(),
                     error: job.stacktrace?.[0] ?? job.returnvalue ?? 'Unknown error',
                     attemptsMade: job.attemptsMade ?? 0,
-                    data: job.data as Record<string, unknown>
+                    data: (job.data !== null && typeof job.data === 'object' && !Array.isArray(job.data))
+                        ? (job.data as Record<string, unknown>)
+                        : { value: job.data }
                 })
             }
         } catch (err) {
