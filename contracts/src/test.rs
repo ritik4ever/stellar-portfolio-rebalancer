@@ -528,6 +528,10 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
     assert!(!trades.contains_key(asset1));
     assert!(!trades.contains_key(asset2));
+    assert_eq!(
+        trades.get(asset3).unwrap(),
+        MIN_TRADE_AMOUNT_STROOPS + 1
+    );
 }
 
 #[test]
