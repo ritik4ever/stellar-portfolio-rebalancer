@@ -173,6 +173,9 @@ Contract interface reference (functions, errors, and type notes): [`contracts/CO
 - Rebalancing: Manual or automatic execution
 - History: Track past rebalances
 
+### Portfolio Asset Limit
+Each portfolio supports a maximum of **10 assets** (). This limit exists because Soroban persistent storage entries are bounded by ledger entry size constraints, and each asset adds allocation and balance map entries plus oracle lookup overhead during rebalance. Attempting to create a portfolio with more than 10 assets returns a  error.
+
 ## Safety Features
 - Cooldown Periods: Minimum 1 hour between rebalances
 - Volatility Detection: Pauses rebalancing during extreme market conditions

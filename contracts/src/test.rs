@@ -964,3 +964,118 @@ fn assert_cost_within_tolerance(cpu: u64, mem: u64, baseline_cpu: u64, baseline_
         mem_limit
     );
 }
+
+// ── #296: Maximum asset count tests ──────────────────────────────────────────
+
+/// Helper: build a portfolio allocation map with `n` assets, each equally weighted.
+/// Allocations are distributed as evenly as possible; any remainder is added to
+/// the last asset so that the sum is always exactly 100.
+fn build_equal_allocations(env: &Env, n: u32) -> Map<Address, u32> {
+    let mut allocations = Map::new(env);
+    let base = 100 / n;
+    let remainder = 100 % n;
+    for i in 0..n {
+        let asset = Address::generate(env);
+        let pct = if i == n - 1 { base + remainder } else { base };
+        allocations.set(asset, pct);
+    }
+    allocations
+}
+
+/// TC-296-01: A portfolio with exactly MAX_PORTFOLIO_ASSETS (10) assets should
+/// be created successfully.
+#[test]
+fn test_create_portfolio_at_max_asset_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.sequence_number = 1);
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // 10 assets = MAX_PORTFOLIO_ASSETS — must succeed
+    let allocations = build_equal_allocations(&env, MAX_PORTFOLIO_ASSETS);
+    let portfolio_id = client.create_portfolio(&user, &allocations, &5, &50);
+    assert!(portfolio_id > 0, "Portfolio with {} assets (MAX) should be created", MAX_PORTFOLIO_ASSETS);
+
+    let portfolio = client.get_portfolio(&portfolio_id);
+    assert_eq!(
+        portfolio.target_allocations.len(),
+        MAX_PORTFOLIO_ASSETS,
+        "Portfolio should hold exactly MAX_PORTFOLIO_ASSETS entries"
+    );
+}
+
+/// TC-296-02: A portfolio with MAX_PORTFOLIO_ASSETS + 1 (11) assets must be
+/// rejected with Error::TooManyAssets.
+#[test]
+fn test_create_portfolio_exceeds_max_asset_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let user = Address::generate(&env);
+
+    // 11 assets = one above the limit — must be rejected
+    let over_limit = MAX_PORTFOLIO_ASSETS + 1;
+    let allocations = build_equal_allocations(&env, over_limit);
+    let result = client.try_create_portfolio(&user, &allocations, &5, &50);
+    assert_eq!(
+        result,
+        Err(Ok(Error::TooManyAssets)),
+        "Portfolio with {} assets should be rejected with TooManyAssets",
+        over_limit
+    );
+}
+
+/// TC-296-03: A portfolio with 20 assets (significantly over limit) is also
+/// rejected with Error::TooManyAssets — the error is not bypassed for large counts.
+#[test]
+fn test_create_portfolio_twenty_assets_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let user = Address::generate(&env);
+    let allocations = build_equal_allocations(&env, 20);
+    let result = client.try_create_portfolio(&user, &allocations, &5, &50);
+    assert_eq!(
+        result,
+        Err(Ok(Error::TooManyAssets)),
+        "Portfolio with 20 assets must be rejected with TooManyAssets"
+    );
+}
+
+/// TC-296-04: A portfolio with one asset below the limit (9) is accepted.
+/// Confirms the boundary check is strictly > MAX, not >=.
+#[test]
+fn test_create_portfolio_below_max_asset_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.sequence_number = 1);
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let allocations = build_equal_allocations(&env, MAX_PORTFOLIO_ASSETS - 1);
+    let portfolio_id = client.create_portfolio(&user, &allocations, &5, &50);
+    assert!(portfolio_id > 0, "Portfolio with {} assets (one below MAX) should be created", MAX_PORTFOLIO_ASSETS - 1);
+}
