@@ -2,9 +2,19 @@ use crate::types::*;
 use soroban_sdk::{Address, Env, Map};
 
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
+    if allocations.is_empty() {
+        return false;
+    }
+
     let mut total = 0u32;
     for (_, percentage) in allocations.iter() {
-        total += percentage;
+        if percentage == 0 {
+            return false;
+        }
+        total = match total.checked_add(percentage) {
+            Some(next_total) => next_total,
+            None => return false,
+        };
     }
     total == 100
 }

@@ -1,0 +1,22 @@
+name: Generated Artifact Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  guard-generated-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main for diff base
+        run: git fetch origin main --depth=1
+
+      - name: Fail on generated/runtime artifacts
+        run: bash scripts/check-generated-artifacts.sh origin/main
