@@ -199,13 +199,6 @@ export const apiRequest = async <T>(
         try {
             const payload = await browserPriceService.getCurrentPrices()
             return payload as unknown as T
-            const prices = await browserPriceService.getCurrentPrices()
-            // Source information is embedded in each price entry via the 'source' field
-            debugLog('Price source: Browser (CoinGecko API or fallback)', {
-                assets: Object.keys(prices),
-                sourceSample: prices[Object.keys(prices)[0]]?.source
-            })
-            return prices as unknown as T
         } catch (error) {
             console.error('Browser price service failed, falling back to backend:', error)
             debugLog('Price fallback triggered: Attempting backend API')

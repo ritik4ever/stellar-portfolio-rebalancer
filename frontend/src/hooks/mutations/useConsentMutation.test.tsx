@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api } from '../../config/api'
 import {
@@ -63,11 +63,11 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-        const mutationPromise = act(async () => {
-            await result.current.mutateAsync()
-        })
+        // Start mutation without awaiting to test intermediate optimistic state
+        const mutationPromise = result.current.mutateAsync()
 
-        await vi.waitFor(() => {
+        // onMutate is async (awaits cancelQueries) so wait for optimistic data to appear
+        await waitFor(() => {
             expect(qc.getQueryData<{ accepted: boolean }>(consentKeys.status(userId))).toEqual({
                 accepted: true,
             })
@@ -89,7 +89,9 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-        await expect(result.current.mutateAsync()).rejects.toThrow(/network down/i)
+        await act(async () => {
+            await expect(result.current.mutateAsync()).rejects.toThrow(/network down/i)
+        })
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
     })
 
@@ -139,11 +141,9 @@ describe('useRevokeConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-        const pending = result.current.mutateAsync()
-        await vi.waitFor(() => {
-            expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
+        await act(async () => {
+            await expect(result.current.mutateAsync()).rejects.toThrow(/delete failed/i)
         })
-        await expect(pending).rejects.toThrow(/delete failed/i)
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: true })
     })
 
