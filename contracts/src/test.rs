@@ -493,15 +493,21 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
     let env = Env::default();
     let asset1 = Address::generate(&env);
     let asset2 = Address::generate(&env);
+    let asset3 = Address::generate(&env);
 
     let mut allocations = Map::new(&env);
-    allocations.set(asset1.clone(), 50);
-    allocations.set(asset2.clone(), 50);
+    allocations.set(asset1.clone(), 100);
+    allocations.set(asset2.clone(), 100);
+    allocations.set(asset3.clone(), 100);
 
     let target_balance = 50_000_000i128;
     let mut balances = Map::new(&env);
     balances.set(asset1.clone(), target_balance - (MIN_TRADE_AMOUNT_STROOPS / 2));
-    balances.set(asset2.clone(), target_balance);
+    balances.set(asset2.clone(), target_balance - MIN_TRADE_AMOUNT_STROOPS);
+    balances.set(
+        asset3.clone(),
+        target_balance - (MIN_TRADE_AMOUNT_STROOPS + 1),
+    );
 
     let portfolio = Portfolio {
         user: Address::generate(&env),
@@ -510,17 +516,22 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
         rebalance_threshold: 5,
         slippage_tolerance: 50,
         last_rebalance: 0,
-        total_value: 100_000_000,
+        total_value: target_balance,
         is_active: true,
     };
 
     let mut prices = Map::new(&env);
     prices.set(asset1.clone(), 10i128.pow(14));
     prices.set(asset2.clone(), 10i128.pow(14));
+    prices.set(asset3.clone(), 10i128.pow(14));
 
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
     assert!(!trades.contains_key(asset1));
     assert!(!trades.contains_key(asset2));
+    assert_eq!(
+        trades.get(asset3).unwrap(),
+        MIN_TRADE_AMOUNT_STROOPS + 1
+    );
 }
 
 #[test]

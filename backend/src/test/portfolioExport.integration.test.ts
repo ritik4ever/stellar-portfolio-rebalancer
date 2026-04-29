@@ -59,6 +59,11 @@ beforeAll(async () => {
         .send({ userAddress: OWNER_ADDRESS, allocations: { XLM: 60, USDC: 40 }, threshold: 5 })
     expect([200, 201]).toContain(res.status)
     sharedPortfolioId = res.body.data.portfolioId as string
+
+    await request(app)
+        .post('/api/consent')
+        .send({ userId: OWNER_ADDRESS, terms: true, privacy: true, cookies: true })
+        .expect(200)
 })
 
 afterAll(() => {
