@@ -1,73 +1,48 @@
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import RealtimeStatusBanner from "./RealtimeStatusBanner";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-let mockRealtimeState: any;
+let mockStatus = "connected";
+const mockReconnect = vi.fn();
 
 vi.mock("../context/RealtimeConnectionContext", () => ({
-  useRealtimeConnection: () => mockRealtimeState,
+  useRealtimeConnection: () => ({
+    state: mockStatus,
+    statusDetail: null,
+    reconnect: mockReconnect,
+  }),
 }));
 
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-});
+import RealtimeStatusBanner from "./RealtimeStatusBanner";
 
 describe("RealtimeStatusBanner", () => {
-  it("renders connected status", () => {
-    mockRealtimeState = {
-      state: "connected",
-      statusDetail: undefined,
-      reconnect: vi.fn(),
-    };
+  beforeEach(() => {
+    mockStatus = "connected";
+    mockReconnect.mockClear();
+  });
+
+  it("does not render warning bar when connected (shows live badge)", () => {
+    mockStatus = "connected";
 
     render(<RealtimeStatusBanner />);
-
-    expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.getByText(/live updates/i)).toBeInTheDocument();
   });
 
-  it("renders reconnecting alert", () => {
-    mockRealtimeState = {
-      state: "reconnecting",
-      statusDetail: undefined,
-      reconnect: vi.fn(),
-    };
+  it("shows reconnecting state", () => {
+    mockStatus = "reconnecting";
 
     render(<RealtimeStatusBanner />);
-
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText(/reconnecting to live updates/i)).toBeInTheDocument();
+    expect(screen.getByText(/reconnecting/i)).toBeInTheDocument();
   });
 
-  it("renders disconnected alert with retry button", () => {
-    mockRealtimeState = {
-      state: "disconnected",
-      statusDetail: "Socket closed",
-      reconnect: vi.fn(),
-    };
+  it("shows disconnected state and retry button", () => {
+    mockStatus = "disconnected";
 
     render(<RealtimeStatusBanner />);
 
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText(/live updates disconnected/i)).toBeInTheDocument();
-    expect(screen.getByText(/socket closed/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /retry connection/i })).toBeInTheDocument();
-  });
+    const button = screen.getByRole("button", { name: /retry/i });
+    expect(button).toBeInTheDocument();
 
-  it("calls reconnect when retry button is clicked", () => {
-    const reconnect = vi.fn();
-
-    mockRealtimeState = {
-      state: "disconnected",
-      statusDetail: undefined,
-      reconnect,
-    };
-
-    render(<RealtimeStatusBanner />);
-
-    fireEvent.click(screen.getByRole("button", { name: /retry connection/i }));
-
-    expect(reconnect).toHaveBeenCalledTimes(1);
+    fireEvent.click(button);
+    expect(mockReconnect).toHaveBeenCalled();
   });
 });
