@@ -20,10 +20,43 @@ export const assetsRouter = Router()
 assetsRouter.get('/assets', (req: Request, res: Response) => {
     try {
         const enabledOnly = parseOptionalBoolean(req.query.enabledOnly) !== false
-        const assets = assetRegistryService.list(enabledOnly)
-        return ok(res, { assets })
+        const queryCode = typeof req.query.code === 'string' ? req.query.code.trim().toUpperCase() : ''
+        const querySearch = typeof req.query.search === 'string' ? req.query.search.trim().toUpperCase() : ''
+        const queryQ = typeof req.query.q === 'string' ? req.query.q.trim().toUpperCase() : ''
+        const term = queryCode || querySearch || queryQ
+        const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1)
+        const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '20'), 10) || 20))
+
+        let assets = assetRegistryService.list(enabledOnly)
+        if (term) {
+            assets = assets.filter(asset =>
+                asset.symbol.includes(term) || asset.name.toUpperCase().includes(term)
+            )
+        }
+
+        const total = assets.length
+        const start = (page - 1) * limit
+        const pagedAssets = assets.slice(start, start + limit)
+
+        return ok(res, { assets: pagedAssets, page, limit, total })
     } catch (error) {
         logger.error('[ERROR] List assets failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Public: get asset by symbol */
+assetsRouter.get('/assets/:id', (req: Request, res: Response) => {
+    try {
+        const id = req.params.id?.trim()
+        if (!id) return fail(res, 400, 'VALIDATION_ERROR', 'Asset id is required')
+
+        const asset = assetRegistryService.getBySymbol(id)
+        if (!asset || !asset.enabled) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        return ok(res, { asset })
+    } catch (error) {
+        logger.error('[ERROR] Get asset failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

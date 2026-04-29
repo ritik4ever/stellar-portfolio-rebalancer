@@ -113,7 +113,7 @@ describe('asset registry persistence', () => {
     afterEach(() => {
         process.env = envBackup
         if (existsSync(dbPath)) {
-            rmSync(dbPath, { force: true })
+            try { rmSync(dbPath, { force: true }) } catch { /* ignore */ }
         }
     })
 
