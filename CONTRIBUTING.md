@@ -30,6 +30,13 @@ For a quick overview of the API contract see [API.md](API.md). Background servic
 
 When your changes should be visible to users or contributors, update the changelog before opening a PR:
 
-1. Run `npm run changelog:update` from the repository root.
-2. Review `CHANGELOG.md` and adjust wording/grouping if needed.
-3. Keep newest entries in `## [Unreleased]` until release cut.
+1. **Automatic generation**: Run `npm run changelog:update` from the repository root to generate entries from conventional commits.
+2. **Manual review**: Review `CHANGELOG.md` and adjust wording/grouping if needed.
+3. **Unreleased section**: Keep newest entries in `## [Unreleased]` until release cut.
+4. **Commit format**: Use [conventional commits](https://conventionalcommits.org/) for automatic changelog generation:
+   - `feat(api): add new endpoint` → Added section
+   - `fix(auth): resolve token issue` → Fixed section
+   - `docs: update examples` → Not included (docs-only)
+   - `BREAKING CHANGE:` in footer → Prominently documented
+
+**Release workflow**: See [CHANGELOG.md](CHANGELOG.md#release-notes-workflow) for the complete release notes process and maintainer responsibilities.
