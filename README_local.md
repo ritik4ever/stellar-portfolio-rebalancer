@@ -17,6 +17,7 @@ An intelligent portfolio rebalancing service built for the Stellar ecosystem, le
 - Node.js 18+
 - Rust (for smart contracts)
 - Stellar account with testnet lumens
+- **Windows Users:** See the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md) for environment setup recommendations.
 
 ### Installation
 

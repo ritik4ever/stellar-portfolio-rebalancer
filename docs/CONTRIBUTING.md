@@ -15,6 +15,8 @@ One path to a fully running local stack. Follow each section in order; services 
 | Rust + Cargo | stable | Only needed for contract development |
 | Soroban CLI | latest | Only needed for contract deployment |
 
+> **Windows Users:** Please review the [Windows/WSL Local Development Workflow](windows-wsl-workflow.md) before cloning the repository to avoid line-ending and permission issues.
+
 ---
 
 ## 1. Clone and install
