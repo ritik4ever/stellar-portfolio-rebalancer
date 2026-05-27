@@ -6,14 +6,14 @@ One path to a fully running local stack. Follow each section in order; services 
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| Node.js | 18+ | Use [nvm](https://github.com/nvm-sh/nvm) to manage versions |
-| npm | 9+ | Comes with Node 18 |
-| PostgreSQL | 14+ | Optional — SQLite fallback works for most dev work |
-| Redis | 6+ | Optional — queue workers are skipped when unavailable |
-| Rust + Cargo | stable | Only needed for contract development |
-| Soroban CLI | latest | Only needed for contract deployment |
+| Tool         | Version | Notes                                                       |
+| ------------ | ------- | ----------------------------------------------------------- |
+| Node.js      | 18+     | Use [nvm](https://github.com/nvm-sh/nvm) to manage versions |
+| npm          | 9+      | Comes with Node 18                                          |
+| PostgreSQL   | 14+     | Optional — SQLite fallback works for most dev work          |
+| Redis        | 6+      | Optional — queue workers are skipped when unavailable       |
+| Rust + Cargo | stable  | Only needed for contract development                        |
+| Soroban CLI  | latest  | Only needed for contract deployment                         |
 
 ---
 
@@ -134,14 +134,15 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 
 ## 5. Auth environment variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `JWT_SECRET` | Required for auth (≥32 chars) | Signs access and refresh tokens — never falls back to a built-in value |
-| `JWT_ACCESS_EXPIRY_SEC` | No (default: 900) | Access token TTL in seconds |
-| `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800) | Refresh token TTL in seconds |
-| `ADMIN_PUBLIC_KEYS` | Yes for admin routes | Comma-separated Stellar public keys |
+| Variable                 | Required                      | Description                                                            |
+| ------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
+| `JWT_SECRET`             | Required for auth (≥32 chars) | Signs access and refresh tokens — never falls back to a built-in value |
+| `JWT_ACCESS_EXPIRY_SEC`  | No (default: 900)             | Access token TTL in seconds                                            |
+| `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800)          | Refresh token TTL in seconds                                           |
+| `ADMIN_PUBLIC_KEYS`      | Yes for admin routes          | Comma-separated Stellar public keys                                    |
 
 **Rules enforced at startup:**
+
 - If `JWT_SECRET` is **absent** — auth is disabled, `/api/auth/*` routes return `503`, and the server starts normally.
 - If `JWT_SECRET` is **set but shorter than 32 characters** — the server refuses to start with a clear error.
 - The backend **never** falls back to a built-in/default secret; tokens are always signed with your explicitly configured value.
@@ -174,6 +175,7 @@ For local harness testing without SMTP or webhook infrastructure, keep `SMTP_*` 
 ### Dev-only notification harness
 
 This harness is isolated from production behavior:
+
 - It calls a debug endpoint gated by `ENABLE_DEBUG_ROUTES=true`.
 - It still requires admin request signing.
 - Debug routes remain disabled by default.
@@ -201,6 +203,7 @@ npm run test:notifications:dev -- --event-type rebalance
 ```
 
 Optional flags:
+
 - `--base-url http://localhost:3001`
 - `--user-id G...` (defaults to admin public key)
 - `--email dev@example.com` (enables email path)
@@ -391,25 +394,25 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ### Soroban troubleshooting
 
-| Error | Cause | Solution |
-|---|---|---|
-| `error: target 'wasm32-unknown-unknown' not found` | WASM target is missing from toolchain | Run `rustup target add wasm32-unknown-unknown`, then rebuild. |
-| `request timed out` / `connection error` during `soroban contract deploy` | RPC endpoint unreachable or unstable | Re-run with network connectivity verified, or point to a responsive endpoint via `SOROBAN_RPC_URL` (backend) / updated Soroban network profile (CLI). |
-| `deployer identity not found` | Local Soroban key not created yet | Run `soroban keys generate deployer` and retry setup/deploy. |
+| Error                                                                     | Cause                                 | Solution                                                                                                                                              |
+| ------------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `error: target 'wasm32-unknown-unknown' not found`                        | WASM target is missing from toolchain | Run `rustup target add wasm32-unknown-unknown`, then rebuild.                                                                                         |
+| `request timed out` / `connection error` during `soroban contract deploy` | RPC endpoint unreachable or unstable  | Re-run with network connectivity verified, or point to a responsive endpoint via `SOROBAN_RPC_URL` (backend) / updated Soroban network profile (CLI). |
+| `deployer identity not found`                                             | Local Soroban key not created yet     | Run `soroban keys generate deployer` and retry setup/deploy.                                                                                          |
 
 ---
 
 ## 10. Common setup failures
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `JWT auth not configured (set JWT_SECRET)` | `JWT_SECRET` missing or < 32 chars | Set a valid secret in `.env` |
-| `Admin auth not configured` | `ADMIN_PUBLIC_KEYS` empty | Add your Stellar public key |
-| `503 Service Unavailable` on queue endpoints | Redis not running | Start Redis or set `REDIS_URL` |
-| `ECONNREFUSED` on DB queries | PostgreSQL not running | Start Postgres or remove `DATABASE_URL` to use SQLite |
-| Playwright `net::ERR_CONNECTION_REFUSED` | Dev servers not started | Start backend and frontend before running E2E |
-| `Cannot find module` TypeScript errors | Dependencies not installed | Run `npm install` in backend/ and frontend/ |
-| Stellar horizon errors on contract calls | Wrong network | Check `STELLAR_NETWORK` and `STELLAR_HORIZON_URL` match |
+| Symptom                                      | Cause                              | Fix                                                     |
+| -------------------------------------------- | ---------------------------------- | ------------------------------------------------------- |
+| `JWT auth not configured (set JWT_SECRET)`   | `JWT_SECRET` missing or < 32 chars | Set a valid secret in `.env`                            |
+| `Admin auth not configured`                  | `ADMIN_PUBLIC_KEYS` empty          | Add your Stellar public key                             |
+| `503 Service Unavailable` on queue endpoints | Redis not running                  | Start Redis or set `REDIS_URL`                          |
+| `ECONNREFUSED` on DB queries                 | PostgreSQL not running             | Start Postgres or remove `DATABASE_URL` to use SQLite   |
+| Playwright `net::ERR_CONNECTION_REFUSED`     | Dev servers not started            | Start backend and frontend before running E2E           |
+| `Cannot find module` TypeScript errors       | Dependencies not installed         | Run `npm install` in backend/ and frontend/             |
+| Stellar horizon errors on contract calls     | Wrong network                      | Check `STELLAR_NETWORK` and `STELLAR_HORIZON_URL` match |
 
 ---
 
@@ -421,3 +424,10 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+
+### Architecture and Design
+
+- [Frontend state and data flow](FRONTEND_STATE_FLOW.md) — Query ownership, cache boundaries, mutation patterns
+- [Queue worker lifecycle](QUEUE_WORKER_LIFECYCLE.md) — Job states, retry policy, worker deployment
+- [Contract deployment checklist](CONTRACT_DEPLOYMENT_CHECKLIST.md) — Environment-specific steps for local, testnet, staging, production
+- [Privacy and consent alignment](PRIVACY_CONSENT_ALIGNMENT.md) — Legal wording, consent flow, GDPR compliance
