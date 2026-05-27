@@ -130,6 +130,7 @@ setup-testnet:
 	@echo "  1) Fund deployer: soroban keys address deployer"
 	@echo "  2) Build: make build"
 	@echo "  3) Deploy: soroban contract deploy --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm --source deployer --network testnet"
+	@echo "  For more commands, see docs/soroban-cookbook.md"
 
 # Help target
 help:

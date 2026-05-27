@@ -5,6 +5,8 @@ Contract source:
 - `contracts/src/types.rs`
 - `contracts/src/reflector.rs`
 
+For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
+
 ## Public Functions
 
 ### `initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error>`

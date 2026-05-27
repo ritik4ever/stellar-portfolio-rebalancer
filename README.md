@@ -86,6 +86,8 @@ cp frontend/.env.example frontend/.env
 
 Full backend environment reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
 
+API Client Examples: [Python API Client Example](scripts/python_api_client.py)
+
 The frontend HTTP client targets **`/api/v1/*`** for resource routes by default (`VITE_API_VERSION=v1` in `frontend/.env.example`). JWT auth still uses **`/api/auth/*`**. See [API.md](API.md) for versioning details.
 
 ## Database Setup
@@ -160,6 +162,7 @@ soroban contract invoke \
 Contract address example: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I`
 
 Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
+Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
 
 ### Usage
 1. Connect your Stellar wallet
@@ -256,6 +259,8 @@ docker compose -f deployment/docker-compose.yml up --build -d
 ## Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
+For issue management, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
 
 Quick steps:
 1. Fork the repository
