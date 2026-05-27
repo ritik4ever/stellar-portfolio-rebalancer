@@ -4,11 +4,11 @@ This document describes the HTTP API for the Stellar Portfolio Rebalancer backen
 
 ## Quick links
 
-| Resource | URL / action |
-|----------|----------------|
-| **Swagger UI** (interactive docs) | [http://localhost:3001/api-docs](http://localhost:3001/api-docs) (when the backend is running on the default port) |
-| **OpenAPI 3.0 spec (JSON)** | [http://localhost:3001/api-docs.json](http://localhost:3001/api-docs.json) or `/api-docs/openapi.json` (same document) — use for **Postman** (Import → Link) or other tools |
-| **Postman collection** | Import the OpenAPI spec: see [Postman collection](#postman-collection) below |
+| Resource                          | URL / action                                                                                                                                                                |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Swagger UI** (interactive docs) | [http://localhost:3001/api-docs](http://localhost:3001/api-docs) (when the backend is running on the default port)                                                          |
+| **OpenAPI 3.0 spec (JSON)**       | [http://localhost:3001/api-docs.json](http://localhost:3001/api-docs.json) or `/api-docs/openapi.json` (same document) — use for **Postman** (Import → Link) or other tools |
+| **Postman collection**            | Import the OpenAPI spec: see [Postman collection](#postman-collection) below                                                                                                |
 
 ## Base URL
 
@@ -19,11 +19,11 @@ All API routes below are relative to the base URL.
 
 ### URL versioning
 
-| Namespace | Purpose |
-|-----------|---------|
-| **`/api/v1/*`** | **Canonical** portfolio/API surface. Prefer this for new clients; responses do not include deprecation headers. |
-| **`/api/*`** (same paths, no `v1` segment) | **Legacy** compatibility; the server may attach `Deprecation`, `Sunset`, and `Link` headers (RFC 8594). |
-| **`/api/auth/*`** | JWT login, refresh, and logout — **not** under `/api/v1` (see `backend/src/http/mountApiRoutes.ts`). |
+| Namespace                                  | Purpose                                                                                                         |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| **`/api/v1/*`**                            | **Canonical** portfolio/API surface. Prefer this for new clients; responses do not include deprecation headers. |
+| **`/api/*`** (same paths, no `v1` segment) | **Legacy** compatibility; the server may attach `Deprecation`, `Sunset`, and `Link` headers (RFC 8594).         |
+| **`/api/auth/*`**                          | JWT login, refresh, and logout — **not** under `/api/v1` (see `backend/src/http/mountApiRoutes.ts`).            |
 
 The **frontend** defaults to `/api/v1` for resource routes via `VITE_API_VERSION` and `API_RESOURCE_ROOT` in `frontend/src/config/api.ts` (see `frontend/.env.example`). Set `VITE_USE_LEGACY_API=true` only for emergency rollback to unversioned `/api/*`.
 
@@ -74,23 +74,23 @@ Select write endpoints support the `Idempotency-Key` request header. When provid
 
 ### Conflict handling
 
-| Scenario | HTTP Status | Error code |
-|----------|-------------|------------|
+| Scenario                    | HTTP Status   | Error code                       |
+| --------------------------- | ------------- | -------------------------------- |
 | Same key, same body (retry) | Cached status | — (`Idempotency-Replayed: true`) |
-| Same key, different body | `409` | `CONFLICT` |
-| Key is empty or > 255 chars | `400` | `VALIDATION_ERROR` |
+| Same key, different body    | `409`         | `CONFLICT`                       |
+| Key is empty or > 255 chars | `400`         | `VALIDATION_ERROR`               |
 
 ### Supported endpoints
 
-| Method | Path | Notes |
-|--------|------|-------|
-| `POST` | `/api/consent` | Consent recording — replay is safe; double-submit has no additional effect |
-| `POST` | `/api/portfolio` | Portfolio creation — prevents duplicate portfolios on retry |
-| `POST` | `/api/portfolio/:id/rebalance` | Rebalance execution — prevents double-execution on retry |
-| `POST` | `/api/rebalance/history` | Rebalance event recording — prevents duplicate history entries |
-| `POST` | `/api/notifications/subscribe` | Notification subscription — idempotent preference upsert |
-| `POST` | `/api/admin/assets` | Asset registry — prevents duplicate asset creation on retry |
-| `PATCH` | `/api/admin/assets/:symbol` | Asset enable/disable — safe to replay the same state change |
+| Method  | Path                           | Notes                                                                      |
+| ------- | ------------------------------ | -------------------------------------------------------------------------- |
+| `POST`  | `/api/consent`                 | Consent recording — replay is safe; double-submit has no additional effect |
+| `POST`  | `/api/portfolio`               | Portfolio creation — prevents duplicate portfolios on retry                |
+| `POST`  | `/api/portfolio/:id/rebalance` | Rebalance execution — prevents double-execution on retry                   |
+| `POST`  | `/api/rebalance/history`       | Rebalance event recording — prevents duplicate history entries             |
+| `POST`  | `/api/notifications/subscribe` | Notification subscription — idempotent preference upsert                   |
+| `POST`  | `/api/admin/assets`            | Asset registry — prevents duplicate asset creation on retry                |
+| `PATCH` | `/api/admin/assets/:symbol`    | Asset enable/disable — safe to replay the same state change                |
 
 ### Example
 
@@ -113,11 +113,11 @@ A retry with the same `Idempotency-Key` and body returns the cached `200` respon
 
 Idempotency keys are automatically cleaned up to prevent unbounded table growth:
 
-| Setting | Value |
-|---------|-------|
-| **Key TTL** | 24 hours from creation |
+| Setting             | Value                                       |
+| ------------------- | ------------------------------------------- |
+| **Key TTL**         | 24 hours from creation                      |
 | **Cleanup cadence** | Every 60 minutes (via BullMQ scheduled job) |
-| **Startup cleanup** | Runs once on server startup |
+| **Startup cleanup** | Runs once on server startup                 |
 
 Expired keys (older than 24 hours) are permanently deleted during each cleanup cycle. The cleanup job logs the number of removed keys on every run for operational visibility. When Redis is unavailable, the cleanup job is not scheduled; expired keys are still filtered out at query time and will be purged once the scheduler resumes.
 
@@ -193,12 +193,12 @@ Third-party integration (e.g. code generation, API gateways, testing) can use th
 
 You can use the OpenAPI spec as a Postman collection source:
 
-1. **Import from URL (recommended)**  
-   - In Postman: **Import** → **Link**.  
-   - Enter: `http://localhost:3001/api-docs.json`  
+1. **Import from URL (recommended)**
+   - In Postman: **Import** → **Link**.
+   - Enter: `http://localhost:3001/api-docs.json`
    - Ensure the backend is running so the URL is reachable.
 
-2. **Import from file**  
+2. **Import from file**
    - Export the spec to a file (see below), then in Postman: **Import** → **Upload** and select the JSON file.
 
 **Export spec to file (optional):**
@@ -219,16 +219,19 @@ The **authoritative spec** is `backend/src/openapi/spec.ts` (what Swagger and th
 To ensure that `API.md`, `openapi.json`, and `spec.ts` stay aligned, run the validation script below.
 
 **To validate sync:**
+
 ```bash
 cd backend
 npm run api:validate
 ```
 
 **To refresh generated outputs (if you've changed the API code):**
+
 ```bash
 cd backend
 npm run openapi:export
 ```
+
 The CI pipeline will fail if documents are out of sync.
 
 ## Examples
@@ -276,3 +279,243 @@ or with options:
 ```
 
 For more examples and exact request/response shapes, use **Swagger UI** at `/api-docs` or the **OpenAPI spec** at `/api-docs/openapi.json`.
+
+## Node.js Client Example
+
+Here's a complete Node.js script that demonstrates common API operations:
+
+```javascript
+// stellar-portfolio-client.js
+const https = require("https");
+const http = require("http");
+
+class StellarPortfolioClient {
+  constructor(baseUrl = "http://localhost:3001") {
+    this.baseUrl = baseUrl;
+    this.httpModule = baseUrl.startsWith("https") ? https : http;
+  }
+
+  async request(method, path, body = null, headers = {}) {
+    return new Promise((resolve, reject) => {
+      const url = new URL(path, this.baseUrl);
+      const options = {
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname + url.search,
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
+      };
+
+      const req = this.httpModule.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (res.statusCode >= 400) {
+              reject(
+                new Error(
+                  `HTTP ${res.statusCode}: ${parsed.error?.message || data}`,
+                ),
+              );
+            } else {
+              resolve(parsed);
+            }
+          } catch (e) {
+            reject(new Error(`Invalid JSON response: ${data}`));
+          }
+        });
+      });
+
+      req.on("error", reject);
+
+      if (body) {
+        req.write(JSON.stringify(body));
+      }
+      req.end();
+    });
+  }
+
+  // Health check
+  async getHealth() {
+    return this.request("GET", "/health");
+  }
+
+  // Get current prices
+  async getPrices() {
+    return this.request("GET", "/api/v1/prices");
+  }
+
+  // Create a portfolio
+  async createPortfolio(
+    userAddress,
+    allocations,
+    threshold,
+    slippageTolerance = 1,
+  ) {
+    const body = {
+      userAddress,
+      allocations,
+      threshold,
+      slippageTolerance,
+    };
+    return this.request("POST", "/api/v1/portfolio", body);
+  }
+
+  // Get portfolio by ID
+  async getPortfolio(portfolioId) {
+    return this.request("GET", `/api/v1/portfolio/${portfolioId}`);
+  }
+
+  // Get rebalance plan
+  async getRebalancePlan(portfolioId) {
+    return this.request(
+      "GET",
+      `/api/v1/portfolio/${portfolioId}/rebalance-plan`,
+    );
+  }
+
+  // Execute rebalance
+  async executeRebalance(portfolioId, options = {}) {
+    return this.request("POST", `/api/v1/portfolio/${portfolioId}/rebalance`, {
+      options,
+    });
+  }
+
+  // Get user portfolios
+  async getUserPortfolios(userAddress) {
+    return this.request("GET", `/api/v1/user/${userAddress}/portfolios`);
+  }
+
+  // Get system status
+  async getSystemStatus() {
+    return this.request("GET", "/api/v1/system/status");
+  }
+}
+
+// Example usage
+async function main() {
+  const client = new StellarPortfolioClient("http://localhost:3001");
+
+  try {
+    console.log("🔍 Checking API health...");
+    const health = await client.getHealth();
+    console.log("✅ API is healthy:", health.status);
+
+    console.log("\n💰 Getting current prices...");
+    const prices = await client.getPrices();
+    console.log("📊 Current prices:", prices.data.prices);
+
+    console.log("\n📈 Getting system status...");
+    const status = await client.getSystemStatus();
+    console.log("🏗️ System status:", {
+      portfolios: status.data.portfolios.total,
+      autoRebalancer: status.data.autoRebalancer.status,
+    });
+
+    // Example: Create a portfolio (uncomment to test)
+    /*
+    const userAddress = 'GABC123...'; // Replace with actual Stellar address
+    const allocations = { XLM: 40, BTC: 30, USDC: 30 };
+    const threshold = 5;
+
+    console.log('\n🎯 Creating portfolio...');
+    const portfolio = await client.createPortfolio(userAddress, allocations, threshold);
+    console.log('✅ Portfolio created:', portfolio.data.id);
+
+    console.log('\n📋 Getting rebalance plan...');
+    const plan = await client.getRebalancePlan(portfolio.data.id);
+    console.log('⚖️ Rebalance plan:', plan.data);
+    */
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    process.exit(1);
+  }
+}
+
+// Run if called directly
+if (require.main === module) {
+  main();
+}
+
+module.exports = StellarPortfolioClient;
+```
+
+### Running the Example
+
+1. **Save the script** as `stellar-portfolio-client.js`
+2. **Start the backend** (see [Contributing Guide](CONTRIBUTING.md))
+3. **Run the example**:
+   ```bash
+   node stellar-portfolio-client.js
+   ```
+
+### Authentication Example
+
+For JWT-protected endpoints, extend the client with auth methods:
+
+```javascript
+class AuthenticatedClient extends StellarPortfolioClient {
+  constructor(baseUrl) {
+    super(baseUrl);
+    this.accessToken = null;
+  }
+
+  // Add JWT token to requests
+  async request(method, path, body = null, headers = {}) {
+    if (this.accessToken) {
+      headers.Authorization = `Bearer ${this.accessToken}`;
+    }
+    return super.request(method, path, body, headers);
+  }
+
+  // Login with wallet signature (implement based on your auth flow)
+  async login(publicKey, signature, message) {
+    const response = await super.request("POST", "/api/auth/login", {
+      publicKey,
+      signature,
+      message,
+    });
+    this.accessToken = response.data.accessToken;
+    return response;
+  }
+
+  // Refresh token
+  async refreshToken(refreshToken) {
+    const response = await super.request("POST", "/api/auth/refresh", {
+      refreshToken,
+    });
+    this.accessToken = response.data.accessToken;
+    return response;
+  }
+}
+```
+
+### Package.json Integration
+
+Add to your project's `package.json`:
+
+```json
+{
+  "scripts": {
+    "portfolio:status": "node stellar-portfolio-client.js",
+    "portfolio:create": "node -e \"const Client = require('./stellar-portfolio-client'); /* custom logic */\""
+  },
+  "dependencies": {
+    "stellar-portfolio-client": "file:./stellar-portfolio-client.js"
+  }
+}
+```
+
+### Maintenance Notes
+
+- **Keep in sync**: When API endpoints change, update the client methods accordingly
+- **Error handling**: The client includes basic error handling; extend as needed for your use case
+- **Rate limiting**: The API includes rate limiting; implement retry logic for production use
+- **Idempotency**: Use `Idempotency-Key` headers for write operations to prevent duplicates
+- **Environment**: Update `baseUrl` for different environments (dev/staging/prod)
+
+For complete API documentation, see the [OpenAPI spec](http://localhost:3001/api-docs.json) and [Swagger UI](http://localhost:3001/api-docs).
