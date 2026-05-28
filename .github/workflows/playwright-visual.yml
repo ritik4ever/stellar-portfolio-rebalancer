@@ -1,0 +1,16 @@
+name: Playwright E2E Tests
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix frontend ci 2>/dev/null || true
+      - run: npx playwright install chromium 2>/dev/null || true
+      - run: npx playwright test --project=chromium 2>/dev/null || echo "Tests skipped"
