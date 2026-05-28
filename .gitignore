@@ -94,6 +94,11 @@ dist
 # https://nextjs.org/blog/next-9-1#public-directory-support
 # public
 
+# Generated outputs (should not be tracked)
+backend/test_results.txt
+backend/test_results_raw.txt
+frontend/tsc-output.txt
+
 # Vite build output
 dist/
 dist-ssr/
