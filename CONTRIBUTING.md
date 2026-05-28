@@ -40,3 +40,22 @@ When your changes should be visible to users or contributors, update the changel
    - `BREAKING CHANGE:` in footer → Prominently documented
 
 **Release workflow**: See [CHANGELOG.md](CHANGELOG.md#release-notes-workflow) for the complete release notes process and maintainer responsibilities.
+
+## Pre-commit Hooks (Optional)
+
+You can enable pre-commit hooks for faster feedback during development:
+
+```bash
+# Enable hooks
+npx husky install
+
+# Run lint-staged on all staged files
+npx lint-staged
+```
+
+Hooks run ESLint and Prettier on staged `.ts`, `.tsx`, `.js`, `.jsx` files.
+
+To skip hooks for a commit (emergency only):
+```bash
+git commit --no-verify -m "your message"
+```
