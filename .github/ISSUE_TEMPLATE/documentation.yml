@@ -1,0 +1,23 @@
+name: Documentation
+description: Report missing, incorrect, or outdated documentation
+title: "[DOCS] "
+labels: ["docs"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page/Document
+      description: Which document or page needs attention?
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue
+      description: What is wrong or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Change
