@@ -261,6 +261,7 @@ docker compose -f deployment/docker-compose.yml up --build -d
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
 For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
 For issue management, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
+For maintainer triage procedures, see the [Triage Guide](docs/TRIAGE_GUIDE.md).
 
 Quick steps:
 1. Fork the repository
