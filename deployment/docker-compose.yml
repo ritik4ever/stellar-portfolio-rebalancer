@@ -235,6 +235,19 @@ volumes:
   alertmanager_data:
   frontend_logs:
 
+
+# Docker Compose Profiles
+#
+# Available profiles:
+# - (default) : frontend, backend, redis, postgres
+# - monitoring: prometheus, grafana, loki, promtail, alertmanager, blackbox-exporter
+#
+# Usage:
+#   docker compose up                   # core services
+#   docker compose --profile monitoring up   # full stack with monitoring
+#   docker compose --profile minimal up      # minimal (frontend + backend only)
+#
+
 networks:
   default:
     name: portfolio-network
