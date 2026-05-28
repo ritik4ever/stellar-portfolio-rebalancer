@@ -15,6 +15,14 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
     environment:
       - NODE_ENV=${NODE_ENV:-development}
     volumes:
@@ -28,6 +36,14 @@ services:
       dockerfile: Dockerfile
     container_name: portfolio-backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
     command: ["sh", "-c", "npm start 2>&1 | tee -a /app/logs/backend.log"]
     environment:
       - NODE_ENV=${NODE_ENV:-development}
@@ -74,6 +90,14 @@ services:
     image: redis:7-alpine
     container_name: portfolio-redis
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
     ports:
       - "6379:6379"
     volumes:
@@ -91,6 +115,14 @@ services:
     image: postgres:15-alpine
     container_name: portfolio-postgres
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
     environment:
       - POSTGRES_DB=portfolio
       - POSTGRES_USER=portfolio
