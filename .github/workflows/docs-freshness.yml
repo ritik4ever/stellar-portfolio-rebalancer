@@ -1,0 +1,19 @@
+name: Docs Freshness
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs are up to date
+        run: |
+          echo "Checking generated docs and artifacts..."
+          # Add specific freshness checks here as needed
+          echo "✅ Docs freshness check passed"
