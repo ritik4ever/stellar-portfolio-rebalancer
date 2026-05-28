@@ -1,0 +1,40 @@
+name: "Feature Request — Rebalancing Strategy"
+description: Suggest a new rebalancing strategy or improvement
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new rebalancing strategy!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this strategy solve?
+      placeholder: "Currently, the rebalancer only supports equal-weight allocation..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Strategy
+      description: Describe how the new strategy would work
+      placeholder: "A market-cap weighted rebalancer that..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative approaches you considered
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: true
