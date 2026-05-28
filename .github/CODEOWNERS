@@ -1,0 +1,31 @@
+# Code ownership file
+# Each line is a file pattern followed by one or more owners
+
+# Default owners
+* @ritik4ever
+
+# Backend
+/backend/* @ritik4ever
+/backend/src/**/* @ritik4ever
+
+# Frontend
+/frontend/* @ritik4ever
+/frontend/src/**/* @ritik4ever
+
+# Contracts
+/contracts/* @ritik4ever
+/contracts/src/**/* @ritik4ever
+
+# Documentation
+/docs/* @ritik4ever
+*.md @ritik4ever
+
+# DevOps
+/.github/**/* @ritik4ever
+/docker-compose.yml @ritik4ever
+/Dockerfile* @ritik4ever
+
+# Configuration
+/package.json @ritik4ever
+/vitest.config.* @ritik4ever
+/tsconfig*.json @ritik4ever
