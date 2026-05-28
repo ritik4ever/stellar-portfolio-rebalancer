@@ -2,49 +2,30 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in the Stellar Portfolio Rebalancer, please report it privately before disclosing it publicly.
+We take the security of Stellar Portfolio Rebalancer seriously. If you discover a security vulnerability, please follow these steps:
 
-**Do not** file a public GitHub issue for security vulnerabilities.
+1. **Do not disclose publicly** — Create a private security advisory or email the maintainers
+2. **Provide details** — Include steps to reproduce, affected versions, and potential impact
+3. **Allow time** — We aim to respond within 48 hours and patch within 7 days
 
-### Contact
+## Contact
 
-Send details to the maintainers via:
-
-1. **GitHub Security Advisory**: Navigate to the repository's **Security** tab and use the **Report a vulnerability** button.
-2. **Direct message**: Contact a maintainer directly on GitHub or through the project's communication channels.
-
-### What to Include
-
-- Type of vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
-
-### Response Timeline
-
-- **24-48 hours**: Initial acknowledgment
-- **7 days**: Assessment and mitigation plan
-- **30 days**: Fix deployed (depending on complexity)
+- **GitHub Security Advisories**: Use the "Report a vulnerability" button on the repository
+- **Email**: Reach out to the repository maintainers via GitHub
 
 ## Scope
 
-This policy covers:
+In-scope:
+- Smart contract vulnerabilities
+- Authentication and authorization issues
+- Data exposure or leakage
+- Replay attacks on Stellar signatures
 
-- The Stellar Portfolio Rebalancer backend and frontend
-- Soroban smart contracts
-- Deployment configurations
+Out-of-scope:
+- Social engineering attacks
+- Physical attacks
+- Third-party dependency vulnerabilities (report to respective projects)
 
-Out of scope:
+## Recognition
 
-- Third-party dependencies (report to the upstream project)
-- Stellar network infrastructure
-- User's local environment
-
-## Safe Harbor
-
-We will not take legal action against researchers who:
-
-- Report vulnerabilities in good faith
-- Follow this disclosure policy
-- Do not access or modify user data without permission
-- Do not exploit vulnerabilities beyond what is necessary to demonstrate the issue
+We thank security researchers who responsibly disclose vulnerabilities. Contributors who report valid issues will be acknowledged in release notes.
