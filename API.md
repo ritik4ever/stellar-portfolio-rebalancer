@@ -189,6 +189,102 @@ The API is described in full by an **OpenAPI 3.0** specification:
 
 Third-party integration (e.g. code generation, API gateways, testing) can use the same OpenAPI spec.
 
+## API Error Code Glossary
+
+All API errors follow the common envelope:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable description",
+    "details": { }
+  },
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+### Standard Error Codes
+
+| HTTP | Code | Meaning | Typical Remediation |
+|------|------|---------|---------------------|
+| `400` | `BAD_REQUEST` | Malformed request (missing field, invalid type). | Check the `details` object for which field failed. Correct the request body. |
+| `400` | `VALIDATION_ERROR` | Input validation failed (Zod schema reject). | Review schema constraints (max length, allowed enum values, pattern). Fix request payload or query params. |
+| `401` | `UNAUTHORIZED` | Missing or invalid authentication (JWT, signature, token). | Provide a valid `Authorization: Bearer <token>` header, or re-authenticate with the wallet challenge flow. |
+| `403` | `FORBIDDEN` | Authenticated but not allowed (wrong user, insufficient role). | Verify you are acting on your own resource or have the required admin permissions. |
+| `404` | `NOT_FOUND` | Requested resource does not exist. | Check the resource ID/address. Verify the portfolio or asset exists. |
+| `409` | `CONFLICT` | Resource state conflict (idempotency key reuse with different body, rebalance already in progress). | Use a unique `Idempotency-Key` per request, or wait for the current rebalance to complete. |
+| `429` | `RATE_LIMITED` | Request rate exceeded the allowed limit. | Retry after the `Retry-After` header value. Add jitter and exponential backoff. |
+| `500` | `INTERNAL_ERROR` | Server-side failure (database error, unhandled exception). | Retry the request. If persistent, contact the maintainer with the `requestId`. |
+| `503` | `SERVICE_UNAVAILABLE` | Required dependency is unavailable (Redis, JWT not configured, price feed down). | Check service configuration and dependency health. Refer to [docs/OPERATIONS.md](docs/OPERATIONS.md). |
+
+### Domain-Specific Error Codes
+
+| HTTP | Code | Where Used | Meaning |
+|------|------|-----------|---------|
+| `401` | `TOKEN_EXPIRED` | `auth`, `requireJwt` middleware | JWT access or refresh token has expired. Obtain a new token via the auth challenge flow or refresh endpoint. |
+| `403` | `CORS_FORBIDDEN_ORIGIN` | `corsSecurity` middleware | Request `Origin` is not in the allowed CORS list. Check deployment CORS configuration. |
+| `404` | `JOB_NOT_FOUND` | `ops.routes` | Queried queue job ID does not exist. |
+| `409` | `ASSET_CONFLICT` | `assets.routes` | Asset with the same identifier already exists. |
+| `503` | `REDIS_UNAVAILABLE` | `ops.routes` | Redis is disconnected but required for this operation. |
+
+### Example Error Scenarios
+
+**1. Missing required field**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request payload",
+    "details": {
+      "issues": [
+        { "path": ["body", "userId"], "message": "Required" }
+      ]
+    }
+  }
+}
+```
+→ _Remedy:_ Add the `userId` field to the request body.
+
+**2. Wallet signature mismatch**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Invalid signature"
+  }
+}
+```
+→ _Remedy:_ Sign the challenge message with the correct wallet private key. Ensure the signer matches the requested address.
+
+**3. Idempotency conflict**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "CONFLICT",
+    "message": "Idempotency key already used with a different request body"
+  }
+}
+```
+→ _Remedy:_ Use a new `Idempotency-Key` for the new request body.
+
+**4. Rate limited**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Too many requests. Please retry after the Retry-After duration."
+  }
+}
+```
+→ _Remedy:_ Check the `Retry-After` header (seconds) and wait before retrying.
+
 ## Postman collection
 
 You can use the OpenAPI spec as a Postman collection source:
