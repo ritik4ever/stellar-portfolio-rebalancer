@@ -46,6 +46,18 @@ stellar-portfolio-rebalancer/
 
 ---
 
+## Demo Walkthrough
+
+New to Stellar Portfolio Rebalancer? Follow the **[step-by-step demo walkthrough](docs/DEMO_WALKTHROUGH.md)** to explore the platform — no wallet required. The guide covers:
+
+- Landing page and wallet connection
+- Dashboard portfolio overview
+- Creating rebalancing strategies
+- Monitoring & manual rebalancing
+- Demo mode with $10,000 simulated portfolio
+
+---
+
 ## Quick Start
 
 ### Prerequisites
