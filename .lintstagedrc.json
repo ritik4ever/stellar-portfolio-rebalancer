@@ -1,0 +1,16 @@
+{
+  "backend/src/**/*.ts": [
+    "cd backend && npm run lint -- --fix",
+    "cd backend && npm run format -- --check 2>/dev/null || true"
+  ],
+  "frontend/src/**/*.{ts,tsx}": [
+    "cd frontend && npm run lint -- --fix",
+    "cd frontend && npm run format -- --check 2>/dev/null || true"
+  ],
+  "*.md": [
+    "prettier --write --check 2>/dev/null || true"
+  ],
+  "docs/**/*.md": [
+    "prettier --write --check 2>/dev/null || true"
+  ]
+}
