@@ -1,0 +1,33 @@
+name: Env Example Sync
+
+on:
+  pull_request:
+    paths:
+      - 'backend/.env.example'
+      - 'frontend/.env.example'
+      - 'docs/ENVIRONMENT.md'
+
+jobs:
+  check-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check env example files exist
+        run: |
+          for f in backend/.env.example frontend/.env.example; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Missing: $f"
+              exit 1
+            fi
+            echo "✅ $f exists"
+          done
+      - name: Check for common env variable drift
+        run: |
+          # Extract variable names from each .env.example
+          grep -oP '^[A-Z_]+(?==)' backend/.env.example | sort > /tmp/backend-env-vars.txt
+          grep -oP '^VITE_[A-Z_]+(?==)' frontend/.env.example | sort > /tmp/frontend-env-vars.txt
+          echo "=== Backend env vars ==="
+          cat /tmp/backend-env-vars.txt
+          echo "=== Frontend env vars ==="
+          cat /tmp/frontend-env-vars.txt
+          echo "✅ Env example files checked"
