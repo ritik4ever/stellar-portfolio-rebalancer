@@ -9,9 +9,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Commit message check
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: commitlint.config.js
+          helpURL: https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/CONTRIBUTING.md#commit-messages
 
       - name: Frontend lint
         working-directory: frontend
