@@ -30,12 +30,15 @@
     "lint:backend": "cd backend && npm run lint",
     "lint:frontend": "cd frontend && npm run lint",
     "clean": "npm run clean:all",
-    "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
+    "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules",
+    "prepare": "husky"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
     "conventional-changelog-cli": "^5.0.0",
+    "husky": "^9.1.7",
     "jsdom": "^26.1.0",
+    "lint-staged": "^17.0.5",
     "vitest": "^4.0.18"
   },
   "engines": {
