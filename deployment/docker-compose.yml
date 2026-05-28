@@ -21,6 +21,13 @@ services:
       - frontend_logs:/var/log/nginx
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 64M
 
   backend:
     build:
@@ -69,6 +76,13 @@ services:
         condition: service_healthy
     volumes:
       - ./logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 128M
 
   redis:
     image: redis:7-alpine
@@ -86,6 +100,13 @@ services:
       timeout: 3s
       retries: 6
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 128M
+        reservations:
+          memory: 32M
 
   postgres:
     image: postgres:15-alpine
@@ -106,6 +127,13 @@ services:
       timeout: 5s
       retries: 8
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 128M
 
   monitoring:
     build:
@@ -129,6 +157,13 @@ services:
     depends_on:
       - redis
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 64M
 
   prometheus:
     image: prom/prometheus:v2.54.1
