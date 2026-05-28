@@ -1,0 +1,17 @@
+name: Publish WASM Hash
+on:
+  release:
+    types: [published]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute WASM hash
+        run: |
+          if [ -f contracts/target/wasm32-unknown-unknown/release/*.wasm ]; then
+            sha256sum contracts/target/wasm32-unknown-unknown/release/*.wasm > wasm-hashes.txt
+            cat wasm-hashes.txt
+          else
+            echo "No WASM files found - build contracts first"
+          fi
