@@ -7,6 +7,9 @@ interface AssetCardProps {
         value: number
         amount: number
         color: string
+        issuer?: string
+        domain?: string
+        type?: 'native' | 'credit_alphanum4' | 'credit_alphanum12'
     }
     price?: {
         price: number | null
@@ -89,6 +92,19 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
                     <div className="ml-3">
                         <h3 className="font-semibold text-gray-900 dark:text-white">{asset.name}</h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{asset.value}% allocation</p>
+                        {/* NEW: Show issuer information for non-native assets */}
+                        {asset.issuer && (
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
+                                {asset.domain ? (
+                                    <span className="text-blue-600 dark:text-blue-400">{asset.domain}</span>
+                                ) : (
+                                    <span>Issuer: {asset.issuer.slice(0, 4)}...{asset.issuer.slice(-4)}</span>
+                                )}
+                            </p>
+                        )}
+                        {asset.type === 'native' && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400">Native Asset</p>
+                        )}
                     </div>
                 </div>
                 <div className={`flex items-center ${isPositive ? 'text-green-500' : isNegative ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
