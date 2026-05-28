@@ -418,6 +418,57 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
+## Commit message conventions
+
+This project enforces **Conventional Commits** in CI via commitlint. Every pull request's commits must follow this format:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Allowed types
+
+| Type       | Usage                                |
+| ---------- | ------------------------------------ |
+| `feat`     | A new feature                        |
+| `fix`      | A bug fix                            |
+| `docs`     | Documentation only                   |
+| `style`    | Formatting, missing semicolons, etc. |
+| `refactor` | Code change that neither fixes nor adds |
+| `perf`     | Performance improvement              |
+| `test`     | Adding or updating tests             |
+| `build`    | Build system or dependencies         |
+| `ci`       | CI configuration or scripts          |
+| `chore`    | Maintenance tasks                    |
+| `revert`   | Reverts a previous commit            |
+
+### Scope examples
+
+- `feat(backend)` — backend API changes
+- `fix(frontend)` — frontend UI fixes
+- `docs(contracts)` — smart contract documentation
+- `ci(lint)` — lint workflow changes
+
+### Rule enforcement
+
+Commit messages are checked automatically in CI via the `wagoid/commitlint-github-action` action. PRs with non-conforming commits will fail the `Commit message check` step. To fix:
+
+```bash
+# Rebase and fix the first commit
+git rebase -i HEAD~N  # then reword
+
+# Or squash everything into one valid commit
+git reset --soft main && git commit -m "feat: description"
+```
+
+See [commitlint.config.js](../commitlint.config.js) for the full rule set.
+
+---
+
 ## Further reading
 
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
