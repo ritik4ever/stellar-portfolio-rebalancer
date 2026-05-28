@@ -1,0 +1,17 @@
+name: Require Issue Link
+on:
+  pull_request:
+    types: [opened, edited]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR body has issue link
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if ! echo "$BODY" | grep -qiE '(closes|fixes|resolves|refs) #[0-9]+'; then
+            echo "❌ PR must reference an issue (Closes #N, Fixes #N, etc.)"
+            exit 1
+          fi
+          echo "✅ Issue link found"
