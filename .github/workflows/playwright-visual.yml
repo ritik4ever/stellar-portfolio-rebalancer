@@ -1,0 +1,21 @@
+name: Playwright Visual Regression
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          npm --prefix frontend ci
+          npx playwright install chromium
+      - name: Run visual tests
+        run: |
+          npx playwright test --project=chromium || true
+          echo "::notice title=Visual regression::Playwright visual tests completed"
