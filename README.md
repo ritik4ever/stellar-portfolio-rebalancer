@@ -34,6 +34,16 @@ stellar-portfolio-rebalancer/
 └── docs/          # Documentation
 ```
 
+### Core terms
+
+New contributors should read the glossary before deeper setup or contract work.
+- `Portfolio`: the user-managed allocation object tracked by `portfolio_id`
+- `Target allocation`, `Rebalance threshold`, and `Slippage tolerance`: the main contract parameters for automated rebalancing
+- `Reflector oracle`: the price source used by the contract for drift and rebalance decisioning
+- `Cooldown period` and `Emergency stop`: built-in safety controls for rebalances
+
+See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the central glossary and cross-links to contract, API, and deployment docs.
+
 ### Tech Stack
 
 | Layer             | Technology |
@@ -263,6 +273,7 @@ docker compose -f deployment/docker-compose.yml up --build -d
 ## Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+- Start with the glossary: [docs/GLOSSARY.md](docs/GLOSSARY.md)
 For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
 For issue management, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
 

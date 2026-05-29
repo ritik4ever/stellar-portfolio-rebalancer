@@ -6,6 +6,7 @@ Contract source:
 - `contracts/src/reflector.rs`
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
+For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOSSARY.md).
 
 ## Public Functions
 
