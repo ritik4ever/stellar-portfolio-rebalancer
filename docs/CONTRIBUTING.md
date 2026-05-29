@@ -420,12 +420,14 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ## Further reading
 
+- [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
 - [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+- [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design
 
