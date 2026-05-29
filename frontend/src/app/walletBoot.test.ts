@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { WalletError } from '../utils/walletAdapters'
 import {
+
     isAuthServiceUnavailable,
     runWalletConnectBoot,
     resolveConsentAcceptedNavigation,
     runWalletReconnectBoot,
     type WalletConnectBootState,
 } from './walletBoot'
+
 
 describe('isAuthServiceUnavailable', () => {
     it('treats 503-style messages as soft failures', () => {
