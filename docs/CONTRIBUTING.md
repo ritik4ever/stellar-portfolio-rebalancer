@@ -34,6 +34,16 @@ cd ../frontend && npm install
 
 ---
 
+## 1.5 Report wallet-specific bugs
+
+If the issue involves wallet selection, extension detection, popup approval, signing, or network mismatch, use the dedicated wallet bug report template in [.github/ISSUE_TEMPLATE/wallet-bug-report.md](../.github/ISSUE_TEMPLATE/wallet-bug-report.md).
+
+The template is designed around the current wallet flow in the frontend, including the wallet types shown by the selector (Freighter, Rabet, xBull, and other Stellar wallets) and the error paths handled in the UI (`USER_DECLINED`, `WALLET_NOT_INSTALLED`, `NETWORK_MISMATCH`, `TIMEOUT`).
+
+If you are already following the contributor setup steps, include the browser, wallet version, Stellar network, and whether the signature prompt appeared or was declined so maintainers can reproduce the failure quickly.
+
+---
+
 ## 2. Backend environment
 
 ```bash

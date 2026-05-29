@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributor setup guide
+    url: https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/CONTRIBUTING.md
+    about: Review the local setup, wallet workflow, and test commands before filing an issue.
+  - name: Wallet bug report template
+    url: https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/new?template=wallet-bug-report.md
+    about: Use this focused form for Freighter, Rabet, xBull, or signing-related wallet failures.
