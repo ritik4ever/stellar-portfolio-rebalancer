@@ -70,3 +70,62 @@ groups:
         annotations:
           summary: Reflector fallback usage is elevated
           description: The backend has relied on cached or synthetic price fallbacks at least five times in the last hour.
+
+  # ---------------------------------------------------------------------------
+  # Loki retention & compaction health
+  # ---------------------------------------------------------------------------
+  - name: loki-retention
+    rules:
+      - alert: LokiCompactorNotRunning
+        # loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds
+        # is updated every time the compactor finishes a cycle.  If it goes stale
+        # for more than 30 minutes the compactor has stopped or failed.
+        expr: |
+          (time() - loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds) > 1800
+        for: 5m
+        labels:
+          severity: warning
+          service: loki
+        annotations:
+          summary: Loki compactor has not run in the last 30 minutes
+          description: >
+            The Loki compactor last completed a cycle more than 30 minutes ago.
+            Retention deletion will fall behind and disk usage may grow unbounded.
+            Check the Loki container logs: `docker compose logs loki`.
+
+      - alert: LokiIngestionRateLimitReached
+        # loki_discarded_samples_total increments when per-stream rate limits fire.
+        expr: |
+          sum(rate(loki_discarded_samples_total[5m])) by (reason) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: loki
+        annotations:
+          summary: Loki is discarding samples due to rate limiting
+          description: >
+            Loki is dropping log samples because per-stream or global ingestion
+            rate limits have been reached (reason={{ $labels.reason }}).
+            Review per_stream_rate_limit in deployment/observability/loki/loki-config.yml
+            or reduce log verbosity in the emitting service.
+
+      - alert: LokiStorageVolumeHigh
+        # Fired when the loki_data docker volume exceeds 80 % of its soft limit.
+        # This is a best-effort check via node_filesystem metrics if the host
+        # node exporter is available; adjust the path to match your mount point.
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint=~".*/loki.*"} /
+            node_filesystem_size_bytes{mountpoint=~".*/loki.*"}
+          ) < 0.20
+        for: 10m
+        labels:
+          severity: warning
+          service: loki
+        annotations:
+          summary: Loki storage volume is above 80 % capacity
+          description: >
+            The Loki data volume has less than 20 % free space.
+            Current retention settings: global 30 d, error 90 d, warn 60 d,
+            debug 14 d.  Consider reducing retention periods or expanding the
+            volume before the disk fills and Loki stops accepting writes.
