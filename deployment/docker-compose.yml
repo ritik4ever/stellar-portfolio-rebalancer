@@ -59,21 +59,19 @@ services:
       - METRICS_ENABLED=${METRICS_ENABLED:-true}
       - LOG_DEPLOYMENT_ENV=${LOG_DEPLOYMENT_ENV:-local}
       - ALERT_CONTACT=${ALERT_CONTACT:-platform-oncall}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://portfolio:portfolio@postgres:5432/portfolio}
-      - PGHOST=postgres
-      - PGPORT=5432
-      - PGDATABASE=portfolio
-      - PGUSER=portfolio
-      - PGPASSWORD=portfolio
+      - DB_PATH=${DB_PATH:-/app/data/portfolio.db}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - PGHOST=${PGHOST:-}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-}
+      - PGUSER=${PGUSER:-}
+      - PGPASSWORD=${PGPASSWORD:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     ports:
       - "3001:3001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
     volumes:
       - ./logs:/app/logs
+      - backend_data:/app/data
     deploy:
       resources:
         limits:
@@ -84,6 +82,8 @@ services:
     image: redis:7-alpine
     container_name: portfolio-redis
     restart: unless-stopped
+    profiles:
+      - full-stack
     ports:
       - "6379:6379"
     volumes:
@@ -106,6 +106,8 @@ services:
     image: postgres:15-alpine
     container_name: portfolio-postgres
     restart: unless-stopped
+    profiles:
+      - full-stack
     environment:
       - POSTGRES_DB=portfolio
       - POSTGRES_USER=portfolio
@@ -134,7 +136,7 @@ services:
     container_name: portfolio-monitoring
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["node", "dist/index.js"]
     environment:
       - NODE_ENV=${NODE_ENV:-development}
@@ -160,7 +162,7 @@ services:
     container_name: portfolio-prometheus
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -186,7 +188,7 @@ services:
     container_name: portfolio-alertmanager
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
@@ -206,7 +208,7 @@ services:
     container_name: portfolio-grafana
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -231,7 +233,7 @@ services:
     container_name: portfolio-loki
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["-config.file=/etc/loki/loki-config.yml"]
     volumes:
       - ./observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
@@ -249,7 +251,7 @@ services:
     container_name: portfolio-promtail
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["-config.file=/etc/promtail/promtail-config.yml"]
     volumes:
       - ./observability/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
@@ -268,7 +270,7 @@ services:
     container_name: portfolio-blackbox
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
@@ -282,6 +284,7 @@ services:
           memory: 64M
 
 volumes:
+  backend_data:
   redis_data:
   postgres_data:
   prometheus_data:

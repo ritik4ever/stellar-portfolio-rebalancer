@@ -1,0 +1,10 @@
+# Default maintainer for repo-wide changes.
+* @xqcxx
+
+# Core subsystems called out by the devops issues.
+/backend/ @xqcxx
+/frontend/ @xqcxx
+/contracts/ @xqcxx
+/deployment/ @xqcxx
+/docs/ @xqcxx
+/.github/ @xqcxx
