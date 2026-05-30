@@ -2,12 +2,21 @@
 
 How background jobs, queues, the contract indexer, and health checks fit together when you run or debug the backend locally or in Docker.
 
+## Queue Operations Monitoring
+
+For comprehensive queue monitoring, dashboard guidance, and operational workflows:
+
+- **Dashboard:** "Queue Operations & Worker Lag" in Grafana (`http://localhost:3003`) — real-time visualization of queue depth, worker lag, failure rates, and drain behavior
+- **Health Check:** `node scripts/queue-health-check.mjs` — programmatic queue health validation for CI/CD pipelines and operational scripts
+- **Workflows & Runbooks:** See [QUEUE_OPERATIONS_WORKFLOW.md](QUEUE_OPERATIONS_WORKFLOW.md) for scenario-based troubleshooting, pre-deployment validation, and incident response procedures
+
 ## Redis and queues
 
 - **BullMQ** drives scheduled work: portfolio checks, rebalance jobs, analytics snapshots, and idempotency key cleanup.
 - **Connection:** `REDIS_URL` (default `redis://localhost:6379`). If Redis is unreachable, `probeRedis()` reports unavailable and the HTTP API still starts; queue-backed features are degraded.
 - **Scheduler:** When Redis is up, `startQueueScheduler()` (from `backend/src/queue/scheduler.ts`) registers repeatable cron jobs and enqueues one-off startup jobs (portfolio check, analytics snapshot, idempotency cleanup).
 - **Queues:** Defined in `backend/src/queue/queues.js` (`portfolio-check`, `rebalance`, `analytics-snapshot`, `idempotency-cleanup`). Without Redis, queue getters return `null` and workers do not attach.
+- **Metrics:** Backend exposes Prometheus metrics at `/metrics`: `stellar_portfolio_queue_jobs`, `stellar_portfolio_queue_worker_lag`, `stellar_portfolio_queue_drain_rate`, `stellar_portfolio_queue_failure_rate`
 
 ## Worker startup
 
@@ -26,10 +35,10 @@ How background jobs, queues, the contract indexer, and health checks fit togethe
 
 The indexer persists two keys in the `kv_store` table:
 
-| Key | Purpose |
-|-----|---------|
-| `soroban_event_indexer.cursor` | Soroban RPC paging token for incremental event fetch |
-| `soroban_event_indexer.latest_ledger` | Last known ledger sequence from RPC response |
+| Key                                   | Purpose                                              |
+| ------------------------------------- | ---------------------------------------------------- |
+| `soroban_event_indexer.cursor`        | Soroban RPC paging token for incremental event fetch |
+| `soroban_event_indexer.latest_ledger` | Last known ledger sequence from RPC response         |
 
 The cursor is written only after a batch completes successfully. If the process crashes mid-batch the same events are re-fetched on restart; this is safe because rebalance history rows are keyed by UUID and duplicates do not affect correctness.
 
@@ -63,10 +72,10 @@ The indexer uses bounded exponential backoff when the Soroban RPC is unreachable
 
 ## Health vs readiness
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /health` | Plain `200` + `ok` — process up (root `index.ts`). |
-| `GET /api/health` | JSON `{ status, timestamp }` — API router health. |
+| Endpoint                        | Purpose                                                                                                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /health`                   | Plain `200` + `ok` — process up (root `index.ts`).                                                                                                                                   |
+| `GET /api/health`               | JSON `{ status, timestamp }` — API router health.                                                                                                                                    |
 | `GET /ready` / `GET /readiness` | Deep probe: database, Redis/queues, worker runtime status, indexer, auto-rebalancer initialization (`backend/src/monitoring/readiness.ts`). Returns `503` when `status !== 'ready'`. |
 
 Use `/health` for load balancer liveness. Use `/ready` before traffic shifts in environments that depend on Redis, workers, or the indexer.
@@ -89,11 +98,11 @@ scripts/health-smoke.sh local
 Configure non-local targets and tuning via environment variables:
 
 | Variable            | Purpose                                                    |
-|---------------------|-----------------------------------------------------------|
-| `SMOKE_LOCAL_URL`   | Base URL for `local` (default `http://localhost:3001`)    |
-| `SMOKE_STAGING_URL` | Base URL for `staging` (required when target is `staging`)|
-| `SMOKE_PROD_URL`    | Base URL for `prod` (required when target is `prod`)      |
-| `SMOKE_TIMEOUT`     | Per-request timeout in seconds (default `10`)             |
+| ------------------- | ---------------------------------------------------------- |
+| `SMOKE_LOCAL_URL`   | Base URL for `local` (default `http://localhost:3001`)     |
+| `SMOKE_STAGING_URL` | Base URL for `staging` (required when target is `staging`) |
+| `SMOKE_PROD_URL`    | Base URL for `prod` (required when target is `prod`)       |
+| `SMOKE_TIMEOUT`     | Per-request timeout in seconds (default `10`)              |
 
 **Pass/fail semantics:**
 
