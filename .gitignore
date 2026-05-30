@@ -232,3 +232,9 @@ keypairs.json
 # Monitoring and logs
 monitoring/logs/
 *.pid
+.vscode/
+.idea/
+dist/
+build/
+.DS_Store
+.env.local
