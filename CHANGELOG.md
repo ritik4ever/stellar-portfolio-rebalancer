@@ -116,6 +116,7 @@ Changelog entries are organized by impact:
 - WebSocket integration tests for `portfolio_update` message shape, reconnect behavior, and per-user event isolation.
 - Feature-flag test coverage for env parsing, runtime toggles, fail-safe defaults, and startup logging visibility.
 - Project-level changelog automation script using `conventional-changelog-cli`.
+- CI commit message lint that enforces Conventional Commits on pull requests, with a locally runnable `scripts/check-commit-messages.sh` helper and contributor documentation.
 
 ## [1.3.0] - 2026-04-27
 

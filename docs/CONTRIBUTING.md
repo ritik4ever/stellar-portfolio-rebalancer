@@ -418,6 +418,43 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
+## 11. Commit message conventions
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
+
+```
+<type>[optional scope][!]: <description>
+```
+
+**Allowed types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+**Examples:**
+
+- `feat(api): add portfolio export endpoint`
+- `fix(auth): resolve JWT token expiration handling`
+- `docs: update API client examples`
+- `chore(deps): update stellar-sdk to v12.0.1`
+
+This convention powers the automated changelog (`npm run changelog:update`) and keeps release history consistent.
+
+### CI enforcement
+
+Pull requests run a **Commit message lint** check (in the `Lint` workflow) that validates every commit in the PR against the format above. The check fails with a clear message listing any non-conforming commits.
+
+Run the same check locally before opening a PR:
+
+```bash
+# Check the current branch against origin/main
+scripts/check-commit-messages.sh
+
+# Or check an explicit range
+scripts/check-commit-messages.sh origin/main..HEAD
+```
+
+If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
+
+---
+
 ## Further reading
 
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
