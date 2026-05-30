@@ -293,3 +293,9 @@ Built with ❤️ for the Stellar ecosystem
 
 
 
+
+## API
+
+```bash
+curl https://api.example.com/rebalance
+```
