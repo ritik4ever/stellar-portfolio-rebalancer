@@ -7,6 +7,7 @@ on:
     paths:
       - 'contracts/**'
       - '.github/workflows/contract-smoke.yml'
+      - 'docs/CONTRIBUTING.md'
   push:
     branches:
       - main
@@ -14,6 +15,7 @@ on:
     paths:
       - 'contracts/**'
       - '.github/workflows/contract-smoke.yml'
+      - 'docs/CONTRIBUTING.md'
 
 jobs:
   soroban-testnet-smoke:
@@ -53,6 +55,15 @@ jobs:
 
       - name: Install Soroban CLI
         run: cargo install --locked soroban-cli
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+
+      - name: Audit Rust dependencies
+        working-directory: ./contracts
+        run: |
+          cargo generate-lockfile
+          cargo deny check
 
       - name: Build contract wasm
         working-directory: ./contracts

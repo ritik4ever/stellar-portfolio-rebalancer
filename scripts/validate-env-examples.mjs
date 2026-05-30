@@ -5,6 +5,7 @@ const repoRoot = process.cwd()
 
 const BACKEND_EXAMPLE_PATH = join(repoRoot, 'backend/.env.example')
 const FRONTEND_EXAMPLE_PATH = join(repoRoot, 'frontend/.env.example')
+const ENVIRONMENT_DOC_PATH = join(repoRoot, 'docs/ENVIRONMENT.md')
 const BACKEND_SRC_PATH = join(repoRoot, 'backend/src')
 const FRONTEND_SRC_PATH = join(repoRoot, 'frontend/src')
 
@@ -24,14 +25,32 @@ const ALLOWED_MISSING_BACKEND_KEYS = new Set([
 
 function parseEnvExampleKeys(content) {
   const keys = new Set()
+  const duplicates = new Set()
   for (const rawLine of content.split('\n')) {
     const line = rawLine.trim()
     if (!line || line.startsWith('#')) continue
     const idx = line.indexOf('=')
     if (idx <= 0) continue
     const key = line.slice(0, idx).trim()
-    if (key) keys.add(key)
+    if (!key) continue
+    if (keys.has(key)) duplicates.add(key)
+    keys.add(key)
   }
+  return { keys, duplicates }
+}
+
+function parseMarkdownEnvKeys(content, heading) {
+  const start = content.indexOf(heading)
+  if (start === -1) return new Set()
+  const nextHeading = content.indexOf('\n## ', start + heading.length)
+  const section = nextHeading === -1 ? content.slice(start) : content.slice(start, nextHeading)
+  const keys = new Set()
+
+  for (const line of section.split('\n')) {
+    const match = line.match(/^\|\s*`([A-Z0-9_]+)`\s*\|/)
+    if (match) keys.add(match[1])
+  }
+
   return keys
 }
 
@@ -85,10 +104,21 @@ function fail(message) {
 
 const backendExample = readFileSync(BACKEND_EXAMPLE_PATH, 'utf8')
 const frontendExample = readFileSync(FRONTEND_EXAMPLE_PATH, 'utf8')
-const backendExampleKeys = parseEnvExampleKeys(backendExample)
-const frontendExampleKeys = parseEnvExampleKeys(frontendExample)
+const environmentDoc = readFileSync(ENVIRONMENT_DOC_PATH, 'utf8')
+const { keys: backendExampleKeys, duplicates: backendDuplicateKeys } = parseEnvExampleKeys(backendExample)
+const { keys: frontendExampleKeys, duplicates: frontendDuplicateKeys } = parseEnvExampleKeys(frontendExample)
+const backendDocKeys = parseMarkdownEnvKeys(environmentDoc, '## Backend Variable Reference')
+const frontendDocKeys = parseMarkdownEnvKeys(environmentDoc, '## Frontend Variable Reference')
 const backendCodeKeys = collectBackendEnvKeys()
 const frontendCodeKeys = collectFrontendEnvKeys()
+
+if (backendDuplicateKeys.size > 0) {
+  fail(`backend/.env.example contains duplicate keys: ${[...backendDuplicateKeys].sort().join(', ')}`)
+}
+
+if (frontendDuplicateKeys.size > 0) {
+  fail(`frontend/.env.example contains duplicate keys: ${[...frontendDuplicateKeys].sort().join(', ')}`)
+}
 
 const missingRequiredBackend = REQUIRED_BACKEND_KEYS.filter(key => !backendExampleKeys.has(key))
 if (missingRequiredBackend.length > 0) {
@@ -115,6 +145,34 @@ if (missingFrontendRuntimeKeys.length > 0) {
   fail(`frontend/.env.example missing env keys referenced by runtime code: ${missingFrontendRuntimeKeys.join(', ')}`)
 }
 
+if (backendDocKeys.size === 0) {
+  fail('docs/ENVIRONMENT.md is missing a Backend Variable Reference table.')
+}
+
+if (frontendDocKeys.size === 0) {
+  fail('docs/ENVIRONMENT.md is missing a Frontend Variable Reference table.')
+}
+
+const backendDocsMissing = [...backendExampleKeys].filter(key => !backendDocKeys.has(key)).sort()
+if (backendDocsMissing.length > 0) {
+  fail(`docs/ENVIRONMENT.md missing backend keys from backend/.env.example: ${backendDocsMissing.join(', ')}`)
+}
+
+const backendExampleMissingDocsKeys = [...backendDocKeys].filter(key => !backendExampleKeys.has(key)).sort()
+if (backendExampleMissingDocsKeys.length > 0) {
+  fail(`backend/.env.example missing keys documented in docs/ENVIRONMENT.md: ${backendExampleMissingDocsKeys.join(', ')}`)
+}
+
+const frontendDocsMissing = [...frontendExampleKeys].filter(key => !frontendDocKeys.has(key)).sort()
+if (frontendDocsMissing.length > 0) {
+  fail(`docs/ENVIRONMENT.md missing frontend keys from frontend/.env.example: ${frontendDocsMissing.join(', ')}`)
+}
+
+const frontendExampleMissingDocsKeys = [...frontendDocKeys].filter(key => !frontendExampleKeys.has(key)).sort()
+if (frontendExampleMissingDocsKeys.length > 0) {
+  fail(`frontend/.env.example missing keys documented in docs/ENVIRONMENT.md: ${frontendExampleMissingDocsKeys.join(', ')}`)
+}
+
 if (!backendExample.includes('REQUIRED SETTINGS') || !backendExample.includes('OPTIONAL SETTINGS')) {
   fail('backend/.env.example must include explicit REQUIRED SETTINGS and OPTIONAL SETTINGS sections.')
 }
@@ -123,4 +181,4 @@ if (!frontendExample.includes('REQUIRED SETTINGS') || !frontendExample.includes(
   fail('frontend/.env.example must include explicit REQUIRED SETTINGS and OPTIONAL SETTINGS sections.')
 }
 
-console.log('[env-example-validation] OK: example env files match startup/runtime config surface.')
+console.log('[env-example-validation] OK: example env files match runtime config and docs/ENVIRONMENT.md.')

@@ -307,6 +307,26 @@ npx playwright test tests/e2e/auth.spec.ts
 
 Playwright config: `frontend/playwright.config.ts`. Reports are written to `frontend/playwright-report/`.
 
+### Visual regression snapshots
+
+Critical frontend screens have a dedicated Playwright visual project:
+
+```bash
+cd frontend
+npm run test:e2e:visual
+```
+
+The visual project lives in `frontend/playwright.config.ts` and reuses critical existing E2E specs (`auth`, `portfolio-create`, and `rebalance-history`) under a fixed Chromium viewport with screenshot capture enabled.
+
+To intentionally accept a design change, run the same visual project locally and review the captured screenshots before pushing:
+
+```bash
+cd frontend
+npm run test:e2e:visual
+```
+
+CI uploads `frontend/playwright-report/` and `frontend/test-results/` when the visual project fails so maintainers can inspect the screenshots and traces for the critical pages.
+
 ---
 
 ## 9. Contract and indexer setup (optional)
@@ -342,6 +362,19 @@ STELLAR_REBALANCE_SECRET=S...YOUR_SIGNING_SECRET
 cd contracts
 cargo test
 ```
+
+### Rust dependency audit
+
+Contract dependency policy is enforced with `cargo-deny` using `contracts/deny.toml`.
+
+```bash
+cargo install --locked cargo-deny
+cd contracts
+cargo generate-lockfile
+cargo deny check
+```
+
+The CI contract smoke workflow runs the same audit before building and deploying the WASM. It fails on yanked crates, denied advisories, wildcard dependency requirements, unknown registries, and licenses outside the allowlist in `contracts/deny.toml`. Duplicate Rust crate versions are reported as warnings so maintainers can address them without blocking unrelated smoke runs.
 
 ---
 
@@ -470,6 +503,34 @@ scripts/check-commit-messages.sh origin/main..HEAD
 ```
 
 If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
+
+## 12. Optional local Git hooks
+
+Install the optional hook templates when you want fast feedback before committing or pushing:
+
+```bash
+npm run hooks:install
+```
+
+This sets `core.hooksPath` to `scripts/hooks` for your local clone only.
+
+The pre-commit hook runs:
+
+- `npm run validate:env-examples`
+- backend `npm run lint` when configured
+- frontend `npm run lint` when configured
+- root `npm run format` when configured
+
+The pre-push hook runs:
+
+- `npm run validate:env-examples`
+- backend `npm run lint` when configured
+- frontend `npm run lint` when configured
+- frontend `npm test`
+- backend `npm test`
+- root `npm run format` when configured
+
+Missing optional scripts are reported as skips. Any configured command that exits non-zero blocks the commit or push with the failing command visible in terminal output.
 
 ---
 
