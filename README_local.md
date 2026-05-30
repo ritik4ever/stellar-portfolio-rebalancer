@@ -62,12 +62,17 @@ cd frontend && npm run dev
 
 ### Docker Compose
 
-You can also run the full stack using Docker Compose:
+You can also run the stack using Docker Compose:
 
 ```bash
-cd deployment
-docker-compose up -d
+docker compose -f deployment/docker-compose.yml up --build
+docker compose -f deployment/docker-compose.yml --profile full-stack up --build
+docker compose -f deployment/docker-compose.yml --profile observability up --build
 ```
+
+The default invocation starts the minimal app stack. Add `--profile full-stack` when you want Redis and PostgreSQL, and add `--profile observability` when you want Prometheus, Grafana, Loki, Alertmanager, Promtail, and Blackbox Exporter.
+
+If you want the backend to talk to the PostgreSQL and Redis services in `full-stack`, set the matching `DATABASE_URL` or `PG*` env vars before you launch the stack.
 
 > **Note:** The `docker-compose.yml` includes sensible resource limits for each service to ensure reproducibility and prevent runaway resource consumption. If you need more resources, you can override them in a `docker-compose.override.yml` file.
 
@@ -84,4 +89,3 @@ docker-compose up -d
 - **Backend**: Node.js API with real-time monitoring
 - **Frontend**: React with TypeScript and Tailwind CSS
 - **Oracle**: Reflector price feeds for accurate pricing
- 
