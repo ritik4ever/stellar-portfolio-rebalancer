@@ -271,7 +271,7 @@ Quick steps:
 2. Create a feature branch: `git checkout -b feature/awesome-feature`
 3. Follow setup in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 4. Ensure tests pass: `cd backend && npm test && cd ../frontend && npm test`
-5. Open a Pull Request
+5. Open a Pull Request — include `Closes #NNN`, a full GitHub issue URL, or `No issue: <rationale>` in the description (CI enforces this; see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md#12-pull-request-requirements))
 
 ## License
 

@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: PR Issue Trail
+
+# ── Triggers ─────────────────────────────────────────────────────────────────
+# Run on every meaningful PR lifecycle event:
+#   opened      — first submission
+#   edited      — contributor updates the description to fix a failure
+#   reopened    — previously closed PR re-opened
+#   synchronize — new commits pushed (labels may have changed)
+#
+# IMPORTANT: "edited" is required so that fixing the PR description
+# (without a new commit) re-triggers this check automatically.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+# ── Permissions ───────────────────────────────────────────────────────────────
+# Read-only. No write access to pull-requests, issues, or contents beyond
+# what is needed to check out the script and read PR metadata.
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  check-issue-link:
+    name: PR issue trail check
+    runs-on: ubuntu-latest
+
+    # ── Bot actor bypass ───────────────────────────────────────────────────
+    # Dependabot and Renovate open automated PRs that do not follow our
+    # template. Skipping here (rather than inside the script) prevents any
+    # runner minutes from being consumed and surfaces a clean "skipped" status
+    # in the GitHub UI instead of a confusing failure.
+    #
+    # To add additional bot accounts extend this condition with:
+    #   && github.event.pull_request.user.login != 'your-bot[bot]'
+    if: |
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'renovate[bot]'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Write PR body and labels to temp files (injection-safe) ────────
+      # SECURITY: GitHub context values (${{ ... }}) must NEVER be inlined
+      # directly into a `run:` block. Doing so passes them through the shell
+      # interpreter before any quoting can protect against special characters
+      # (backticks, $(), semicolons, etc.) in a malicious PR body.
+      #
+      # Correct pattern:
+      #   1. Map the context value to an env: variable within the step.
+      #   2. Reference it as a shell variable (${VAR}) inside `run:`.
+      #   3. Write to the file with `printf '%s'` — avoids interpreting
+      #      escape sequences the way `echo` would.
+      #
+      # The runner treats env: values as opaque data strings, not code.
+      - name: Write PR body and labels to files (injection-safe)
+        env:
+          # PR body — never inline-expanded in the run: block below
+          PR_BODY: ${{ github.event.pull_request.body }}
+          # Label names as a JSON array, e.g. ["bug","skip-issue-check"]
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          # printf '%s' treats the variable as a literal string.
+          # Redirecting via the shell variable (not the context) is safe.
+          printf '%s' "${PR_BODY}"   > /tmp/pr_body.txt
+          printf '%s' "${PR_LABELS}" > /tmp/pr_labels.txt
+
+      # ── Validate PR body ───────────────────────────────────────────────
+      # The script:
+      #   1. Checks for the 'skip-issue-check' label (maintainer override).
+      #   2. Strips HTML/Markdown comments to prevent template-placeholder
+      #      false-positives.
+      #   3. Checks Path A: issue reference (#NNN or full GitHub URL).
+      #   4. Checks Path B: explicit no-issue rationale keyword.
+      #   5. Exits 1 with a prescriptive, copy-paste-ready error message
+      #      if neither path matches.
+      #
+      # The contributor fixes a failure by editing the PR description in
+      # the GitHub UI — no new commit push is required. The 'edited' trigger
+      # above ensures this workflow re-runs automatically on save.
+      - name: Validate PR body
+        run: bash scripts/check-pr-body.sh /tmp/pr_body.txt /tmp/pr_labels.txt

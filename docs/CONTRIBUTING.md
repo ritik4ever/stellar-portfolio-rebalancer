@@ -473,6 +473,109 @@ If the check flags a commit, amend or rebase to fix the subject line, e.g. `git 
 
 ---
 
+## 12. Pull Request Requirements
+
+Every pull request must include **one** of the following in the PR description to pass the `pr-issue-trail` CI check. The check runs automatically whenever a PR is opened, edited, or updated.
+
+### Accepted formats
+
+**Option 1 — Link a GitHub issue**
+
+Use a closing keyword followed by an issue number (shorthand or full URL):
+
+```
+Closes #42
+Fixes #7
+Resolves #1001
+Refs #300
+Related to #88
+
+Fixes https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/42
+```
+
+Or place a bare reference anywhere in the description:
+
+```
+#42
+https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/42
+```
+
+Accepted keywords (case-insensitive): `Closes`, `Fixes`, `Resolves`, `Refs`,
+`References`, `Related to`.
+
+**Option 2 — Declare no issue with a rationale**
+
+If your PR intentionally has no backing issue (e.g. a typo fix, dependency bump, or CI tweak), start a line with `No issue:` followed by a one-sentence explanation:
+
+```
+No issue: dependency bump — no feature request needed
+No issue: typo fix in README, trivial one-word change
+```
+
+Other accepted rationale keywords: `standalone`, `rationale:`, `reason:`, `intentionally no issue`.
+
+---
+
+### What the validator checks
+
+1. **Comment stripping** — All `<!-- HTML comment -->` blocks are removed from the PR body before any matching occurs. Text that exists only inside comment markers (such as unfilled template placeholders) does not count.
+
+2. **Path A** — The cleaned body is searched for an issue reference (keyword + `#NNN`, keyword + full URL, bare `#NNN`, bare full URL).
+
+3. **Path B** — If Path A fails, the cleaned body is searched for a rationale keyword.
+
+4. If neither path matches, the check exits with a failure and a prescriptive error message explaining exactly what to add.
+
+---
+
+### How to fix a failing check
+
+You do **not** need to push a new commit. Simply:
+
+1. Open the PR in the GitHub UI.
+2. Click **Edit** on the PR description.
+3. Add a valid issue reference or `No issue: <rationale>` — make sure it is **outside** any `<!-- comment -->` blocks.
+4. Save. The `pr-issue-trail` check re-runs automatically within seconds.
+
+---
+
+### Automated PRs (Dependabot / Renovate)
+
+Dependency manager bots are automatically skipped. The `pr-issue-trail`
+workflow will not run — and will not fail — for PRs opened by
+`dependabot[bot]` or `renovate[bot]`.
+
+---
+
+### Maintainer escape hatch
+
+A maintainer can apply the **`skip-issue-check`** label to any PR to bypass
+the check entirely. The label is evaluated on every run, so applying it after
+a failure is enough — the check will pass on its next trigger without a code
+change or re-run needed.
+
+Only contributors with repository write access can apply labels, so this
+cannot be self-granted by external contributors.
+
+---
+
+### Local testing
+
+To reproduce the exact check locally before opening a PR:
+
+```bash
+# Write your draft PR description to a file
+echo "Closes #42" > /tmp/test_pr_body.txt
+
+# Run the validator (no labels file = no escape hatch)
+bash scripts/check-pr-body.sh /tmp/test_pr_body.txt
+
+# Exit code 0 = would pass CI; exit code 1 = would fail CI
+echo "Exit code: $?"
+```
+
+---
+
 ## Further reading
 
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers

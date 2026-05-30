@@ -27,7 +27,7 @@ For a quick overview of the API contract see [API.md](API.md). Background servic
 2. Fork the repository and create a feature branch: `git checkout -b feature/your-feature`
 3. Follow the setup guide in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 4. Make your changes and ensure all tests pass: `cd backend && npm test && cd ../frontend && npm test`
-5. Open a pull request targeting `main` (reference the issue with "Closes #123")
+5. Open a pull request targeting `main`. The PR body **must** link an issue or provide an explicit rationale — CI will fail if this is missing. See [§ Pull Request Requirements](docs/CONTRIBUTING.md#12-pull-request-requirements) for accepted formats and examples.
 
 ## Issue Templates
 
