@@ -263,6 +263,7 @@ docker compose -f deployment/docker-compose.yml up --build -d
 ## Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+For branch protection rules and which CI checks must pass before merging, see [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md).
 For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
 For issue management, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
 

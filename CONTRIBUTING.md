@@ -29,6 +29,8 @@ For a quick overview of the API contract see [API.md](API.md). Background servic
 4. Make your changes and ensure all tests pass: `cd backend && npm test && cd ../frontend && npm test`
 5. Open a pull request targeting `main` (reference the issue with "Closes #123")
 
+> **Before you open a PR**, review the [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md) guide to understand which CI checks must pass before your PR can be merged.
+
 ## Issue Templates
 
 We provide templates for common contribution types:
