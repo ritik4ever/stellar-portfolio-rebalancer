@@ -1,0 +1,33 @@
+name: Wallet Bug Report
+description: Report a wallet connection or signature issue
+title: "[Wallet] "
+labels: ["bug", "wallet"]
+body:
+  - type: input
+    id: wallet_type
+    attributes:
+      label: Wallet Type
+      description: Which wallet are you using?
+      placeholder: Freighter / Rabet / LOBSTR / Ledger
+    validations:
+      required: true
+  - type: input
+    id: network
+    attributes:
+      label: Network
+      description: Testnet or Mainnet?
+      placeholder: Testnet
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: 1. Open app\n2. Click connect\n3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Message
+      render: shell
