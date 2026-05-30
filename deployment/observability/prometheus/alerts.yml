@@ -51,6 +51,7 @@ groups:
           summary: Failed rebalance jobs detected
           description: The rebalance queue has failed jobs that need investigation.
 
+<<<<<<< HEAD
   - name: queue-operations
     interval: 30s
     rules:
@@ -153,3 +154,23 @@ groups:
         annotations:
           summary: "Idempotency cleanup queue has failed jobs"
           description: "Cleanup jobs have failed {{ $value | humanize }} times. Old idempotency keys may not be pruned. Check logs."
+
+      - alert: ReflectorStalePricesDetected
+        expr: sum(increase(stellar_portfolio_reflector_stale_prices_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: prices
+        annotations:
+          summary: Reflector has served stale prices
+          description: One or more stale Reflector price rows were observed in the last 15 minutes.
+
+      - alert: ReflectorFallbackUsageSpike
+        expr: sum(increase(stellar_portfolio_reflector_fallback_usage_total[1h])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+          service: prices
+        annotations:
+          summary: Reflector fallback usage is elevated
+          description: The backend has relied on cached or synthetic price fallbacks at least five times in the last hour.

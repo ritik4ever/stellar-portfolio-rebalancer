@@ -40,7 +40,7 @@ An application error boundary captures render failures and reports them to Sentr
 Start the app plus the monitoring stack:
 
 ```bash
-docker compose -f deployment/docker-compose.yml --profile monitoring up --build
+docker compose -f deployment/docker-compose.yml --profile observability up --build
 ```
 
 Main endpoints:
@@ -68,6 +68,14 @@ Prometheus alerts are preconfigured for:
 - frontend uptime failures
 - elevated backend 5xx rate
 - failed rebalance queue jobs
+- stale Reflector price rows observed in the last 15 minutes
+- excessive fallback price usage over the last hour
+
+The backend exports dedicated price-quality metrics:
+
+- `stellar_portfolio_price_feed_resolutions_total`
+- `stellar_portfolio_reflector_stale_prices_total`
+- `stellar_portfolio_reflector_fallback_usage_total`
 
 Alertmanager ships alerts to `http://host.docker.internal:5001/alerts` by default. Replace that receiver with your Slack, PagerDuty, Opsgenie, or webhook destination before production rollout.
 
