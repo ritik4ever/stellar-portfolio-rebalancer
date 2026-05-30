@@ -37,7 +37,25 @@ An application error boundary captures render failures and reports them to Sentr
 
 ## Running The Stack
 
-Start the app plus the monitoring stack:
+For the easiest and most robust setup, you can boot the local observability stack with a single command that validates prerequisites (Docker, daemon running, port conflicts), builds and runs the stack in the background, waits/polls all service health endpoints, and runs the health smoke tests:
+
+```bash
+npm run observability:up
+```
+
+Alternatively, you can execute the bootstrap script directly:
+
+```bash
+./scripts/bootstrap-observability.sh
+```
+
+Other helper commands:
+
+- **Check service status:** `npm run observability:status`
+- **Tear down the stack and clean data volumes:** `npm run observability:down`
+- **Tear down without cleaning volumes:** `docker compose -f deployment/docker-compose.yml --profile monitoring down`
+
+If you prefer to run the stack manually in the foreground:
 
 ```bash
 docker compose -f deployment/docker-compose.yml --profile monitoring up --build

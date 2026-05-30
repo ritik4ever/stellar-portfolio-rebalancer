@@ -14,7 +14,7 @@ jobs:
       - name: Build Docker images
         run: docker compose -f deployment/docker-compose.yml build
 
-      - name: Validate health-checked compose startup
+      - name: Validate local observability bootstrap
         run: |
-          docker compose -f deployment/docker-compose.yml up -d --wait backend
-          docker compose -f deployment/docker-compose.yml down -v
+          bash scripts/bootstrap-observability.sh
+          docker compose -f deployment/docker-compose.yml --profile monitoring down -v
