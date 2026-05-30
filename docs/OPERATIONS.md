@@ -71,6 +71,37 @@ The indexer uses bounded exponential backoff when the Soroban RPC is unreachable
 
 Use `/health` for load balancer liveness. Use `/ready` before traffic shifts in environments that depend on Redis, workers, or the indexer.
 
+## Health smoke test
+
+`scripts/health-smoke.sh` probes the key operational surfaces (`/health`, `/api/health`, `/ready`, `/metrics`) and prints a pass/fail summary. Use it after a deploy or during triage against local, staging, or production.
+
+```bash
+# From the repository root
+npm run smoke                 # probe local (default http://localhost:3001)
+npm run smoke -- staging      # probe SMOKE_STAGING_URL
+npm run smoke -- prod         # probe SMOKE_PROD_URL
+npm run smoke -- https://api.example.com   # probe an explicit base URL
+
+# Or call the script directly
+scripts/health-smoke.sh local
+```
+
+Configure non-local targets and tuning via environment variables:
+
+| Variable            | Purpose                                                    |
+|---------------------|-----------------------------------------------------------|
+| `SMOKE_LOCAL_URL`   | Base URL for `local` (default `http://localhost:3001`)    |
+| `SMOKE_STAGING_URL` | Base URL for `staging` (required when target is `staging`)|
+| `SMOKE_PROD_URL`    | Base URL for `prod` (required when target is `prod`)      |
+| `SMOKE_TIMEOUT`     | Per-request timeout in seconds (default `10`)             |
+
+**Pass/fail semantics:**
+
+- `liveness` (`/health`) and `api-health` (`/api/health`) are **required** — a failure exits non-zero.
+- `readiness` (`/ready`) and `metrics` (`/metrics`) are **advisory** — they report a warning rather than failing the run, because readiness is legitimately `503` until Redis, workers, and the indexer are up (see the table above).
+
+The script exits `0` when all required checks pass and `1` otherwise, so it can gate a deploy step or be run by hand without manual interpretation.
+
 ## Safe shutdown and restart
 
 - **Process stop:** Stopping Node terminates open HTTP and WebSocket connections. BullMQ workers in the same process should be stopped with their `stop*Worker` helpers before exit if you add a worker host; repeatable jobs remain in Redis until removed via `stopQueueScheduler()`.

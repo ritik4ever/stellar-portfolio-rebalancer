@@ -26,6 +26,7 @@
     "changelog:update": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
     "changelog:preview": "conventional-changelog -p conventionalcommits",
     "validate:env-examples": "node scripts/validate-env-examples.mjs",
+    "smoke": "bash scripts/health-smoke.sh",
     "lint": "npm run lint:backend && npm run lint:frontend",
     "lint:backend": "cd backend && npm run lint",
     "lint:frontend": "cd frontend && npm run lint",

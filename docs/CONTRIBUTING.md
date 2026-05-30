@@ -260,6 +260,24 @@ npm test -- --watch   # watch mode
 
 Tests use an isolated SQLite database per run (no external dependencies required).
 
+#### Sharded test runs (CI parity)
+
+To keep CI fast, the **Backend Tests** workflow splits the suite into 4 parallel shards (`SHARD_TOTAL` in `.github/workflows/backend-tests.yml`). Each shard collects coverage into a [blob report](https://vitest.dev/guide/reporters#blob-reporter); a final job merges the blobs and enforces the coverage thresholds in `backend/vitest.config.ts` against the full suite.
+
+You can reproduce the sharded flow locally without any CI-specific tooling:
+
+```bash
+cd backend
+
+# Run a single shard (e.g. shard 1 of 4). Repeat for shards 2/4, 3/4, 4/4.
+npm run test:shard -- --shard=1/4
+
+# After running all shards, merge the blob reports and check coverage thresholds
+npm run test:merge-coverage
+```
+
+Each shard writes its blob report to `backend/.vitest-reports/`, which `test:merge-coverage` reads when combining results. To change the shard count, update `SHARD_TOTAL` and the `matrix.shard` list in the workflow together.
+
 ### Frontend unit tests
 
 ```bash
@@ -415,6 +433,43 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 | Playwright `net::ERR_CONNECTION_REFUSED`     | Dev servers not started            | Start backend and frontend before running E2E           |
 | `Cannot find module` TypeScript errors       | Dependencies not installed         | Run `npm install` in backend/ and frontend/             |
 | Stellar horizon errors on contract calls     | Wrong network                      | Check `STELLAR_NETWORK` and `STELLAR_HORIZON_URL` match |
+
+---
+
+## 11. Commit message conventions
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
+
+```
+<type>[optional scope][!]: <description>
+```
+
+**Allowed types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+**Examples:**
+
+- `feat(api): add portfolio export endpoint`
+- `fix(auth): resolve JWT token expiration handling`
+- `docs: update API client examples`
+- `chore(deps): update stellar-sdk to v12.0.1`
+
+This convention powers the automated changelog (`npm run changelog:update`) and keeps release history consistent.
+
+### CI enforcement
+
+Pull requests run a **Commit message lint** check (in the `Lint` workflow) that validates every commit in the PR against the format above. The check fails with a clear message listing any non-conforming commits.
+
+Run the same check locally before opening a PR:
+
+```bash
+# Check the current branch against origin/main
+scripts/check-commit-messages.sh
+
+# Or check an explicit range
+scripts/check-commit-messages.sh origin/main..HEAD
+```
+
+If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
 
 ---
 
