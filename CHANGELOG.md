@@ -86,6 +86,7 @@ Changelog entries are organized by impact:
 - Use clear, non-technical language when possible
 - Reference issue/PR numbers: `(#123)`
 - Group related changes under single entries when appropriate
+- **API Changes documentation**: Any modification to the API specification (`spec.ts` or `openapi.json`) requires matching updates to either `API.md` or `CHANGELOG.md` within the same Pull Request (enforced in CI).
 
 **For maintainers**:
 

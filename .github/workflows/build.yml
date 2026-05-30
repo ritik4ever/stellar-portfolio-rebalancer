@@ -26,3 +26,34 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      # ---------- RUST CONTRACTS ----------
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+
+      - name: Build contract and capture hash
+        run: |
+          make -C contracts build
+          WASM_HASH=$(sha256sum contracts/target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1)
+          echo "WASM_HASH=$WASM_HASH" >> $GITHUB_ENV
+          echo "### 🔐 Smart Contract Build Audit" >> $GITHUB_STEP_SUMMARY
+          echo "- **WASM File:** \`portfolio_rebalancer.wasm\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA-256 Hash:** \`$WASM_HASH\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Contract WASM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-rebalancer-wasm
+          path: |
+            contracts/target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+
