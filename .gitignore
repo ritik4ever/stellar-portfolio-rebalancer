@@ -232,3 +232,7 @@ keypairs.json
 # Monitoring and logs
 monitoring/logs/
 *.pid
+
+# Generated output files
+backend/test_results.txt
+frontend/tsc-output.txt
