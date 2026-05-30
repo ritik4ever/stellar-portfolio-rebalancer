@@ -123,3 +123,37 @@ Connection lifecycle messages used in `websocket.service.ts`:
 - On connect: `{ "type": "connection", "message": "Validation and Monitoring Active", "version": "1.0.0" }`
 - Protocol mismatch / invalid frame: `{ "type": "ERROR", "payload": "Incompatible version or format. Use v1.0.0" }`
 - Ping response: `{ "type": "PONG", "version": "1.0.0" }`
+
+## Structured Logging Schema
+
+The backend uses `pino` to output structured JSON logs. This schema ensures logs are easily searchable and correlatable in Loki or any other log aggregator.
+
+### Base Log Fields
+
+Every log entry automatically includes the following standard fields:
+
+- `level`: The severity of the log (e.g., `info`, `warn`, `error`).
+- `time`: ISO 8601 formatted timestamp of when the event occurred.
+- `service`: Identifies the source component (always `stellar-portfolio-backend`).
+- `environment`: The deployment environment (`development`, `production`, etc.).
+- `msg`: The human-readable log message.
+
+### Correlation Keys
+
+To trace a single logical operation across multiple log statements or services, we inject correlation IDs into the log payload.
+
+- `requestId`: A unique identifier for the current HTTP request. It is automatically injected into all logs emitted within the request context via `AsyncLocalStorage`.
+
+If you are logging within a worker or queue context, ensure you include a `jobId` or equivalent correlation key manually when starting the context.
+
+### Audit Logs
+
+Significant system actions (e.g., portfolio creations, configuration changes) are tracked using a dedicated `logAudit` helper. These logs contain:
+
+- `event`: Always set to `"audit"`.
+- `action`: A string describing the specific action taken (e.g., `portfolio_created`, `rebalance_triggered`).
+- Additional fields specific to the action can be merged into the payload.
+
+### Redaction
+
+For security and compliance, sensitive fields in log payloads (like passwords, tokens, or PII) are automatically redacted before the log is printed.
