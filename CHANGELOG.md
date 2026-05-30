@@ -117,6 +117,7 @@ Changelog entries are organized by impact:
 - Feature-flag test coverage for env parsing, runtime toggles, fail-safe defaults, and startup logging visibility.
 - Project-level changelog automation script using `conventional-changelog-cli`.
 - CI commit message lint that enforces Conventional Commits on pull requests, with a locally runnable `scripts/check-commit-messages.sh` helper and contributor documentation.
+- Sharded backend test execution in CI (4 parallel shards with merged coverage and threshold enforcement) plus `test:shard`/`test:merge-coverage` scripts and contributor docs for reproducing it locally.
 
 ## [1.3.0] - 2026-04-27
 

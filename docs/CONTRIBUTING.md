@@ -260,6 +260,24 @@ npm test -- --watch   # watch mode
 
 Tests use an isolated SQLite database per run (no external dependencies required).
 
+#### Sharded test runs (CI parity)
+
+To keep CI fast, the **Backend Tests** workflow splits the suite into 4 parallel shards (`SHARD_TOTAL` in `.github/workflows/backend-tests.yml`). Each shard collects coverage into a [blob report](https://vitest.dev/guide/reporters#blob-reporter); a final job merges the blobs and enforces the coverage thresholds in `backend/vitest.config.ts` against the full suite.
+
+You can reproduce the sharded flow locally without any CI-specific tooling:
+
+```bash
+cd backend
+
+# Run a single shard (e.g. shard 1 of 4). Repeat for shards 2/4, 3/4, 4/4.
+npm run test:shard -- --shard=1/4
+
+# After running all shards, merge the blob reports and check coverage thresholds
+npm run test:merge-coverage
+```
+
+Each shard writes its blob report to `backend/.vitest-reports/`, which `test:merge-coverage` reads when combining results. To change the shard count, update `SHARD_TOTAL` and the `matrix.shard` list in the workflow together.
+
 ### Frontend unit tests
 
 ```bash
