@@ -152,6 +152,152 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
+## Database Backups and Restores
+
+The application supports two database backends: SQLite (for development) and PostgreSQL (for production). Both have automated backup and restore capabilities.
+
+### Backup Operations
+
+#### SQLite Backups
+
+Create a backup of the SQLite database:
+```bash
+cd backend
+npm run db:backup
+```
+
+By default, backups are stored in `backend/data/backups/` with a timestamped filename:
+`portfolio-backup-YYYY-MM-DDTHH-MM-SS-SSS.db`
+
+You can specify a custom backup path:
+```bash
+npm run db:backup -- --path ./custom/path/my-backup.db
+```
+
+#### PostgreSQL Backups
+
+Create a PostgreSQL backup (requires `pg_dump`):
+```bash
+cd backend
+npm run db:backup
+```
+
+Backups are stored in `backend/data/backups/` as SQL dumps. Custom output path:
+```bash
+npm run db:backup -- --output ./custom/path/backup.sql
+```
+
+PostgreSQL backup uses `DATABASE_URL` or `PG*` environment variables (PGHOST, PGPORT, PGUSER, PGDATABASE, PGPASSWORD) to connect.
+
+### Restore Operations
+
+#### SQLite Restores
+
+Restore from a SQLite backup:
+```bash
+cd backend
+npm run db:restore ./path/to/your-backup.db
+```
+
+**Important**: Stop the backend server before restoring. The restore process will close and reopen the database connection.
+
+#### PostgreSQL Restores
+
+Restore from a PostgreSQL backup (requires `psql`):
+```bash
+cd backend
+npm run db:restore ./path/to/your-backup.sql
+```
+
+### Backup Drills
+
+Practice these restore drills to ensure your backup process is reliable:
+
+#### Drill 1: Local SQLite Backup & Restore
+
+1. **Create test data**:
+   ```bash
+   cd backend
+   # Start the backend and create a test portfolio
+   npm run dev
+   # Create a portfolio via API or UI
+   ```
+
+2. **Create backup**:
+   ```bash
+   npm run db:backup
+   ```
+   Note the backup file path.
+
+3. **Modify data**:
+   - Delete or modify the test portfolio
+   - Verify the change is in the database
+
+4. **Restore backup**:
+   ```bash
+   npm run db:restore ./path/to/your-backup.db
+   ```
+
+5. **Verify restore**:
+   - Check that the original portfolio is restored correctly
+
+#### Drill 2: PostgreSQL Backup & Restore (Production-like)
+
+1. **Set up PostgreSQL locally**:
+   ```bash
+   # Using Docker
+   docker run --name stellar-pg -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=stellar -p 5432:5432 -d postgres
+   ```
+
+2. **Configure environment**:
+   ```bash
+   export DATABASE_URL="postgresql://postgres:secret@localhost:5432/stellar"
+   ```
+
+3. **Run migrations**:
+   ```bash
+   cd backend
+   npm run db:migrate
+   ```
+
+4. **Create test data**:
+   - Use the API to create test portfolios and events
+
+5. **Backup**:
+   ```bash
+   npm run db:backup
+   ```
+
+6. **Modify data**:
+   - Make changes to the database
+
+7. **Restore**:
+   ```bash
+   npm run db:restore ./path/to/pg-backup.sql
+   ```
+
+8. **Verify**:
+   - Confirm the original data is restored
+
+### Failure Handling
+
+- The scripts exit with non-zero code on failure, making them suitable for CI/CD pipelines
+- SQLite restore includes safety checks and attempts to reopen the original database if restore fails
+- PostgreSQL restore requires proper permissions and `psql`/`pg_dump` in PATH
+
+### CI/CD Integration
+
+Add backup verification to your CI pipeline:
+```yaml
+# Example GitHub Actions step
+- name: Test backup/restore
+  run: |
+    cd backend
+    npm run db:backup
+    # Verify backup file exists
+    ls -la data/backups/
+```
+
 ## Related docs
 
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
