@@ -60,6 +60,17 @@ cd backend && npm run dev
 cd frontend && npm run dev
 ```
 
+### Docker Compose
+
+You can also run the full stack using Docker Compose:
+
+```bash
+cd deployment
+docker-compose up -d
+```
+
+> **Note:** The `docker-compose.yml` includes sensible resource limits for each service to ensure reproducibility and prevent runaway resource consumption. If you need more resources, you can override them in a `docker-compose.override.yml` file.
+
 ## Usage
 
 - **Connect Wallet**: Connect your Stellar wallet

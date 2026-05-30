@@ -21,6 +21,11 @@ services:
       - frontend_logs:/var/log/nginx
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   backend:
     build:
@@ -69,6 +74,11 @@ services:
         condition: service_healthy
     volumes:
       - ./logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
   redis:
     image: redis:7-alpine
@@ -86,6 +96,11 @@ services:
       timeout: 3s
       retries: 6
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   postgres:
     image: postgres:15-alpine
@@ -106,6 +121,11 @@ services:
       timeout: 5s
       retries: 8
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   monitoring:
     build:
@@ -129,6 +149,11 @@ services:
     depends_on:
       - redis
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -150,6 +175,11 @@ services:
       - backend
       - alertmanager
       - blackbox-exporter
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -165,6 +195,11 @@ services:
       - --storage.path=/alertmanager
     ports:
       - "9093:9093"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
 
   grafana:
     image: grafana/grafana:11.2.0
@@ -185,6 +220,11 @@ services:
     depends_on:
       - prometheus
       - loki
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   loki:
     image: grafana/loki:3.1.1
@@ -198,6 +238,11 @@ services:
       - loki_data:/loki
     ports:
       - "3100:3100"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
   promtail:
     image: grafana/promtail:3.1.1
@@ -212,6 +257,11 @@ services:
       - frontend_logs:/var/log/portfolio-frontend:ro
     depends_on:
       - loki
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
 
   blackbox-exporter:
     image: prom/blackbox-exporter:v0.25.0
@@ -225,6 +275,11 @@ services:
       - --config.file=/etc/blackbox_exporter/config.yml
     ports:
       - "9115:9115"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
 
 volumes:
   redis_data:
