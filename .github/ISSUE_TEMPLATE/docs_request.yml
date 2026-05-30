@@ -1,0 +1,21 @@
+name: Documentation Request
+description: Suggest documentation improvements
+title: "[DOCS] "
+labels: [docs]
+body:
+  - type: textarea
+    id: missing
+    attributes:
+      label: What documentation is missing or outdated?
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Suggested content
+      description: What should the documentation cover?
+  - type: input
+    id: location
+    attributes:
+      label: Where should this go?
+      placeholder: "docs/ folder, README, CONTRIBUTING.md..."
