@@ -58,6 +58,33 @@ jobs:
         working-directory: ./contracts
         run: cargo build --target wasm32-unknown-unknown --release
 
+      - name: Run benchmarks
+        working-directory: ./contracts
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo test benchmark_ -- --nocapture > bench_output.txt || true
+          python3 -c '
+          lines = [line.strip() for line in open("bench_output.txt") if "BENCHMARK_RESULT|" in line]
+          with open("bench_summary.md", "w") as f:
+              f.write("## Benchmark Results\n")
+              f.write("| Benchmark | CPU | Baseline CPU | Δ CPU | Mem | Baseline Mem | Δ Mem |\n")
+              f.write("|-----------|-----|--------------|-------|-----|--------------|-------|\n")
+              for line in lines:
+                  parts = line.split("|")
+                  name, cpu, base_cpu, mem, base_mem = parts[1], int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5])
+                  cpu_diff = (cpu - base_cpu) / base_cpu * 100
+                  mem_diff = (mem - base_mem) / base_mem * 100
+                  f.write(f"| `{name}` | {cpu:,} | {base_cpu:,} | {cpu_diff:+.2f}% | {mem:,} | {base_mem:,} | {mem_diff:+.2f}% |\n")
+          '
+          cat bench_summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Post benchmark summary
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          header: benchmark
+          path: contracts/bench_summary.md
+
       - name: Deploy and initialize on testnet
         working-directory: ./contracts
         run: |

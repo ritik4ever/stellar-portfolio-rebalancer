@@ -1359,6 +1359,7 @@ fn benchmark_initialize_gas() {
     let admin = Address::generate(&env);
     let _ = client.initialize(&admin, &reflector_id);
     assert_cost_within_tolerance(
+        "initialize",
         env.budget().cpu_instruction_cost(),
         env.budget().memory_bytes_cost(),
         BASELINE_INITIALIZE_CPU,
@@ -1385,6 +1386,7 @@ fn benchmark_create_portfolio_gas() {
     env.budget().reset_tracker();
     let _ = client.create_portfolio(&user, &allocations, &5, &50);
     assert_cost_within_tolerance(
+        "create_portfolio",
         env.budget().cpu_instruction_cost(),
         env.budget().memory_bytes_cost(),
         BASELINE_CREATE_PORTFOLIO_CPU,
@@ -1422,6 +1424,7 @@ fn benchmark_execute_rebalance_gas() {
     env.budget().reset_tracker();
     let _ = client.execute_rebalance(&pid, &Map::new(&env));
     assert_cost_within_tolerance(
+        "execute_rebalance",
         env.budget().cpu_instruction_cost(),
         env.budget().memory_bytes_cost(),
         BASELINE_EXECUTE_REBALANCE_CPU,
@@ -1450,6 +1453,7 @@ fn benchmark_deposit_gas() {
     env.budget().reset_tracker();
     client.deposit(&pid, &asset, &100);
     assert_cost_within_tolerance(
+        "deposit",
         env.budget().cpu_instruction_cost(),
         env.budget().memory_bytes_cost(),
         BASELINE_DEPOSIT_CPU,
@@ -1457,9 +1461,10 @@ fn benchmark_deposit_gas() {
     );
 }
 
-fn assert_cost_within_tolerance(cpu: u64, mem: u64, baseline_cpu: u64, baseline_mem: u64) {
+fn assert_cost_within_tolerance(name: &str, cpu: u64, mem: u64, baseline_cpu: u64, baseline_mem: u64) {
     let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
     let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
+    std::println!("BENCHMARK_RESULT|{}|{}|{}|{}|{}", name, cpu, baseline_cpu, mem, baseline_mem);
     assert!(
         cpu <= cpu_limit,
         "CPU instruction usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
