@@ -112,6 +112,9 @@ Changelog entries are organized by impact:
 
 ### Added
 
+- GitHub Actions build attestations for frontend and backend release bundles, plus CycloneDX SBOM artifacts for frontend, backend, and contracts.
+- A repository-level npm audit baseline and CI policy gate, with a backend-local wrapper command for maintainers.
+- A reusable release checklist template for contract, backend, and frontend releases, together with a contract Makefile helper that points to it.
 - Replay-focused idempotency tests for cached success/error responses, cross-user key rejection, and expiry cleanup paths.
 - WebSocket integration tests for `portfolio_update` message shape, reconnect behavior, and per-user event isolation.
 - Feature-flag test coverage for env parsing, runtime toggles, fail-safe defaults, and startup logging visibility.

@@ -108,6 +108,24 @@ The script exits `0` when all required checks pass and `1` otherwise, so it can 
 - **Redis restart:** Queues and repeatable job metadata live in Redis. After Redis comes back, restart the API so `probeRedis()` and `startQueueScheduler()` run again; workers must reconnect via `getConnectionOptions()`.
 - **Database:** SQLite (`DB_PATH`) or PostgreSQL (`DATABASE_URL`) holds application data and indexer cursors. Deleting the DB resets consent and portfolios; indexer cursors reset to bootstrap behavior on next start.
 
+## Supply chain artifacts
+
+- The PR build workflow now emits three SBOM files: one each for `frontend`, `backend`, and `contracts`.
+- The same workflow packages the frontend and backend bundles as tarballs and creates GitHub artifact attestations for those release outputs.
+- Download the `build-and-supply-chain-artifacts` artifact from the workflow run when you need to inspect the exact files that were built.
+
+### Verification
+
+Use GitHub's attestation tooling to verify a downloaded artifact against the repository's published attestations. The workflow stores the attestation on the run; verification is a maintainer task, not a manual build step.
+
+### Practical limits
+
+This repository does not yet sign the live Docker images created by `deployment/docker-compose.yml`. The current control point is the CI build bundle and its SBOMs. If you move deployment to immutable image publishing later, add image-level attestations at that stage rather than trying to infer provenance from the compose file alone.
+
+### Release checklist
+
+The release checklist template lives in [docs/RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Use it before cutting a release that touches contract, backend, or frontend delivery.
+
 ## JWT signing secret rotation
 
 The backend supports a dual-secret validation window so access tokens signed with the previous secret remain valid for a controlled grace period.

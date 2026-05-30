@@ -103,7 +103,27 @@ Migration files live in `backend/src/db/migrations/`. Add new PostgreSQL migrati
 
 ---
 
-## 4. Redis and queue workers (optional)
+## 4. Dependency audit policy
+
+Run the audit policy check before opening a PR:
+
+```bash
+npm run audit:policy
+```
+
+The policy compares the current `npm audit --json --omit=dev` counts against the reviewed baseline in `security/npm-audit-baseline.json` for the root workspace, `backend`, and `frontend`. A PR passes when the counts stay at or below that baseline.
+
+Use the update command only after a maintainer has reviewed the findings and decided to accept the new baseline:
+
+```bash
+npm run audit:policy:update
+```
+
+Temporary exceptions should be time-bounded and recorded in the release notes or PR description. Do not silently expand the baseline.
+
+---
+
+## 5. Redis and queue workers (optional)
 
 Queue workers (portfolio checks, rebalancing, analytics snapshots) require Redis. If Redis is not running, workers are silently skipped and the API still starts.
 
@@ -134,7 +154,7 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 
 ---
 
-## 5. Auth environment variables
+## 6. Auth environment variables
 
 | Variable                 | Required                      | Description                                                            |
 | ------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
@@ -157,7 +177,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ---
 
-## 6. Notification environment variables (optional)
+## 7. Notification environment variables (optional)
 
 Email notifications use SMTP. Leave these unset to disable notifications entirely.
 
@@ -226,7 +246,7 @@ curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
 
 ---
 
-## 7. Start development servers
+## 8. Start development servers
 
 ```bash
 # Terminal 1 — backend (hot reload)
@@ -248,7 +268,7 @@ curl http://localhost:3001/api/health
 
 ---
 
-## 8. Running tests
+## 9. Running tests
 
 ### Backend unit + integration tests
 

@@ -3,6 +3,12 @@ name: Build
 on:
   pull_request:
 
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,14 +21,74 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      - name: Prepare artifact workspace
+        run: mkdir -p artifacts/sbom
+
       - name: Build frontend
         working-directory: frontend
         run: |
           npm ci
           npm run build
 
+      - name: Package frontend bundle
+        working-directory: frontend
+        run: tar -czf ../artifacts/frontend-dist.tar.gz dist
+
       - name: Build backend
         working-directory: backend
         run: |
           npm ci
           npm run build
+
+      - name: Package backend bundle
+        working-directory: backend
+        run: tar -czf ../artifacts/backend-dist.tar.gz dist
+
+      - name: Install Rust SBOM tooling
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo install cargo-sbom --locked
+
+      - name: Generate frontend SBOM
+        working-directory: frontend
+        run: npm sbom --sbom-format cyclonedx --sbom-type application > ../artifacts/sbom/frontend.cdx.json
+
+      - name: Generate backend SBOM
+        working-directory: backend
+        run: npm sbom --sbom-format cyclonedx --sbom-type application > ../artifacts/sbom/backend.cdx.json
+
+      - name: Generate contracts SBOM
+        run: cargo sbom --project-directory contracts --output-format cyclone_dx_json_1_6 > artifacts/sbom/contracts.cdx.json
+
+      - name: Attest frontend bundle provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/frontend-dist.tar.gz
+
+      - name: Attest backend bundle provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/backend-dist.tar.gz
+
+      - name: Attest frontend SBOM
+        uses: actions/attest@v4
+        with:
+          sbom-path: artifacts/sbom/frontend.cdx.json
+
+      - name: Attest backend SBOM
+        uses: actions/attest@v4
+        with:
+          sbom-path: artifacts/sbom/backend.cdx.json
+
+      - name: Attest contracts SBOM
+        uses: actions/attest@v4
+        with:
+          sbom-path: artifacts/sbom/contracts.cdx.json
+
+      - name: Upload build and supply-chain artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-and-supply-chain-artifacts
+          path: artifacts/
+          if-no-files-found: error
