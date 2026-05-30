@@ -15,6 +15,8 @@ jobs:
         run: docker compose -f deployment/docker-compose.yml build
 
       - name: Validate local observability bootstrap
-        run: |
-          bash scripts/bootstrap-observability.sh
-          docker compose -f deployment/docker-compose.yml --profile monitoring down -v
+        run: bash scripts/bootstrap-observability.sh
+
+      - name: Tear down observability stack
+        if: always()
+        run: docker compose -f deployment/docker-compose.yml --profile monitoring down -v
