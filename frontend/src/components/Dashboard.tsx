@@ -179,6 +179,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         }
     }, [publicKey, queryClient])
 
+    // Empty state: connected wallet but no portfolios yet (first-time user)
+    const noPortfoliosYet = Boolean(
+        publicKey && (!portfolios || portfolios.length === 0) && !loading && !portfoliosLoadError
+    )
+
     const disconnectWallet = async () => {
         if (publicKey) {
             await authLogout(publicKey)
@@ -321,6 +326,42 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             </div>
         )
     }
+
+        if (noPortfoliosYet) {
+            return (
+                <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
+                    <div className="max-w-2xl w-full bg-white dark:bg-gray-800 rounded-xl p-8 shadow-sm text-center">
+                        <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">No portfolios yet</h2>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                            You don't have any portfolios yet. Create your first automated portfolio to start tracking and rebalancing on Stellar.
+                        </p>
+                        <div className="flex flex-col sm:flex-row items-center gap-3 justify-center">
+                            <button
+                                onClick={() => onNavigate('setup')}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                            >
+                                Create Portfolio
+                            </button>
+                            <button
+                                onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition-colors"
+                            >
+                                Learn how to start
+                            </button>
+                            <button
+                                onClick={() => { alert('Tip: Use the Create Portfolio button to open the setup flow.') }}
+                                className="px-4 py-2 text-sm text-gray-500"
+                            >
+                                Quick tips
+                            </button>
+                        </div>
+                        <p className="mt-6 text-xs text-gray-400">
+                            You can also import/export portfolios, connect a wallet, or reset demo data from the header actions.
+                        </p>
+                    </div>
+                </div>
+            )
+        }
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
