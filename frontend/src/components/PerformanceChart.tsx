@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
+import { TrendingUp, TrendingDown, BarChart3, AlertCircle, Download } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 
 // TanStack Query Hooks
 import { usePortfolioAnalytics, usePerformanceSummary } from '../hooks/queries/useAnalyticsQuery'
+
+// Export utilities
+import { downloadCSV, toCSV } from '../utils/export'
 
 interface PerformanceChartProps {
     portfolioId: string | null
@@ -45,6 +48,20 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
     const formatPercentage = (value: number) => {
         return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+    }
+
+    // Export chart data as CSV
+    const exportChartDataCSV = () => {
+        const chartData = formatChartData()
+        const rows = chartData.map((dataPoint) => ({
+            timestamp: dataPoint.timestamp,
+            date: dataPoint.date,
+            portfolioValue: dataPoint.value
+        }))
+
+        const csv = toCSV(rows, ['timestamp', 'date', 'portfolioValue'])
+        const filename = `portfolio_performance_${portfolioId}_${days}days_${new Date().toISOString()}.csv`
+        downloadCSV(filename, csv)
     }
 
     if (!portfolioId || portfolioId === 'demo') {
@@ -112,6 +129,15 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Portfolio Performance</h2>
                     <div className="flex items-center space-x-2">
+                        <button
+                            onClick={exportChartDataCSV}
+                            disabled={chartData.length === 0}
+                            className="flex items-center space-x-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-1 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Export chart data as CSV"
+                        >
+                            <Download className="w-4 h-4" />
+                            <span>Export CSV</span>
+                        </button>
                         <select
                             value={days}
                             onChange={(e) => setDays(Number(e.target.value))}
