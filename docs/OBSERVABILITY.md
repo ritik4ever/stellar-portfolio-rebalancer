@@ -7,8 +7,21 @@ This repository now includes a baseline observability stack for production debug
 - Prometheus for metrics scraping
 - Grafana for dashboards
 - Loki + Promtail for centralized log aggregation
-- Blackbox Exporter for uptime probes
+- Blackbox Exporter for external uptime probes and WebSocket handshake validation
 - Alertmanager for alert routing
+
+## Blackbox uptime probes
+Prometheus scrapes the Blackbox Exporter to validate externally visible availability across the main public surfaces.
+The current deployment probes:
+
+- `http://frontend:80/` — frontend application root
+- `http://backend:3001/readiness` — backend deep readiness check
+- `http://backend:3001/health` — backend process liveness
+- `http://backend:3001/` — backend public API root
+- `http://backend:3001/api-docs` — backend API documentation page
+- `http://backend:3001/` via WebSocket handshake using `Upgrade: websocket`
+
+The blackbox configuration is stored in `deployment/observability/blackbox/blackbox.yml`, and Prometheus scrape jobs are defined in `deployment/observability/prometheus/prometheus.yml`.
 
 ## Backend
 

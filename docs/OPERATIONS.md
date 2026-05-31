@@ -73,7 +73,7 @@ Use `/health` for load balancer liveness. Use `/ready` before traffic shifts in 
 
 ## Health smoke test
 
-`scripts/health-smoke.sh` probes the key operational surfaces (`/health`, `/api/health`, `/ready`, `/metrics`) and prints a pass/fail summary. Use it after a deploy or during triage against local, staging, or production.
+`scripts/health-smoke.sh` probes the key operational surfaces (`/health`, `/api/health`, `/ready`, `/`, `/api-docs`, `/metrics`) and prints a pass/fail summary. Use it after a deploy or during triage against local, staging, or production.
 
 ```bash
 # From the repository root
