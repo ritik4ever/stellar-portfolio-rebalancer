@@ -44,9 +44,23 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                         Accept to continue
                     </h2>
                 </div>
+
                 <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
                     To use the Portfolio Rebalancer you must accept the following. You can read each document before accepting.
                 </p>
+
+                <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    <h3 className="font-semibold mb-2">Consent document version history</h3>
+                    <p className="mb-3">
+                        Before re-accepting, review what may have changed in the consent documents.
+                    </p>
+                    <ul className="list-disc space-y-1 pl-5">
+                        <li>Terms of Service may include updated disclaimers, liability terms, and smart contract risk language.</li>
+                        <li>Privacy Policy may include updated data handling, retention, and compliance information.</li>
+                        <li>Cookie Policy may include updated cookie usage and preference details.</li>
+                    </ul>
+                </div>
+
                 <div className="space-y-4">
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input
@@ -67,6 +81,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             {' '}(disclaimers, liability, smart contract risks).
                         </span>
                     </label>
+
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input
                             type="checkbox"
@@ -86,6 +101,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             {' '}(GDPR/CCPA compliant).
                         </span>
                     </label>
+
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input
                             type="checkbox"
@@ -105,12 +121,14 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                         </span>
                     </label>
                 </div>
+
                 {error && (
                     <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm flex items-center gap-2">
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />
                         {error}
                     </div>
                 )}
+
                 <div className="mt-6 flex justify-end">
                     <button
                         type="button"

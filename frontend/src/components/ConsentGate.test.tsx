@@ -69,6 +69,16 @@ describe('ConsentGate', () => {
         expect(await screen.findByText(/accept to continue/i)).toBeTruthy()
     })
 
+    it('shows consent document version history before acceptance', async () => {
+        renderWithQuery(<ConsentHarness />)
+
+        expect(await screen.findByText(/consent document version history/i)).toBeTruthy()
+        expect(screen.getByText(/before re-accepting/i)).toBeTruthy()
+        expect(screen.getByText(/terms of service may include updated disclaimers/i)).toBeTruthy()
+        expect(screen.getByText(/privacy policy may include updated data handling/i)).toBeTruthy()
+        expect(screen.getByText(/cookie policy may include updated cookie usage/i)).toBeTruthy()
+    })
+
     it('renders dashboard immediately after consent is granted', async () => {
         renderWithQuery(<ConsentHarness />)
 
