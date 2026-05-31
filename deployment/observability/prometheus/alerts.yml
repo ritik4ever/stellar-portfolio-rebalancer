@@ -102,17 +102,17 @@ groups:
           summary: Reflector fallback usage is elevated
           description: The backend has relied on cached or synthetic price fallbacks at least five times in the last hour.
 
-      # --- DATABASE SUBSYSTEM ---
-      - alert: DatabaseUnavailable
+      # --- SYSTEM READINESS SUBSYSTEM ---
+      - alert: SystemReadinessDegraded
         expr: stellar_portfolio_readiness_status == 0
         for: 2m
         labels:
           severity: critical
-          subsystem: database
+          subsystem: system
           service: backend
         annotations:
-          summary: Database connection check failed
-          description: The backend readiness probe reports that the database connection is unhealthy or unreachable.
+          summary: System readiness check has failed
+          description: The global application readiness probe is failing, indicating degraded health across one or more critical backend dependencies.
 
       # --- CONFIGURATION INFO ALERTS ---
       - alert: ConfigurationReloaded

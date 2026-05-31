@@ -164,7 +164,7 @@ To ensure high reliability, alerts in the system are explicitly labeled with `se
 | **critical** | `api-gateway` | `BackendDown` | Scrape job `up == 0` for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
 | **critical** | `api-gateway` | `BackendReadinessFailed` | `/readiness` returning non-2xx for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
 | **critical** | `api-gateway` | `FrontendUptimeProbeFailed` | Frontend probe unavailable for 5m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
-| **critical** | `database` | `DatabaseUnavailable` | Readiness report reports DB down for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `system` | `SystemReadinessDegraded` | Readiness report reports unhealthy for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
 | **warning** | `api-gateway` | `Elevated5xxRate` | HTTP 5xx rate > 5% for 10m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
 | **warning** | `api-gateway` | `APILatencySpike` | 95th percentile request latency > 2.0s for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
 | **warning** | `portfolio-engine` | `RebalanceQueueFailures` | Failed rebalance jobs > 0 for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |

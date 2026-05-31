@@ -27,6 +27,9 @@ route:
         - match:
             subsystem: database
           receiver: pagerduty-critical
+        - match:
+            subsystem: system
+          receiver: pagerduty-critical
 
     # ----------------------------------------------------
     # WARNING ALERTS: Asynchronous logging / Slack warning
@@ -46,6 +49,9 @@ route:
           receiver: slack-warnings
         - match:
             subsystem: database
+          receiver: slack-warnings
+        - match:
+            subsystem: system
           receiver: slack-warnings
 
     # ----------------------------------------------------
