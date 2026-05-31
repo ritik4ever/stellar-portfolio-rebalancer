@@ -12,7 +12,10 @@ import {
     isAuthServiceUnavailable,
     resolveConsentAcceptedNavigation,
     runWalletReconnectBoot,
+    runBootDiagnostics,
+    type BootCheck,
 } from './app/walletBoot'
+import BootDiagnosticsPanel from './components/BootDiagnosticsPanel'
 import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
@@ -39,8 +42,25 @@ function App() {
     const showBackendBanner = loadError || notices.length > 0
     const contentTopPad = showBackendBanner ? 'pt-14' : 'pt-4'
 
+    const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
+    const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
+
     useEffect(() => {
         checkWalletConnection()
+        runBootDiagnostics({
+            checkWallets: () => {
+                const wallets = walletManager.getAvailableWallets()
+                return wallets.length > 0
+            },
+            checkApi: async () => {
+                try {
+                    await api.get(ENDPOINTS.HEALTH)
+                    return true
+                } catch {
+                    return false
+                }
+            },
+        }).then((result) => setBootChecks(result.checks))
     }, [])
 
     useEffect(() => {
@@ -285,13 +305,51 @@ function App() {
                     onBack={() => handleNavigate('landing')}
                 />
             ) : currentView === 'landing' ? (
-                <Landing
-                    onNavigate={handleNavigate}
-                    onConnectWallet={connectWallet}
-                    onNeedsConsent={handleNeedsConsent}
-                    isConnecting={isConnecting}
-                    publicKey={publicKey}
-                />
+                <div className="relative">
+                    <Landing
+                        onNavigate={handleNavigate}
+                        onConnectWallet={connectWallet}
+                        onNeedsConsent={handleNeedsConsent}
+                        isConnecting={isConnecting}
+                        publicKey={publicKey}
+                    />
+                    {!publicKey ? (
+                        <div className="fixed bottom-4 left-4 z-40 max-w-xs">
+                            <button
+                                type="button"
+                                onClick={() => setShowBootDiagnostics(!showBootDiagnostics)}
+                                className="mb-1 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-xs text-slate-500 shadow-sm backdrop-blur hover:bg-white hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            >
+                                {showBootDiagnostics ? 'Hide' : 'Show'} startup checks
+                            </button>
+                            {showBootDiagnostics ? (
+                                <BootDiagnosticsPanel
+                                    checks={bootChecks}
+                                    onRetry={() => {
+                                        setBootChecks([
+                                            { id: 'wallet-detection', label: 'Wallet extension', status: 'loading' },
+                                            { id: 'api-reachability', label: 'API reachability', status: 'loading' },
+                                        ])
+                                        runBootDiagnostics({
+                                            checkWallets: () => {
+                                                const wallets = walletManager.getAvailableWallets()
+                                                return wallets.length > 0
+                                            },
+                                            checkApi: async () => {
+                                                try {
+                                                    await api.get(ENDPOINTS.HEALTH)
+                                                    return true
+                                                } catch {
+                                                    return false
+                                                }
+                                            },
+                                        }).then((result) => setBootChecks(result.checks))
+                                    }}
+                                />
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
             ) : currentView === 'dashboard' ? (
                 <Dashboard
                     onNavigate={handleNavigate}
