@@ -18,17 +18,130 @@ body {
     outline: none;
 }
 
-/* NEW: Mobile action bar styles */
+/* Mobile action bar styles */
 @media (max-width: 768px) {
-    /* Ensure mobile action bar is always visible above other content */
     .mobile-action-bar {
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
         box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -1px rgba(0, 0, 0, 0.06);
     }
-    
-    /* Add safe area padding for devices with home indicators */
     .mobile-action-bar {
         padding-bottom: max(1rem, env(safe-area-inset-bottom));
     }
+}
+
+/* =========================================================
+   Color Tokens & Theme Contrast
+   ========================================================= */
+
+/* Light theme contrast refinements */
+:root {
+    --text-primary: #1a1a2e;
+    --text-secondary: #4a4a6a;
+    --text-muted: #6b6b8a;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5fa;
+    --bg-card: #ffffff;
+    --border-color: #d4d4e0;
+    --accent-color: #3b82f6;
+    --success-color: #16a34a;
+    --warning-color: #d97706;
+    --error-color: #dc2626;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Dark theme contrast refinements */
+[data-theme="dark"] {
+    --text-primary: #e8e8f0;
+    --text-secondary: #b0b0c8;
+    --text-muted: #8888a0;
+    --bg-primary: #0f0f1a;
+    --bg-secondary: #1a1a2e;
+    --bg-card: #1e1e36;
+    --border-color: #2a2a44;
+    --accent-color: #60a5fa;
+    --success-color: #22c55e;
+    --warning-color: #f59e0b;
+    --error-color: #ef4444;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Apply contrast-optimized tokens */
+body {
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+}
+
+/* Enhanced focus styles for keyboard navigation */
+:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: more) {
+    :root {
+        --text-secondary: #2a2a4a;
+        --text-muted: #3a3a5a;
+        --border-color: #8888a0;
+    }
+    [data-theme="dark"] {
+        --text-secondary: #d0d0e0;
+        --text-muted: #b0b0c8;
+        --border-color: #4444a0;
+    }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.no-animation {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Card component refinements */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+}
+
+.card:hover {
+    border-color: var(--accent-color);
+}
+
+/* Badge color refinements */
+.badge-success {
+    background-color: var(--success-color);
+    color: #ffffff;
+}
+
+.badge-warning {
+    background-color: var(--warning-color);
+    color: #ffffff;
+}
+
+.badge-error {
+    background-color: var(--error-color);
+    color: #ffffff;
+}
+
+/* Text contrast improvements */
+.text-secondary {
+    color: var(--text-secondary);
+}
+
+.text-muted {
+    color: var(--text-muted);
 }
