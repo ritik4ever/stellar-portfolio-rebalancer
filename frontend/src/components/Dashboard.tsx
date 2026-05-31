@@ -19,6 +19,7 @@ import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMuta
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
+import RouteErrorState from './RouteErrorState'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
@@ -36,7 +37,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const { isDark } = useTheme()
 
     // Query for user portfolios
-    const { data: portfolios, isLoading: portfoliosLoading } = useUserPortfolios(publicKey)
+    const {
+        data: portfolios,
+        isLoading: portfoliosLoading,
+        isError: portfoliosLoadError,
+        error: portfoliosError,
+        refetch: refetchPortfolios,
+    } = useUserPortfolios(publicKey)
 
     // Determine the latest portfolio
     const latestPortfolioId = portfolios && portfolios.length > 0
@@ -44,10 +51,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         : null
 
     // Query for portfolio details
-    const { data: portfolioDetails, isLoading: detailsLoading } = usePortfolioDetails(latestPortfolioId)
+    const {
+        data: portfolioDetails,
+        isLoading: detailsLoading,
+        isError: detailsLoadError,
+        error: detailsError,
+        refetch: refetchPortfolioDetails,
+    } = usePortfolioDetails(latestPortfolioId)
 
     // Query for prices
-    const { data: priceBundle, isLoading: pricesLoading } = usePrices()
+    const {
+        data: priceBundle,
+        isLoading: pricesLoading,
+        isError: pricesLoadError,
+        refetch: refetchPrices,
+    } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
 
     // Mutation for rebalancing
@@ -81,6 +99,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         ? (priceRows as Record<string, DashboardPriceRow>)
         : demoPrices
     const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
+    const routeDataUnavailable = Boolean(
+        publicKey &&
+        portfoliosLoadError &&
+        !portfoliosLoading &&
+        (!portfolios || portfolios.length === 0)
+    )
     const priceSource = hasLivePriceRows
         ? formatPriceFeedSummary(priceBundle?.feedMeta, true, false)
         : publicKey
@@ -121,6 +145,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         ])
     }, [queryClient])
 
+    const retryPortfolioLoad = useCallback(async () => {
+        await Promise.all([
+            refetchPortfolios(),
+            refetchPortfolioDetails(),
+            refetchPrices(),
+        ])
+        await refreshData()
+    }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
+
     // NEW: Demo reset functionality for local testing
     const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
     const [resettingDemo, setResettingDemo] = useState(false)
@@ -130,19 +163,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         
         setResettingDemo(true)
         try {
-            // Reset to default demo state
-            const defaultDemoData = {
-                id: 'demo',
-                totalValue: 10000,
-                dayChange: 0.85,
-                needsRebalance: false,
-                lastRebalance: '2 hours ago',
-                allocations: [
-                    { asset: 'XLM', target: 40, current: 40.2, amount: 4020 },
-                    { asset: 'USDC', target: 60, current: 59.8, amount: 5980 }
-                ]
-            }
-            
             // Clear any cached demo data and force refresh
             await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
             await queryClient.invalidateQueries({ queryKey: priceKeys.all })
@@ -266,6 +286,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const walletType = StellarWallet.getWalletType()
     const contractAddress = 'CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I'
+
+    if (routeDataUnavailable) {
+        return (
+            <RouteErrorState
+                title="Portfolio data is unavailable"
+                message={
+                    portfoliosError instanceof Error
+                        ? portfoliosError.message
+                        : 'We could not load the portfolio list for this wallet.'
+                }
+                detail={
+                    detailsLoadError && detailsError instanceof Error
+                        ? `Latest portfolio details also failed to load: ${detailsError.message}`
+                        : pricesLoadError
+                          ? 'Price data failed to refresh. The retry action will attempt a full refetch.'
+                          : 'Retrying will refetch portfolio data and the latest price feed.'
+                }
+                onRetry={retryPortfolioLoad}
+                onBack={() => onNavigate('landing')}
+                retryLabel="Retry loading"
+                backLabel="Go to landing"
+            />
+        )
+    }
 
     if (loading) {
         return (
