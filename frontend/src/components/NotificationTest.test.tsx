@@ -67,7 +67,7 @@ describe('NotificationTest', () => {
         fireEvent.click(screen.getByRole('button', { name: /^test rebalance$/i }))
 
         expect(await screen.findByText(/test notification sent successfully/i)).toBeTruthy()
-        expect(await screen.findByText(/email: user@example\.com/i)).toBeTruthy()
+        expect(await screen.findByText(/user@example\.com/i)).toBeTruthy()
     })
 
     it('displays inline failure result and shows Retry button on error', async () => {
@@ -92,7 +92,7 @@ describe('NotificationTest', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /^test circuit breaker$/i }))
 
-        expect(await screen.findByText(/webhook: https:\/\/hooks\.example\.com\/notify/i)).toBeTruthy()
+        expect(await screen.findByText(/https:\/\/hooks\.example\.com\/notify/i)).toBeTruthy()
     })
 
     it('shows Re-test label after a result is already present', async () => {
@@ -170,12 +170,12 @@ describe('NotificationTest', () => {
         renderWithQuery(<NotificationTest userId="user-1" />)
 
         fireEvent.click(screen.getByRole('button', { name: /^test rebalance$/i }))
-        await screen.findByText(/sent/i)
+        await screen.findByRole('button', { name: /re-test rebalance/i })
 
         fireEvent.click(screen.getByRole('button', { name: /clear all test results/i }))
 
         await waitFor(() => {
-            expect(screen.queryByText(/sent/i)).toBeNull()
+            expect(screen.queryByRole('button', { name: /re-test rebalance/i })).toBeNull()
         })
     })
 

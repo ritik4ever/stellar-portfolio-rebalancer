@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Bell, Mail, Webhook, Save, CheckCircle, AlertCircle, Loader, Download } from 'lucide-react'
 import { downloadPortfolioExport } from '../config/api'
@@ -35,14 +35,19 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const { data: prefData, isLoading: loading, error: loadError } = useNotificationPreferencesQuery(userId)
     const saveMutation = useSaveNotificationPreferencesMutation(userId)
     const unsubscribeMutation = useUnsubscribeNotificationsMutation(userId)
-    const [saveSuccess, setSaveSuccess] = useState(false)
+    const [successMessage, setSuccessMessage] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [webhookError, setWebhookError] = useState<string | null>(null)
     const [emailError, setEmailError] = useState<string | null>(null)
     const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
+    const [savedProviderActive, setSavedProviderActive] = useState(false)
+    const [showUnsubscribeReason, setShowUnsubscribeReason] = useState(false)
+    const [unsubscribeReason, setUnsubscribeReason] = useState('')
+    const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-
-    const saving = saveMutation.isPending || unsubscribeMutation.isPending
+    const savePending = saveMutation.microstate.phase === 'pending'
+    const unsubscribePending = unsubscribeMutation.microstate.phase === 'pending'
+    const actionPending = savePending || unsubscribePending
 
     useEffect(() => {
         if (!prefData) return
@@ -58,6 +63,34 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setSavedProviderActive(false)
         }
     }, [prefData])
+
+    useEffect(() => {
+        return () => {
+            if (successTimeoutRef.current) {
+                clearTimeout(successTimeoutRef.current)
+            }
+        }
+    }, [])
+
+    const clearSuccessMessage = () => {
+        if (successTimeoutRef.current) {
+            clearTimeout(successTimeoutRef.current)
+            successTimeoutRef.current = null
+        }
+        setSuccessMessage(null)
+    }
+
+    const showSuccessMessage = (message: string) => {
+        if (successTimeoutRef.current) {
+            clearTimeout(successTimeoutRef.current)
+        }
+
+        setSuccessMessage(message)
+        successTimeoutRef.current = setTimeout(() => {
+            setSuccessMessage(null)
+            successTimeoutRef.current = null
+        }, 3000)
+    }
 
     const loadErrMsg =
         loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
@@ -104,7 +137,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
-        if (preferences.emailAddress && !validateEmail(preferences.emailAddress)) {
+        if (
+            preferences.emailEnabled &&
+            preferences.emailAddress &&
+            !validateEmail(preferences.emailAddress)
+        ) {
             setEmailError('Invalid email address format')
             return
         }
@@ -115,22 +152,24 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
-        if (preferences.webhookUrl && !validateWebhookUrl(preferences.webhookUrl)) {
+        if (
+            preferences.webhookEnabled &&
+            preferences.webhookUrl &&
+            !validateWebhookUrl(preferences.webhookUrl)
+        ) {
             setWebhookError('Invalid webhook URL format')
             return
         }
 
         setError(null)
-        setSaveSuccess(false)
+        clearSuccessMessage()
 
         try {
             await saveMutation.mutateAsync(preferences)
 
             setOriginalPreferences(preferences)
-            setSaveSuccess(true)
             setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled)
-
-            setTimeout(() => setSaveSuccess(false), 3000)
+            showSuccessMessage('Preferences saved successfully')
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to save preferences')
         }
@@ -139,7 +178,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const handleUnsubscribeClick = () => {
         setShowUnsubscribeReason(true)
         setError(null)
-        setSaveSuccess(false)
+        clearSuccessMessage()
     }
 
     const handleCancelUnsubscribe = () => {
@@ -149,13 +188,10 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     }
 
     const handleUnsubscribe = async (includeReason: boolean) => {
-        if (saving) {
-            return
-        }
+        if (actionPending) return
 
         setError(null)
-        setSaveSuccess(false)
-
+        clearSuccessMessage()
         const reason = includeReason ? unsubscribeReason.trim() : undefined
 
         try {
@@ -175,10 +211,11 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                       }
                     : null
             )
+            setSavedProviderActive(false)
+            setShowUnsubscribeReason(false)
+            setUnsubscribeReason('')
 
-
-            setSaveSuccess(true)
-            setTimeout(() => setSaveSuccess(false), 3000)
+            showSuccessMessage('Unsubscribed from all notifications')
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to unsubscribe')
         }
@@ -201,9 +238,26 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         return JSON.stringify(preferences) !== JSON.stringify(originalPreferences)
     }
 
-
-
-
+    const emailHasUnsavedChanges = !!originalPreferences && (
+        preferences.emailEnabled !== originalPreferences.emailEnabled ||
+        preferences.emailAddress !== originalPreferences.emailAddress
+    )
+    const webhookHasUnsavedChanges = !!originalPreferences && (
+        preferences.webhookEnabled !== originalPreferences.webhookEnabled ||
+        preferences.webhookUrl !== originalPreferences.webhookUrl
+    )
+    const eventsHaveUnsavedChanges = !!originalPreferences &&
+        JSON.stringify(preferences.events) !== JSON.stringify(originalPreferences.events)
+    const saveErrorMessage =
+        saveMutation.microstate.phase === 'error' ? saveMutation.microstate.description : null
+    const unsubscribeErrorMessage =
+        unsubscribeMutation.microstate.phase === 'error' ? unsubscribeMutation.microstate.description : null
+    const actionStatus = savePending
+        ? saveMutation.microstate.label
+        : unsubscribePending
+          ? unsubscribeMutation.microstate.label
+          : null
+    const displayedError = error || saveErrorMessage || unsubscribeErrorMessage || loadErrMsg
 
     if (loading) {
         return (
@@ -230,27 +284,41 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             </div>
 
             {/* Error Message */}
-            {(error || loadErrMsg) && (
+            {displayedError && (
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-800"
+                    role="alert"
                 >
                     <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0" />
-                    <span className="text-sm">{error || loadErrMsg}</span>
+                    <span className="text-sm">{displayedError}</span>
                 </motion.div>
             )}
 
             {/* Success Message */}
-            {saveSuccess && (
+            {successMessage && (
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center text-green-800"
+                    role="status"
+                    aria-live="polite"
                 >
                     <CheckCircle className="w-5 h-5 mr-2 flex-shrink-0" />
-                    <span className="text-sm">Preferences saved successfully</span>
+                    <span className="text-sm">{successMessage}</span>
                 </motion.div>
+            )}
+
+            {actionStatus && (
+                <div
+                    className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 flex items-center"
+                    role="status"
+                    aria-live="polite"
+                >
+                    <Loader className="w-4 h-4 mr-2 animate-spin flex-shrink-0" />
+                    {actionStatus}
+                </div>
             )}
 
             {/* Export my data (GDPR) */}
@@ -302,10 +370,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             <span className="font-medium text-gray-900">Email Notifications</span>
                         </div>
                         <button
+                            type="button"
+                            role="switch"
+                            aria-checked={preferences.emailEnabled}
+                            aria-label="Email notifications"
                             onClick={() => setPreferences(prev => ({ ...prev, emailEnabled: !prev.emailEnabled }))}
+                            disabled={actionPending}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                 preferences.emailEnabled ? 'bg-blue-600' : 'bg-gray-300'
-                            }`}
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                             <span
                                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -316,6 +389,23 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     </div>
                     <p className="text-sm text-gray-600 mb-3">
                         Receive notifications via email (requires SMTP configuration)
+                    </p>
+                    <p
+                        className={`mb-3 text-xs ${
+                            savePending && emailHasUnsavedChanges
+                                ? 'text-blue-600'
+                                : emailHasUnsavedChanges
+                                  ? 'text-orange-600'
+                                  : 'text-gray-500'
+                        }`}
+                        role={emailHasUnsavedChanges || savePending ? 'status' : undefined}
+                        aria-live="polite"
+                    >
+                        {savePending && emailHasUnsavedChanges
+                            ? 'Saving email notification settings...'
+                            : emailHasUnsavedChanges
+                              ? 'Email notification changes are pending save.'
+                              : 'Email notification settings are unchanged.'}
                     </p>
 
                     {preferences.emailEnabled && (
@@ -350,10 +440,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             <span className="font-medium text-gray-900">Webhook Notifications</span>
                         </div>
                         <button
+                            type="button"
+                            role="switch"
+                            aria-checked={preferences.webhookEnabled}
+                            aria-label="Webhook notifications"
                             onClick={() => setPreferences(prev => ({ ...prev, webhookEnabled: !prev.webhookEnabled }))}
+                            disabled={actionPending}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                 preferences.webhookEnabled ? 'bg-blue-600' : 'bg-gray-300'
-                            }`}
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                             <span
                                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -364,6 +459,23 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                     </div>
                     <p className="text-sm text-gray-600 mb-3">
                         Send notifications to your webhook endpoint via HTTP POST
+                    </p>
+                    <p
+                        className={`mb-3 text-xs ${
+                            savePending && webhookHasUnsavedChanges
+                                ? 'text-blue-600'
+                                : webhookHasUnsavedChanges
+                                  ? 'text-orange-600'
+                                  : 'text-gray-500'
+                        }`}
+                        role={webhookHasUnsavedChanges || savePending ? 'status' : undefined}
+                        aria-live="polite"
+                    >
+                        {savePending && webhookHasUnsavedChanges
+                            ? 'Saving webhook notification settings...'
+                            : webhookHasUnsavedChanges
+                              ? 'Webhook notification changes are pending save.'
+                              : 'Webhook notification settings are unchanged.'}
                     </p>
 
                     {preferences.webhookEnabled && (
@@ -394,6 +506,23 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             {/* Event Toggles */}
             <div className="mb-6">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Event Types</h3>
+                <p
+                    className={`mb-3 text-xs ${
+                        savePending && eventsHaveUnsavedChanges
+                            ? 'text-blue-600'
+                            : eventsHaveUnsavedChanges
+                              ? 'text-orange-600'
+                              : 'text-gray-500'
+                    }`}
+                    role={eventsHaveUnsavedChanges || savePending ? 'status' : undefined}
+                    aria-live="polite"
+                >
+                    {savePending && eventsHaveUnsavedChanges
+                        ? 'Saving event notification choices...'
+                        : eventsHaveUnsavedChanges
+                          ? 'Event notification changes are pending save.'
+                          : 'Event notification choices are unchanged.'}
+                </p>
                 <div className="space-y-3">
                     <div className="flex items-center justify-between py-2">
                         <div className="flex-1">
@@ -405,13 +534,18 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         <div className="flex items-center space-x-2">
                        
                             <button
+                                type="button"
+                                role="switch"
+                                aria-checked={preferences.events.rebalance}
+                                aria-label="Rebalance alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
                                     events: { ...prev.events, rebalance: !prev.events.rebalance }
                                 }))}
+                                disabled={actionPending}
                                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                     preferences.events.rebalance ? 'bg-blue-600' : 'bg-gray-300'
-                                }`}
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
                                 <span
                                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -432,13 +566,18 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         <div className="flex items-center space-x-2">
                           
                             <button
+                                type="button"
+                                role="switch"
+                                aria-checked={preferences.events.circuitBreaker}
+                                aria-label="Circuit breaker alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
                                     events: { ...prev.events, circuitBreaker: !prev.events.circuitBreaker }
                                 }))}
+                                disabled={actionPending}
                                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                     preferences.events.circuitBreaker ? 'bg-blue-600' : 'bg-gray-300'
-                                }`}
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
                                 <span
                                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -459,13 +598,18 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         <div className="flex items-center space-x-2">
                             
                             <button
+                                type="button"
+                                role="switch"
+                                aria-checked={preferences.events.priceMovement}
+                                aria-label="Large price movement alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
                                     events: { ...prev.events, priceMovement: !prev.events.priceMovement }
                                 }))}
+                                disabled={actionPending}
                                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                     preferences.events.priceMovement ? 'bg-blue-600' : 'bg-gray-300'
-                                }`}
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
                                 <span
                                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -486,13 +630,18 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         <div className="flex items-center space-x-2">
                             
                             <button
+                                type="button"
+                                role="switch"
+                                aria-checked={preferences.events.riskChange}
+                                aria-label="Risk level change alerts"
                                 onClick={() => setPreferences(prev => ({
                                     ...prev,
                                     events: { ...prev.events, riskChange: !prev.events.riskChange }
                                 }))}
+                                disabled={actionPending}
                                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                     preferences.events.riskChange ? 'bg-blue-600' : 'bg-gray-300'
-                                }`}
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
                                 <span
                                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -532,7 +681,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         <button
                             type="button"
                             onClick={handleCancelUnsubscribe}
-                            disabled={saving}
+                            disabled={actionPending}
                             className="text-sm font-medium text-red-700 hover:text-red-900 disabled:text-gray-400"
                         >
                             Cancel
@@ -548,7 +697,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                         onChange={(e) => setUnsubscribeReason(e.target.value.slice(0, 280))}
                         rows={3}
                         maxLength={280}
-                        disabled={saving}
+                        disabled={actionPending}
                         placeholder="Too many notifications, not relevant, or another reason"
                         className="w-full px-3 py-2 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-100"
                     />
@@ -558,7 +707,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             <button
                                 type="button"
                                 onClick={() => handleUnsubscribe(false)}
-                                disabled={saving}
+                                disabled={actionPending}
                                 className="px-4 py-2 text-sm font-medium border border-red-200 rounded-lg text-red-700 hover:bg-red-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                             >
                                 Skip and unsubscribe
@@ -566,10 +715,10 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             <button
                                 type="button"
                                 onClick={() => handleUnsubscribe(true)}
-                                disabled={saving}
+                                disabled={actionPending}
                                 className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg"
                             >
-                                {saving ? 'Unsubscribing...' : 'Unsubscribe'}
+                                {unsubscribePending ? 'Unsubscribing...' : 'Unsubscribe'}
                             </button>
                         </div>
                     </div>
@@ -578,8 +727,9 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-200">
                 <button
+                    type="button"
                     onClick={handleUnsubscribeClick}
-                    disabled={saving || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled)}
+                    disabled={actionPending || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled)}
                     className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                     Unsubscribe from all
@@ -587,13 +737,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
                 <button
                     onClick={handleSave}
-                    disabled={saving || !hasUnsavedChanges() || (preferences.webhookEnabled && !!webhookError) || (preferences.emailEnabled && !!emailError)}
+                    disabled={actionPending || !hasUnsavedChanges() || (preferences.webhookEnabled && !!webhookError) || (preferences.emailEnabled && !!emailError)}
                     className="flex items-center px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                 >
-                    {saving ? (
+                    {savePending ? (
                         <>
                             <Loader className="w-4 h-4 mr-2 animate-spin" />
-                            Saving...
+                            Saving preferences...
                         </>
                     ) : (
                         <>
