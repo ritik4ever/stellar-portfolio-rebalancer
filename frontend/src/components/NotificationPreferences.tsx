@@ -8,6 +8,7 @@ import {
     useUnsubscribeNotificationsMutation,
 } from '../hooks/mutations/useNotificationMutations'
 import type { NotificationPreferencesModel as Preferences } from '../hooks/queries/useNotificationPreferencesQuery'
+import { NotificationTest } from './NotificationTest'
 
 interface NotificationPreferencesProps {
     userId: string
@@ -39,6 +40,8 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const [webhookError, setWebhookError] = useState<string | null>(null)
     const [emailError, setEmailError] = useState<string | null>(null)
     const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
+    // Track whether the user has at least one provider saved so the test section can be shown
+    const [savedProviderActive, setSavedProviderActive] = useState(false)
 
     const saving = saveMutation.isPending || unsubscribeMutation.isPending
 
@@ -47,9 +50,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         if (prefData.preferences) {
             setPreferences(prefData.preferences)
             setOriginalPreferences(prefData.preferences)
+            setSavedProviderActive(
+                prefData.preferences.emailEnabled || prefData.preferences.webhookEnabled
+            )
         } else {
             setPreferences(defaultPreferences)
             setOriginalPreferences(defaultPreferences)
+            setSavedProviderActive(false)
         }
     }, [prefData])
 
@@ -122,6 +129,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
             setOriginalPreferences(preferences)
             setSaveSuccess(true)
+            setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled)
 
             setTimeout(() => setSaveSuccess(false), 3000)
         } catch (err) {
@@ -153,6 +161,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                       }
                     : null
             )
+            setSavedProviderActive(false)
 
             setSaveSuccess(true)
             setTimeout(() => setSaveSuccess(false), 3000)
@@ -483,6 +492,12 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
         
             </div>
+
+            {/* Inline notification test delivery */}
+            <NotificationTest
+                userId={userId}
+                hasConfiguredProvider={savedProviderActive}
+            />
 
             {/* Action Buttons */}
             <div className="flex items-center justify-between pt-4 border-t border-gray-200">
