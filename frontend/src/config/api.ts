@@ -153,8 +153,14 @@ export const API_CONFIG = {
         RISK_CHECK: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/check/${portfolioId}`,
         NOTIFICATIONS_PREFERENCES: `${API_RESOURCE_ROOT}/notifications/preferences`,
         NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
-        NOTIFICATIONS_UNSUBSCRIBE: (userId: string) =>
-            `${API_RESOURCE_ROOT}/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
+        NOTIFICATIONS_UNSUBSCRIBE: (userId: string, reason?: string) => {
+            const params = new URLSearchParams({ userId })
+            const trimmedReason = reason?.trim()
+            if (trimmedReason) {
+                params.set('reason', trimmedReason)
+            }
+            return `${API_RESOURCE_ROOT}/notifications/unsubscribe?${params.toString()}`
+        },
         NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/notifications/test`,
         NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/notifications/test-all`,
         TEST_CORS: '/test/cors',
