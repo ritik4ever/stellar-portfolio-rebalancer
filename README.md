@@ -31,7 +31,7 @@ stellar-portfolio-rebalancer/
 ├── frontend/      # React + TypeScript frontend
 ├── backend/       # Node.js + Express API
 ├── deployment/    # Docker deployment files
-└── docs/          # Documentation
+└── docs/          # Documentation (including [ADRs](docs/adr/README.md))
 ```
 
 ### Tech Stack
