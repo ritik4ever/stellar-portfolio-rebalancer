@@ -103,13 +103,10 @@ vi.mock('../services/analyticsService.js', () => ({
     },
 }))
 
-vi.mock('../services/rebalanceLock.js', () => ({
-    rebalanceLockService: {
-        acquireLock: vi.fn().mockResolvedValue(true),
-        releaseLock: vi.fn().mockResolvedValue(true),
-        isLocked: vi.fn().mockResolvedValue(false),
-    },
-}))
+vi.mock('../queue/workers/workerRuntime.js', () => ({
+  acquireWorkerLock: vi.fn().mockResolvedValue(true),
+  releaseWorkerLock: vi.fn().mockResolvedValue(true),
+}));
 
 vi.mock('../queue/queues.js', () => ({
     getRebalanceQueue: vi.fn().mockReturnValue({
@@ -137,7 +134,7 @@ import { processAnalyticsSnapshotJob } from '../queue/workers/analyticsSnapshotW
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
-import { rebalanceLockService } from '../services/rebalanceLock.js'
+import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
 import { getRebalanceQueue } from '../queue/queues.js'
 import { StellarService } from '../services/stellar.js'
 
@@ -253,8 +250,8 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         // Reset lock service for each test
-        ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
-        ;(rebalanceLockService.releaseLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+        ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+        ;(releaseWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
     })
 
     describe('Retryable failure paths', () => {
@@ -368,7 +365,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
     describe('Duplicate protection & lock interactions', () => {
         it('prevents duplicate rebalances via lock acquisition', async () => {
             // First rebalance acquires lock
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
 
             const job1 = mockJob(
                 { portfolioId, triggeredBy: 'auto' as const },
@@ -388,12 +385,12 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await processRebalanceJob(job1)
 
             // Lock was acquired
-            expect(rebalanceLockService.acquireLock).toHaveBeenCalledWith(portfolioId)
+            expect(acquireWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
 
         it('aborts rebalance when lock cannot be acquired (in-progress rebalance)', async () => {
             // Simulate another rebalance already in progress
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
 
             const job = mockJob({ portfolioId, triggeredBy: 'auto' as const })
 
@@ -401,7 +398,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await processRebalanceJob(job)
 
             // Lock release should NOT be called since it was never acquired
-            expect(rebalanceLockService.releaseLock).not.toHaveBeenCalled()
+            expect(releaseWorkerLock).not.toHaveBeenCalled()
 
             // History should NOT be recorded for skipped rebalances
             const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
@@ -410,8 +407,8 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
         })
 
         it('releases lock on both success and failure paths', async () => {
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
-            ;(rebalanceLockService.releaseLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+            ;(releaseWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
 
             // Test failure path
             StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(
@@ -422,7 +419,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await expect(processRebalanceJob(failureJob)).rejects.toThrow()
 
             // Lock must be released on failure
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith('portfolio-fail')
+            expect(releaseWorkerLock).toHaveBeenCalledWith('portfolio-fail')
 
             vi.clearAllMocks()
 
@@ -441,18 +438,18 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await processRebalanceJob(successJob)
 
             // Lock must also be released on success
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+            expect(releaseWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
 
         it('ensures finally block executes to release lock during early returns', async () => {
             // Test scenario: lock not acquired, early return
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
 
             const job = mockJob({ portfolioId: 'skip-test', triggeredBy: 'auto' as const })
             await processRebalanceJob(job)
 
             // Should not call releaseLock since lock was never acquired
-            expect(rebalanceLockService.releaseLock).not.toHaveBeenCalled()
+            expect(releaseWorkerLock).not.toHaveBeenCalled()
         })
     })
 
