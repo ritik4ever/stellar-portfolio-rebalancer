@@ -53,4 +53,8 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    /// A portfolio creation request contains duplicate asset addresses.
+    /// Each asset address must appear exactly once in the target allocations.
+    /// Corrective action: Remove duplicate entries from the asset list.
+    DuplicateAsset = 12,
 }
