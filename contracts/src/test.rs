@@ -321,7 +321,6 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
-#[should_panic(expected = "Cooldown active")]
 fn test_execute_rebalance_cooldown() {
     let env = Env::default();
     env.mock_all_auths();
@@ -348,7 +347,45 @@ fn test_execute_rebalance_cooldown() {
     });
 
     let actual_balances = Map::new(&env);
-    client.execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::CooldownActive)));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10000);
+}
+
+#[test]
+fn test_execute_rebalance_emergency_stop_rolls_back() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+    client.set_emergency_stop(&true);
+
+    let actual_balances = Map::new(&env);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::EmergencyStop)));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10000);
 }
 
 #[test]
@@ -375,7 +412,6 @@ fn test_emergency_stop() {
 }
 
 #[test]
-#[should_panic(expected = "Stale price data")]
 fn test_stale_data() {
     let env = Env::default();
     env.mock_all_auths();
@@ -447,7 +483,83 @@ fn test_stale_data() {
     });
 
     let actual_balances = Map::new(&env);
-    client.execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StaleData)));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10000);
+}
+
+#[test]
+fn test_execute_rebalance_missing_price_rolls_back() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id =
+        env.register_contract(None, reflector_with_missing_price::ReflectorWithMissingPrice);
+    let missing_price_reflector =
+        reflector_with_missing_price::ReflectorWithMissingPriceClient::new(&env, &reflector_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    missing_price_reflector.set_missing_asset(&asset);
+    allocations.set(asset, 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    let actual_balances = Map::new(&env);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StaleData)));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10000);
+}
+
+#[test]
+fn test_execute_rebalance_slippage_failure_rolls_back() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    let mut actual_balances = Map::new(&env);
+    actual_balances.set(asset, 0);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::SlippageExceeded)));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10000);
 }
 
 #[test]
