@@ -63,11 +63,19 @@ vi.mock('../services/authService', () => ({
     logout: vi.fn(async () => undefined),
 }))
 
-vi.mock('../utils/export', () => ({
-    downloadCSV: vi.fn(),
-    downloadJSON: vi.fn(),
-    toCSV: vi.fn(() => 'csv'),
-}))
+vi.mock('../hooks/usePortfolio', async () => {
+    const actual = await vi.importActual<typeof import('../hooks/usePortfolio')>('../hooks/usePortfolio')
+    return {
+        ...actual,
+        usePortfolioExport: () => ({
+            exportProgress: { phase: 'idle', label: '' },
+            resetExportProgress: vi.fn(),
+            exportClientCsv: vi.fn(async () => undefined),
+            exportClientJson: vi.fn(async () => undefined),
+            exportFromServer: vi.fn(async () => undefined),
+        }),
+    }
+})
 
 vi.mock('../config/api', async () => {
     const actual = await vi.importActual<typeof import('../config/api')>('../config/api')
