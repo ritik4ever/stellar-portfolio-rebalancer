@@ -89,3 +89,12 @@ If you want the backend to talk to the PostgreSQL and Redis services in `full-st
 - **Backend**: Node.js API with real-time monitoring
 - **Frontend**: React with TypeScript and Tailwind CSS
 - **Oracle**: Reflector price feeds for accurate pricing
+
+## Realtime WebSocket Protocol
+
+- Clients open a WebSocket connection to the configured `WEBSOCKET_URL` with `userId` in the query string.
+- The backend sends a `CONNECTION_ACK` message with protocol version, heartbeat interval, and reconnect policy.
+- Clients must send a `SUBSCRIBE` request to confirm they are ready to receive live updates.
+- The backend responds with `SUBSCRIBED`, including `heartbeatIntervalMs` and `reconnectPolicy`.
+- The server emits `HEARTBEAT` events regularly so both sides agree on liveness and reconnect expectations.
+

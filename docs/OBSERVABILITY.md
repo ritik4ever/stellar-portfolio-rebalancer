@@ -128,8 +128,11 @@ Additional server-sent broadcast message shapes used by `RebalancingService`:
 
 Connection lifecycle messages used in `websocket.service.ts`:
 
-- On connect: `{ "type": "connection", "message": "Validation and Monitoring Active", "version": "1.0.0" }`
-- Protocol mismatch / invalid frame: `{ "type": "ERROR", "payload": "Incompatible version or format. Use v1.0.0" }`
+- On connect: `{ "type": "CONNECTION_ACK", "version": "1.0.0", "payload": { "message": "Validation and Monitoring Active", "heartbeatIntervalMs": 30000, "reconnectPolicy": { "maxAttempts": 12, "suggestedBackoffMs": 30000 } } }`
+- Client subscribe request: `{ "type": "SUBSCRIBE", "version": "1.0.0", "timestamp": 1680000000000 }`
+- Subscribe acknowledgement: `{ "type": "SUBSCRIBED", "version": "1.0.0", "payload": { "heartbeatIntervalMs": 30000, "reconnectPolicy": { "maxAttempts": 12, "suggestedBackoffMs": 30000 }, "subscribed": true } }`
+- Heartbeat event: `{ "type": "HEARTBEAT", "version": "1.0.0", "payload": { "serverTime": 1680000000000, "heartbeatIntervalMs": 30000, "reconnectPolicy": { "maxAttempts": 12, "suggestedBackoffMs": 30000 } } }`
+- Protocol mismatch / invalid frame: `{ "type": "ERROR", "version": "1.0.0", "payload": "Incompatible version or format. Use v1.0.0" }`
 - Ping response: `{ "type": "PONG", "version": "1.0.0" }`
 
 ## Structured Logging Schema

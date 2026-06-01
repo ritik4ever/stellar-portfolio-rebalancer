@@ -1,9 +1,16 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { WSMessageSchema, PROTOCOL_VERSION } from '../types/websocket.js';
+import {
+  WSMessageSchema,
+  PROTOCOL_VERSION,
+  HEARTBEAT_INTERVAL_MS,
+  RECONNECT_MAX_ATTEMPTS,
+  RECONNECT_SUGGESTED_BACKOFF_MS
+} from '../types/websocket.js';
 import { logger } from '../utils/logger.js';
 
 interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
+  isSubscribed?: boolean;
   userId?: string;
 }
 
@@ -20,10 +27,20 @@ interface PortfolioEventPayload {
   data?: Record<string, unknown>;
 }
 
+function sendWsMessage(ws: WebSocket, message: Record<string, unknown>): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    ...message,
+    version: PROTOCOL_VERSION,
+    timestamp: Date.now()
+  }));
+}
+
 export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
   if (!attachedServer) return;
   const message = JSON.stringify({
     type: 'portfolio_update',
+    version: PROTOCOL_VERSION,
     portfolioId: payload.portfolioId,
     event: payload.event,
     data: payload.data ?? {},
@@ -33,6 +50,7 @@ export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
   attachedServer.clients.forEach((ws) => {
     const client = ws as ExtWebSocket;
     if (ws.readyState !== WebSocket.OPEN) return;
+    if (!client.isSubscribed) return;
     if (payload.userId && client.userId !== payload.userId) return;
     ws.send(message);
   });
@@ -45,13 +63,25 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
     wss.clients.forEach((ws) => {
       const client = ws as ExtWebSocket;
       if (client.isAlive === false) {
-        logger.info('[WS] Terminating inactive connection');
+        logger.info('[WS] Terminating inactive connection', { userId: client.userId });
         return ws.terminate();
       }
+
       client.isAlive = false;
       ws.ping();
+      sendWsMessage(ws, {
+        type: 'HEARTBEAT',
+        payload: {
+          serverTime: Date.now(),
+          heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+          reconnectPolicy: {
+            maxAttempts: RECONNECT_MAX_ATTEMPTS,
+            suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
+          }
+        }
+      });
     });
-  }, 30000);
+  }, HEARTBEAT_INTERVAL_MS);
 
   wss.on('close', () => {
     clearInterval(interval);
@@ -61,39 +91,73 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
   wss.on('connection', (ws: WebSocket, req) => {
     const extWs = ws as ExtWebSocket;
     extWs.isAlive = true;
+    extWs.isSubscribed = false;
     const requestUrl = req.url ?? '';
     const wsUrl = new URL(requestUrl, 'ws://localhost');
     extWs.userId = wsUrl.searchParams.get('userId') ?? undefined;
 
-    logger.info('[WS] Client connected');
+    logger.info('[WS] Client connected', { userId: extWs.userId });
 
     ws.on('pong', () => {
       extWs.isAlive = true;
     });
 
-    ws.send(JSON.stringify({
-      type: 'connection',
-      message: 'Validation and Monitoring Active',
-      version: PROTOCOL_VERSION
-    }));
+    sendWsMessage(ws, {
+      type: 'CONNECTION_ACK',
+      payload: {
+        message: 'Validation and Monitoring Active',
+        heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+        reconnectPolicy: {
+          maxAttempts: RECONNECT_MAX_ATTEMPTS,
+          suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
+        }
+      }
+    });
 
     ws.on('message', (rawData) => {
       extWs.isAlive = true;
 
       try {
         const parsed = JSON.parse(rawData.toString());
-
         const validated = WSMessageSchema.parse(parsed);
 
-        if (validated.type === 'PING') {
-          ws.send(JSON.stringify({ type: 'PONG', version: PROTOCOL_VERSION }));
+        switch (validated.type) {
+          case 'PING':
+            logger.debug('[WS] Received PING', { userId: extWs.userId });
+            sendWsMessage(ws, { type: 'PONG' });
+            break;
+          case 'PONG':
+            logger.debug('[WS] Received PONG', { userId: extWs.userId });
+            break;
+          case 'SUBSCRIBE':
+            extWs.isSubscribed = true;
+            logger.info('[WS] Client subscribed to realtime updates', { userId: extWs.userId });
+            sendWsMessage(ws, {
+              type: 'SUBSCRIBED',
+              payload: {
+                serverTime: Date.now(),
+                heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+                reconnectPolicy: {
+                  maxAttempts: RECONNECT_MAX_ATTEMPTS,
+                  suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
+                },
+                subscribed: true
+              }
+            });
+            break;
+          default:
+            logger.warn('[WS] Unsupported WS message type', { type: validated.type, userId: extWs.userId });
+            sendWsMessage(ws, {
+              type: 'ERROR',
+              payload: `Unsupported message type: ${validated.type}. Expected PING or SUBSCRIBE.`
+            });
         }
-      } catch {
-        logger.warn('[WS] Rejecting invalid message format');
-        ws.send(JSON.stringify({
+      } catch (error) {
+        logger.warn('[WS] Rejecting invalid message format', { error: String(error), userId: extWs.userId });
+        sendWsMessage(ws, {
           type: 'ERROR',
           payload: `Incompatible version or format. Use v${PROTOCOL_VERSION}`
-        }));
+        });
       }
     });
   });
