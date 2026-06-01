@@ -34,6 +34,7 @@ type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknow
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'test-notifications'>('overview')
+    const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const { isDark } = useTheme()
 
     // Query for user portfolios
@@ -139,14 +140,30 @@ const retryPortfolioLoad = useCallback(async () => {
 const executeRebalance = useCallback(async () => {
     try {
         const result = await executeRebalanceMutation.mutateAsync()
-        alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
+        setRebalanceNotice({
+            type: 'success',
+            message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}`,
+        })
     } catch (error: any) {
         console.error('Rebalance failed:', error)
         const msg = error.message ?? 'Rebalance failed. Please try again.'
         const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-        alert(isSlippage ? `Slippage too high: ${msg}` : msg)
+        setRebalanceNotice({
+            type: 'error',
+            message: isSlippage ? `Slippage too high: ${msg}` : msg,
+        })
     }
 }, [executeRebalanceMutation])
+
+const dismissRebalanceNotice = useCallback(() => {
+    setRebalanceNotice(null)
+}, [])
+
+React.useEffect(() => {
+    if (!rebalanceNotice) return
+    const timer = setTimeout(() => setRebalanceNotice(null), 5000)
+    return () => clearTimeout(timer)
+}, [rebalanceNotice])
 
 // NEW: Demo reset functionality for local testing
 const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
@@ -319,6 +336,19 @@ if (routeDataUnavailable) {
 
 return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        {rebalanceNotice && (
+            <div className="fixed right-4 top-4 z-50 max-w-md rounded-lg border bg-white dark:bg-gray-800 shadow-lg p-3">
+                <div className={`text-sm ${rebalanceNotice.type === 'success' ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
+                    {rebalanceNotice.message}
+                </div>
+                <button
+                    onClick={dismissRebalanceNotice}
+                    className="mt-2 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                    Dismiss
+                </button>
+            </div>
+        )}
         {/* Header */}
         <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
             <div className="flex items-center justify-between">
