@@ -399,25 +399,26 @@ export class StellarService {
                 ? this.applyExecutionToBalances(portfolio.balances, dexResult.executedTrades)
                 : { ...portfolio.balances }
 
+            // Removed premature optimistic update; will apply all changes atomically after trade execution.
             // Compare-and-set: only commit if no concurrent write advanced the version
-            portfolioStorage.updatePortfolio(
-                portfolioId,
-                { lastRebalance: new Date().toISOString(), balances: updatedBalances },
-                portfolio.version
-            )
+            // This will be performed after we have the final balances and total value.
             const updatedTotalValue = this.calculateTotalValue(updatedBalances, prices)
 
             if (dexResult.status !== 'failed') {
+                await portfolioStorage.updatePortfolio(portfolioId,
+                    {
+                        lastRebalance: new Date().toISOString(),
+                        balances: updatedBalances,
+                        totalValue: updatedTotalValue,
+                    },
+                    portfolio.version,
+                );
+            } else if (shouldApplyExecutions) {
                 await portfolioStorage.updatePortfolio(portfolioId, {
                     lastRebalance: new Date().toISOString(),
                     balances: updatedBalances,
-                    totalValue: updatedTotalValue
-                })
-            } else if (shouldApplyExecutions) {
-                await portfolioStorage.updatePortfolio(portfolioId, {
-                    balances: updatedBalances,
-                    totalValue: updatedTotalValue
-                })
+                    totalValue: updatedTotalValue,
+                }, portfolio.version);
             }
 
             const firstExecuted = dexResult.executedTrades.find(t => t.executedAmount > 0)

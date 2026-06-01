@@ -17,6 +17,7 @@ import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { ConflictError } from '../types/index.js'
 import type { Portfolio } from '../types/index.js'
 
 export const portfoliosRouter = Router()
@@ -211,9 +212,13 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
             await rebalanceLockService.releaseLock(portfolioId);
         }
     } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message);
+        }
         console.error('[ERROR] Manual rebalance failed:', error);
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
+
 });
 
 // ================================
