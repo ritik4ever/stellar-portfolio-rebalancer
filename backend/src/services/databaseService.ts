@@ -1244,20 +1244,15 @@ export class DatabaseService {
     try {
       const { where, params } = this.buildHistoryFilter(portfolioId, options);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const countStmt = this.db.prepare(
+      const countStmt = this.db.prepare<unknown[], { cnt: number }>(
         `SELECT COUNT(*) as cnt FROM rebalance_history ${where}`,
-      ) as any;
-      const total: number =
-        (countStmt.get(...params) as { cnt: number })?.cnt ?? 0;
+      );
+      const total: number = countStmt.get(...params)?.cnt ?? 0;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rowsStmt = this.db.prepare(
+      const rowsStmt = this.db.prepare<unknown[], RebalanceHistoryRow>(
         `SELECT * FROM rebalance_history ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
-      ) as any;
-      const events = (
-        rowsStmt.all(...params, limit, offset) as RebalanceHistoryRow[]
-      ).map(rowToEvent);
+      );
+      const events = rowsStmt.all(...params, limit, offset).map(rowToEvent);
 
       return { events, total };
     } catch (err) {
