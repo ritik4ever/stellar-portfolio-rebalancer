@@ -55,6 +55,7 @@ describe("authService – JWT secret enforcement", () => {
       const cfg = getAuthConfig();
       expect(cfg.accessExpirySec).toBe(900);
       expect(cfg.refreshExpirySec).toBe(604800);
+      expect(cfg.clockSkewSec).toBe(30);
     });
   });
 
@@ -149,11 +150,43 @@ describe("authService – JWT secret enforcement", () => {
       expect(payload?.type).toBe("access");
     });
 
+    it("returns the payload for a token expired within configured clock skew", async () => {
+      const secret = "i".repeat(32);
+      vi.stubEnv("JWT_SECRET", secret);
+      vi.stubEnv("JWT_CLOCK_SKEW_SEC", "30");
+      const token = jwt.sign({ sub: "GRECENT", type: "access" }, secret, {
+        expiresIn: -10,
+      });
+      const { verifyAccessToken } = await import("../services/authService.js");
+      expect(verifyAccessToken(token)?.sub).toBe("GRECENT");
+    });
+
+    it("returns null for a token issued beyond configured clock skew", async () => {
+      const secret = "j".repeat(32);
+      vi.stubEnv("JWT_SECRET", secret);
+      vi.stubEnv("JWT_CLOCK_SKEW_SEC", "30");
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const nowSec = Math.floor(Date.now() / 1000);
+      const token = jwt.sign(
+        {
+          sub: "GFUTURE",
+          type: "access",
+          iat: nowSec + 31,
+          exp: nowSec + 900,
+        },
+        secret,
+      );
+      const { verifyAccessToken } = await import("../services/authService.js");
+      expect(verifyAccessToken(token)).toBeNull();
+      vi.useRealTimers();
+    });
+
     it("returns null for an expired token", async () => {
       const secret = "h".repeat(32);
       vi.stubEnv("JWT_SECRET", secret);
       const expired = jwt.sign({ sub: "GTEST", type: "access" }, secret, {
-        expiresIn: -1,
+        expiresIn: -31,
       });
       const { verifyAccessToken } = await import("../services/authService.js");
       expect(verifyAccessToken(expired)).toBeNull();
@@ -215,7 +248,7 @@ describe("authService – JWT secret enforcement", () => {
       const expiredToken = jwt.sign(
         { sub: address, type: "refresh", jti: "expired-jti" },
         secret,
-        { expiresIn: -1 },
+        { expiresIn: -31 },
       );
 
       vi.mocked(findRefreshToken).mockResolvedValueOnce({
@@ -367,6 +400,29 @@ describe("validateStartupConfigOrThrow – JWT_SECRET validation", () => {
     expect(cfg.jwtAuthEnabled).toBe(true);
   });
 
+  it("sets jwtClockSkewSec from JWT_CLOCK_SKEW_SEC", async () => {
+    const { validateStartupConfigOrThrow } =
+      await import("../config/startupConfig.js");
+    const cfg = validateStartupConfigOrThrow({
+      ...baseEnv,
+      JWT_SECRET: "z".repeat(32),
+      JWT_CLOCK_SKEW_SEC: "45",
+    });
+    expect(cfg.jwtClockSkewSec).toBe(45);
+  });
+
+  it("throws when JWT_CLOCK_SKEW_SEC is outside the bounded tolerance", async () => {
+    const { validateStartupConfigOrThrow } =
+      await import("../config/startupConfig.js");
+    expect(() =>
+      validateStartupConfigOrThrow({
+        ...baseEnv,
+        JWT_SECRET: "z".repeat(32),
+        JWT_CLOCK_SKEW_SEC: "301",
+      }),
+    ).toThrow(/JWT_CLOCK_SKEW_SEC/);
+  });
+
   it("includes jwtAuthEnabled in buildStartupSummary output", async () => {
     const { validateStartupConfigOrThrow, buildStartupSummary } =
       await import("../config/startupConfig.js");
@@ -376,5 +432,6 @@ describe("validateStartupConfigOrThrow – JWT_SECRET validation", () => {
     });
     const summary = buildStartupSummary(cfg);
     expect(summary).toHaveProperty("jwtAuthEnabled", true);
+    expect(summary).toHaveProperty("jwtClockSkewSec", 30);
   });
 });

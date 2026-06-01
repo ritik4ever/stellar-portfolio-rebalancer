@@ -92,6 +92,7 @@ This document is the canonical reference for `backend/.env.example`.
 | `JWT_PREVIOUS_SECRET_GRACE_UNTIL` | ISO date string | No | empty | Timestamp until which the previous JWT secret remains valid. |
 | `JWT_ACCESS_EXPIRY_SEC` | integer (s) | No | `900` | Access token TTL. |
 | `JWT_REFRESH_EXPIRY_SEC` | integer (s) | No | `604800` | Refresh token TTL. |
+| `JWT_CLOCK_SKEW_SEC` | integer (s) | No | `30` | Bounded JWT clock tolerance for `iat` and `exp` checks in distributed deployments; must be 0-300. |
 | `API_RATE_LIMIT_WINDOW` | integer (ms) | No | `900000` | Security middleware rate-limit window. |
 | `API_RATE_LIMIT_MAX_REQUESTS` | integer | No | `100` | Security middleware max requests per window. |
 | `REQUEST_TIMEOUT` | integer (ms) | No | `30000` | Request timeout setting. |

@@ -25,6 +25,7 @@ describe('requireJwt middleware', () => {
         vi.stubEnv('JWT_SECRET', CURRENT_SECRET)
         vi.stubEnv('JWT_PREVIOUS_SECRET', '')
         vi.stubEnv('JWT_PREVIOUS_SECRET_GRACE_UNTIL', '')
+        vi.stubEnv('JWT_CLOCK_SKEW_SEC', '30')
     })
 
     afterEach(() => {
@@ -46,7 +47,7 @@ describe('requireJwt middleware', () => {
     })
 
     it('returns 401 with TOKEN_EXPIRED for expired token', async () => {
-        const token = jwt.sign({ sub: 'GEXPIRED', type: 'access' }, CURRENT_SECRET, { expiresIn: -1 })
+        const token = jwt.sign({ sub: 'GEXPIRED', type: 'access' }, CURRENT_SECRET, { expiresIn: -31 })
         const app = createApp()
 
         const res = await request(app)
@@ -55,6 +56,50 @@ describe('requireJwt middleware', () => {
             .expect(401)
 
         expect(res.body.error?.code).toBe('TOKEN_EXPIRED')
+    })
+
+    it('accepts an access token that expired within the configured clock skew', async () => {
+        const token = jwt.sign({ sub: 'GSKEWEXP', type: 'access' }, CURRENT_SECRET, { expiresIn: -10 })
+        const app = createApp()
+
+        const res = await request(app)
+            .get('/protected')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(res.body.user).toEqual({ address: 'GSKEWEXP' })
+    })
+
+    it('accepts an access token issued slightly in the future within the configured clock skew', async () => {
+        const nowSec = Math.floor(Date.now() / 1000)
+        const token = jwt.sign(
+            { sub: 'GSKEWIAT', type: 'access', iat: nowSec + 10, exp: nowSec + 900 },
+            CURRENT_SECRET
+        )
+        const app = createApp()
+
+        const res = await request(app)
+            .get('/protected')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(res.body.user).toEqual({ address: 'GSKEWIAT' })
+    })
+
+    it('rejects an access token issued beyond the configured clock skew', async () => {
+        const nowSec = Math.floor(Date.now() / 1000)
+        const token = jwt.sign(
+            { sub: 'GFUTUREIAT', type: 'access', iat: nowSec + 31, exp: nowSec + 900 },
+            CURRENT_SECRET
+        )
+        const app = createApp()
+
+        const res = await request(app)
+            .get('/protected')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(401)
+
+        expect(res.body.error?.code).toBe('UNAUTHORIZED')
     })
 
     it('returns 401 for malformed token input', async () => {
