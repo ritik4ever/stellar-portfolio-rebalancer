@@ -172,6 +172,16 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **GET /api/system/status** — System status (portfolios, history, risk, auto-rebalancer, indexer, feature flags).
 - **GET /api/queue/health** — BullMQ queue health and Redis connectivity.
 
+### Consent and privacy
+
+- **GET /api/consent/status** — Consent status (query: `userId` or `user_id`).
+- **POST /api/consent/grant** — Grant consent (JWT when enabled). Records policy versions and audit event.
+- **POST /api/consent/revoke** — Revoke consent (JWT when enabled).
+- **GET /api/consent/audit** — Append-only grant/revoke history (JWT when enabled; own user only).
+- **GET /api/consent/export** — Export consent snapshot and history (query: `format=json|csv`, default `json`). Includes acceptance/revocation dates and Terms/Privacy/Cookie policy versions.
+- **POST /api/consent** — Record consent (legacy; supports `Idempotency-Key`).
+- **DELETE /api/user/:address/data** — Delete all user data (GDPR).
+
 ### Notifications
 
 - **POST /api/notifications/subscribe** — Subscribe (userId, email/webhook, events). Supports `Idempotency-Key`.

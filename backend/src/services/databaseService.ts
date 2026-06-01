@@ -8,6 +8,12 @@ import { logger } from "../utils/logger.js";
 import { ConflictError } from "../types/index.js";
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
+import type { ConsentPolicyVersions } from "../config/consentPolicyConfig.js";
+import {
+  getConsentPolicyVersions,
+  parseConsentPolicyVersions,
+  serializeConsentPolicyVersions,
+} from "../config/consentPolicyConfig.js";
 
 function isSqliteAssetSymbolUniqueViolation(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -68,6 +74,7 @@ interface ConsentAuditRow {
   timestamp: string;
   ip_address: string | null;
   user_agent: string | null;
+  policy_versions: string | null;
 }
 
 export interface ConsentRecord {
@@ -76,6 +83,8 @@ export interface ConsentRecord {
   cookieAcceptedAt: string | null;
   revokedAt: string | null;
   active: boolean;
+  updatedAt: string | null;
+  policyVersions: ConsentPolicyVersions | null;
 }
 
 export interface ConsentAuditEvent {
@@ -85,6 +94,7 @@ export interface ConsentAuditEvent {
   timestamp: string;
   ipAddress: string | null;
   userAgent: string | null;
+  policyVersions: ConsentPolicyVersions | null;
 }
 
 // ─────────────────────────────────────────────
@@ -162,6 +172,7 @@ CREATE TABLE IF NOT EXISTS legal_consent (
     cookie_accepted_at  TEXT,
     revoked_at          TEXT,
     is_active           INTEGER NOT NULL DEFAULT 1,
+    policy_versions     TEXT,
     ip_address          TEXT,
     user_agent          TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
@@ -173,6 +184,7 @@ CREATE TABLE IF NOT EXISTS consent_audit_events (
     user_id     TEXT NOT NULL,
     action      TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
     timestamp   TEXT NOT NULL,
+    policy_versions TEXT,
     ip_address  TEXT,
     user_agent  TEXT
 );
@@ -461,18 +473,34 @@ export class DatabaseService {
       );
       logger.info("[DB] Migration: added is_active column to legal_consent");
     }
+    if (!consentCols.some((c) => c.name === "policy_versions")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN policy_versions TEXT");
+      logger.info("[DB] Migration: added policy_versions column to legal_consent");
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS consent_audit_events (
           id          TEXT PRIMARY KEY,
           user_id     TEXT NOT NULL,
           action      TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
           timestamp   TEXT NOT NULL,
+          policy_versions TEXT,
           ip_address  TEXT,
           user_agent  TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
+    const auditCols = this.db
+      .prepare("PRAGMA table_info(consent_audit_events)")
+      .all() as Array<{ name: string }>;
+    if (!auditCols.some((c) => c.name === "policy_versions")) {
+      this.db.exec(
+        "ALTER TABLE consent_audit_events ADD COLUMN policy_versions TEXT",
+      );
+      logger.info(
+        "[DB] Migration: added policy_versions column to consent_audit_events",
+      );
+    }
   }
 
   private _seedDefaultAssets(): void {
@@ -913,17 +941,19 @@ export class DatabaseService {
     },
   ): void {
     const now = new Date().toISOString();
+    const policyVersions = serializeConsentPolicyVersions(getConsentPolicyVersions());
     const grant = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, ip_address, user_agent, updated_at)
-               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?)
+          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, policy_versions, ip_address, user_agent, updated_at)
+               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
                  privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
                  cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
                  revoked_at = NULL,
                  is_active = 1,
+                 policy_versions = excluded.policy_versions,
                  ip_address = excluded.ip_address,
                  user_agent = excluded.user_agent,
                  updated_at = excluded.updated_at`,
@@ -933,11 +963,19 @@ export class DatabaseService {
           opts.terms ? now : null,
           opts.privacy ? now : null,
           opts.cookies ? now : null,
+          policyVersions,
           opts.ipAddress ?? null,
           opts.userAgent ?? null,
           now,
         );
-      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent);
+      this.insertConsentAuditEvent(
+        userId,
+        "grant",
+        now,
+        policyVersions,
+        opts.ipAddress,
+        opts.userAgent,
+      );
     });
     grant();
   }
@@ -969,7 +1007,17 @@ export class DatabaseService {
           opts.userAgent ?? null,
           now,
         );
-      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent);
+      const policyVersions = serializeConsentPolicyVersions(
+        getConsentPolicyVersions(),
+      );
+      this.insertConsentAuditEvent(
+        userId,
+        "revoke",
+        now,
+        policyVersions,
+        opts.ipAddress,
+        opts.userAgent,
+      );
     });
     revoke();
   }
@@ -984,8 +1032,12 @@ export class DatabaseService {
           cookie_accepted_at: string | null;
           revoked_at: string | null;
           is_active: number;
+          updated_at: string;
+          policy_versions: string | null;
         }
-      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active FROM legal_consent WHERE user_id = ?")
+      >(
+        "SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, updated_at, policy_versions FROM legal_consent WHERE user_id = ?",
+      )
       .get(userId);
     if (!row) return undefined;
     return {
@@ -994,6 +1046,8 @@ export class DatabaseService {
       cookieAcceptedAt: row.cookie_accepted_at,
       revokedAt: row.revoked_at,
       active: row.is_active === 1,
+      updatedAt: row.updated_at,
+      policyVersions: parseConsentPolicyVersions(row.policy_versions),
     };
   }
 
@@ -1007,7 +1061,7 @@ export class DatabaseService {
   getConsentAudit(userId: string): ConsentAuditEvent[] {
     const rows = this.db
       .prepare<[string], ConsentAuditRow>(
-        `SELECT id, user_id, action, timestamp, ip_address, user_agent
+        `SELECT id, user_id, action, timestamp, ip_address, user_agent, policy_versions
          FROM consent_audit_events
          WHERE user_id = ?
          ORDER BY timestamp ASC, id ASC`,
@@ -1020,6 +1074,7 @@ export class DatabaseService {
       timestamp: row.timestamp,
       ipAddress: row.ip_address,
       userAgent: row.user_agent,
+      policyVersions: parseConsentPolicyVersions(row.policy_versions),
     }));
   }
 
@@ -1027,19 +1082,21 @@ export class DatabaseService {
     userId: string,
     action: "grant" | "revoke",
     timestamp: string,
+    policyVersionsJson: string,
     ipAddress?: string,
     userAgent?: string,
   ): void {
     this.db
       .prepare(
-        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, policy_versions, ip_address, user_agent)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         generateId(),
         userId,
         action,
         timestamp,
+        policyVersionsJson,
         ipAddress ?? null,
         userAgent ?? null,
       );
@@ -1050,6 +1107,15 @@ export class DatabaseService {
    * Returns the number of deleted rows.
    */
   purgeOldConsentAuditEvents(retentionDays: number): number {
+    if (retentionDays <= 0) {
+      const result = this.db.prepare("DELETE FROM consent_audit_events").run();
+      const count = result.changes;
+      if (count > 0) {
+        logger.info(`[DB] Purged ${count} consent audit event(s) (retentionDays=${retentionDays})`);
+      }
+      return count;
+    }
+
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
     const result = this.db
       .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")

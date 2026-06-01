@@ -117,6 +117,12 @@ export const consentAuditQuerySchema = z.object({
     user_id: z.string().min(1).optional()
 });
 
+export const consentExportQuerySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional(),
+    format: z.enum(['json', 'csv']).optional().default('json')
+});
+
 // ─── Notification schemas ─────────────────────────────────────────────────────
 export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;

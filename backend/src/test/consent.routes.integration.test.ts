@@ -265,4 +265,5 @@ describe('consent routes integration', () => {
 
         expect(purge.body.error?.code).toBe('VALIDATION_ERROR')
     })
+
 })
