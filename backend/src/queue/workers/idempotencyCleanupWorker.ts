@@ -28,6 +28,7 @@ export async function processIdempotencyCleanupJob(
     logger.info('[WORKER:idempotency-cleanup] Running cleanup cycle', {
         jobId: job.id,
         triggeredBy: job.data.triggeredBy ?? 'scheduler',
+        recovery: job.data.recovery,
     })
 
     const deleted = dbCleanupExpiredIdempotencyKeys()

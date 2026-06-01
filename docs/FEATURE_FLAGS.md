@@ -12,6 +12,7 @@ Single reference for backend and frontend switches that change runtime behavior.
 | `ALLOW_DEMO_BALANCE_FALLBACK` | follows `DEMO_MODE` | follows `DEMO_MODE` | Demo-style balance fallbacks in `StellarService` when real reads fail. |
 | `ENABLE_DEMO_DB_SEED` | follows `DEMO_MODE` | follows `DEMO_MODE` | Seed demo rows when DB is empty (`databaseService`). |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | `false` | `false` | Allow unauthenticated listing of user portfolios in demo contexts. |
+| `AUTO_REBALANCER_SHADOW_MODE` | `false` | `false` | Record auto-rebalancer decisions as simulated pending history events while intentionally skipping execution jobs. |
 | `ENABLE_DEBUG_ROUTES` | `false` | `false` | Mount `/api/v1/debug/*` (and legacy `/api/debug/*`). Keep off in shared/staging unless you trust the network. |
 
 **Indexer / contract alignment**
@@ -52,6 +53,7 @@ Public copies of the main booleans are exposed on `GET /api/v1/system/status` un
 - **Strict pricing:** `ALLOW_FALLBACK_PRICES=false`, `ALLOW_MOCK_PRICE_HISTORY=false` — failures surface as errors instead of synthetic numbers.
 - **Contributor debugging:** `ENABLE_DEBUG_ROUTES=true` locally, hit `/api/v1/debug/force-fresh-prices` (still requires the debug gate middleware).
 - **Demo kiosk:** `DEMO_MODE=true`, `ENABLE_DEMO_DB_SEED=true`, `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO=false` unless you understand the data exposure.
+- **Strategy validation:** `AUTO_REBALANCER_SHADOW_MODE=true` to record automatic rebalance decisions without placing trades or enqueueing execution jobs.
 
 ## See also
 

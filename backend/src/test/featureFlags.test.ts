@@ -24,6 +24,7 @@ describe('featureFlags', () => {
         delete process.env.ALLOW_DEMO_BALANCE_FALLBACK
         delete process.env.ENABLE_DEMO_DB_SEED
         delete process.env.ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO
+        delete process.env.AUTO_REBALANCER_SHADOW_MODE
     })
 
     afterEach(() => {
@@ -76,10 +77,20 @@ describe('featureFlags', () => {
             'allowFallbackPrices',
             'allowMockPriceHistory',
             'allowPublicUserPortfoliosInDemo',
+            'autoRebalancerShadowMode',
             'demoMode',
             'enableDebugRoutes',
             'enableDemoDbSeed'
         ])
+    })
+
+    it('defaults auto-rebalancer shadow mode off and enables it via environment variable', () => {
+        expect(getFeatureFlags().autoRebalancerShadowMode).toBe(false)
+
+        process.env.AUTO_REBALANCER_SHADOW_MODE = 'true'
+
+        expect(getFeatureFlags().autoRebalancerShadowMode).toBe(true)
+        expect(isFeatureFlagEnabled('autoRebalancerShadowMode')).toBe(true)
     })
 
     it('parses READINESS_CACHE_TTL_MS from environment', () => {

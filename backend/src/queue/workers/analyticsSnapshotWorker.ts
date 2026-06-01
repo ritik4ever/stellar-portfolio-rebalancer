@@ -28,6 +28,7 @@ export async function processAnalyticsSnapshotJob(
   logger.info("[WORKER:analytics-snapshot] Capturing portfolio snapshots", {
     jobId: job.id,
     triggeredBy: job.data.triggeredBy ?? "scheduler",
+    recovery: job.data.recovery,
   });
 
   await analyticsService.captureAllPortfolios();

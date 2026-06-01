@@ -11,9 +11,20 @@ export const QUEUE_NAMES = {
     PORTFOLIO_EXPORT: 'portfolio-export',
 } as const
 
+export type ScheduledJobTrigger = 'scheduler' | 'manual' | 'startup' | 'recovery'
+
+export interface MissedScheduledJobRecovery {
+    action: 'replay' | 'skip' | 'compact'
+    missedRuns: number
+    lastSchedulerSeenAt: string
+    recoveredAt: string
+    reason: string
+}
+
 export interface PortfolioCheckJobData {
-    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    triggeredBy?: ScheduledJobTrigger
     correlationId?: string
+    recovery?: MissedScheduledJobRecovery
 }
 
 export interface RebalanceJobData {
@@ -23,13 +34,15 @@ export interface RebalanceJobData {
 }
 
 export interface AnalyticsSnapshotJobData {
-    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    triggeredBy?: ScheduledJobTrigger
     correlationId?: string
+    recovery?: MissedScheduledJobRecovery
 }
 
 export interface IdempotencyCleanupJobData {
-    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    triggeredBy?: ScheduledJobTrigger
     correlationId?: string
+    recovery?: MissedScheduledJobRecovery
 }
 
 export interface PortfolioExportJobData {

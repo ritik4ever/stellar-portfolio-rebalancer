@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Job } from 'bullmq'
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -110,10 +110,11 @@ function mockJob<T>(data: T, id = 'test-job-1', attemptsMade = 0): Job<T> {
 describe('AutoRebalancer Pipeline Integration', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        delete process.env.AUTO_REBALANCER_SHADOW_MODE
         // Setup initial mocked state
         ;(portfolioStorage.getAllPortfolios as ReturnType<typeof vi.fn>).mockResolvedValue([
-            { id: 'portfolio-drifting', threshold: 5 },
-            { id: 'portfolio-stable', threshold: 5 },
+            { id: 'portfolio-drifting', threshold: 5, allocations: { XLM: 60, USDC: 40 } },
+            { id: 'portfolio-stable', threshold: 5, allocations: { XLM: 50, USDC: 50 } },
         ])
         const queue = getRebalanceQueue()
         if (queue) {
@@ -122,6 +123,10 @@ describe('AutoRebalancer Pipeline Integration', () => {
         ;(StellarService.prototype.checkRebalanceNeeded as ReturnType<typeof vi.fn>).mockImplementation(
             async (id: string) => id === 'portfolio-drifting'
         )
+    })
+
+    afterEach(() => {
+        delete process.env.AUTO_REBALANCER_SHADOW_MODE
     })
 
     it('should simulate a portfolio drifting beyond threshold and trigger full rebalance pipeline', async () => {
@@ -176,5 +181,34 @@ describe('AutoRebalancer Pipeline Integration', () => {
         // Ensure no jobs were added to the rebalance queue
         const queue = getRebalanceQueue()
         expect(queue!.add).not.toHaveBeenCalled()
+    })
+
+    it('records shadow-mode decisions without enqueueing rebalance execution', async () => {
+        process.env.AUTO_REBALANCER_SHADOW_MODE = 'true'
+
+        await processPortfolioCheckJob(mockJob({
+            triggeredBy: 'scheduler' as const,
+            correlationId: 'shadow-correlation-1',
+        }))
+
+        const queue = getRebalanceQueue()
+        expect(queue!.add).not.toHaveBeenCalled()
+        expect(StellarService.prototype.executeRebalance).not.toHaveBeenCalled()
+        expect(rebalanceHistoryService.recordRebalanceEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+                portfolioId: 'portfolio-drifting',
+                trigger: 'Automatic Rebalancing (Shadow Mode)',
+                status: 'pending',
+                isAutomatic: true,
+                eventSource: 'simulated',
+                isSimulated: true,
+                triggerMetadata: expect.objectContaining({
+                    shadowMode: true,
+                    skippedExecution: true,
+                    decision: 'rebalance_needed',
+                    correlationId: 'shadow-correlation-1',
+                }),
+            })
+        )
     })
 })

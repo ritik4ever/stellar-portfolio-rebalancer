@@ -268,6 +268,7 @@ export function buildStartupSummary(
       allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
       allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
+      autoRebalancerShadowMode: config.featureFlags.autoRebalancerShadowMode,
     },
   };
 }
@@ -299,6 +300,7 @@ export function logStartupSubsystems(
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       debugRoutes: config.featureFlags.enableDebugRoutes,
+      autoRebalancerShadowMode: config.featureFlags.autoRebalancerShadowMode,
     },
   });
 
