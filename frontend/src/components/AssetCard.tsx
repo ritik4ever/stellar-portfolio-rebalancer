@@ -15,11 +15,16 @@ interface AssetCardProps {
         price: number | null
         change: number | null
     } | null
+    /** Freshness metadata derived from the price row's dataTier */
+    priceMeta?: {
+        isFallback: boolean
+        isStale: boolean
+    }
     // NEW: Loading skeleton prop
     isLoading?: boolean
 }
 
-const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }) => {
+const AssetCard: React.FC<AssetCardProps> = ({ asset, price, priceMeta, isLoading = false }) => {
     // NEW: Render skeleton loading state
     if (isLoading) {
         return (
@@ -124,7 +129,27 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
                 </div>
                 <div className="flex justify-between">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Price</span>
-                    <span className="text-sm text-gray-600 dark:text-gray-300" data-testid="price-value">{formattedPrice}</span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="text-sm text-gray-600 dark:text-gray-300" data-testid="price-value">{formattedPrice}</span>
+                        {priceMeta?.isFallback && (
+                            <span
+                                data-testid="badge-fallback"
+                                title="Price is a synthetic fallback estimate"
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                            >
+                                Fallback
+                            </span>
+                        )}
+                        {!priceMeta?.isFallback && priceMeta?.isStale && (
+                            <span
+                                data-testid="badge-stale"
+                                title="Price data may be delayed"
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300"
+                            >
+                                Stale
+                            </span>
+                        )}
+                    </span>
                 </div>
                 <div className="flex justify-between">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Target</span>

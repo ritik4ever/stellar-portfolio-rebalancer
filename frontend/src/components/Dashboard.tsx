@@ -826,7 +826,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         row?.price !== undefined
                                             ? { price: row.price, change: row.change ?? 0 }
                                             : undefined
-                                    return <AssetCard key={index} asset={asset} price={priceCard} />
+                                    const tier = (row as any)?.dataTier as string | undefined
+                                    const priceMeta = tier
+                                        ? {
+                                              isFallback: tier === 'synthetic_fallback',
+                                              isStale: tier === 'stale_cached',
+                                          }
+                                        : undefined
+                                    return <AssetCard key={index} asset={asset} price={priceCard} priceMeta={priceMeta} />
                                 })
                             )}
                         </div>
