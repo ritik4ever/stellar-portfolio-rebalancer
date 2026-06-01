@@ -274,6 +274,7 @@ export class StellarService {
                 await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Risk Management Block',
+                    reasonCode: 'RISK_MITIGATION',
                     trades: 0,
                     gasUsed: '0 XLM',
                     status: 'failed',
@@ -319,6 +320,7 @@ export class StellarService {
                 await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Circuit Breaker Triggered',
+                    reasonCode: 'VOLATILITY_CIRCUIT_BREAKER',
                     trades: 0,
                     gasUsed: '0 XLM',
                     status: 'failed',
@@ -377,6 +379,7 @@ export class StellarService {
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Rebalance Started',
+                reasonCode: trigger.includes('Threshold') ? 'THRESHOLD_EXCEEDED' : 'MANUAL_USER_REQUEST',
                 trades: 0,
                 gasUsed: '0 XLM',
                 status: 'pending',
@@ -434,6 +437,7 @@ export class StellarService {
                 trigger: dexResult.status === 'failed'
                     ? `Execution Failed: ${dexResult.failureReason || 'unknown reason'}`
                     : trigger,
+                reasonCode: dexResult.status === 'failed' ? 'SYSTEM_FORCED' : (trigger.includes('Threshold') ? 'THRESHOLD_EXCEEDED' : 'MANUAL_USER_REQUEST'),
                 trades: executedTradeCount,
                 gasUsed: `${dexResult.totalEstimatedFeeXLM.toFixed(7)} XLM`,
                 status: historyStatus,

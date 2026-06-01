@@ -64,6 +64,18 @@ export interface Portfolio {
     version: number
 }
 
+export type RebalanceTrigger = 'auto' | 'manual' | 'system'
+
+export type RebalanceReasonCode =
+    | 'THRESHOLD_EXCEEDED'
+    | 'SCHEDULED_REBALANCE'
+    | 'VOLATILITY_CIRCUIT_BREAKER'
+    | 'MANUAL_USER_REQUEST'
+    | 'RISK_MITIGATION'
+    | 'ON_CHAIN_SYNC'
+    | 'SYSTEM_FORCED'
+    | 'OTHER'
+
 // Rebalance strategy types
 export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
 
@@ -101,6 +113,7 @@ export interface RebalanceEvent {
     portfolioId: string
     timestamp: string
     trigger: string
+    reasonCode?: RebalanceReasonCode
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'

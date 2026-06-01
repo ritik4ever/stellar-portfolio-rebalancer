@@ -77,7 +77,7 @@ export class ContractEventIndexerService {
         pollIntervalMs: this.pollIntervalMs,
         lastIngestedCount: 0,
         consecutiveFailures: 0,
-        recentErrors: []
+        recentErrors: [],
         expectedEventSchemaVersion: BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
         contractEventSchemaOk: true
     }
@@ -240,6 +240,7 @@ export class ContractEventIndexerService {
                         portfolioId: indexed.portfolioId,
                         timestamp: indexed.timestamp,
                         trigger: indexed.trigger,
+                        reasonCode: 'ON_CHAIN_SYNC',
                         trades: indexed.trades,
                         gasUsed: 'on-chain',
                         status: 'completed',

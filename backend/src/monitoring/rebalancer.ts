@@ -103,6 +103,7 @@ export class RebalancingService {
                     await rebalanceHistoryService.recordRebalanceEvent({
                         portfolioId,
                         trigger: 'Automatic Check – Blocked',
+                        reasonCode: 'VOLATILITY_CIRCUIT_BREAKER',
                         trades: 0,
                         gasUsed: '0 XLM',
                         status: 'failed',

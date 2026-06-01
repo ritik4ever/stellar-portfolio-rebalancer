@@ -1,7 +1,7 @@
 import { RiskManagementService } from './riskManagements.js'
 import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import type { PricesMap } from '../types/index.js'
+import type { PricesMap, RebalanceReasonCode } from '../types/index.js'
 import { logger } from '../utils/logger.js'
 
 export interface RebalanceEvent {
@@ -9,6 +9,7 @@ export interface RebalanceEvent {
     portfolioId: string
     timestamp: string
     trigger: string
+    reasonCode?: RebalanceReasonCode
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
@@ -56,6 +57,7 @@ export class RebalanceHistoryService {
     async recordRebalanceEvent(eventData: {
         portfolioId: string
         trigger: string
+        reasonCode?: RebalanceReasonCode
         trades: number
         gasUsed: string
         status: 'completed' | 'failed' | 'pending'
@@ -94,11 +96,11 @@ export class RebalanceHistoryService {
             fromAsset: eventData.fromAsset,
             toAsset: eventData.toAsset,
             amount: eventData.amount,
-            reason: this.generateReasonFromTrigger(eventData.trigger),
-            volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger),
-            riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status),
+            reason: this.generateReasonFromTrigger(eventData.trigger, eventData.reasonCode),
+            volatilityDetected: this.checkVolatilityInTrigger(eventData.trigger, eventData.reasonCode),
+            riskLevel: this.assessRiskLevel(eventData.trigger, eventData.status, eventData.reasonCode),
             priceDirection: this.determinePriceDirection(eventData.prices),
-            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger),
+            performanceImpact: this.assessPerformanceImpact(eventData.status, eventData.trigger, eventData.reasonCode),
             estimatedSlippageBps: eventData.estimatedSlippageBps,
             actualSlippageBps: eventData.actualSlippageBps,
             slippageExceededTolerance: eventData.slippageExceededTolerance,
@@ -126,6 +128,7 @@ export class RebalanceHistoryService {
         const event = databaseService.recordRebalanceEvent({
             portfolioId: eventData.portfolioId,
             trigger: eventData.trigger,
+            reasonCode: eventData.reasonCode,
             trades: eventData.trades,
             gasUsed: eventData.gasUsed,
             status: eventData.status,
@@ -145,7 +148,8 @@ export class RebalanceHistoryService {
 
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
             eventId: event.id,
-            isAutomatic: eventData.isAutomatic ?? false
+            isAutomatic: eventData.isAutomatic ?? false,
+            reasonCode: eventData.reasonCode
         })
         return event
     }
@@ -191,38 +195,42 @@ export class RebalanceHistoryService {
 
     // ─── Private helpers (kept for semantic consistency) ───────────────────────
 
-    private generateReasonFromTrigger(trigger: string): string {
-        if (trigger.includes('Threshold exceeded')) {
+    private generateReasonFromTrigger(trigger: string, reasonCode?: RebalanceReasonCode): string {
+        if (reasonCode === 'THRESHOLD_EXCEEDED' || trigger.includes('Threshold exceeded')) {
             return `Portfolio allocation drift exceeded rebalancing threshold`
         }
-        if (trigger.includes('Scheduled') || trigger.includes('Automatic')) {
+        if (reasonCode === 'SCHEDULED_REBALANCE' || trigger.includes('Scheduled') || trigger.includes('Automatic')) {
             return 'Automated scheduled rebalancing executed'
         }
-        if (trigger.includes('Volatility') || trigger.includes('circuit breaker')) {
+        if (reasonCode === 'VOLATILITY_CIRCUIT_BREAKER' || trigger.includes('Volatility') || trigger.includes('circuit breaker')) {
             return 'High market volatility detected, protective rebalance executed'
         }
-        if (trigger.includes('Manual')) {
+        if (reasonCode === 'MANUAL_USER_REQUEST' || trigger.includes('Manual')) {
             return 'User-initiated manual rebalancing'
         }
-        if (trigger.includes('Risk')) {
+        if (reasonCode === 'RISK_MITIGATION' || trigger.includes('Risk')) {
             return 'Risk management system triggered rebalancing'
+        }
+        if (reasonCode === 'ON_CHAIN_SYNC') {
+            return 'Synchronized from on-chain event'
         }
         return `Rebalancing triggered: ${trigger}`
     }
 
-    private checkVolatilityInTrigger(trigger: string): boolean {
+    private checkVolatilityInTrigger(trigger: string, reasonCode?: RebalanceReasonCode): boolean {
+        if (reasonCode === 'VOLATILITY_CIRCUIT_BREAKER') return true
         const volatilityKeywords = ['volatility', 'circuit breaker', 'risk', 'emergency']
         return volatilityKeywords.some(keyword => trigger.toLowerCase().includes(keyword))
     }
 
-    private assessRiskLevel(trigger: string, status: string): 'low' | 'medium' | 'high' {
+    private assessRiskLevel(trigger: string, status: string, reasonCode?: RebalanceReasonCode): 'low' | 'medium' | 'high' {
         if (status === 'failed') return 'high'
 
-        if (trigger.includes('Volatility') || trigger.includes('circuit breaker') || trigger.includes('emergency')) {
+        if (reasonCode === 'VOLATILITY_CIRCUIT_BREAKER' || trigger.includes('Volatility') || trigger.includes('circuit breaker') || trigger.includes('emergency')) {
             return 'high'
         }
 
-        if (trigger.includes('Threshold exceeded')) {
+        if (reasonCode === 'THRESHOLD_EXCEEDED' || trigger.includes('Threshold exceeded')) {
             const match = trigger.match(/(\d+\.?\d*)%/)
             if (match) {
                 const percentage = parseFloat(match[1])
@@ -232,7 +240,7 @@ export class RebalanceHistoryService {
             return 'medium'
         }
 
-        if (trigger.includes('Scheduled') || trigger.includes('Manual') || trigger.includes('Automatic')) {
+        if (reasonCode === 'SCHEDULED_REBALANCE' || reasonCode === 'MANUAL_USER_REQUEST' || trigger.includes('Scheduled') || trigger.includes('Manual') || trigger.includes('Automatic')) {
             return 'low'
         }
 
@@ -246,11 +254,11 @@ export class RebalanceHistoryService {
         return averageChange >= 0 ? 'up' : 'down'
     }
 
-    private assessPerformanceImpact(status: string, trigger: string): 'positive' | 'negative' | 'neutral' {
+    private assessPerformanceImpact(status: string, trigger: string, reasonCode?: RebalanceReasonCode): 'positive' | 'negative' | 'neutral' {
         if (status === 'failed') return 'negative'
-        if (trigger.includes('Volatility') || trigger.includes('circuit breaker')) return 'negative'
-        if (trigger.includes('Scheduled') || trigger.includes('Automatic')) return 'positive'
-        if (trigger.includes('Threshold exceeded')) return 'neutral'
+        if (reasonCode === 'VOLATILITY_CIRCUIT_BREAKER' || trigger.includes('Volatility') || trigger.includes('circuit breaker')) return 'negative'
+        if (reasonCode === 'SCHEDULED_REBALANCE' || trigger.includes('Scheduled') || trigger.includes('Automatic')) return 'positive'
+        if (reasonCode === 'THRESHOLD_EXCEEDED' || trigger.includes('Threshold exceeded')) return 'neutral'
         return 'neutral'
     }
 

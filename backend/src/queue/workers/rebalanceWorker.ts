@@ -62,6 +62,7 @@ export async function processRebalanceJob(
       portfolioId,
       trigger:
         triggeredBy === "auto" ? "Automatic Rebalancing" : "Manual Rebalancing",
+      reasonCode: triggeredBy === "auto" ? "THRESHOLD_EXCEEDED" : "MANUAL_USER_REQUEST",
       trades: rebalanceResult.trades ?? 0,
       gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
       status: "completed",
@@ -109,6 +110,7 @@ export async function processRebalanceJob(
       await rebalanceHistoryService.recordRebalanceEvent({
         portfolioId,
         trigger: `Automatic Rebalancing (Failed – attempt ${job.attemptsMade + 1})`,
+        reasonCode: "SYSTEM_FORCED",
         trades: 0,
         gasUsed: "0 XLM",
         status: "failed",

@@ -52,6 +52,7 @@ interface RebalanceHistoryRow {
   portfolio_id: string;
   timestamp: string;
   trigger: string;
+  reason_code?: string;
   trades: number;
   gas_used: string;
   status: string;
@@ -326,6 +327,7 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
     portfolioId: row.portfolio_id,
     timestamp: row.timestamp,
     trigger: row.trigger,
+    reasonCode: row.reason_code as any,
     trades: row.trades,
     gasUsed: row.gas_used,
     status: row.status as RebalanceEvent["status"],
@@ -402,6 +404,16 @@ export class DatabaseService {
         "ALTER TABLE portfolios ADD COLUMN strategy_config TEXT DEFAULT '{}'",
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
+    }
+
+    const histCols = this.db
+      .prepare("PRAGMA table_info(rebalance_history)")
+      .all() as Array<{ name: string }>;
+    if (!histCols.some((c) => c.name === "reason_code")) {
+      this.db.exec("ALTER TABLE rebalance_history ADD COLUMN reason_code TEXT");
+      logger.info(
+        "[DB] Migration: added reason_code column to rebalance_history",
+      );
     }
   }
 
@@ -950,6 +962,7 @@ export class DatabaseService {
     onChainContractId?: string;
     onChainPagingToken?: string;
     isSimulated?: boolean;
+    reasonCode?: string;
   }): RebalanceEvent {
     try {
       const event: RebalanceEvent = {
@@ -957,6 +970,7 @@ export class DatabaseService {
         portfolioId: eventData.portfolioId,
         timestamp: eventData.timestamp ?? new Date().toISOString(),
         trigger: eventData.trigger,
+        reasonCode: eventData.reasonCode as any,
         trades: eventData.trades,
         gasUsed: eventData.gasUsed,
         status: eventData.status,
@@ -978,8 +992,8 @@ export class DatabaseService {
         .prepare(
           `
                 INSERT INTO rebalance_history
-                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
         )
         .run(
@@ -987,6 +1001,7 @@ export class DatabaseService {
           event.portfolioId,
           event.timestamp,
           event.trigger,
+          event.reasonCode ?? null,
           event.trades,
           event.gasUsed,
           event.status,
@@ -1169,8 +1184,8 @@ export class DatabaseService {
 
       const insert = this.db.prepare(`
                 INSERT INTO rebalance_history
-                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
       for (const ev of demoEvents) {
@@ -1179,6 +1194,7 @@ export class DatabaseService {
           ev.portfolioId,
           ev.timestamp,
           ev.trigger,
+          (ev as any).reasonCode ?? null,
           ev.trades,
           ev.gasUsed,
           ev.status,
