@@ -600,7 +600,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 
 ---
 
- ## Further reading
+## Further reading
 
 
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
