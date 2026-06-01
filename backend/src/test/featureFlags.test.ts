@@ -81,4 +81,55 @@ describe('featureFlags', () => {
             'enableDemoDbSeed'
         ])
     })
+
+    it('parses READINESS_CACHE_TTL_MS from environment', () => {
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, READINESS_CACHE_TTL_MS: '5000' }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.readinessCacheTtlMs).toBe(5000)
+    })
+
+    it('defaults READINESS_CACHE_TTL_MS to 2000', () => {
+        delete process.env.READINESS_CACHE_TTL_MS
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.readinessCacheTtlMs).toBe(2000)
+    })
+
+    it('parses CONSENT_AUDIT_RETENTION_DAYS from environment', () => {
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, CONSENT_AUDIT_RETENTION_DAYS: '90' }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.consentAuditRetentionDays).toBe(90)
+    })
+
+    it('defaults CONSENT_AUDIT_RETENTION_DAYS to 365', () => {
+        delete process.env.CONSENT_AUDIT_RETENTION_DAYS
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.consentAuditRetentionDays).toBe(365)
+    })
+
+    it('parses METRICS_ALLOWLIST from environment', () => {
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, METRICS_ALLOWLIST: '10.0.0.1,192.168.0.0/16' }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.metricsAllowlist).toContain('10.0.0.1')
+        expect(config.metricsAllowlist).toContain('192.168.0.0/16')
+        expect(config.metricsAllowlist).toHaveLength(2)
+    })
+
+    it('defaults metricsAllowlist to empty array', () => {
+        delete process.env.METRICS_ALLOWLIST
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.metricsAllowlist).toEqual([])
+    })
+
+    it('validates CONSENT_AUDIT_RETENTION_DAYS must be a positive integer', () => {
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, CONSENT_AUDIT_RETENTION_DAYS: '0' }
+        expect(() => validateStartupConfigOrThrow(process.env)).toThrow()
+    })
+
+    it('validates READINESS_CACHE_TTL_MS must be a non-negative integer', () => {
+        process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, READINESS_CACHE_TTL_MS: '-1' }
+        expect(() => validateStartupConfigOrThrow(process.env)).toThrow()
+    })
 })

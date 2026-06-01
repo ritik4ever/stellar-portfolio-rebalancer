@@ -66,7 +66,23 @@ All other variables have working defaults for local development.
 
 ---
 
-## 3. Database migrations
+## 3. Docker Compose modes
+
+The default Compose invocation starts the minimal app stack. Add profiles when you need the larger environments:
+
+```bash
+docker compose -f deployment/docker-compose.yml up --build
+docker compose -f deployment/docker-compose.yml --profile full-stack up --build
+docker compose -f deployment/docker-compose.yml --profile observability up --build
+```
+
+`full-stack` adds Redis and PostgreSQL. `observability` adds Prometheus, Alertmanager, Grafana, Loki, Promtail, Blackbox Exporter, and the monitoring backend process.
+
+When you want the backend to use those services, export `DATABASE_URL` and `REDIS_URL` (or the equivalent `PG*` variables) before starting the profile.
+
+---
+
+## 4. Database migrations
 
 Use PostgreSQL when you want the SQL migration runner:
 
@@ -103,7 +119,7 @@ Migration files live in `backend/src/db/migrations/`. Add new PostgreSQL migrati
 
 ---
 
-## 4. Dependency audit policy
+## 5. Dependency audit policy
 
 Run the audit policy check before opening a PR:
 
@@ -123,7 +139,7 @@ Temporary exceptions should be time-bounded and recorded in the release notes or
 
 ---
 
-## 5. Redis and queue workers (optional)
+## 6. Redis and queue workers (optional)
 
 Queue workers (portfolio checks, rebalancing, analytics snapshots) require Redis. If Redis is not running, workers are silently skipped and the API still starts.
 
@@ -154,7 +170,7 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 
 ---
 
-## 6. Auth environment variables
+## 7. Auth environment variables
 
 | Variable                 | Required                      | Description                                                            |
 | ------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
@@ -177,7 +193,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ---
 
-## 7. Notification environment variables (optional)
+## 8. Notification environment variables (optional)
 
 Email notifications use SMTP. Leave these unset to disable notifications entirely.
 
@@ -246,7 +262,7 @@ curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
 
 ---
 
-## 8. Start development servers
+## 9. Start development servers
 
 ```bash
 # Terminal 1 — backend (hot reload)
@@ -268,7 +284,7 @@ curl http://localhost:3001/api/health
 
 ---
 
-## 9. Running tests
+## 10. Running tests
 
 ### Backend unit + integration tests
 
@@ -349,7 +365,7 @@ CI uploads `frontend/playwright-report/` and `frontend/test-results/` when the v
 
 ---
 
-## 9. Contract and indexer setup (optional)
+## 11. Contract and indexer setup (optional)
 
 Only needed if you are working on Soroban smart contracts or on-chain event indexing.
 
@@ -395,6 +411,16 @@ cargo deny check
 ```
 
 The CI contract smoke workflow runs the same audit before building and deploying the WASM. It fails on yanked crates, denied advisories, wildcard dependency requirements, unknown registries, and licenses outside the allowlist in `contracts/deny.toml`. Duplicate Rust crate versions are reported as warnings so maintainers can address them without blocking unrelated smoke runs.
+
+### Grouped dependency updates
+
+Dependabot is configured to open grouped pull requests per workspace so dependency hygiene stays visible without creating one PR per package.
+
+- Root workspace updates are grouped in `.github/dependabot.yml`.
+- Backend npm updates are grouped separately from frontend npm updates.
+- Contracts dependency updates are grouped under the Rust workspace.
+
+If you need to adjust the cadence, edit `.github/dependabot.yml` and keep the group names aligned with the workspace they cover.
 
 ---
 
@@ -475,7 +501,7 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
-## 10. Common setup failures
+## 12. Common setup failures
 
 | Symptom                                      | Cause                              | Fix                                                     |
 | -------------------------------------------- | ---------------------------------- | ------------------------------------------------------- |
@@ -489,7 +515,7 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
-## 11. Commit message conventions
+## 13. Commit message conventions
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
 
@@ -524,7 +550,7 @@ scripts/check-commit-messages.sh origin/main..HEAD
 
 If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
 
-## 12. Optional local Git hooks
+## 14. Optional local Git hooks
 
 Install the optional hook templates when you want fast feedback before committing or pushing:
 

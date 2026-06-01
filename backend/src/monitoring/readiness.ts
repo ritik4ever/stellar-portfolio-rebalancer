@@ -11,8 +11,28 @@ import { autoRebalancer } from "../services/runtimeServices.js";
 import { getPortfolioCheckWorkerStatus } from "../queue/workers/portfolioCheckWorker.js";
 import { getRebalanceWorkerStatus } from "../queue/workers/rebalanceWorker.js";
 import { getAnalyticsSnapshotWorkerStatus } from "../queue/workers/analyticsSnapshotWorker.js";
+import { logger } from "../utils/logger.js";
 
 type ReadinessState = "ready" | "not_ready" | "disabled";
+
+// ── Readiness cache ─────────────────────────────────────────────────────────
+interface CacheEntry {
+  report: object
+  expiresAt: number
+}
+
+let cacheTtlMs = parseInt(process.env.READINESS_CACHE_TTL_MS || "2000", 10)
+if (!Number.isInteger(cacheTtlMs) || cacheTtlMs < 0) cacheTtlMs = 2000
+
+let cache: CacheEntry | null = null
+
+export function setReadinessCacheTtl(ttlMs: number): void {
+  cacheTtlMs = ttlMs
+}
+
+export function clearReadinessCache(): void {
+  cache = null
+}
 
 interface ReadinessCheck {
   status: ReadinessState;
@@ -67,6 +87,11 @@ async function checkQueueReady(
 }
 
 export async function buildReadinessReport() {
+  const now = Date.now()
+  if (cache && cache.expiresAt > now) {
+    return cache.report
+  }
+
   const database = databaseService.getReadiness();
   const databaseCheck = database.ready
     ? buildCheck("ready", true, "Database connection is healthy", database)
@@ -255,10 +280,16 @@ export async function buildReadinessReport() {
     (check) => !check.required || check.status === "ready",
   );
 
-  return {
+  const report = {
     status: ready ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     checks,
   };
+
+  if (cacheTtlMs > 0) {
+    cache = { report, expiresAt: now + cacheTtlMs }
+  }
+
+  return report
 }
