@@ -17,6 +17,7 @@ import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
 import BackendCapabilitiesBanner from './components/BackendCapabilitiesBanner'
+import StartupSplash from './components/StartupSplash'
 import { useReadinessReport } from './hooks/useReadinessReport'
 import {
     onAuthSessionExpired,
@@ -36,10 +37,6 @@ function App() {
     const [sessionRecovery, setSessionRecovery] = useState<string | null>(null)
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
-    const { notices, loadError, loading: readinessLoading } = useReadinessReport()
-    const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
-    const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
-    const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
 
     const showBackendBanner = loadError || notices.length > 0
     const showApiCompatibilityBanner =
@@ -226,6 +223,10 @@ function App() {
     }
 
     const errorTop = showBackendBanner ? 'top-[4.25rem]' : 'top-4'
+
+    if (!bootReady) {
+        return <StartupSplash loading={readinessLoading} loadError={loadError} />
+    }
 
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
