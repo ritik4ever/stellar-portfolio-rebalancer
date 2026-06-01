@@ -8,6 +8,7 @@ export const QUEUE_NAMES = {
     REBALANCE: 'rebalance',
     ANALYTICS_SNAPSHOT: 'analytics-snapshot',
     IDEMPOTENCY_CLEANUP: 'idempotency-cleanup',
+    PORTFOLIO_EXPORT: 'portfolio-export',
 } as const
 
 export interface PortfolioCheckJobData {
@@ -31,17 +32,17 @@ export interface IdempotencyCleanupJobData {
     correlationId?: string
 }
 
-export interface RebalanceJobData {
+export interface PortfolioExportJobData {
     portfolioId: string
-    triggeredBy?: 'auto' | 'manual' | 'force'
+    format: 'json' | 'csv' | 'pdf'
+    userId?: string
 }
 
-export interface AnalyticsSnapshotJobData {
-    triggeredBy?: 'scheduler' | 'manual' | 'startup'
-}
-
-export interface IdempotencyCleanupJobData {
-    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+export interface PortfolioExportResult {
+    contentType: string
+    filename: string
+    bodyBase64?: string
+    bodyString?: string
 }
 
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
@@ -50,6 +51,7 @@ let portfolioCheckQueue: Queue<PortfolioCheckJobData> | null = null
 let rebalanceQueue: Queue<RebalanceJobData> | null = null
 let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null
 let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null
+let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null
 
 function getDefaultJobOptions() {
     return {
@@ -123,6 +125,21 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
     }
 }
 
+export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, PortfolioExportResult> | null {
+    try {
+        if (!portfolioExportQueue) {
+            portfolioExportQueue = new Queue<PortfolioExportJobData, PortfolioExportResult>(QUEUE_NAMES.PORTFOLIO_EXPORT, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PORTFOLIO_EXPORT}`)
+        }
+        return portfolioExportQueue
+    } catch {
+        return null
+    }
+}
+
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
@@ -131,10 +148,12 @@ export async function closeAllQueues(): Promise<void> {
         rebalanceQueue?.close(),
         analyticsSnapshotQueue?.close(),
         idempotencyCleanupQueue?.close(),
+        portfolioExportQueue?.close(),
     ])
     portfolioCheckQueue = null
     rebalanceQueue = null
     analyticsSnapshotQueue = null
     idempotencyCleanupQueue = null
+    portfolioExportQueue = null
     logger.info('[QUEUE] All queues closed')
 }
