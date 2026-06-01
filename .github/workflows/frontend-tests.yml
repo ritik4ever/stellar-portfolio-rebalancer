@@ -5,6 +5,7 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-tests.yml'
+      - 'docs/CONTRIBUTING.md'
   push:
     branches:
       - main
@@ -12,6 +13,7 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-tests.yml'
+      - 'docs/CONTRIBUTING.md'
 
 jobs:
   frontend-tests:
@@ -41,4 +43,82 @@ jobs:
         with:
           name: frontend-coverage
           path: frontend/coverage/
+          if-no-files-found: warn
+
+  visual-regression:
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_CONTRACT_ADDRESS: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      DEMO_MODE: 'true'
+      ALLOW_DEMO_BALANCE_FALLBACK: 'true'
+      JWT_SECRET: visual-ci-jwt-secret-at-least-32-characters-long
+      DB_PATH: ./data/visual-regression.db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: ./frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Start backend for visual routes
+        working-directory: ./backend
+        env:
+          PORT: 3001
+        run: |
+          npm run build
+          npm start &
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::Backend did not become healthy on http://localhost:3001/health"
+            exit 1
+          fi
+
+      - name: Run visual regression snapshots
+        working-directory: ./frontend
+        env:
+          VITE_API_URL: http://localhost:3001
+          VITE_E2E_MOCK_WALLET: 'true'
+        run: npm run test:e2e:visual
+
+      - name: Upload Playwright visual report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-report
+          path: frontend/playwright-report/
+          if-no-files-found: warn
+
+      - name: Upload visual diff artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-diffs
+          path: frontend/test-results/
           if-no-files-found: warn

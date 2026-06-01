@@ -76,7 +76,23 @@ All other variables have working defaults for local development.
 
 ---
 
-## 3. Database migrations
+## 3. Docker Compose modes
+
+The default Compose invocation starts the minimal app stack. Add profiles when you need the larger environments:
+
+```bash
+docker compose -f deployment/docker-compose.yml up --build
+docker compose -f deployment/docker-compose.yml --profile full-stack up --build
+docker compose -f deployment/docker-compose.yml --profile observability up --build
+```
+
+`full-stack` adds Redis and PostgreSQL. `observability` adds Prometheus, Alertmanager, Grafana, Loki, Promtail, Blackbox Exporter, and the monitoring backend process.
+
+When you want the backend to use those services, export `DATABASE_URL` and `REDIS_URL` (or the equivalent `PG*` variables) before starting the profile.
+
+---
+
+## 4. Database migrations
 
 Use PostgreSQL when you want the SQL migration runner:
 
@@ -113,7 +129,27 @@ Migration files live in `backend/src/db/migrations/`. Add new PostgreSQL migrati
 
 ---
 
-## 4. Redis and queue workers (optional)
+## 5. Dependency audit policy
+
+Run the audit policy check before opening a PR:
+
+```bash
+npm run audit:policy
+```
+
+The policy compares the current `npm audit --json --omit=dev` counts against the reviewed baseline in `security/npm-audit-baseline.json` for the root workspace, `backend`, and `frontend`. A PR passes when the counts stay at or below that baseline.
+
+Use the update command only after a maintainer has reviewed the findings and decided to accept the new baseline:
+
+```bash
+npm run audit:policy:update
+```
+
+Temporary exceptions should be time-bounded and recorded in the release notes or PR description. Do not silently expand the baseline.
+
+---
+
+## 6. Redis and queue workers (optional)
 
 Queue workers (portfolio checks, rebalancing, analytics snapshots) require Redis. If Redis is not running, workers are silently skipped and the API still starts.
 
@@ -144,7 +180,7 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 
 ---
 
-## 5. Auth environment variables
+## 7. Auth environment variables
 
 | Variable                 | Required                      | Description                                                            |
 | ------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
@@ -167,7 +203,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ---
 
-## 6. Notification environment variables (optional)
+## 8. Notification environment variables (optional)
 
 Email notifications use SMTP. Leave these unset to disable notifications entirely.
 
@@ -236,7 +272,7 @@ curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
 
 ---
 
-## 7. Start development servers
+## 9. Start development servers
 
 ```bash
 # Terminal 1 — backend (hot reload)
@@ -258,7 +294,7 @@ curl http://localhost:3001/api/health
 
 ---
 
-## 8. Running tests
+## 10. Running tests
 
 ### Backend unit + integration tests
 
@@ -269,6 +305,24 @@ npm test -- --watch   # watch mode
 ```
 
 Tests use an isolated SQLite database per run (no external dependencies required).
+
+#### Sharded test runs (CI parity)
+
+To keep CI fast, the **Backend Tests** workflow splits the suite into 4 parallel shards (`SHARD_TOTAL` in `.github/workflows/backend-tests.yml`). Each shard collects coverage into a [blob report](https://vitest.dev/guide/reporters#blob-reporter); a final job merges the blobs and enforces the coverage thresholds in `backend/vitest.config.ts` against the full suite.
+
+You can reproduce the sharded flow locally without any CI-specific tooling:
+
+```bash
+cd backend
+
+# Run a single shard (e.g. shard 1 of 4). Repeat for shards 2/4, 3/4, 4/4.
+npm run test:shard -- --shard=1/4
+
+# After running all shards, merge the blob reports and check coverage thresholds
+npm run test:merge-coverage
+```
+
+Each shard writes its blob report to `backend/.vitest-reports/`, which `test:merge-coverage` reads when combining results. To change the shard count, update `SHARD_TOTAL` and the `matrix.shard` list in the workflow together.
 
 ### Frontend unit tests
 
@@ -299,9 +353,29 @@ npx playwright test tests/e2e/auth.spec.ts
 
 Playwright config: `frontend/playwright.config.ts`. Reports are written to `frontend/playwright-report/`.
 
+### Visual regression snapshots
+
+Critical frontend screens have a dedicated Playwright visual project:
+
+```bash
+cd frontend
+npm run test:e2e:visual
+```
+
+The visual project lives in `frontend/playwright.config.ts` and reuses critical existing E2E specs (`auth`, `portfolio-create`, and `rebalance-history`) under a fixed Chromium viewport with screenshot capture enabled.
+
+To intentionally accept a design change, run the same visual project locally and review the captured screenshots before pushing:
+
+```bash
+cd frontend
+npm run test:e2e:visual
+```
+
+CI uploads `frontend/playwright-report/` and `frontend/test-results/` when the visual project fails so maintainers can inspect the screenshots and traces for the critical pages.
+
 ---
 
-## 9. Contract and indexer setup (optional)
+## 11. Contract and indexer setup (optional)
 
 Only needed if you are working on Soroban smart contracts or on-chain event indexing.
 
@@ -334,6 +408,29 @@ STELLAR_REBALANCE_SECRET=S...YOUR_SIGNING_SECRET
 cd contracts
 cargo test
 ```
+
+### Rust dependency audit
+
+Contract dependency policy is enforced with `cargo-deny` using `contracts/deny.toml`.
+
+```bash
+cargo install --locked cargo-deny
+cd contracts
+cargo generate-lockfile
+cargo deny check
+```
+
+The CI contract smoke workflow runs the same audit before building and deploying the WASM. It fails on yanked crates, denied advisories, wildcard dependency requirements, unknown registries, and licenses outside the allowlist in `contracts/deny.toml`. Duplicate Rust crate versions are reported as warnings so maintainers can address them without blocking unrelated smoke runs.
+
+### Grouped dependency updates
+
+Dependabot is configured to open grouped pull requests per workspace so dependency hygiene stays visible without creating one PR per package.
+
+- Root workspace updates are grouped in `.github/dependabot.yml`.
+- Backend npm updates are grouped separately from frontend npm updates.
+- Contracts dependency updates are grouped under the Rust workspace.
+
+If you need to adjust the cadence, edit `.github/dependabot.yml` and keep the group names aligned with the workspace they cover.
 
 ---
 
@@ -414,7 +511,7 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
-## 10. Common setup failures
+## 12. Common setup failures
 
 | Symptom                                      | Cause                              | Fix                                                     |
 | -------------------------------------------- | ---------------------------------- | ------------------------------------------------------- |
@@ -428,14 +525,81 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
+## 13. Commit message conventions
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
+
+```
+<type>[optional scope][!]: <description>
+```
+
+**Allowed types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+**Examples:**
+
+- `feat(api): add portfolio export endpoint`
+- `fix(auth): resolve JWT token expiration handling`
+- `docs: update API client examples`
+- `chore(deps): update stellar-sdk to v12.0.1`
+
+This convention powers the automated changelog (`npm run changelog:update`) and keeps release history consistent.
+
+### CI enforcement
+
+Pull requests run a **Commit message lint** check (in the `Lint` workflow) that validates every commit in the PR against the format above. The check fails with a clear message listing any non-conforming commits.
+
+Run the same check locally before opening a PR:
+
+```bash
+# Check the current branch against origin/main
+scripts/check-commit-messages.sh
+
+# Or check an explicit range
+scripts/check-commit-messages.sh origin/main..HEAD
+```
+
+If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
+
+## 14. Optional local Git hooks
+
+Install the optional hook templates when you want fast feedback before committing or pushing:
+
+```bash
+npm run hooks:install
+```
+
+This sets `core.hooksPath` to `scripts/hooks` for your local clone only.
+
+The pre-commit hook runs:
+
+- `npm run validate:env-examples`
+- backend `npm run lint` when configured
+- frontend `npm run lint` when configured
+- root `npm run format` when configured
+
+The pre-push hook runs:
+
+- `npm run validate:env-examples`
+- backend `npm run lint` when configured
+- frontend `npm run lint` when configured
+- frontend `npm test`
+- backend `npm test`
+- root `npm run format` when configured
+
+Missing optional scripts are reported as skips. Any configured command that exits non-zero blocks the commit or push with the failing command visible in terminal output.
+
+---
+
 ## Further reading
 
+- [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
 - [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+- [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design
 

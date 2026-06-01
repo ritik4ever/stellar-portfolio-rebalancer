@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet
+.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet release-checklist
 
 # Default target
 all: build
@@ -145,4 +145,14 @@ help:
 	@echo "  init-contract   - Initialize deployed contract"
 	@echo "  install-tools   - Install required tools"
 	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
+	@echo "  release-checklist - Print the release checklist location and contract release steps"
 	@echo "  help            - Show this help message"
+
+# Contract release checklist
+release-checklist:
+	@echo "Release checklist: ../docs/RELEASE_CHECKLIST.md"
+	@echo "Contract release steps:"
+	@echo "  1) Build the WASM artifact with 'make build'"
+	@echo "  2) Confirm the contract SBOM and attestation are present in CI"
+	@echo "  3) Hand off backend deploy steps to the release owner"
+	@echo "  4) Verify post-release health checks before closing the release"

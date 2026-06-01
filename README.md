@@ -165,6 +165,10 @@ Contract interface reference (functions, errors, and type notes): [`contracts/CO
 Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
 
 ### Usage
+
+**📸 New to the platform?** Check out our [Visual Demo Walkthrough](docs/DEMO_WALKTHROUGH.md) with step-by-step screenshots and detailed explanations.
+
+**Quick Start:**
 1. Connect your Stellar wallet
 2. Create a portfolio and set target allocations (sum must equal 100%, maximum 10 assets per portfolio)
 3. Configure rebalance thresholds (1–50%)

@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:visual": "PLAYWRIGHT_VISUAL_BASELINES=1 playwright test --project=visual-regression"
   },
   "dependencies": {
     "@sentry/react": "^9.14.0",

@@ -18,5 +18,33 @@ jobs:
       - name: Fetch main for diff base
         run: git fetch origin main --depth=1
 
-      - name: Fail on generated/runtime artifacts
+      # Only the OpenAPI freshness check needs backend deps, so install them
+      # only when the spec source, its export, or the exporter changed.
+      - name: Detect OpenAPI-related changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            openapi:
+              - 'backend/src/openapi/**'
+              - 'backend/openapi.json'
+              - 'backend/scripts/export-openapi.ts'
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.openapi == 'true' || github.event_name != 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies (for OpenAPI freshness check)
+        if: steps.changes.outputs.openapi == 'true' || github.event_name != 'pull_request'
+        working-directory: ./backend
+        run: npm ci
+
+      # The script always runs the runtime-artifact blocklist. When backend
+      # deps are present (installed above), it also regenerates backend/openapi.json
+      # from source and fails if the committed copy is stale.
+      - name: Guard artifacts and verify generated docs are fresh
         run: bash scripts/check-generated-artifacts.sh origin/main

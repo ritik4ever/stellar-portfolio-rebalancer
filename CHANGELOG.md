@@ -112,10 +112,17 @@ Changelog entries are organized by impact:
 
 ### Added
 
+- GitHub Actions build attestations for frontend and backend release bundles, plus CycloneDX SBOM artifacts for frontend, backend, and contracts.
+- A repository-level npm audit baseline and CI policy gate, with a backend-local wrapper command for maintainers.
+- A reusable release checklist template for contract, backend, and frontend releases, together with a contract Makefile helper that points to it.
 - Replay-focused idempotency tests for cached success/error responses, cross-user key rejection, and expiry cleanup paths.
 - WebSocket integration tests for `portfolio_update` message shape, reconnect behavior, and per-user event isolation.
 - Feature-flag test coverage for env parsing, runtime toggles, fail-safe defaults, and startup logging visibility.
 - Project-level changelog automation script using `conventional-changelog-cli`.
+- CI commit message lint that enforces Conventional Commits on pull requests, with a locally runnable `scripts/check-commit-messages.sh` helper and contributor documentation.
+- Sharded backend test execution in CI (4 parallel shards with merged coverage and threshold enforcement) plus `test:shard`/`test:merge-coverage` scripts and contributor docs for reproducing it locally.
+- Portable health smoke script (`scripts/health-smoke.sh`, `npm run smoke`) that probes `/health`, `/api/health`, `/ready`, and `/metrics` across local/staging/prod with a clear pass/fail summary, documented in OPERATIONS.md and API.md.
+- Tightened generated-artifact guard: `backend/openapi.json` freshness is now verified by regenerating from source and diffing (replacing a heuristic that referenced a non-existent spec path), wired into the Generated Artifact Guard workflow and documented in backend/docs/openapi.md.
 
 ## [1.3.0] - 2026-04-27
 

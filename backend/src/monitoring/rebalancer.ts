@@ -5,6 +5,7 @@ import { rebalanceHistoryService, riskManagementService } from '../services/serv
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { logger } from '../utils/logger.js'
+import { recordAnomaly, getAnomalySummary, resetAnomalyCounts } from './anomalyTracker.js'
 import type { Portfolio, RiskAlert } from '../types/index.js'
 
 export class RebalancingService {
@@ -32,6 +33,28 @@ export class RebalancingService {
     }
 
     /**
+     * Record an anomaly occurrence for operational monitoring.
+     * Delegates to the shared anomaly tracker so ops routes can also record.
+     */
+    recordAnomaly(type: 'risk_alert' | 'rebalance_block' | 'price_feed_anomaly' | 'circuit_breaker_trigger', severity?: 'critical' | 'warning' | 'info'): void {
+        recordAnomaly(type, severity)
+    }
+
+    /**
+     * Get the current anomaly summary for ops dashboards.
+     */
+    getAnomalySummary() {
+        return getAnomalySummary()
+    }
+
+    /**
+     * Reset all anomaly counters.
+     */
+    resetAnomalyCounts(): void {
+        resetAnomalyCounts()
+    }
+
+    /**
      * Manually check a specific portfolio and broadcast results via WebSocket.
      */
     async forceCheckPortfolio(portfolioId: string): Promise<any> {
@@ -54,6 +77,7 @@ export class RebalancingService {
             rebalanceHistory: stats,
             circuitBreakers,
             riskManagement: { enabled: true, lastUpdate: new Date().toISOString() },
+            anomalySummary: this.getAnomalySummary(),
         }
     }
 
@@ -78,6 +102,10 @@ export class RebalancingService {
                     return
                 }
                 const riskCheck = riskManagementService.shouldAllowRebalance(storedPortfolio, prices)
+
+                if (!riskCheck.allowed) {
+                    this.recordAnomaly('rebalance_block')
+                }
 
                 if (riskCheck.allowed) {
                     // Enqueue a rebalance job rather than executing inline
@@ -114,11 +142,16 @@ export class RebalancingService {
 
             if (riskAlerts.length > 0) {
                 const criticalAlerts = riskAlerts.filter((a: RiskAlert) => a.severity === 'critical')
+                const warningAlerts = riskAlerts.filter((a: RiskAlert) => a.severity === 'warning')
                 if (criticalAlerts.length > 0) {
                     this.notifyClients(portfolioId, 'risk_alert', {
                         message: 'Critical risk conditions detected',
                         alerts: criticalAlerts,
                     })
+                    this.recordAnomaly('risk_alert', 'critical')
+                }
+                if (warningAlerts.length > 0) {
+                    this.recordAnomaly('risk_alert', 'warning')
                 }
             }
         } catch (error) {

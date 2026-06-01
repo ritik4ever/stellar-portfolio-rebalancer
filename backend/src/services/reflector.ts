@@ -3,6 +3,7 @@ import type { PricesMap, PriceData, PriceFeedMeta, PricesFeedPayload } from '../
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice } from '../observability/metrics.js'
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
 
@@ -62,7 +63,7 @@ export class ReflectorService {
         const staleOrLimited =
             hint === 'error_recovery_cache'
             || hint === 'rate_limited_cache'
-        return {
+        const meta: PriceFeedMeta = {
             provider: 'backend',
             resolvedAtMs: Date.now(),
             degraded,
@@ -70,6 +71,8 @@ export class ReflectorService {
             resolutionHint: hint,
             assetsCount: Object.keys(prices).length
         }
+        recordPriceFeedResolution(meta)
+        return meta
     }
 
     private async resolvePricesInternal(): Promise<{ map: PricesMap; hint: PriceResolutionHint }> {
@@ -87,9 +90,11 @@ export class ReflectorService {
             if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
                 logger.info('[DEBUG] Rate limiting - using cached prices only')
                 if (Object.keys(cachedPrices).length > 0) {
+                    recordReflectorFallbackUsage('rate_limited_cache')
                     return { map: cachedPrices, hint: 'rate_limited_cache' }
                 }
                 if (getFeatureFlags().allowFallbackPrices) {
+                    recordReflectorFallbackUsage('synthetic_fallback')
                     return { map: this.getFallbackPrices(), hint: 'synthetic_fallback' }
                 }
                 throw new Error('Price request rate-limited and ALLOW_FALLBACK_PRICES is disabled')
@@ -127,6 +132,7 @@ export class ReflectorService {
             const cachedPrices = this.getCachedPrices(assets)
             if (Object.keys(cachedPrices).length > 0) {
                 logger.info('[DEBUG] Using cached prices due to API error')
+                recordReflectorFallbackUsage('error_recovery_cache')
                 return { map: cachedPrices, hint: 'error_recovery_cache' }
             }
 
@@ -134,6 +140,7 @@ export class ReflectorService {
                 throw new Error('Price sources unavailable and ALLOW_FALLBACK_PRICES is disabled')
             }
 
+            recordReflectorFallbackUsage('synthetic_fallback')
             return { map: this.getFallbackPrices(), hint: 'synthetic_fallback' }
         }
     }
@@ -221,7 +228,7 @@ export class ReflectorService {
             prices?: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
         } | Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
 
-        const rows = ('prices' in payload && payload.prices)
+        const rows: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }> = ('prices' in payload && payload.prices)
             ? payload.prices
             : payload
 
@@ -234,6 +241,7 @@ export class ReflectorService {
 
             if (this.isPriceStale(row.timestamp)) {
                 staleCount += 1
+                recordReflectorStalePrice(asset)
                 return
             }
 
