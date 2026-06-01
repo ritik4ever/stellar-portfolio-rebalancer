@@ -17,7 +17,9 @@ export const useUserPortfolios = (address: string | null) => {
             return res.portfolios
         },
         enabled: !!address,
-        staleTime: 60000, // 1 minute
+        staleTime: 60000,
+        refetchOnReconnect: false,
+        placeholderData: (previous) => previous,
     })
 }
 
@@ -26,7 +28,9 @@ export const usePortfolioDetails = (id: string | null) => {
         queryKey: portfolioKeys.detail(id || ''),
         queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_DETAIL(id!)),
         enabled: !!id && id !== 'demo',
-        staleTime: 30000, // 30 seconds
+        staleTime: 30000,
+        refetchOnReconnect: false,
+        placeholderData: (previous) => previous,
     })
 }
 
@@ -37,5 +41,7 @@ export const useRebalanceEstimate = (id: string | null) => {
         enabled: !!id && id !== 'demo',
         refetchInterval: 30000,
         staleTime: 25000,
+        refetchOnReconnect: false,
+        placeholderData: (previous) => previous,
     })
 }
