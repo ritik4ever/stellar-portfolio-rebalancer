@@ -5,6 +5,7 @@ import { rebalanceLockService } from '../../services/rebalanceLock.js'
 import { StellarService } from '../../services/stellar.js'
 import { rebalanceHistoryService } from '../../services/serviceContainer.js'
 import { notificationService } from '../../services/notificationService.js'
+import { buildNotificationPayload } from '../../services/notificationTemplates.js'
 import { getConnectionOptions } from '../connection.js'
 import type { RebalanceJobData } from '../queues.js'
 import {
@@ -69,19 +70,17 @@ export async function processRebalanceJob(
     });
 
     try {
-      await notificationService.notify({
-        userId: portfolio.userAddress,
-        eventType: "rebalance",
-        title: "Portfolio Rebalanced",
-        message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
-        data: {
-          portfolioId,
-          trades: rebalanceResult.trades,
-          gasUsed: rebalanceResult.gasUsed,
-          trigger: triggeredBy,
-        },
-        timestamp: new Date().toISOString(),
-      });
+      await notificationService.notify(
+        buildNotificationPayload(portfolio.userAddress, {
+          eventType: 'rebalance',
+          data: {
+            portfolioId,
+            trades: rebalanceResult.trades ?? 0,
+            gasUsed: rebalanceResult.gasUsed ?? '0 XLM',
+            trigger: triggeredBy,
+          },
+        }),
+      );
     } catch (notifyErr) {
       logger.error("[WORKER:rebalance] Notification failed (non-fatal)", {
         portfolioId,
