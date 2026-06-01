@@ -150,6 +150,8 @@ CREATE TABLE IF NOT EXISTS assets (
     issuer_account    TEXT,
     coingecko_id      TEXT,
     enabled           INTEGER NOT NULL DEFAULT 1,
+    last_refreshed_at TEXT,
+    is_quarantined    INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -469,6 +471,19 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
+
+    const assetCols = this.db
+      .prepare("PRAGMA table_info(assets)")
+      .all() as Array<{ name: string }>;
+    if (!assetCols.some((c) => c.name === "last_refreshed_at")) {
+      this.db.exec("ALTER TABLE assets ADD COLUMN last_refreshed_at TEXT");
+      this.db.exec("UPDATE assets SET last_refreshed_at = datetime('now')");
+      logger.info("[DB] Migration: added last_refreshed_at column to assets");
+    }
+    if (!assetCols.some((c) => c.name === "is_quarantined")) {
+      this.db.exec("ALTER TABLE assets ADD COLUMN is_quarantined INTEGER NOT NULL DEFAULT 0");
+      logger.info("[DB] Migration: added is_quarantined column to assets");
+    }
   }
 
   private _seedDefaultAssets(): void {
@@ -500,10 +515,10 @@ export class DatabaseService {
       ["ETH", "Ethereum", null, null, "ethereum", 1],
     ];
     const stmt = this.db.prepare(
-      "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
     );
     for (const row of defaults) {
-      stmt.run(...row, now, now);
+      stmt.run(...row, now, now, now);
     }
     logger.info("[DB] Seeded default assets (XLM, USDC, BTC, ETH)");
   }
@@ -767,6 +782,8 @@ export class DatabaseService {
     issuerAccount?: string;
     coingeckoId?: string;
     enabled: boolean;
+    lastRefreshedAt?: string;
+    isQuarantined: boolean;
   }> {
     try {
       const rows = this.db
@@ -779,8 +796,10 @@ export class DatabaseService {
             issuer_account: string | null;
             coingecko_id: string | null;
             enabled: number;
+            last_refreshed_at: string | null;
+            is_quarantined: number;
           }
-        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE enabled = 1 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets ORDER BY symbol")
+        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE enabled = 1 AND is_quarantined = 0 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets ORDER BY symbol")
         .all();
       return rows.map((r) => ({
         symbol: r.symbol,
@@ -789,6 +808,8 @@ export class DatabaseService {
         issuerAccount: r.issuer_account ?? undefined,
         coingeckoId: r.coingecko_id ?? undefined,
         enabled: r.enabled === 1,
+        lastRefreshedAt: r.last_refreshed_at ?? undefined,
+        isQuarantined: r.is_quarantined === 1,
       }));
     } catch (err) {
       throw new Error(`Failed to list assets: ${err}`);
@@ -805,6 +826,8 @@ export class DatabaseService {
         issuerAccount?: string;
         coingeckoId?: string;
         enabled: boolean;
+        lastRefreshedAt?: string;
+        isQuarantined: boolean;
       }
     | undefined {
     try {
@@ -818,8 +841,10 @@ export class DatabaseService {
             issuer_account: string | null;
             coingecko_id: string | null;
             enabled: number;
+            last_refreshed_at: string | null;
+            is_quarantined: number;
           }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE symbol = ?")
+        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
         .get(symbol.toUpperCase());
       if (!row) return undefined;
       return {
@@ -829,6 +854,8 @@ export class DatabaseService {
         issuerAccount: row.issuer_account ?? undefined,
         coingeckoId: row.coingecko_id ?? undefined,
         enabled: row.enabled === 1,
+        lastRefreshedAt: row.last_refreshed_at ?? undefined,
+        isQuarantined: row.is_quarantined === 1,
       };
     } catch (err) {
       throw new Error(`Failed to get asset '${symbol}': ${err}`);
@@ -849,7 +876,7 @@ export class DatabaseService {
       const now = new Date().toISOString();
       this.db
         .prepare(
-          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
         )
         .run(
           sym,
@@ -857,6 +884,7 @@ export class DatabaseService {
           options.contractAddress ?? null,
           options.issuerAccount ?? null,
           options.coingeckoId ?? null,
+          now,
           now,
           now,
         );
@@ -867,6 +895,41 @@ export class DatabaseService {
         );
       }
       throw new Error(`Failed to add asset '${symbol}': ${err}`);
+    }
+  }
+
+  setAssetFreshness(
+    symbol: string,
+    lastRefreshedAt: string,
+    isQuarantined: boolean,
+  ): boolean {
+    try {
+      const result = this.db
+        .prepare(
+          "UPDATE assets SET last_refreshed_at = ?, is_quarantined = ?, updated_at = ? WHERE symbol = ?",
+        )
+        .run(
+          lastRefreshedAt,
+          isQuarantined ? 1 : 0,
+          new Date().toISOString(),
+          symbol.toUpperCase(),
+        );
+      return result.changes > 0;
+    } catch (err) {
+      throw new Error(`Failed to set asset freshness '${symbol}': ${err}`);
+    }
+  }
+
+  setAssetQuarantined(symbol: string, quarantined: boolean): boolean {
+    try {
+      const result = this.db
+        .prepare(
+          "UPDATE assets SET is_quarantined = ?, updated_at = ? WHERE symbol = ?",
+        )
+        .run(quarantined ? 1 : 0, new Date().toISOString(), symbol.toUpperCase());
+      return result.changes > 0;
+    } catch (err) {
+      throw new Error(`Failed to set asset quarantined '${symbol}': ${err}`);
     }
   }
 
