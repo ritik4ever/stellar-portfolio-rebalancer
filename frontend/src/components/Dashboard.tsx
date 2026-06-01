@@ -365,10 +365,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </div>
                     </div>
 
-                    <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-1 sm:space-x-4">
                         <ThemeToggle />
                         {/*  NEW: Export buttons — server-side (full data + history) when connected, client-side for demo */}
-                        <div className="flex items-center space-x-2">
+                        <div className="hidden sm:flex items-center space-x-2">
                             {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
                                 <>
                                     <button
@@ -546,7 +546,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 </div>
             )}
 
-            <div className="p-6 max-w-7xl mx-auto">
+            <div className="p-4 sm:p-6 max-w-7xl mx-auto">
                 {/* Tab Navigation */}
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
                     <nav className="flex space-x-8">
@@ -603,7 +603,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 ) :  (
                     <>
                         {/* Portfolio Overview */}
-                        <div className="grid lg:grid-cols-3 gap-6 mb-8">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
                             <div className="lg:col-span-2">
                                 {/* NEW: Portfolio Value Skeleton Loading State */}
                                 {loading ? (
@@ -812,7 +812,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </div>
 
                         {/* NEW: Asset Cards Skeleton Loading State */}
-                        <div className="grid lg:grid-cols-3 gap-6 mb-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
                             {loading ? (
                                 // Show skeleton cards while loading
                                 [1, 2, 3].map((i) => (
