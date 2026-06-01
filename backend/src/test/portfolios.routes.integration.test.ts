@@ -20,13 +20,13 @@ const JWT_SECRET = 'test-jwt-secret-for-portfolio-tests-min-32!!'
 const OWNER_ADDRESS = 'GPORTFOWNER123456789ABCDEF'
 const OTHER_ADDRESS = 'GPORTFOTHER123456789ABCDEF'
 
-function createApp(): Express {
+async function createApp(): Promise<Express> {
     const app = express()
     app.use(cors({ origin: true, credentials: true }))
     app.use(express.json({ limit: '10mb' }))
     app.set('trust proxy', 1)
 
-    const { portfolioRouter } = require('../api/routes.js') as any
+    const { portfolioRouter } = await import('../api/routes.js') as any
     app.use('/api', portfolioRouter)
 
     return app
@@ -51,7 +51,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         testDbPath = join(testDir, 'test.db')
         process.env.DB_PATH = testDbPath
 
-        app = createApp()
+        app = await createApp()
     })
 
     afterAll(() => {

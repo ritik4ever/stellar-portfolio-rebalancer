@@ -19,14 +19,14 @@ vi.mock('../utils/logger.js', () => ({
 const JWT_SECRET = 'test-jwt-secret-for-rebalancing-tests-min-32!!'
 const ADMIN_SECRET = 'test-admin-secret-for-rebalancing-tests-32!'
 
-function createApp(): Express {
+async function createApp(): Promise<Express> {
     const app = express()
     app.use(cors({ origin: true, credentials: true }))
     app.use(express.json({ limit: '10mb' }))
     app.set('trust proxy', 1)
 
     // Mount rebalancing routes
-    const { rebalancingRouter } = require('../api/rebalancing.routes.js') as any
+    const { rebalancingRouter } = await import('../api/rebalancing.routes.js') as any
     app.use('/api', rebalancingRouter)
 
     return app
@@ -60,7 +60,7 @@ describe('Rebalancing API Integration Tests', () => {
         testDbPath = join(testDir, 'test.db')
         process.env.DB_PATH = testDbPath
 
-        app = createApp()
+        app = await createApp()
     })
 
     afterAll(() => {
