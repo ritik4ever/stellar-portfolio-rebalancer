@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
-import { ConflictError } from "../types/index.js";
+import { ConflictError, BackupVerificationError } from "../types/index.js";
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 
@@ -1103,6 +1103,8 @@ export class DatabaseService {
   }
 
   deleteUserData(userId: string): void {
+    // Verify a recent backup before destructive user data deletion
+    this.verifyBackupExists();
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
     this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
     const portfolios = this.db
@@ -1122,6 +1124,8 @@ export class DatabaseService {
   }
 
   clearAll(): void {
+    // Verify a recent backup before clearing all database tables
+    this.verifyBackupExists();
     try {
       this.db.prepare("DELETE FROM rebalance_history").run();
       this.db.prepare("DELETE FROM portfolios").run();
@@ -1412,6 +1416,8 @@ export class DatabaseService {
   }
 
   clearHistory(portfolioId?: string): void {
+    // Verify a recent backup before clearing rebalance history
+    this.verifyBackupExists();
     try {
       if (portfolioId) {
         this.db

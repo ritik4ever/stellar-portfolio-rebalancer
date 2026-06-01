@@ -95,6 +95,15 @@ export class ConflictError extends Error {
     }
 }
 
+// Thrown when a destructive database operation lacks a recent backup
+export class BackupVerificationError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'BackupVerificationError'
+    }
+}
+
+
 // Rebalance event interface
 export interface RebalanceEvent {
     id: string
