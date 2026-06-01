@@ -559,7 +559,7 @@ describe('Protected routes — token ownership and revocation', () => {
         const expired = jwt.sign(
             { sub: address, type: 'access' },
             TEST_JWT_SECRET,
-            { expiresIn: -1 }
+            { expiresIn: -31 }
         )
 
         const res = await request(app)

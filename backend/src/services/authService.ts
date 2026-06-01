@@ -10,6 +10,7 @@ import {
   generateRefreshTokenId,
 } from "../db/refreshTokenDb.js";
 import { logger } from "../utils/logger.js";
+import { getJwtClockSkewSec } from "../config/jwtConfig.js";
 
 const ACCESS_EXPIRY_SEC = parseInt(
   process.env.JWT_ACCESS_EXPIRY_SEC || "900",
@@ -51,6 +52,7 @@ export function getAuthConfig(): {
   enabled: boolean;
   accessExpirySec: number;
   refreshExpirySec: number;
+  clockSkewSec: number;
 } {
   const secretSet = Boolean(
     process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32,
@@ -59,6 +61,7 @@ export function getAuthConfig(): {
     enabled: secretSet,
     accessExpirySec: ACCESS_EXPIRY_SEC,
     refreshExpirySec: REFRESH_EXPIRY_SEC,
+    clockSkewSec: getJwtClockSkewSec(),
   };
 }
 
@@ -93,12 +96,20 @@ export async function issueTokens(address: string): Promise<AuthTokens> {
 export function verifyAccessToken(token: string): TokenPayload | null {
   const secret = getJwtSecret();
   try {
-    const decoded = jwt.verify(token, secret) as TokenPayload;
-    if (decoded.type !== "access") return null;
+    const decoded = jwt.verify(token, secret, {
+      clockTolerance: getJwtClockSkewSec(),
+    }) as TokenPayload;
+    if (decoded.type !== "access" || isIssuedInFuture(decoded)) return null;
     return decoded;
   } catch {
     return null;
   }
+}
+
+function isIssuedInFuture(payload: TokenPayload): boolean {
+  if (typeof payload.iat !== "number") return false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  return payload.iat > nowSec + getJwtClockSkewSec();
 }
 
 export async function refreshTokens(
@@ -108,10 +119,12 @@ export async function refreshTokens(
   if (!row) return null;
   const secret = getJwtSecret();
   try {
-    const decoded = jwt.verify(refreshToken, secret) as TokenPayload & {
+    const decoded = jwt.verify(refreshToken, secret, {
+      clockTolerance: getJwtClockSkewSec(),
+    }) as TokenPayload & {
       jti?: string;
     };
-    if (decoded.type !== "refresh") return null;
+    if (decoded.type !== "refresh" || isIssuedInFuture(decoded)) return null;
   } catch {
     await deleteRefreshTokenById(row.id).catch(() => {});
     return null;

@@ -1,5 +1,10 @@
 import { getFeatureFlags, type FeatureFlags } from "./featureFlags.js";
 import { logger } from "../utils/logger.js";
+import {
+  DEFAULT_JWT_CLOCK_SKEW_SEC,
+  getJwtClockSkewSec,
+  MAX_JWT_CLOCK_SKEW_SEC,
+} from "./jwtConfig.js";
 
 export interface StartupConfig {
   nodeEnv: "development" | "test" | "production";
@@ -11,6 +16,7 @@ export interface StartupConfig {
   corsOrigins: string[];
   hasRebalanceSigner: boolean;
   jwtAuthEnabled: boolean;
+  jwtClockSkewSec: number;
   featureFlags: FeatureFlags;
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
@@ -150,6 +156,20 @@ export function validateStartupConfigOrThrow(
   }
   const jwtAuthEnabled = jwtSecretRaw.length >= 32;
 
+  const jwtClockSkewSecRaw = (
+    env.JWT_CLOCK_SKEW_SEC || `${DEFAULT_JWT_CLOCK_SKEW_SEC}`
+  ).trim();
+  const jwtClockSkewSec = Number.parseInt(jwtClockSkewSecRaw, 10);
+  if (
+    !Number.isInteger(jwtClockSkewSec) ||
+    jwtClockSkewSec < 0 ||
+    jwtClockSkewSec > MAX_JWT_CLOCK_SKEW_SEC
+  ) {
+    errors.push(
+      `JWT_CLOCK_SKEW_SEC '${env.JWT_CLOCK_SKEW_SEC}' is invalid. Provide an integer between 0 and ${MAX_JWT_CLOCK_SKEW_SEC} seconds.`,
+    );
+  }
+
   if (stellarNetwork && horizonUrl) {
     const host = horizonUrl.hostname.toLowerCase();
     const isTestnetHost = host.includes("testnet");
@@ -227,6 +247,7 @@ export function validateStartupConfigOrThrow(
     consentAuditRetentionDays: Number.isInteger(consentAuditRetentionDays) ? consentAuditRetentionDays : 365,
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
+    jwtClockSkewSec: getJwtClockSkewSec(env),
     featureFlags,
   };
 }
@@ -259,6 +280,7 @@ export function buildStartupSummary(
         : undefined,
     },
     jwtAuthEnabled: config.jwtAuthEnabled,
+    jwtClockSkewSec: config.jwtClockSkewSec,
     readinessCacheTtlMs: config.readinessCacheTtlMs,
     consentAuditRetentionDays: config.consentAuditRetentionDays,
     featureFlags: {
@@ -295,6 +317,7 @@ export function logStartupSubsystems(
       autoRebalancer: config.autoRebalancerEnabled
         ? "enabled"
         : "disabled (non-production)",
+      jwtClockSkew: `${config.jwtClockSkewSec}s`,
     },
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
