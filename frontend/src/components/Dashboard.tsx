@@ -330,36 +330,7 @@ if (loading) {
     )
 }
 
-return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        {/* Header */}
-        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                    <button
-                        onClick={() => onNavigate('landing')}
-                        className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-                    >
-                        <ArrowLeft className="w-5 h-5" />
-                    </button>
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Portfolio Dashboard</h1>
-                        {publicKey ? (
-                            <div className="flex items-center space-x-4 mt-1">
-                                <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
-                                    <span className="capitalize font-medium">
-                                        {walletType} Wallet
-                                    </span>
-                                    <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
-                                </div>
-                                <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-500">
-                                    <span>Contract:</span>
-                                    <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
-                                    <a
-                                        href={`https://stellar.expert/explorer/testnet/contract/${contractAddress}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-700"
+
                                     >
                                         <ExternalLink className="w-3 h-3" />
                                     </a>
@@ -472,18 +443,7 @@ return (
             </div>
         </div>
 
-        {/* Delete my data confirmation modal */}
-        {showDeleteConfirm && (
-            <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                        <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete my data</h2>
-                    </div>
-                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                        This will permanently delete your consent records, all portfolios, and rebalance history from our servers. You will be signed out. This action cannot be undone.
-                    </p>
-                    <div className="flex justify-end gap-3">
+
                         <button
                             onClick={() => setShowDeleteConfirm(false)}
                             disabled={deleting}
@@ -589,36 +549,7 @@ return (
                 </nav>
             </div>
 
-            {/* Debug Info */}
-            {(import.meta as any).env?.DEV && (
-                <div className="bg-gray-100 dark:bg-gray-800 p-2 rounded mb-4 text-xs dark:text-gray-300">
-                    <div>Portfolio ID: {portfolioData?.id}</div>
-                    <div>Allocations: {JSON.stringify(allocationData)}</div>
-                    <div>Price source: {priceSource}</div>
-                    {feedMeta ? (
-                        <div>
-                            Feed: {feedMeta.provider} / {feedMeta.resolutionHint} / degraded=
-                            {String(feedMeta.degraded)}
-                        </div>
-                    ) : null}
-                </div>
-            )}
 
-            {activeTab === 'analytics' ? (
-                <PerformanceChart portfolioId={portfolioData?.id || null} />
-            ) : activeTab === 'notifications' ? (
-                <NotificationPreferences userId={publicKey || 'demo'} portfolioId={portfolioData?.id || null} />
-            ) : (
-                <>
-                    {/* Portfolio Overview */}
-                    <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                        <div className="lg:col-span-2">
-                            {/* NEW: Portfolio Value Skeleton Loading State */}
-                            {loading ? (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
-                                        <div className="space-x-2 flex items-center">
                                             <div className="w-32 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
                                             <div className="w-24 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                                         </div>
@@ -776,7 +707,7 @@ return (
                                             </div>
                                         ))}
                                     </div>
-                                </div>
+
                             ) : (
                                 <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
