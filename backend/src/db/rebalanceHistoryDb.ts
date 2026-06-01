@@ -12,6 +12,7 @@ export interface RebalanceEventRow {
     risk_alerts: unknown
     error: string | null
     details: unknown
+    event_source: string | null
 }
 
 function rowToEvent(r: RebalanceEventRow) {

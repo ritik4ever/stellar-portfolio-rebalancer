@@ -34,24 +34,26 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
     try {
         const portfolioId = req.query.portfolioId as string | undefined
         const limit = (req.query.limit as unknown as number | undefined) ?? 50
+        const offset = (req.query.offset as unknown as number | undefined) ?? 0
         const source = parseHistorySource(req.query.source)
         const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp)
         const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
         const syncOnChain = (req.query.syncOnChain as unknown as boolean | undefined) === true
 
-        logger.info('Rebalance history request', { portfolioId: portfolioId || 'all' })
+        logger.info('Rebalance history request', { portfolioId: portfolioId || 'all', limit, offset })
         if (syncOnChain) {
             await contractEventIndexerService.syncOnce()
         }
 
-        const history = await rebalanceHistoryService.getRebalanceHistory(
+        const { events: history, total } = await rebalanceHistoryService.getRebalanceHistory(
             portfolioId || undefined,
             limit,
             {
                 eventSource: source,
                 startTimestamp,
                 endTimestamp
-            }
+            },
+            offset
         )
 
         return ok(
@@ -63,9 +65,15 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
                     source,
                     startTimestamp,
                     endTimestamp
+                },
+                pagination: {
+                    total,
+                    limit,
+                    offset,
+                    hasMore: offset + history.length < total
                 }
             },
-            { meta: { count: history.length } }
+            { meta: { count: history.length, total } }
         )
 
     } catch (error) {

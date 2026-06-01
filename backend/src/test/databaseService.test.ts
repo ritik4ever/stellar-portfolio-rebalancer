@@ -102,11 +102,12 @@ describe('DatabaseService', () => {
                 details: { reason: 'scheduled' }
             })
 
-            const fullHistory = db.getRebalanceHistory(id, 10)
+            const { events: fullHistory, total } = db.getRebalanceHistory(id, 10)
             const autos = db.getRecentAutoRebalances(id, 10)
             const since = db.getAutoRebalancesSince(id, new Date(Date.now() - 60 * 1000))
 
             expect(fullHistory).toHaveLength(2)
+            expect(total).toBe(2)
             expect(autos).toHaveLength(1)
             expect(autos[0].isAutomatic).toBe(true)
             expect(since.length).toBeGreaterThanOrEqual(1)
