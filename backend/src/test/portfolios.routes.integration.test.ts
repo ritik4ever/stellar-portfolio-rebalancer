@@ -512,6 +512,8 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
 
         it('returns dry-run result envelope for owner', async () => {
+            expect(portfolioId).toBeDefined()
+
             const res = await request(app)
                 .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
                 .set(authHeader(OWNER_ADDRESS))
@@ -522,11 +524,14 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             if (res.status === 200) {
                 expect(res.body.success).toBe(true)
-                expect(res.body.data).toHaveProperty('result')
-                expect(res.body.data.result).toHaveProperty('portfolioId')
-                expect(res.body.data.result).toHaveProperty('guardrails')
-                expect(res.body.data.result).toHaveProperty('estimatedTrades')
-                expect(res.body.data.result).toHaveProperty('skippedAssets')
+                expect(res.body.data.result).toMatchObject({
+                    portfolioId,
+                    guardrails: expect.objectContaining({
+                        riskManagement: expect.objectContaining({ reason: expect.any(String) }),
+                    }),
+                })
+                expect(Array.isArray(res.body.data.result.estimatedTrades)).toBe(true)
+                expect(Array.isArray(res.body.data.result.skippedAssets)).toBe(true)
             }
         })
 

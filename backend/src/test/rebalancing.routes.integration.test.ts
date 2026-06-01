@@ -240,7 +240,7 @@ describe('Rebalancing API Integration Tests', () => {
                 })
         })
 
-        it('returns actionable response for admin dry-run requests', async () => {
+        it('returns actionable NOT_FOUND for admin dry-run when portfolio is missing', async () => {
             const res = await request(app)
                 .post('/api/auto-rebalancer/dry-run/non-existent-portfolio')
                 .set(makeAdminHeaders(adminKp))
@@ -252,6 +252,7 @@ describe('Rebalancing API Integration Tests', () => {
             if (res.status === 404) {
                 expect(res.body.success).toBe(false)
                 expect(res.body.error.code).toBe('NOT_FOUND')
+                expect(res.body.error.message).toMatch(/not found/i)
             }
         })
     })
