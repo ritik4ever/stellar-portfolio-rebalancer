@@ -7,6 +7,7 @@ export const QUEUE_NAMES = {
   REBALANCE: "rebalance",
   ANALYTICS_SNAPSHOT: "analytics-snapshot",
   IDEMPOTENCY_CLEANUP: "idempotency-cleanup",
+  DLQ: "dead-letter-queue",
 } as const;
 
 export interface PortfolioCheckJobData {
@@ -28,6 +29,16 @@ export interface AnalyticsSnapshotJobData {
 export interface IdempotencyCleanupJobData {
   triggeredBy?: "scheduler" | "manual" | "startup";
   correlationId?: string;
+}
+
+export interface DLQJobData {
+  originalQueue: string;
+  originalJobId: string;
+  attempts: number;
+  error: string;
+  stack: string;
+  failedAt: string;
+  payload: any;
 }
 
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
@@ -109,6 +120,26 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   }
 }
 
+let dlqQueue: Queue<DLQJobData> | null = null;
+
+export function getDLQQueue(): Queue<DLQJobData> | null {
+  try {
+    if (!dlqQueue) {
+      dlqQueue = new Queue(QUEUE_NAMES.DLQ, {
+        connection: getConnectionOptions(),
+        defaultJobOptions: {
+          ...getDefaultJobOptions(),
+          attempts: 1, // DLQ jobs themselves should not be retried
+        },
+      });
+      logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.DLQ}`);
+    }
+    return dlqQueue;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
@@ -117,10 +148,12 @@ export async function closeAllQueues(): Promise<void> {
     rebalanceQueue?.close(),
     analyticsSnapshotQueue?.close(),
     idempotencyCleanupQueue?.close(),
+    dlqQueue?.close(),
   ]);
   portfolioCheckQueue = null;
   rebalanceQueue = null;
   analyticsSnapshotQueue = null;
   idempotencyCleanupQueue = null;
+  dlqQueue = null;
   logger.info("[QUEUE] All queues closed");
 }
