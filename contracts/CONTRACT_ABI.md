@@ -39,6 +39,19 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
 
+#### Portfolio ID derivation (deterministic)
+
+- **Strategy:** Portfolio IDs are allocated from a monotonically increasing
+  counter stored in persistent contract storage under `DataKey::NextPortfolioId`.
+  The counter starts at `1` and increments by one for each created portfolio.
+- **Behavioral guarantee:** Given the same contract persistent state, the
+  assigned portfolio id for a `create_portfolio` invocation is deterministic.
+  Off-chain systems may rely on this stable mapping to correlate portfolios
+  across sync operations.
+- **Notes:** The contract exposes `get_portfolio` to read portfolio contents by
+  id. Consumers should store the returned id along with the portfolio metadata
+  to maintain a canonical reference.
+
 ### `get_portfolio(env: Env, portfolio_id: u64) -> Portfolio`
 
 - **Purpose:** Reads a stored portfolio by ID.
