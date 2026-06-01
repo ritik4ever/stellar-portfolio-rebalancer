@@ -29,7 +29,7 @@ This document is the canonical reference for `backend/.env.example`.
 | `PGPASSWORD` | string | No | empty | PostgreSQL password. |
 | `PGDATABASE` | string | No | empty | PostgreSQL database name. |
 | `CI` | string | No | empty | CI marker used by scripts/runtime checks. |
-| `DB_PATH` | path | No | `./data/portfolio.db` | SQLite database path for local/test fallback. |
+| `DB_PATH` | path | No | `./data/portfolio.db` | SQLite database file path used when PostgreSQL is not configured. The directory is created automatically. Validated on startup: WAL mode, foreign keys, synchronous mode, and wal_autocheckpoint are checked and logged with actionable messages if misconfigured. |
 | `COINGECKO_API_KEY` | string | No | empty | CoinGecko API key for higher rate limits. |
 | `REFLECTOR_API_URL` | URL | No | empty | Reflector API base URL for off-chain price/oracle fallback paths. |
 | `PRICE_CACHE_DURATION` | integer (ms) | No | `300000` | Price-cache TTL. |
@@ -127,6 +127,20 @@ This document is the canonical reference for `backend/.env.example`.
 | `METRICS_PREFIX` | string | No | `stellar_portfolio_` | Prefix applied to metric names. |
 | `METRICS_DEFAULT_LABELS_SERVICE` | string | No | `stellar-portfolio-backend` | Default service label for metrics. |
 | `ALERT_CONTACT` | string | No | `platform-oncall` | Alert-routing metadata label for operations. |
+
+## SQLite Startup Validation
+
+When the backend starts in SQLite mode (`DB_PATH` is used and no PostgreSQL connection is configured), the following pragmas are inspected automatically and logged with actionable guidance if they are not set correctly:
+
+| Pragma | Expected | Risk if wrong |
+|---|---|---|
+| `journal_mode` | `wal` | Concurrent reads blocked during writes; hot-backup unsafe |
+| `foreign_keys` | `1` (ON) | Referential integrity not enforced; orphaned rows possible |
+| `synchronous` | `NORMAL` or `FULL` (1 or 2) | `OFF` risks data loss or corruption on crash/power loss |
+| `wal_autocheckpoint` | `> 0` (default `1000`) | `0` disables auto-checkpointing; WAL file grows unboundedly |
+
+All four pragmas are applied in `SCHEMA_SQL` at startup. If a warning or error appears in the logs, follow the `fix:` field in the structured log entry. The most common cause is a pre-existing database file created by a different tool or an older version of this project.
+
 
 ## Frontend Variable Reference
 
