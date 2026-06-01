@@ -14,9 +14,33 @@ interface AssetCardProps {
     price?: {
         price: number | null
         change: number | null
+        source?: string
+        quoteAgeSeconds?: number
+        servedFromCache?: boolean
+        dataTier?: string
     } | null
     // NEW: Loading skeleton prop
     isLoading?: boolean
+}
+
+function getFallbackLabel(price?: AssetCardProps['price']): string | null {
+    if (!price) return null
+    if (price.source?.includes('fallback')) {
+        return 'Fallback price'
+    }
+    if (price.source?.includes('cached') || price.servedFromCache) {
+        return 'Cached price'
+    }
+    if (price.source === 'reflector') {
+        return 'Server quote'
+    }
+    if (price.source === 'coingecko_browser') {
+        return 'Browser quote'
+    }
+    if (price.source) {
+        return price.source.replace(/_/g, ' ')
+    }
+    return null
 }
 
 const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }) => {
@@ -62,18 +86,26 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
     const hasChange = typeof price?.change === 'number'
     const isPositive = changeValue > 0
     const isNegative = changeValue < 0
-    const isNeutral = changeValue === 0
+    const isNeutral = hasChange && changeValue === 0
 
     const priceValue = price?.price
     const hasPrice = typeof priceValue === 'number'
     const formattedPrice = hasPrice
         ? new Intl.NumberFormat('en-US', {
-              style: 'currency',
-              currency: 'USD',
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2
-          }).format(priceValue)
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(priceValue)
         : 'N/A'
+
+    const priceLabel = !hasPrice
+        ? 'Missing quote'
+        : getFallbackLabel(price) ?? 'Live quote'
+
+    const priceCaption = price?.quoteAgeSeconds !== undefined && Number.isFinite(price.quoteAgeSeconds)
+        ? `Updated ${Math.round(price.quoteAgeSeconds)}s ago`
+        : null
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 dark:border-gray-700">
@@ -117,9 +149,7 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
                     <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Value</span>
                     <span className="text-xs sm:text-sm font-medium dark:text-gray-200">${asset.amount.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between">
-                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Price</span>
-                    <span className="text-xs sm:text-sm text-gray-600 dark:text-gray-300" data-testid="price-value">{formattedPrice}</span>
+
                 </div>
                 <div className="flex justify-between">
                     <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Target</span>
