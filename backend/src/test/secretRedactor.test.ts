@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { redactObject } from '../utils/secretRedactor.js'
+import { redactObject, redactString } from '../utils/secretRedactor.js'
 
 describe('secretRedactor', () => {
     it('redacts authorization header values', () => {
@@ -71,5 +71,41 @@ describe('secretRedactor', () => {
         expect(output.arrayValues[0].api_key).toBe('[REDACTED]')
         expect(output.arrayValues[1].asset).toBe('XLM')
         expect(output.request.meta.retries).toBe(2)
+    })
+
+    it('redacts webhookUrl and webhook fields', () => {
+        const input = {
+            sentTo: {
+                webhookUrl: 'https://hooks.example.com/secret-token',
+                webhook: 'https://hooks.example.com/other-token',
+            },
+        }
+        const output = redactObject(input)
+        expect((output.sentTo as any).webhookUrl).toBe('[REDACTED]')
+        expect((output.sentTo as any).webhook).toBe('[REDACTED]')
+    })
+
+    it('redacts email address fields', () => {
+        const input = { emailAddress: 'user@example.com', smtpUser: 'smtp@example.com', smtpPass: 'hunter2' }
+        const output = redactObject(input)
+        expect((output as any).emailAddress).toBe('[REDACTED]')
+        expect((output as any).smtpUser).toBe('[REDACTED]')
+        expect((output as any).smtpPass).toBe('[REDACTED]')
+    })
+
+    it('redacts Bearer tokens in strings', () => {
+        expect(redactString('Authorization: Bearer abc123xyz')).toBe('Authorization: Bearer [REDACTED]')
+        expect(redactString('no token here')).toBe('no token here')
+    })
+
+    it('redacts Stellar secret keys in strings', () => {
+        // Valid Stellar secret key: S + 55 chars from base32 alphabet [A-Z2-7]
+        const stellarSecret = 'SABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW'
+        expect(redactString(stellarSecret)).toBe('[REDACTED]')
+    })
+
+    it('redacts API keys in query params', () => {
+        const url = 'https://api.example.com/data?api_key=supersecret&foo=bar'
+        expect(redactString(url)).toBe('https://api.example.com/data?api_key=[REDACTED]&foo=bar')
     })
 })
