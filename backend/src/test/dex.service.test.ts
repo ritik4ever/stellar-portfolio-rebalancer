@@ -567,6 +567,74 @@ describe("StellarDEXService", () => {
     });
   });
 
+  // ── Rebalance dry-run assessment (assessRebalanceTrades) ─────────────────
+
+  describe("assessRebalanceTrades", () => {
+    const healthyOrderbook = createOrderbook(
+      [{ price: 0.185, amount: 5000 }],
+      [{ price: 0.186, amount: 4000 }],
+    );
+
+    beforeEach(() => {
+      const mockOrderbookCall = vi.fn().mockResolvedValue(healthyOrderbook);
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: mockOrderbookCall,
+      } as any);
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+    });
+
+    it("returns executable trades and fee estimate for valid requests", async () => {
+      const trades: DEXTradeRequest[] = [
+        {
+          tradeId: "dry-run-1",
+          fromAsset: "XLM",
+          toAsset: "USDC",
+          amount: 100,
+        },
+      ];
+
+      const result = await service.assessRebalanceTrades(trades, {
+        maxSpreadBps: 500,
+        minLiquidityCoverage: 0.5,
+      });
+
+      expect(result.status).toBe("success");
+      expect(result.executableTrades).toHaveLength(1);
+      expect(result.skippedTrades).toHaveLength(0);
+      expect(result.executableTrades[0]?.status).toBe("executable");
+      expect(result.executableTrades[0]?.estimatedReceivedAmount).toBeGreaterThan(0);
+      expect(result.totalEstimatedFeeXLM).toBeGreaterThanOrEqual(0);
+    });
+
+    it("skips trades when spread exceeds tolerance", async () => {
+      const wideSpread = createOrderbook(
+        [{ price: 0.17, amount: 1000 }],
+        [{ price: 0.2, amount: 1000 }],
+      );
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: vi.fn().mockResolvedValue(wideSpread),
+      } as any);
+
+      const result = await service.assessRebalanceTrades(
+        [{ tradeId: "dry-run-2", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { maxSpreadBps: 100 },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.executableTrades).toHaveLength(0);
+      expect(result.skippedTrades).toHaveLength(1);
+      expect(result.skippedTrades[0]?.skipReason).toMatch(/spread/i);
+    });
+
+    it("skips zero-amount trades with actionable reason", async () => {
+      const result = await service.assessRebalanceTrades([
+        { tradeId: "dry-run-3", fromAsset: "XLM", toAsset: "USDC", amount: 0 },
+      ]);
+
+      expect(result.skippedTrades[0]?.skipReason).toMatch(/greater than zero/i);
+    });
+  });
+
   // ── Liquidity coverage tests ─────────────────────────────────────────────
 
   describe("Liquidity coverage calculations", () => {

@@ -373,6 +373,38 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/portfolio/{id}/rebalance/dry-run': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Dry-run rebalance',
+                description: 'Preview likely rebalance outcome (estimated trades, skipped assets, guardrails) without executing trades or writing rebalance history.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    options: {
+                                        type: 'object',
+                                        properties: {
+                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Dry-run preview', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/portfolio/{id}/rebalance': {
             post: {
                 tags: ['Portfolio'],
@@ -705,6 +737,38 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Check completed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '401': { description: 'Unauthorized' },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/auto-rebalancer/dry-run/{portfolioId}': {
+            post: {
+                tags: ['Auto-rebalancer'],
+                summary: 'Dry-run a portfolio rebalance',
+                description: 'Preview auto-rebalancer execution for one portfolio without submitting trades or writing history. Admin only.',
+                parameters: [{ name: 'portfolioId', in: 'path', required: true, schema: { type: 'string' } }],
+                security: [{ adminAuth: [] }],
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    options: {
+                                        type: 'object',
+                                        properties: {
+                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Dry-run result', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '401': { description: 'Unauthorized' },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },

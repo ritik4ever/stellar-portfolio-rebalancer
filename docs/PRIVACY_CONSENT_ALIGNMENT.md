@@ -432,6 +432,25 @@ Use this checklist to ensure privacy policy matches implementation:
 
 ---
 
+## Consent history export (GDPR portability)
+
+**Endpoint:** `GET /api/consent/export` (alias: `/api/v1/consent/export`)
+
+Users with JWT authentication can download their own consent and revocation history. Supports `format=json` (default) or `format=csv`.
+
+**Response (JSON)** includes:
+
+- `exportedAt` — ISO timestamp of the export
+- `deployedPolicyVersions` — current Terms / Privacy / Cookie document versions from server config
+- `current` — latest consent snapshot with acceptance dates and stored `policyVersions`
+- `history` — append-only grant/revoke events with `timestamp`, `action`, and `policyVersions`
+
+Query `GET /api/consent/audit` returns the same events in a lighter shape; prefer `/consent/export` for portability downloads.
+
+**Environment variables:** `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`, `LEGAL_COOKIE_VERSION` (default `1.0.0`).
+
+---
+
 ## Notification Preferences Alignment
 
 **File:** `backend/src/services/notificationService.ts`

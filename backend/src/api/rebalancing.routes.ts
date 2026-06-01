@@ -10,6 +10,7 @@ import { requireAdmin } from '../middleware/auth.js'
 import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 
 export const rebalancingRouter = Router()
 
@@ -28,6 +29,13 @@ const parseHistorySource = (value: unknown): 'offchain' | 'simulated' | 'onchain
     if (normalized === 'simulated') return 'simulated'
     if (normalized === 'onchain') return 'onchain'
     return undefined
+}
+
+const parseDryRunOptions = (body: unknown): ExecuteRebalanceOptions => {
+    const options = (body as { options?: { slippageOverrides?: Record<string, number> } } | undefined)?.options
+    return {
+        tradeSlippageOverrides: options?.slippageOverrides
+    }
 }
 
 rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
@@ -171,6 +179,35 @@ rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, adminRateLi
         return ok(res, { message: 'Force check completed' })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+rebalancingRouter.post('/auto-rebalancer/dry-run/:portfolioId', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        if (!autoRebalancer) {
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
+        }
+
+        const portfolioId = req.params.portfolioId
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        }
+
+        const result = await autoRebalancer.dryRunPortfolioRebalance(portfolioId, parseDryRunOptions(req.body))
+        return ok(res, { result })
+    } catch (error) {
+        const message = getErrorMessage(error)
+        const normalized = message.toLowerCase()
+        logger.error('[ERROR] Auto-rebalancer dry-run failed', {
+            portfolioId: req.params.portfolioId,
+            error: getErrorObject(error)
+        })
+
+        if (normalized.includes('not found')) {
+            return fail(res, 404, 'NOT_FOUND', message)
+        }
+
+        return fail(res, 500, 'INTERNAL_ERROR', message)
     }
 })
 

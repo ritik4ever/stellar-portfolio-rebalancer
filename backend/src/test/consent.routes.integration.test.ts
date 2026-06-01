@@ -116,6 +116,70 @@ describe('consent routes integration', () => {
         expect(blocked.body.error?.code).toBe('FORBIDDEN')
     })
 
+    it('GET /api/v1/consent/export returns portable history with policy versions', async () => {
+        process.env.LEGAL_TERMS_VERSION = '3.0.0'
+        process.env.LEGAL_PRIVACY_VERSION = '3.0.0'
+        process.env.LEGAL_COOKIE_VERSION = '3.0.0'
+
+        const userId = testUser('EXPORT')
+        const token = generateAccessToken(userId)
+
+        await request(app)
+            .post('/api/v1/consent/grant')
+            .set('Authorization', `Bearer ${token}`)
+            .send({})
+            .expect(200)
+
+        await request(app)
+            .post('/api/v1/consent/revoke')
+            .set('Authorization', `Bearer ${token}`)
+            .send({})
+            .expect(200)
+
+        const jsonExport = await request(app)
+            .get('/api/v1/consent/export')
+            .set('Authorization', `Bearer ${token}`)
+            .query({ format: 'json' })
+            .expect(200)
+
+        const payload = jsonExport.body.data.export
+        expect(payload.userId).toBe(userId)
+        expect(payload.history).toHaveLength(2)
+        expect(payload.history[0].policyVersions.terms).toBe('3.0.0')
+        expect(payload.current.revokedAt).toBeTruthy()
+
+        const csvExport = await request(app)
+            .get('/api/v1/consent/export')
+            .set('Authorization', `Bearer ${token}`)
+            .query({ format: 'csv' })
+            .expect(200)
+
+        expect(csvExport.headers['content-type']).toMatch(/text\/csv/)
+        expect(csvExport.text).toContain('grant')
+        expect(csvExport.text).toContain('revoke')
+    })
+
+    it('GET /api/v1/consent/export returns 403 for another user when JWT is enabled', async () => {
+        const owner = testUser('OWN')
+        const other = testUser('OTH')
+        const ownerToken = generateAccessToken(owner)
+        const otherToken = generateAccessToken(other)
+
+        await request(app)
+            .post('/api/v1/consent/grant')
+            .set('Authorization', `Bearer ${ownerToken}`)
+            .send({})
+            .expect(200)
+
+        const blocked = await request(app)
+            .get('/api/v1/consent/export')
+            .set('Authorization', `Bearer ${otherToken}`)
+            .query({ userId: owner, format: 'json' })
+            .expect(403)
+
+        expect(blocked.body.error?.code).toBe('FORBIDDEN')
+    })
+
     it('GET /api/v1/consent/audit returns an append-only log of all consent events', async () => {
         const userId = testUser('AUDIT')
         const token = generateAccessToken(userId)
@@ -201,4 +265,5 @@ describe('consent routes integration', () => {
 
         expect(purge.body.error?.code).toBe('VALIDATION_ERROR')
     })
+
 })
