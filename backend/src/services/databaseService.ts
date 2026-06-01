@@ -56,9 +56,27 @@ interface RebalanceHistoryRow {
   gas_used: string;
   status: string;
   is_automatic: number;
+  event_source?: string | null;
+  on_chain_confirmed?: number | null;
+  on_chain_event_type?: string | null;
+  on_chain_tx_hash?: string | null;
+  on_chain_ledger?: number | null;
+  on_chain_contract_id?: string | null;
+  on_chain_paging_token?: string | null;
+  is_simulated?: number | null;
   risk_alerts: string | null;
   error: string | null;
   details: string | null;
+}
+
+export interface IndexerCursorState {
+  name: string;
+  cursor?: string;
+  latestLedger?: number;
+  updatedAt?: string;
+  lastSuccessfulSyncAt?: string;
+  lastFailedSyncAt?: string;
+  lastError?: string;
 }
 
 interface ConsentAuditRow {
@@ -117,6 +135,14 @@ CREATE TABLE IF NOT EXISTS rebalance_history (
     gas_used      TEXT NOT NULL,
     status        TEXT NOT NULL,
     is_automatic  INTEGER NOT NULL DEFAULT 0,
+    event_source  TEXT NOT NULL DEFAULT 'offchain',
+    on_chain_confirmed INTEGER NOT NULL DEFAULT 0,
+    on_chain_event_type TEXT,
+    on_chain_tx_hash TEXT,
+    on_chain_ledger INTEGER,
+    on_chain_contract_id TEXT,
+    on_chain_paging_token TEXT,
+    is_simulated INTEGER NOT NULL DEFAULT 0,
     risk_alerts   TEXT,
     error         TEXT,
     details       TEXT,
@@ -128,6 +154,20 @@ CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id
 
 CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id_timestamp
     ON rebalance_history (portfolio_id, timestamp);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_history_on_chain_paging_token
+    ON rebalance_history (on_chain_paging_token)
+    WHERE on_chain_paging_token IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS contract_event_indexer_state (
+    name                    TEXT PRIMARY KEY,
+    cursor                  TEXT,
+    latest_ledger           INTEGER,
+    updated_at              TEXT NOT NULL,
+    last_successful_sync_at TEXT,
+    last_failed_sync_at     TEXT,
+    last_error              TEXT
+);
 
 CREATE TABLE IF NOT EXISTS price_snapshots (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -361,7 +401,11 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
 }
 
 function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
-  const details = safeJsonParse(row.details, undefined, `event(${row.id}).details`);
+  const details = safeJsonParse<Record<string, any> | undefined>(
+    row.details,
+    undefined,
+    `event(${row.id}).details`,
+  );
   return {
     id: row.id,
     portfolioId: row.portfolio_id,
@@ -380,6 +424,21 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
     actor: details?.actor,
     source: details?.source,
     triggerMetadata: details?.triggerMetadata,
+    eventSource:
+      (row.event_source as RebalanceEvent["eventSource"]) ?? undefined,
+    onChainConfirmed:
+      row.on_chain_confirmed === undefined || row.on_chain_confirmed === null
+        ? undefined
+        : row.on_chain_confirmed === 1,
+    onChainEventType: row.on_chain_event_type ?? undefined,
+    onChainTxHash: row.on_chain_tx_hash ?? undefined,
+    onChainLedger: row.on_chain_ledger ?? undefined,
+    onChainContractId: row.on_chain_contract_id ?? undefined,
+    onChainPagingToken: row.on_chain_paging_token ?? undefined,
+    isSimulated:
+      row.is_simulated === undefined || row.is_simulated === null
+        ? undefined
+        : row.is_simulated === 1,
     details,
   };
 }
@@ -472,6 +531,47 @@ export class DatabaseService {
       );
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
+    `);
+
+    const historyCols = this.db
+      .prepare("PRAGMA table_info(rebalance_history)")
+      .all() as Array<{ name: string }>;
+    const addHistoryColumn = (name: string, definition: string) => {
+      if (!historyCols.some((c) => c.name === name)) {
+        this.db.exec(`ALTER TABLE rebalance_history ADD COLUMN ${definition}`);
+        logger.info(
+          `[DB] Migration: added ${name} column to rebalance_history`,
+        );
+      }
+    };
+    addHistoryColumn(
+      "event_source",
+      "event_source TEXT NOT NULL DEFAULT 'offchain'",
+    );
+    addHistoryColumn(
+      "on_chain_confirmed",
+      "on_chain_confirmed INTEGER NOT NULL DEFAULT 0",
+    );
+    addHistoryColumn("on_chain_event_type", "on_chain_event_type TEXT");
+    addHistoryColumn("on_chain_tx_hash", "on_chain_tx_hash TEXT");
+    addHistoryColumn("on_chain_ledger", "on_chain_ledger INTEGER");
+    addHistoryColumn("on_chain_contract_id", "on_chain_contract_id TEXT");
+    addHistoryColumn("on_chain_paging_token", "on_chain_paging_token TEXT");
+    addHistoryColumn("is_simulated", "is_simulated INTEGER NOT NULL DEFAULT 0");
+
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_history_on_chain_paging_token
+          ON rebalance_history (on_chain_paging_token)
+          WHERE on_chain_paging_token IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS contract_event_indexer_state (
+          name                    TEXT PRIMARY KEY,
+          cursor                  TEXT,
+          latest_ledger           INTEGER,
+          updated_at              TEXT NOT NULL,
+          last_successful_sync_at TEXT,
+          last_failed_sync_at     TEXT,
+          last_error              TEXT
+      );
     `);
   }
 
@@ -762,9 +862,7 @@ export class DatabaseService {
   // Asset registry (configurable assets)
   // ──────────────────────────────────────────
 
-  listAssets(
-    enabledOnly: boolean = true,
-  ): Array<{
+  listAssets(enabledOnly: boolean = true): Array<{
     symbol: string;
     name: string;
     contractAddress?: string;
@@ -784,7 +882,11 @@ export class DatabaseService {
             coingecko_id: string | null;
             enabled: number;
           }
-        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE enabled = 1 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets ORDER BY symbol")
+        >(
+          enabledOnly
+            ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE enabled = 1 ORDER BY symbol"
+            : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets ORDER BY symbol",
+        )
         .all();
       return rows.map((r) => ({
         symbol: r.symbol,
@@ -799,9 +901,7 @@ export class DatabaseService {
     }
   }
 
-  getAssetBySymbol(
-    symbol: string,
-  ):
+  getAssetBySymbol(symbol: string):
     | {
         symbol: string;
         name: string;
@@ -823,7 +923,9 @@ export class DatabaseService {
             coingecko_id: string | null;
             enabled: number;
           }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE symbol = ?")
+        >(
+          "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE symbol = ?",
+        )
         .get(symbol.toUpperCase());
       if (!row) return undefined;
       return {
@@ -937,7 +1039,13 @@ export class DatabaseService {
           opts.userAgent ?? null,
           now,
         );
-      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent);
+      this.insertConsentAuditEvent(
+        userId,
+        "grant",
+        now,
+        opts.ipAddress,
+        opts.userAgent,
+      );
     });
     grant();
   }
@@ -962,14 +1070,14 @@ export class DatabaseService {
                  user_agent = excluded.user_agent,
                  updated_at = excluded.updated_at`,
         )
-        .run(
-          userId,
-          now,
-          opts.ipAddress ?? null,
-          opts.userAgent ?? null,
-          now,
-        );
-      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent);
+        .run(userId, now, opts.ipAddress ?? null, opts.userAgent ?? null, now);
+      this.insertConsentAuditEvent(
+        userId,
+        "revoke",
+        now,
+        opts.ipAddress,
+        opts.userAgent,
+      );
     });
     revoke();
   }
@@ -985,7 +1093,9 @@ export class DatabaseService {
           revoked_at: string | null;
           is_active: number;
         }
-      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active FROM legal_consent WHERE user_id = ?")
+      >(
+        "SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active FROM legal_consent WHERE user_id = ?",
+      )
       .get(userId);
     if (!row) return undefined;
     return {
@@ -1000,7 +1110,10 @@ export class DatabaseService {
   hasFullConsent(userId: string): boolean {
     const c = this.getConsent(userId);
     return Boolean(
-      c?.active && c.termsAcceptedAt && c.privacyAcceptedAt && c.cookieAcceptedAt,
+      c?.active &&
+      c.termsAcceptedAt &&
+      c.privacyAcceptedAt &&
+      c.cookieAcceptedAt,
     );
   }
 
@@ -1050,20 +1163,26 @@ export class DatabaseService {
    * Returns the number of deleted rows.
    */
   purgeOldConsentAuditEvents(retentionDays: number): number {
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+      Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const result = this.db
       .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")
       .run(cutoff);
     const count = result.changes;
     if (count > 0) {
-      logger.info(`[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`);
+      logger.info(
+        `[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`,
+      );
     }
     return count;
   }
 
   deleteUserData(userId: string): void {
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
-    this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
+    this.db
+      .prepare("DELETE FROM consent_audit_events WHERE user_id = ?")
+      .run(userId);
     const portfolios = this.db
       .prepare<
         [string],
@@ -1121,7 +1240,9 @@ export class DatabaseService {
         ...(eventData.details ?? {}),
         ...(eventData.actor !== undefined && { actor: eventData.actor }),
         ...(eventData.source !== undefined && { source: eventData.source }),
-        ...(eventData.triggerMetadata !== undefined && { triggerMetadata: eventData.triggerMetadata }),
+        ...(eventData.triggerMetadata !== undefined && {
+          triggerMetadata: eventData.triggerMetadata,
+        }),
       };
 
       const event: RebalanceEvent = {
@@ -1149,12 +1270,22 @@ export class DatabaseService {
         isSimulated: eventData.isSimulated,
       };
 
+      if (eventData.onChainPagingToken) {
+        const existing = this.db
+          .prepare<
+            [string],
+            RebalanceHistoryRow
+          >("SELECT * FROM rebalance_history WHERE on_chain_paging_token = ?")
+          .get(eventData.onChainPagingToken);
+        if (existing) return rowToEvent(existing);
+      }
+
       this.db
         .prepare(
           `
                 INSERT INTO rebalance_history
-                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, portfolio_id, timestamp, trigger, trades, gas_used, status, is_automatic, event_source, on_chain_confirmed, on_chain_event_type, on_chain_tx_hash, on_chain_ledger, on_chain_contract_id, on_chain_paging_token, is_simulated, risk_alerts, error, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
         )
         .run(
@@ -1166,6 +1297,14 @@ export class DatabaseService {
           event.gasUsed,
           event.status,
           event.isAutomatic ? 1 : 0,
+          event.eventSource ?? "offchain",
+          event.onChainConfirmed ? 1 : 0,
+          event.onChainEventType ?? null,
+          event.onChainTxHash ?? null,
+          event.onChainLedger ?? null,
+          event.onChainContractId ?? null,
+          event.onChainPagingToken ?? null,
+          event.isSimulated ? 1 : 0,
           event.riskAlerts?.length ? JSON.stringify(event.riskAlerts) : null,
           event.error ?? null,
           event.details ? JSON.stringify(event.details) : null,
@@ -1495,6 +1634,119 @@ export class DatabaseService {
   // ──────────────────────────────────────────
   // Indexer state (key-value store for contract event indexer)
   // ──────────────────────────────────────────
+
+  getContractEventIndexerState(
+    name = "soroban_event_indexer",
+  ): IndexerCursorState {
+    try {
+      const row = this.db
+        .prepare<
+          [string],
+          {
+            name: string;
+            cursor: string | null;
+            latest_ledger: number | null;
+            updated_at: string | null;
+            last_successful_sync_at: string | null;
+            last_failed_sync_at: string | null;
+            last_error: string | null;
+          }
+        >("SELECT * FROM contract_event_indexer_state WHERE name = ?")
+        .get(name);
+
+      if (row) {
+        return {
+          name: row.name,
+          cursor: row.cursor || undefined,
+          latestLedger: row.latest_ledger ?? undefined,
+          updatedAt: row.updated_at ?? undefined,
+          lastSuccessfulSyncAt: row.last_successful_sync_at ?? undefined,
+          lastFailedSyncAt: row.last_failed_sync_at ?? undefined,
+          lastError: row.last_error ?? undefined,
+        };
+      }
+
+      const legacyCursor = this.getIndexerState(`${name}.cursor`);
+      const legacyLatestLedger =
+        Number(this.getIndexerState(`${name}.latest_ledger`) || 0) || undefined;
+      return {
+        name,
+        cursor: legacyCursor || undefined,
+        latestLedger: legacyLatestLedger,
+      };
+    } catch (err) {
+      throw new Error(
+        `Failed to retrieve contract event indexer state '${name}': ${err}`,
+      );
+    }
+  }
+
+  saveContractEventIndexerState(
+    state: Partial<Omit<IndexerCursorState, "name">>,
+    name = "soroban_event_indexer",
+  ): IndexerCursorState {
+    try {
+      const previous = this.getContractEventIndexerState(name);
+      const next: IndexerCursorState = {
+        ...previous,
+        ...state,
+        name,
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db
+        .prepare(
+          `
+            INSERT INTO contract_event_indexer_state
+              (name, cursor, latest_ledger, updated_at, last_successful_sync_at, last_failed_sync_at, last_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+              cursor = excluded.cursor,
+              latest_ledger = excluded.latest_ledger,
+              updated_at = excluded.updated_at,
+              last_successful_sync_at = excluded.last_successful_sync_at,
+              last_failed_sync_at = excluded.last_failed_sync_at,
+              last_error = excluded.last_error
+          `,
+        )
+        .run(
+          name,
+          next.cursor ?? null,
+          next.latestLedger ?? null,
+          next.updatedAt,
+          next.lastSuccessfulSyncAt ?? null,
+          next.lastFailedSyncAt ?? null,
+          next.lastError ?? null,
+        );
+
+      this.setIndexerState(`${name}.cursor`, next.cursor ?? "");
+      this.setIndexerState(
+        `${name}.latest_ledger`,
+        next.latestLedger?.toString() ?? "",
+      );
+      return next;
+    } catch (err) {
+      throw new Error(
+        `Failed to save contract event indexer state '${name}': ${err}`,
+      );
+    }
+  }
+
+  resetContractEventIndexerState(
+    fromLedger?: number,
+    name = "soroban_event_indexer",
+  ): IndexerCursorState {
+    return this.saveContractEventIndexerState(
+      {
+        cursor: undefined,
+        latestLedger: fromLedger,
+        lastError: undefined,
+        lastFailedSyncAt: undefined,
+        lastSuccessfulSyncAt: undefined,
+      },
+      name,
+    );
+  }
 
   getIndexerState(key: string): string | undefined {
     try {
