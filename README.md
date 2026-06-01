@@ -88,6 +88,8 @@ Full backend environment reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
 
 API Client Examples: [Python API Client Example](scripts/python_api_client.py)
 
+Quick API recipes: [docs/curl-recipes/README.md](docs/curl-recipes/README.md) provides copy-paste `curl` examples for portfolio workflows, notification preferences, and health checks.
+
 The frontend HTTP client targets **`/api/v1/*`** for resource routes by default (`VITE_API_VERSION=v1` in `frontend/.env.example`). JWT auth still uses **`/api/auth/*`**. See [API.md](API.md) for versioning details.
 
 ## Database Setup
@@ -213,8 +215,8 @@ GET /api/v1/portfolio/:id
 # Execute rebalance
 POST /api/v1/portfolio/:id/rebalance
 
-# Rebalance status
-GET /api/v1/portfolio/:id/rebalance-status
+# Rebalance plan
+GET /api/v1/portfolio/:id/rebalance-plan
 ```
 
 Notifications: 

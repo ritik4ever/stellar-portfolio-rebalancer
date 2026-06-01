@@ -9,6 +9,7 @@ This document describes the HTTP API for the Stellar Portfolio Rebalancer backen
 | **Swagger UI** (interactive docs) | [http://localhost:3001/api-docs](http://localhost:3001/api-docs) (when the backend is running on the default port)                                                          |
 | **OpenAPI 3.0 spec (JSON)**       | [http://localhost:3001/api-docs.json](http://localhost:3001/api-docs.json) or `/api-docs/openapi.json` (same document) — use for **Postman** (Import → Link) or other tools |
 | **Postman collection**            | Import the OpenAPI spec: see [Postman collection](#postman-collection) below                                                                                                |
+| **Curl recipes**                 | See [docs/curl-recipes/README.md](docs/curl-recipes/README.md) for copy-paste API workflows                                                                                 |
 
 ## Base URL
 
