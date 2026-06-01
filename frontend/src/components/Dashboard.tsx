@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2 } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
@@ -13,11 +13,13 @@ import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
 
 // TanStack Query Hooks
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate } from '../hooks/queries/usePortfolioQuery'
-import { usePrices, formatPriceFeedSummary } from '../hooks/queries/usePricesQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
+import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
+import RouteErrorState from './RouteErrorState'
 
 //  NEW: export utils (create frontend/src/utils/export.ts first)
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
@@ -35,7 +37,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const { isDark } = useTheme()
 
     // Query for user portfolios
-    const { data: portfolios, isLoading: portfoliosLoading } = useUserPortfolios(publicKey)
+    const {
+        data: portfolios,
+        isLoading: portfoliosLoading,
+        isError: portfoliosLoadError,
+        error: portfoliosError,
+        refetch: refetchPortfolios,
+    } = useUserPortfolios(publicKey)
 
     // Determine the latest portfolio
     const latestPortfolioId = portfolios && portfolios.length > 0
@@ -43,10 +51,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         : null
 
     // Query for portfolio details
-    const { data: portfolioDetails, isLoading: detailsLoading } = usePortfolioDetails(latestPortfolioId)
+    const {
+        data: portfolioDetails,
+        isLoading: detailsLoading,
+        isError: detailsLoadError,
+        error: detailsError,
+        refetch: refetchPortfolioDetails,
+    } = usePortfolioDetails(latestPortfolioId)
 
     // Query for prices
-    const { data: priceBundle, isLoading: pricesLoading } = usePrices()
+    const {
+        data: priceBundle,
+        isLoading: pricesLoading,
+        isError: pricesLoadError,
+        refetch: refetchPrices,
+    } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
 
     // Mutation for rebalancing
@@ -80,6 +99,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         ? (priceRows as Record<string, DashboardPriceRow>)
         : demoPrices
     const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
+    const routeDataUnavailable = Boolean(
+        publicKey &&
+        portfoliosLoadError &&
+        !portfoliosLoading &&
+        (!portfolios || portfolios.length === 0)
+    )
     const priceSource = hasLivePriceRows
         ? formatPriceFeedSummary(priceBundle?.feedMeta, true, false)
         : publicKey
@@ -109,11 +134,50 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
     const hasHighGasWarning = rebalanceEstimate?.gasWarning || estimateXlm > 0.5
 
-    const refreshData = async () => {
-        // TanStack Query handles background refresh automatically, but we can force it
-        // by invalidating queries if needed. For now, simple manual refresh is fine.
-        window.location.reload()
-    }
+    const queryClient = useQueryClient()
+
+    const refreshData = useCallback(async () => {
+        // Invalidate all relevant queries to force a refetch without a full page reload.
+        // This leverages TanStack Query's cache invalidation instead of the naive window.location.reload().
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+        ])
+    }, [queryClient])
+
+    const retryPortfolioLoad = useCallback(async () => {
+        await Promise.all([
+            refetchPortfolios(),
+            refetchPortfolioDetails(),
+            refetchPrices(),
+        ])
+        await refreshData()
+    }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
+
+    // NEW: Demo reset functionality for local testing
+    const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
+    const [resettingDemo, setResettingDemo] = useState(false)
+    
+    const resetDemoPortfolio = useCallback(async () => {
+        if (publicKey) return // Only available in demo mode
+        
+        setResettingDemo(true)
+        try {
+            // Clear any cached demo data and force refresh
+            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
+            await queryClient.invalidateQueries({ queryKey: priceKeys.all })
+            
+            // Small delay to show loading state
+            await new Promise(resolve => setTimeout(resolve, 500))
+            
+            setShowDemoResetConfirm(false)
+        } catch (error) {
+            console.error('Demo reset failed:', error)
+            alert('Failed to reset demo portfolio. Please refresh the page.')
+        } finally {
+            setResettingDemo(false)
+        }
+    }, [publicKey, queryClient])
 
     const disconnectWallet = async () => {
         if (publicKey) {
@@ -222,6 +286,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const walletType = StellarWallet.getWalletType()
     const contractAddress = 'CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I'
+
+    if (routeDataUnavailable) {
+        return (
+            <RouteErrorState
+                title="Portfolio data is unavailable"
+                message={
+                    portfoliosError instanceof Error
+                        ? portfoliosError.message
+                        : 'We could not load the portfolio list for this wallet.'
+                }
+                detail={
+                    detailsLoadError && detailsError instanceof Error
+                        ? `Latest portfolio details also failed to load: ${detailsError.message}`
+                        : pricesLoadError
+                          ? 'Price data failed to refresh. The retry action will attempt a full refetch.'
+                          : 'Retrying will refetch portfolio data and the latest price feed.'
+                }
+                onRetry={retryPortfolioLoad}
+                onBack={() => onNavigate('landing')}
+                retryLabel="Retry loading"
+                backLabel="Go to landing"
+            />
+        )
+    }
 
     if (loading) {
         return (
@@ -347,12 +435,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </button>
                             </>
                         ) : (
-                            <button
-                                onClick={() => onNavigate('landing')}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                            >
-                                Connect Wallet
-                            </button>
+                            <>
+                                <button
+                                    onClick={() => onNavigate('landing')}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                                >
+                                    Connect Wallet
+                                </button>
+                                {/* NEW: Demo reset button for local testing */}
+                                <button
+                                    onClick={() => setShowDemoResetConfirm(true)}
+                                    className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
+                                    title="Reset demo portfolio to default state"
+                                >
+                                    <RefreshCw className="w-4 h-4" />
+                                    Reset Demo
+                                </button>
+                            </>
                         )}
                         <button
                             onClick={refreshData}
@@ -398,6 +497,47 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <>
                                         <Trash2 className="w-4 h-4" />
                                         Delete all my data
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* NEW: Demo reset confirmation modal */}
+            {showDemoResetConfirm && (
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <RefreshCw className="w-6 h-6 text-blue-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Reset Demo Portfolio</h2>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Perfect for testing and screenshots.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowDemoResetConfirm(false)}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={resetDemoPortfolio}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                            >
+                                {resettingDemo ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                        Resetting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCw className="w-4 h-4" />
+                                        Reset Demo
                                     </>
                                 )}
                             </button>
@@ -696,6 +836,86 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </>
                 )}
             </div>
+
+            {/* NEW: Sticky Mobile Action Bar */}
+            <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
+                <div className="flex items-center justify-between max-w-sm mx-auto">
+                    {/* Portfolio Value */}
+                    <div className="text-center">
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
+                        <div className="text-lg font-bold text-gray-900 dark:text-white">
+                            ${portfolioData?.totalValue?.toLocaleString() || '10,000'}
+                        </div>
+                        <div className={`text-xs flex items-center justify-center gap-1 ${
+                            (portfolioData?.dayChange || 0) >= 0 
+                                ? 'text-green-600 dark:text-green-400' 
+                                : 'text-red-600 dark:text-red-400'
+                        }`}>
+                            {(portfolioData?.dayChange || 0) >= 0 ? (
+                                <TrendingUp className="w-3 h-3" />
+                            ) : (
+                                <TrendingUp className="w-3 h-3 rotate-180" />
+                            )}
+                            {Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%
+                        </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-2">
+                        {/* Rebalance Status & Action */}
+                        {portfolioData?.needsRebalance ? (
+                            <button
+                                onClick={executeRebalance}
+                                disabled={executeRebalanceMutation.isPending || portfolioData?.id === 'demo'}
+                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                            >
+                                {executeRebalanceMutation.isPending ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Zap className="w-4 h-4" />
+                                )}
+                                Rebalance
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
+                                <CheckCircle className="w-4 h-4" />
+                                <span className="hidden sm:inline">Balanced</span>
+                            </div>
+                        )}
+
+                        {/* Create Portfolio / Refresh */}
+                        {publicKey ? (
+                            <button
+                                onClick={() => onNavigate('setup')}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
+                            >
+                                <Plus className="w-4 h-4" />
+                                <span className="hidden sm:inline">New</span>
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => setShowDemoResetConfirm(true)}
+                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                                <span className="hidden sm:inline">Reset</span>
+                            </button>
+                        )}
+
+                        {/* Refresh Data */}
+                        <button
+                            onClick={refreshData}
+                            disabled={loading}
+                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Add bottom padding to main content to prevent overlap with mobile action bar */}
+            <div className="h-20 md:hidden"></div>
         </div>
     )
 }

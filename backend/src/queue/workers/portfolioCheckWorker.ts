@@ -93,7 +93,7 @@ export function startPortfolioCheckWorker(): Worker | null {
     markWorkerFailed(runtimeStatus, err);
     logger.warn("[WORKER:portfolio-check] Failed to start - Redis may be unavailable", {
       error: err instanceof Error ? err.message : String(err),
-    }));
+    });
     return null;
   }
 

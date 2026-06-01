@@ -3,6 +3,7 @@ import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom
 import { observabilityConfig } from './config.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
+import type { PriceFeedMeta } from '../types/index.js'
 
 const register = new Registry()
 
@@ -48,6 +49,27 @@ const queueDepthGauge = new Gauge({
     name: `${observabilityConfig.metrics.prefix}queue_jobs`,
     help: 'Current queue depth by state',
     labelNames: ['queue', 'state'] as const,
+    registers: [register],
+})
+
+const priceFeedResolutionsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}price_feed_resolutions_total`,
+    help: 'Total price feed resolutions by final quality classification',
+    labelNames: ['resolution_hint', 'degraded', 'stale_or_limited'] as const,
+    registers: [register],
+})
+
+const reflectorStalePricesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}reflector_stale_prices_total`,
+    help: 'Total stale Reflector price rows observed by asset',
+    labelNames: ['asset'] as const,
+    registers: [register],
+})
+
+const reflectorFallbackUsageTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}reflector_fallback_usage_total`,
+    help: 'Total fallback price resolutions used by the backend',
+    labelNames: ['reason'] as const,
     registers: [register],
 })
 
@@ -100,4 +122,20 @@ export async function getMetricsPayload(): Promise<string> {
 
 export function getMetricsContentType(): string {
     return register.contentType
+}
+
+export function recordPriceFeedResolution(meta: Pick<PriceFeedMeta, 'resolutionHint' | 'degraded' | 'staleOrLimited'>): void {
+    priceFeedResolutionsTotal.inc({
+        resolution_hint: meta.resolutionHint,
+        degraded: String(meta.degraded),
+        stale_or_limited: String(meta.staleOrLimited),
+    })
+}
+
+export function recordReflectorStalePrice(asset: string): void {
+    reflectorStalePricesTotal.inc({ asset })
+}
+
+export function recordReflectorFallbackUsage(reason: string): void {
+    reflectorFallbackUsageTotal.inc({ reason })
 }

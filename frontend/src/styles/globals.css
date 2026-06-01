@@ -17,3 +17,18 @@ body {
 .recharts-tooltip-wrapper {
     outline: none;
 }
+
+/* NEW: Mobile action bar styles */
+@media (max-width: 768px) {
+    /* Ensure mobile action bar is always visible above other content */
+    .mobile-action-bar {
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    
+    /* Add safe area padding for devices with home indicators */
+    .mobile-action-bar {
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    }
+}

@@ -88,12 +88,31 @@ export async function dbGetAllPortfolios() {
  */
 export async function dbUpdatePortfolio(
     id: string,
-    updates: { balances?: Record<string, number>; totalValue?: number; lastRebalance?: string },
+    updates: { 
+        userAddress?: string;
+        allocations?: Record<string, number>;
+        threshold?: number;
+        balances?: Record<string, number>; 
+        totalValue?: number; 
+        lastRebalance?: string 
+    },
     expectedVersion?: number
 ) {
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1
+    if (updates.userAddress !== undefined) {
+        sets.push(`user_address = $${i++}`)
+        values.push(updates.userAddress)
+    }
+    if (updates.allocations !== undefined) {
+        sets.push(`allocations = $${i++}`)
+        values.push(JSON.stringify(updates.allocations))
+    }
+    if (updates.threshold !== undefined) {
+        sets.push(`threshold = $${i++}`)
+        values.push(updates.threshold)
+    }
     if (updates.balances !== undefined) {
         sets.push(`balances = $${i++}`)
         values.push(JSON.stringify(updates.balances))

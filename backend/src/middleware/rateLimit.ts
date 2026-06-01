@@ -147,7 +147,7 @@ export const globalRateLimiter = rateLimit({
   keyGenerator: createKeyGenerator("global"),
   handler: createHandler(GLOBAL_WINDOW_MS, "global"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("global"),
   skip: skipSuccessfulRequests,
   message: "Too many requests from this IP, please try again later.",
@@ -160,7 +160,7 @@ export const burstProtectionLimiter = rateLimit({
   keyGenerator: createKeyGenerator("burst"),
   handler: createHandler(BURST_WINDOW_MS, "burst-protection"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("burst"),
   skip: (req) => isProbePath(req.path),
 });
@@ -172,7 +172,7 @@ export const writeRateLimiter = rateLimit({
   keyGenerator: createKeyGenerator("write"),
   handler: createHandler(GLOBAL_WINDOW_MS, "write-operations"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("write"),
 });
 
@@ -183,7 +183,7 @@ export const writeBurstLimiter = rateLimit({
   keyGenerator: createKeyGenerator("write-burst"),
   handler: createHandler(BURST_WINDOW_MS, "write-burst-protection"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("write-burst"),
   skip: (req) => isProbePath(req.path),
 });
@@ -195,7 +195,7 @@ export const authRateLimiter = rateLimit({
   keyGenerator: createKeyGenerator("auth"),
   handler: createHandler(GLOBAL_WINDOW_MS, "authentication"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("auth"),
   skip: () => false,
 });
@@ -207,7 +207,7 @@ export const criticalRateLimiter = rateLimit({
   keyGenerator: createKeyGenerator("critical"),
   handler: createHandler(GLOBAL_WINDOW_MS, "critical-operations"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("critical"),
   skip: () => false,
 });
@@ -219,7 +219,7 @@ export const adminRateLimiter = rateLimit({
   keyGenerator: createKeyGenerator("admin"),
   handler: createHandler(GLOBAL_WINDOW_MS, "admin-operations"),
   standardHeaders: "draft-7",
-  legacyHeaders: false,
+  legacyHeaders: true,
   store: makeStore("admin"),
   skip: () => false,
 });

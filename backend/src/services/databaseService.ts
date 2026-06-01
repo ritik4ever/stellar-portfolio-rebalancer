@@ -61,6 +61,32 @@ interface RebalanceHistoryRow {
   details: string | null;
 }
 
+interface ConsentAuditRow {
+  id: string;
+  user_id: string;
+  action: "grant" | "revoke";
+  timestamp: string;
+  ip_address: string | null;
+  user_agent: string | null;
+}
+
+export interface ConsentRecord {
+  termsAcceptedAt: string | null;
+  privacyAcceptedAt: string | null;
+  cookieAcceptedAt: string | null;
+  revokedAt: string | null;
+  active: boolean;
+}
+
+export interface ConsentAuditEvent {
+  id: string;
+  userId: string;
+  action: "grant" | "revoke";
+  timestamp: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
 // ─────────────────────────────────────────────
 // Schema SQL
 // ─────────────────────────────────────────────
@@ -134,11 +160,25 @@ CREATE TABLE IF NOT EXISTS legal_consent (
     terms_accepted_at   TEXT,
     privacy_accepted_at TEXT,
     cookie_accepted_at  TEXT,
+    revoked_at          TEXT,
+    is_active           INTEGER NOT NULL DEFAULT 1,
     ip_address          TEXT,
     user_agent          TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS consent_audit_events (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    action      TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
+    timestamp   TEXT NOT NULL,
+    ip_address  TEXT,
+    user_agent  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
+    ON consent_audit_events (user_id, timestamp);
 `;
 
 // ─────────────────────────────────────────────
@@ -403,6 +443,32 @@ export class DatabaseService {
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
     }
+
+    const consentCols = this.db
+      .prepare("PRAGMA table_info(legal_consent)")
+      .all() as Array<{ name: string }>;
+    if (!consentCols.some((c) => c.name === "revoked_at")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN revoked_at TEXT");
+      logger.info("[DB] Migration: added revoked_at column to legal_consent");
+    }
+    if (!consentCols.some((c) => c.name === "is_active")) {
+      this.db.exec(
+        "ALTER TABLE legal_consent ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+      );
+      logger.info("[DB] Migration: added is_active column to legal_consent");
+    }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS consent_audit_events (
+          id          TEXT PRIMARY KEY,
+          user_id     TEXT NOT NULL,
+          action      TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
+          timestamp   TEXT NOT NULL,
+          ip_address  TEXT,
+          user_agent  TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
+          ON consent_audit_events (user_id, timestamp);
+    `);
   }
 
   private _seedDefaultAssets(): void {
@@ -843,38 +909,68 @@ export class DatabaseService {
     },
   ): void {
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, ip_address, user_agent, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id) DO UPDATE SET
-               terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
-               privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
-               cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
-               ip_address = excluded.ip_address,
-               user_agent = excluded.user_agent,
-               updated_at = excluded.updated_at`,
-      )
-      .run(
-        userId,
-        opts.terms ? now : null,
-        opts.privacy ? now : null,
-        opts.cookies ? now : null,
-        opts.ipAddress ?? null,
-        opts.userAgent ?? null,
-        now,
-      );
+    const grant = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, ip_address, user_agent, updated_at)
+               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
+                 privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
+                 cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
+                 revoked_at = NULL,
+                 is_active = 1,
+                 ip_address = excluded.ip_address,
+                 user_agent = excluded.user_agent,
+                 updated_at = excluded.updated_at`,
+        )
+        .run(
+          userId,
+          opts.terms ? now : null,
+          opts.privacy ? now : null,
+          opts.cookies ? now : null,
+          opts.ipAddress ?? null,
+          opts.userAgent ?? null,
+          now,
+        );
+      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent);
+    });
+    grant();
   }
 
-  getConsent(
+  revokeConsent(
     userId: string,
-  ):
-    | {
-        termsAcceptedAt: string | null;
-        privacyAcceptedAt: string | null;
-        cookieAcceptedAt: string | null;
-      }
-    | undefined {
+    opts: {
+      ipAddress?: string;
+      userAgent?: string;
+    } = {},
+  ): void {
+    const now = new Date().toISOString();
+    const revoke = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO legal_consent (user_id, revoked_at, is_active, ip_address, user_agent, updated_at)
+               VALUES (?, ?, 0, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 revoked_at = excluded.revoked_at,
+                 is_active = 0,
+                 ip_address = excluded.ip_address,
+                 user_agent = excluded.user_agent,
+                 updated_at = excluded.updated_at`,
+        )
+        .run(
+          userId,
+          now,
+          opts.ipAddress ?? null,
+          opts.userAgent ?? null,
+          now,
+        );
+      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent);
+    });
+    revoke();
+  }
+
+  getConsent(userId: string): ConsentRecord | undefined {
     const row = this.db
       .prepare<
         [string],
@@ -882,26 +978,72 @@ export class DatabaseService {
           terms_accepted_at: string | null;
           privacy_accepted_at: string | null;
           cookie_accepted_at: string | null;
+          revoked_at: string | null;
+          is_active: number;
         }
-      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at FROM legal_consent WHERE user_id = ?")
+      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active FROM legal_consent WHERE user_id = ?")
       .get(userId);
     if (!row) return undefined;
     return {
       termsAcceptedAt: row.terms_accepted_at,
       privacyAcceptedAt: row.privacy_accepted_at,
       cookieAcceptedAt: row.cookie_accepted_at,
+      revokedAt: row.revoked_at,
+      active: row.is_active === 1,
     };
   }
 
   hasFullConsent(userId: string): boolean {
     const c = this.getConsent(userId);
     return Boolean(
-      c?.termsAcceptedAt && c?.privacyAcceptedAt && c?.cookieAcceptedAt,
+      c?.active && c.termsAcceptedAt && c.privacyAcceptedAt && c.cookieAcceptedAt,
     );
+  }
+
+  getConsentAudit(userId: string): ConsentAuditEvent[] {
+    const rows = this.db
+      .prepare<[string], ConsentAuditRow>(
+        `SELECT id, user_id, action, timestamp, ip_address, user_agent
+         FROM consent_audit_events
+         WHERE user_id = ?
+         ORDER BY timestamp ASC, id ASC`,
+      )
+      .all(userId);
+    return rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      action: row.action,
+      timestamp: row.timestamp,
+      ipAddress: row.ip_address,
+      userAgent: row.user_agent,
+    }));
+  }
+
+  private insertConsentAuditEvent(
+    userId: string,
+    action: "grant" | "revoke",
+    timestamp: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        generateId(),
+        userId,
+        action,
+        timestamp,
+        ipAddress ?? null,
+        userAgent ?? null,
+      );
   }
 
   deleteUserData(userId: string): void {
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
+    this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
     const portfolios = this.db
       .prepare<
         [string],
