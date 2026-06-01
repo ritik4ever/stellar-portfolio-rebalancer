@@ -71,81 +71,16 @@ describe('AssetCard', () => {
         })
     })
 
-    describe('Price freshness badges', () => {
-        it('shows no badge when priceMeta is not provided', () => {
-            render(<AssetCard asset={mockAsset} price={{ price: 100, change: 0 }} />)
-            expect(screen.queryByTestId('badge-fallback')).toBeNull()
-            expect(screen.queryByTestId('badge-stale')).toBeNull()
+    describe('Partial fallback and source labels', () => {
+        it('shows fallback source label when price source is fallback', () => {
+            render(<AssetCard asset={mockAsset} price={{ price: 0.5, change: -1, source: 'fallback_browser' }} />)
+            expect(screen.getByText('Fallback price')).toBeTruthy()
+            expect(screen.getByTestId('price-value')).toHaveTextContent('$0.50')
         })
 
-        it('shows Fallback badge when isFallback is true', () => {
-            render(
-                <AssetCard
-                    asset={mockAsset}
-                    price={{ price: 100, change: 0 }}
-                    priceMeta={{ isFallback: true, isStale: false }}
-                />
-            )
-            expect(screen.getByTestId('badge-fallback')).toBeInTheDocument()
-            expect(screen.queryByTestId('badge-stale')).toBeNull()
-        })
-
-        it('shows Stale badge when isStale is true and isFallback is false', () => {
-            render(
-                <AssetCard
-                    asset={mockAsset}
-                    price={{ price: 100, change: 0 }}
-                    priceMeta={{ isFallback: false, isStale: true }}
-                />
-            )
-            expect(screen.getByTestId('badge-stale')).toBeInTheDocument()
-            expect(screen.queryByTestId('badge-fallback')).toBeNull()
-        })
-
-        it('shows only Fallback badge (not Stale) when both flags are true', () => {
-            render(
-                <AssetCard
-                    asset={mockAsset}
-                    price={{ price: 100, change: 0 }}
-                    priceMeta={{ isFallback: true, isStale: true }}
-                />
-            )
-            expect(screen.getByTestId('badge-fallback')).toBeInTheDocument()
-            expect(screen.queryByTestId('badge-stale')).toBeNull()
-        })
-
-        it('shows no badge when both flags are false', () => {
-            render(
-                <AssetCard
-                    asset={mockAsset}
-                    price={{ price: 100, change: 0 }}
-                    priceMeta={{ isFallback: false, isStale: false }}
-                />
-            )
-            expect(screen.queryByTestId('badge-fallback')).toBeNull()
-            expect(screen.queryByTestId('badge-stale')).toBeNull()
-        })
-
-        it('Fallback badge has a descriptive title for accessibility', () => {
-            render(
-                <AssetCard
-                    asset={mockAsset}
-                    price={{ price: 100, change: 0 }}
-                    priceMeta={{ isFallback: true, isStale: false }}
-                />
-            )
-            expect(screen.getByTestId('badge-fallback')).toHaveAttribute('title')
-        })
-
-        it('Stale badge has a descriptive title for accessibility', () => {
-            render(
-                <AssetCard
-                    asset={mockAsset}
-                    price={{ price: 100, change: 0 }}
-                    priceMeta={{ isFallback: false, isStale: true }}
-                />
-            )
-            expect(screen.getByTestId('badge-stale')).toHaveAttribute('title')
+        it('shows cached price label when price is served from cache', () => {
+            render(<AssetCard asset={mockAsset} price={{ price: 0.5, change: -1, source: 'coingecko_browser', servedFromCache: true }} />)
+            expect(screen.getByText('Cached price')).toBeTruthy()
         })
     })
 })
