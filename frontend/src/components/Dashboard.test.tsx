@@ -1,6 +1,7 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
 
 const queryMocks = vi.hoisted(() => ({
@@ -105,6 +106,13 @@ class TestErrorBoundary extends React.Component<{ children: React.ReactNode }, {
     }
 }
 
+function renderDashboard(ui: React.ReactElement) {
+    const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
+
 describe('Dashboard', () => {
     beforeEach(() => {
         cleanup()
@@ -118,10 +126,53 @@ describe('Dashboard', () => {
     })
 
     it('renders onboarding CTA for an empty portfolio', async () => {
-        render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByRole('button', { name: /create portfolio/i })).toBeTruthy()
         expect(screen.getByText(/portfolio dashboard/i)).toBeTruthy()
+    })
+
+    it('offers clone as new when a saved portfolio is loaded', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({
+            data: [{
+                id: 'p-1',
+                totalValue: 5000,
+                threshold: 5,
+                slippageTolerance: 1,
+                strategy: 'threshold',
+                allocations: [
+                    { asset: 'XLM', target: 60, amount: 3000 },
+                    { asset: 'USDC', target: 40, amount: 2000 },
+                ]
+            }],
+            isLoading: false
+        })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: {
+                id: 'p-1',
+                threshold: 5,
+                slippageTolerance: 1,
+                strategy: 'threshold',
+                allocations: [
+                    { asset: 'XLM', target: 60 },
+                    { asset: 'USDC', target: 40 },
+                ],
+            },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({
+            data: {
+                prices: { XLM: { price: 0.12, change: 1.1 }, USDC: { price: 1, change: 0 } },
+                feedMeta: null
+            },
+            isLoading: false
+        })
+
+        const onNavigate = vi.fn()
+        renderDashboard(<Dashboard onNavigate={onNavigate} publicKey="GABC1234TEST" />)
+
+        fireEvent.click(await screen.findByRole('button', { name: /clone as new/i }))
+        expect(onNavigate).toHaveBeenCalledWith('setup')
     })
 
     it('renders asset cards when portfolio data is populated', async () => {
@@ -145,7 +196,7 @@ describe('Dashboard', () => {
             isLoading: false
         })
 
-        render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByText('Asset Card XLM')).toBeTruthy()
         expect(screen.getByText('Asset Card USDC')).toBeTruthy()
@@ -155,7 +206,7 @@ describe('Dashboard', () => {
         queryMocks.useUserPortfolios.mockReturnValue({ data: undefined, isLoading: true })
         queryMocks.usePrices.mockReturnValue({ data: undefined, isLoading: true })
 
-        render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByText(/loading portfolio data/i)).toBeTruthy()
     })
@@ -166,7 +217,7 @@ describe('Dashboard', () => {
             throw new Error('portfolio fetch failed')
         })
 
-        render(
+        renderDashboard(
             <TestErrorBoundary>
                 <Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />
             </TestErrorBoundary>
