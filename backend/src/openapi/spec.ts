@@ -190,7 +190,7 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Event recorded', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -264,7 +264,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -331,7 +331,7 @@ const spec: Record<string, any> = {
                     },
                     '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -787,7 +787,7 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Preferences saved', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -800,7 +800,7 @@ const spec: Record<string, any> = {
                 parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Preferences or null', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -813,7 +813,7 @@ const spec: Record<string, any> = {
                 parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Unsubscribed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -877,9 +877,82 @@ const spec: Record<string, any> = {
                 description: 'Admin API key or bearer token',
             },
         },
+        examples: {
+            ValidationError: {
+                summary: 'Validation error',
+                value: {
+                    success: false,
+                    data: null,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Invalid request payload',
+                        details: [
+                            { field: 'allocations', message: 'Allocations must sum to 100%' },
+                        ],
+                    },
+                    timestamp: '2025-01-01T00:00:00.000Z',
+                },
+            },
+            QueryValidationError: {
+                summary: 'Query parameter validation error',
+                value: {
+                    success: false,
+                    data: null,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Invalid query parameters',
+                        details: [
+                            { field: 'limit', message: 'Number must be less than or equal to 500' },
+                        ],
+                    },
+                    timestamp: '2025-01-01T00:00:00.000Z',
+                },
+            },
+        },
         schemas: {
-            ApiEnvelope: { type: 'object' },
-            ApiError: { type: 'object' },
+            ApiEnvelope: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { nullable: true },
+                    error: { nullable: true, $ref: '#/components/schemas/ApiErrorBody' },
+                    timestamp: { type: 'string', format: 'date-time' },
+                    meta: { type: 'object', additionalProperties: true },
+                },
+            },
+            ApiErrorBody: {
+                type: 'object',
+                required: ['code', 'message'],
+                properties: {
+                    code: { type: 'string', example: 'VALIDATION_ERROR' },
+                    message: { type: 'string', example: 'Invalid request payload' },
+                    details: {
+                        nullable: true,
+                        oneOf: [
+                            {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        field: { type: 'string' },
+                                        message: { type: 'string' },
+                                    },
+                                },
+                            },
+                            { type: 'object' },
+                        ],
+                    },
+                },
+            },
+            ApiError: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: false },
+                    data: { nullable: true, example: null },
+                    error: { $ref: '#/components/schemas/ApiErrorBody' },
+                    timestamp: { type: 'string', format: 'date-time' },
+                },
+            },
             Portfolio: { type: 'object' },
             PriceData: { type: 'object' },
             RiskMetrics: { type: 'object' },
