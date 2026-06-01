@@ -110,23 +110,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         : publicKey
             ? 'No price data'
             : 'Demo data'
-    const effectivePriceSource = hasPartialPriceData
-        ? 'Partial price data'
-        : priceSource
     const feedMeta = priceBundle?.feedMeta
-    const showPriceQualityNote = !!(feedMeta?.degraded || feedMeta?.staleOrLimited || hasPartialPriceData)
-}
-
-try {
-    const result = await executeRebalanceMutation.mutateAsync()
-    alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
-} catch (error: any) {
-    console.error('Rebalance failed:', error)
-    const msg = error.message ?? 'Rebalance failed. Please try again.'
-    const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-    alert(isSlippage ? `Slippage too high: ${msg}` : msg)
-}
-    }
 
 const estimateXlm = rebalanceEstimate?.gasEstimateXlm ?? 0
 const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
@@ -151,6 +135,18 @@ const retryPortfolioLoad = useCallback(async () => {
     ])
     await refreshData()
 }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
+
+const executeRebalance = useCallback(async () => {
+    try {
+        const result = await executeRebalanceMutation.mutateAsync()
+        alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
+    } catch (error: any) {
+        console.error('Rebalance failed:', error)
+        const msg = error.message ?? 'Rebalance failed. Please try again.'
+        const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
+        alert(isSlippage ? `Slippage too high: ${msg}` : msg)
+    }
+}, [executeRebalanceMutation])
 
 // NEW: Demo reset functionality for local testing
 const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
@@ -233,6 +229,8 @@ const hasPartialPriceData = pricedAssets > 0 && missingPriceAssets.length > 0
 const partialPriceMessage = hasPartialPriceData
     ? `Some asset quotes are unavailable or fallback-based. ${missingPriceAssets.length} asset${missingPriceAssets.length !== 1 ? 's are' : ' is'} missing fresh market data.`
     : null
+const effectivePriceSource = hasPartialPriceData ? 'Partial price data' : priceSource
+const showPriceQualityNote = !!(feedMeta?.degraded || feedMeta?.staleOrLimited || hasPartialPriceData)
 
 // NEW: Export helpers (Portfolio CSV / JSON) - works in demo mode too
 const buildPortfolioExportRows = () => {
@@ -316,17 +314,6 @@ if (routeDataUnavailable) {
             retryLabel="Retry loading"
             backLabel="Go to landing"
         />
-    )
-}
-
-if (loading) {
-    return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-            <div className="text-center">
-                <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-                <p className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
-            </div>
-        </div>
     )
 }
 
@@ -615,7 +602,7 @@ return (
                         <div className="lg:col-span-2">
                             {/* NEW: Portfolio Value Skeleton Loading State */}
                             {loading ? (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
+                                <div data-testid="dashboard-value-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                     <div className="flex items-center justify-between mb-6">
                                         <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                                         <div className="space-x-2 flex items-center">
@@ -760,7 +747,7 @@ return (
 
                             {/* NEW: Allocation Chart Skeleton Loading State */}
                             {loading ? (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                <div data-testid="dashboard-allocation-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                                     <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-4 animate-pulse" />
                                     <div className="h-48 flex items-center justify-center mb-4">
                                         <div className="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
@@ -850,7 +837,7 @@ return (
                     </div>
 
                     {/* Rebalance History */}
-                    <RebalanceHistory portfolioId={portfolioData?.id || null} />
+                    <RebalanceHistory portfolioId={portfolioData?.id || null} isLoading={loading} />
                 </>
             )}
         </div>

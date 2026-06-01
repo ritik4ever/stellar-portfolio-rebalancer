@@ -29,6 +29,11 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
 vi.mock('../context/ThemeContext', () => ({
     useTheme: vi.fn(() => ({ isDark: false })),
 }))
+vi.mock('@tanstack/react-query', () => ({
+    useQueryClient: vi.fn(() => ({
+        invalidateQueries: vi.fn(async () => undefined),
+    })),
+}))
 
 vi.mock('./ThemeToggle', () => ({ default: () => <div>Theme Toggle</div> }))
 vi.mock('recharts', () => ({
@@ -47,7 +52,10 @@ vi.mock('./AssetCard', () => ({
     default: ({ asset, isLoading }: { asset?: { name?: string }; isLoading?: boolean }) =>
         isLoading ? <div>Asset Card Skeleton</div> : <div>Asset Card {asset?.name ?? 'Unknown'}</div>
 }))
-vi.mock('./RebalanceHistory', () => ({ default: () => <div>Rebalance History</div> }))
+vi.mock('./RebalanceHistory', () => ({
+    default: ({ isLoading }: { isLoading?: boolean }) =>
+        isLoading ? <div>Rebalance History Skeleton</div> : <div>Rebalance History</div>
+}))
 vi.mock('./PerformanceChart', () => ({ default: () => <div>Performance Chart</div> }))
 vi.mock('./NotificationPreferences', () => ({ default: () => <div>Notification Preferences</div> }))
 vi.mock('./PriceTracker', () => ({ default: () => <div>Price Tracker</div> }))
@@ -149,7 +157,10 @@ describe('Dashboard', () => {
 
         render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
-        expect(await screen.findByText(/loading portfolio data/i)).toBeTruthy()
+        expect(await screen.findByTestId('dashboard-value-skeleton')).toBeTruthy()
+        expect(screen.getByTestId('dashboard-allocation-skeleton')).toBeTruthy()
+        expect(screen.getAllByText('Asset Card Skeleton').length).toBeGreaterThan(0)
+        expect(screen.getByText('Rebalance History Skeleton')).toBeTruthy()
     })
 
     it('renders error fallback when portfolio fetching throws', async () => {

@@ -47,7 +47,7 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
     // NEW: Render skeleton loading state
     if (isLoading) {
         return (
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 animate-pulse">
+            <div data-testid="asset-card-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 animate-pulse">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center">
                         {/* Skeleton circle avatar */}
