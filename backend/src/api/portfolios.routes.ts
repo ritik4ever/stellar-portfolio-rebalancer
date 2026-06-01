@@ -18,6 +18,7 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
+import { updatePortfolioSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 
 export const portfoliosRouter = Router()
@@ -65,6 +66,26 @@ portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddlew
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
+
+// Update portfolio with optimistic concurrency control
+portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(updatePortfolioSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
+        const { version, ...updates } = req.body;
+        if (version === undefined) return fail(res, 400, 'VALIDATION_ERROR', 'Version is required for update');
+        const okUpdate = await portfolioStorage.updatePortfolio(portfolioId, updates, version);
+        if (!okUpdate) return fail(res, 409, 'CONFLICT', 'Version conflict', { currentVersion: (await portfolioStorage.getPortfolio(portfolioId))?.version });
+        const updated = await portfolioStorage.getPortfolio(portfolioId);
+        return ok(res, { portfolio: updated }, { status: 200 });
+    } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message);
+        }
+        logger.error('[ERROR] Update portfolio failed', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
 
 portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
