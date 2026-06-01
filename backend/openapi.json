@@ -837,7 +837,7 @@
           "Portfolio"
         ],
         "summary": "Dry-run rebalance",
-        "description": "Preview likely rebalance outcome (estimated trades, skipped assets, and guardrails) without executing trades or writing rebalance history.",
+        "description": "Preview likely rebalance outcome (estimated trades, skipped assets, guardrails) without executing trades or writing rebalance history.",
         "parameters": [
           {
             "name": "id",
@@ -876,82 +876,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "result": {
-                          "type": "object",
-                          "properties": {
-                            "portfolioId": {
-                              "type": "string"
-                            },
-                            "canExecute": {
-                              "type": "boolean"
-                            },
-                            "overallStatus": {
-                              "type": "string",
-                              "enum": [
-                                "ready",
-                                "partial",
-                                "blocked"
-                              ]
-                            },
-                            "trigger": {
-                              "type": "string"
-                            },
-                            "estimatedTrades": {
-                              "type": "array",
-                              "items": {
-                                "type": "object"
-                              }
-                            },
-                            "skippedTrades": {
-                              "type": "array",
-                              "items": {
-                                "type": "object"
-                              }
-                            },
-                            "skippedAssets": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "asset": {
-                                    "type": "string"
-                                  },
-                                  "reason": {
-                                    "type": "string"
-                                  }
-                                }
-                              }
-                            },
-                            "guardrails": {
-                              "type": "object"
-                            },
-                            "feeEstimate": {
-                              "type": "object"
-                            },
-                            "estimatedTotalSlippageBps": {
-                              "type": "number"
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "error": {
-                      "type": "object",
-                      "nullable": true
-                    },
-                    "timestamp": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ApiEnvelope"
                 }
               }
             }
