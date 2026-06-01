@@ -19,11 +19,13 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
     const [cookies, setCookies] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const recordConsent = useRecordConsentMutation(userId)
+    const submitting = recordConsent.isPending
 
     const allAccepted = terms && privacy && cookies
 
+
     const handleAccept = async () => {
-        if (!allAccepted) return
+        if (!allAccepted || submitting) return
         setError(null)
         try {
             await recordConsent.mutateAsync()
@@ -33,7 +35,6 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
         }
     }
 
-    const submitting = recordConsent.isPending
 
     return (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
@@ -53,6 +54,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             type="checkbox"
                             checked={terms}
                             onChange={(e) => setTerms(e.target.checked)}
+                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
@@ -72,6 +74,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             type="checkbox"
                             checked={privacy}
                             onChange={(e) => setPrivacy(e.target.checked)}
+                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
@@ -91,6 +94,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             type="checkbox"
                             checked={cookies}
                             onChange={(e) => setCookies(e.target.checked)}
+                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
