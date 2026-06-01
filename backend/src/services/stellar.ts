@@ -488,7 +488,8 @@ export class StellarService {
                 failedTrades: dexResult.failedTrades,
                 failureReasons,
                 rollback: dexResult.rollback,
-                totalSlippageBps: dexResult.totalSlippageBps
+                totalSlippageBps: dexResult.totalSlippageBps,
+                explanation: dexResult.explanation
             }
         } catch (error) {
 
