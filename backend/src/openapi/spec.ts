@@ -904,6 +904,7 @@ const spec: Record<string, any> = {
                     webhookEnabled: { type: 'boolean' },
                     webhookUrl: { type: 'string', format: 'uri', pattern: '^https?://', description: 'Required when webhookEnabled is true. Must use http or https.' },
                     events: { $ref: '#/components/schemas/NotificationEventsInput' },
+                    digestMode: { type: 'string', enum: ['immediate','daily','weekly'], description: 'Delivery mode for notifications: immediate (per-event), daily digest, or weekly digest.' },
                 },
             },
         },

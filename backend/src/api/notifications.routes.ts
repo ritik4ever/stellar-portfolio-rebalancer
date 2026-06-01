@@ -32,7 +32,7 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, ...p
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
-        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body
+        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress, digestMode } = req.body
 
         notificationService.subscribe({
             userId,
@@ -40,6 +40,7 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, ...p
             emailAddress,
             webhookEnabled,
             webhookUrl,
+            digestMode,
             events
         })
 

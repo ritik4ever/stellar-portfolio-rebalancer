@@ -192,6 +192,19 @@ describe("NotificationService", () => {
 
       expect(mockNodemailerTransporter.sendMail).not.toHaveBeenCalled();
     });
+
+    it("queues event when user has daily digest preference", async () => {
+      const digestPrefs = { ...emailPrefs, digestMode: 'daily' } as any;
+      getPrefsSpy.mockReturnValue(digestPrefs);
+      const saveDigestSpy = vi.spyOn(notificationDb, 'dbSaveDigestEvent').mockImplementation(() => {});
+
+      const service = new NotificationService();
+      const payload: NotificationPayload = { ...basePayload };
+
+      await service.notify(payload);
+
+      expect(saveDigestSpy).toHaveBeenCalledWith('test-user', 'rebalance', expect.any(String), expect.any(String), undefined);
+    });
   });
 
   describe("WebhookProvider - failure handling", () => {
