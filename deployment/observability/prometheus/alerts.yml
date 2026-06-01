@@ -1,31 +1,35 @@
-groups:
+﻿groups:
   - name: portfolio-observability
     rules:
+      # --- API GATEWAY SUBSYSTEM ---
       - alert: BackendDown
         expr: up{job="portfolio-backend"} == 0
         for: 2m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: backend
         annotations:
           summary: Backend metrics endpoint is unavailable
-          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes.
+          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes. The API gateway is likely offline.
 
       - alert: BackendReadinessFailed
         expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/readiness"} == 0
         for: 2m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: backend
         annotations:
           summary: Backend readiness probe is failing
-          description: The backend /readiness endpoint is returning a non-2xx response.
+          description: The backend /readiness endpoint is returning a non-2xx response. The API gateway is reporting unhealthy status.
 
       - alert: FrontendUptimeProbeFailed
         expr: probe_success{job="portfolio-readiness", instance="http://frontend:80/"} == 0
         for: 5m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: frontend
         annotations:
           summary: Frontend uptime probe failed
@@ -36,22 +40,46 @@ groups:
         for: 10m
         labels:
           severity: warning
+          subsystem: api-gateway
           service: backend
         annotations:
           summary: Elevated backend 5xx rate
           description: More than 5% of backend requests have been failing with 5xx responses for 10 minutes.
+
+      - alert: APILatencySpike
+        expr: histogram_quantile(0.95, sum(rate(stellar_portfolio_http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: api-gateway
+          service: backend
+        annotations:
+          summary: API Gateway response latency spike detected
+          description: The 95th percentile of HTTP request duration is greater than 2 seconds for 5 minutes.
+
+      # --- PORTFOLIO ENGINE SUBSYSTEM ---
+      - alert: PortfolioRebalanceFailed
+        expr: stellar_portfolio_queue_jobs{queue="rebalance", state="failed"} >= 5
+        for: 2m
+        labels:
+          severity: critical
+          subsystem: portfolio-engine
+          service: queue
+        annotations:
+          summary: Portfolio rebalancing has failed completely
+          description: The rebalance queue has accumulated 5 or more failed jobs in the last 2 minutes. Automated rebalancing is failing completely.
 
       - alert: RebalanceQueueFailures
         expr: stellar_portfolio_queue_jobs{queue="rebalance", state="failed"} > 0
         for: 5m
         labels:
           severity: warning
+          subsystem: portfolio-engine
           service: queue
         annotations:
           summary: Failed rebalance jobs detected
           description: The rebalance queue has failed jobs that need investigation.
 
-<<<<<<< HEAD
   - name: queue-operations
     interval: 30s
     rules:
@@ -160,6 +188,7 @@ groups:
         for: 5m
         labels:
           severity: warning
+          subsystem: portfolio-engine
           service: prices
         annotations:
           summary: Reflector has served stale prices
@@ -170,7 +199,19 @@ groups:
         for: 10m
         labels:
           severity: warning
+          subsystem: portfolio-engine
           service: prices
         annotations:
           summary: Reflector fallback usage is elevated
           description: The backend has relied on cached or synthetic price fallbacks at least five times in the last hour.
+
+      - alert: SystemReadinessDegraded
+        expr: stellar_portfolio_readiness_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          subsystem: system
+          service: backend
+        annotations:
+          summary: System readiness check has failed
+          description: The global application readiness probe is failing, indicating degraded health across one or more critical backend dependencies.

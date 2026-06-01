@@ -102,6 +102,43 @@ const queueFailureRateGauge = new Gauge({
   registers: [register],
 });
 
+const workerHealthTotal = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}worker_health_total`,
+  help: "Total number of workers",
+  registers: [register],
+});
+
+const workerHealthyTotal = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}worker_healthy_total`,
+  help: "Number of healthy workers",
+  registers: [register],
+});
+
+const workerUnhealthyTotal = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}worker_unhealthy_total`,
+  help: "Number of unhealthy workers",
+  registers: [register],
+});
+
+const workerIdleTotal = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}worker_idle_total`,
+  help: "Number of idle workers",
+  registers: [register],
+});
+
+const workerLaggingTotal = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}worker_lagging_total`,
+  help: "Number of workers with high lag",
+  registers: [register],
+});
+
+const workerStatus = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}worker_status`,
+  help: "Per-worker status (1 = ready, 0 = not ready)",
+  labelNames: ["worker_name"] as const,
+  registers: [register],
+});
+
 const routeLabel = (req: Request): string =>
   req.route?.path || req.path || "unknown";
 
@@ -166,6 +203,61 @@ export async function getMetricsPayload(): Promise<string> {
     // Calculate failure rate
     const failureRate = totalProcessed > 0 ? stats.failed / totalProcessed : 0;
     queueFailureRateGauge.set({ queue }, failureRate);
+  }
+
+  // Update worker health metrics
+  const workerHealth = await getWorkerHealthSummary();
+  workerHealthTotal.set(workerHealth.total);
+  workerHealthyTotal.set(workerHealth.healthy);
+  workerUnhealthyTotal.set(workerHealth.unhealthy);
+  workerIdleTotal.set(workerHealth.idle);
+  workerLaggingTotal.set(workerHealth.lagging);
+
+  // Update per-worker status
+  for (const worker of workerHealth.workers) {
+    workerStatus.set({ worker_name: worker.name }, worker.ready ? 1 : 0);
+  }
+
+  return register.metrics();
+}
+
+export function getMetricsContentType(): string {
+  return register.contentType;
+}
+
+export function recordPriceFeedResolution(
+  meta: Pick<
+    { resolutionHint: string; degraded: boolean; staleOrLimited: boolean },
+    "resolutionHint" | "degraded" | "staleOrLimited"
+  >,
+): void {
+  priceFeedResolutionsTotal.inc({
+    resolution_hint: meta.resolutionHint,
+    degraded: String(meta.degraded),
+    stale_or_limited: String(meta.staleOrLimited),
+  });
+}
+
+export function recordReflectorStalePrice(asset: string): void {
+  reflectorStalePricesTotal.inc({ asset });
+}
+
+export function recordReflectorFallbackUsage(reason: string): void {
+  reflectorFallbackUsageTotal.inc({ reason });
+}
+  }
+
+  // Update worker health metrics
+  const workerHealth = await getWorkerHealthSummary();
+  workerHealthTotal.set(workerHealth.total);
+  workerHealthyTotal.set(workerHealth.healthy);
+  workerUnhealthyTotal.set(workerHealth.unhealthy);
+  workerIdleTotal.set(workerHealth.idle);
+  workerLaggingTotal.set(workerHealth.lagging);
+
+  // Update per-worker status
+  for (const worker of workerHealth.workers) {
+    workerStatus.set({ worker_name: worker.name }, worker.ready ? 1 : 0);
   }
 
   return register.metrics();
