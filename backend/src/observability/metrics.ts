@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client'
 import { observabilityConfig } from './config.js'
-import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { getQueueMetrics, QUEUE_METRIC_NAMES, QUEUE_METRIC_STATES } from '../queue/queueMetrics.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
 import type { PriceFeedMeta } from '../types/index.js'
 
@@ -109,12 +109,11 @@ export async function getMetricsPayload(): Promise<string> {
     readinessGauge.set(readiness.status === 'ready' ? 1 : 0)
 
     const queueMetrics = await getQueueMetrics()
-    for (const [queue, stats] of Object.entries(queueMetrics.queues)) {
-        queueDepthGauge.set({ queue, state: 'waiting' }, stats.waiting)
-        queueDepthGauge.set({ queue, state: 'active' }, stats.active)
-        queueDepthGauge.set({ queue, state: 'completed' }, stats.completed)
-        queueDepthGauge.set({ queue, state: 'failed' }, stats.failed)
-        queueDepthGauge.set({ queue, state: 'delayed' }, stats.delayed)
+    for (const queue of QUEUE_METRIC_NAMES) {
+        const stats = queueMetrics.queues[queue]
+        for (const state of QUEUE_METRIC_STATES) {
+            queueDepthGauge.set({ queue, state }, stats?.[state] ?? 0)
+        }
     }
 
     return register.metrics()

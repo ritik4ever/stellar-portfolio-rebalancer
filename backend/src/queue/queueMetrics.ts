@@ -13,7 +13,7 @@ export interface QueueStats {
 
 export interface AllQueueMetrics {
     redisConnected: boolean
-    queues: Record<string, QueueStats>
+    queues: Record<QueueMetricName, QueueStats>
 }
 
 export interface FailedJobInfo {
@@ -31,10 +31,24 @@ export interface FailedJobsResult {
     countsByQueue: Record<string, number>
 }
 
-const EMPTY_STATS: QueueStats = { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 }
+export const QUEUE_METRIC_NAMES = [
+    QUEUE_NAMES.PORTFOLIO_CHECK,
+    QUEUE_NAMES.REBALANCE,
+    QUEUE_NAMES.ANALYTICS_SNAPSHOT,
+] as const
 
-async function statsFor(queue: Queue<any> | null): Promise<QueueStats> {
-    if (!queue) return EMPTY_STATS
+export const QUEUE_METRIC_STATES = ['waiting', 'active', 'completed', 'failed', 'delayed'] as const satisfies readonly (keyof QueueStats)[]
+
+export type QueueMetricName = typeof QUEUE_METRIC_NAMES[number]
+export type QueueMetricState = typeof QUEUE_METRIC_STATES[number]
+
+const emptyStats = (): QueueStats => ({ waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 })
+
+async function statsFor(queue: Queue<any> | null, queueName: QueueMetricName): Promise<QueueStats> {
+    if (!queue) {
+        logger.warn('[queueMetrics] Queue unavailable while collecting metrics', { queue: queueName })
+        return emptyStats()
+    }
     try {
         const [waiting, active, completed, failed, delayed] = await Promise.all([
             queue.getWaitingCount(),
@@ -44,8 +58,9 @@ async function statsFor(queue: Queue<any> | null): Promise<QueueStats> {
             queue.getDelayedCount(),
         ])
         return { waiting, active, completed, failed, delayed }
-    } catch {
-        return EMPTY_STATS
+    } catch (err) {
+        logger.warn('[queueMetrics] Failed to collect queue metrics', { queue: queueName, error: String(err) })
+        return emptyStats()
     }
 }
 
@@ -59,17 +74,17 @@ export async function getQueueMetrics(): Promise<AllQueueMetrics> {
         return {
             redisConnected: false,
             queues: {
-                [QUEUE_NAMES.PORTFOLIO_CHECK]: EMPTY_STATS,
-                [QUEUE_NAMES.REBALANCE]: EMPTY_STATS,
-                [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: EMPTY_STATS,
+                [QUEUE_NAMES.PORTFOLIO_CHECK]: emptyStats(),
+                [QUEUE_NAMES.REBALANCE]: emptyStats(),
+                [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: emptyStats(),
             },
         }
     }
 
     const [portfolioCheckStats, rebalanceStats, analyticsStats] = await Promise.all([
-        statsFor(getPortfolioCheckQueue()),
-        statsFor(getRebalanceQueue()),
-        statsFor(getAnalyticsSnapshotQueue()),
+        statsFor(getPortfolioCheckQueue(), QUEUE_NAMES.PORTFOLIO_CHECK),
+        statsFor(getRebalanceQueue(), QUEUE_NAMES.REBALANCE),
+        statsFor(getAnalyticsSnapshotQueue(), QUEUE_NAMES.ANALYTICS_SNAPSHOT),
     ])
 
     return {
