@@ -75,14 +75,17 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.
-- **Returns:** `Ok(())` or `Err(Error::SlippageExceeded)`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::SlippageExceeded)`
+  - `Err(Error::StaleData)`
+  - `Err(Error::UnsupportedAsset)`
 - **Preconditions / failure behavior:**
   - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
   - Portfolio must exist and owner must authorize call.
   - Cooldown must be elapsed (`>= 3600` seconds since last rebalance) or panic `"Cooldown active"`.
-  - Every target asset must have non-stale Reflector price data or panic:
-    - `"Stale price data"`
-    - `"Missing price data"`
+  - Every target asset must have non-stale Reflector price data:
+    - stale price data returns `Err(Error::StaleData)`
+    - missing Reflector price data returns `Err(Error::UnsupportedAsset)`
 
 ### `set_emergency_stop(env: Env, stop: bool) -> ()`
 
@@ -102,13 +105,14 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `2` | `RebalanceNotNeeded` | Reserved variant; currently not explicitly returned by `lib.rs`. |
 | `3` | `EmergencyStop` | Reserved variant; emergency-stop paths currently panic instead of returning this error. |
 | `4` | `CooldownActive` | Reserved variant; cooldown path currently panics instead of returning this error. |
-| `5` | `StaleData` | Reserved variant; stale-price path currently panics instead of returning this error. |
+| `5` | `StaleData` | `execute_rebalance` receives stale Reflector price data. |
 | `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
 | `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
 | `8` | `InvalidThreshold` | `create_portfolio` threshold outside `1..=50`. |
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
+| `12` | `UnsupportedAsset` | `execute_rebalance` cannot get Reflector price data for an asset, so callers can distinguish unsupported assets from stale data or allocation validation failures. |
 
 ## XDR/Contract Type References
 

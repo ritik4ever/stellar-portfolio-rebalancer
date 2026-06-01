@@ -375,7 +375,6 @@ fn test_emergency_stop() {
 }
 
 #[test]
-#[should_panic(expected = "Stale price data")]
 fn test_stale_data() {
     let env = Env::default();
     env.mock_all_auths();
@@ -447,7 +446,8 @@ fn test_stale_data() {
     });
 
     let actual_balances = Map::new(&env);
-    client.execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StaleData)));
 }
 
 #[test]
@@ -1257,19 +1257,23 @@ fn test_calculate_portfolio_value_all_prices_available() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
-    assert_eq!(value, Some(15000));
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
+    assert_eq!(value, Ok(15000));
 }
 
 #[test]
-fn test_calculate_portfolio_value_missing_price_skips_asset() {
+fn test_calculate_portfolio_value_missing_price_returns_unsupported_asset() {
     let env = Env::default();
     env.mock_all_auths();
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_with_missing_price::ReflectorWithMissingPrice);
+    let reflector_id =
+        env.register_contract(None, reflector_with_missing_price::ReflectorWithMissingPrice);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
@@ -1288,14 +1292,20 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
 
-    assert_eq!(value, None); // Should be None now that we don't skip
+    assert_eq!(
+        value,
+        Err(crate::portfolio::PortfolioValueError::UnsupportedAsset)
+    );
 }
 
 #[test]
-fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
+fn test_calculate_portfolio_value_all_prices_missing_returns_unsupported_asset() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1314,9 +1324,45 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
-    assert_eq!(value, None); // Should be None if all missing
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
+    assert_eq!(
+        value,
+        Err(crate::portfolio::PortfolioValueError::UnsupportedAsset)
+    );
+}
+
+#[test]
+fn test_execute_rebalance_unsupported_asset_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id =
+        env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20_000;
+    });
+
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::UnsupportedAsset)));
 }
 
 #[test]

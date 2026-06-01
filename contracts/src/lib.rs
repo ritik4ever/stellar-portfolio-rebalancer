@@ -143,8 +143,8 @@ impl PortfolioRebalancer {
             &portfolio.current_balances,
             &reflector_client,
         ) {
-            Some(val) => val,
-            None => return false, // Cannot safely rebalance without all prices
+            Ok(val) => val,
+            Err(_) => return false, // Cannot safely rebalance without all prices
         };
 
         if total_value == 0 {
@@ -165,7 +165,7 @@ impl PortfolioRebalancer {
                 let current_asset_value = (current_balance * price_data.price) / 10i128.pow(14);
                 let current_percent = (current_asset_value * 100) / total_value;
 
-                 let drift = (current_percent - target_percent as i128).abs();
+                let drift = (current_percent - target_percent as i128).abs();
                 if drift > portfolio.rebalance_threshold as i128 {
                     return true;
                 }
@@ -175,7 +175,11 @@ impl PortfolioRebalancer {
         false
     }
 
-    pub fn execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error> {
+    pub fn execute_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+    ) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             panic!("Emergency stop active");
         }
@@ -205,10 +209,10 @@ impl PortfolioRebalancer {
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
                 if price_data.is_stale(current_time, 3600) {
-                    panic!("Stale price data");
+                    return Err(Error::StaleData);
                 }
             } else {
-                panic!("Missing price data");
+                return Err(Error::UnsupportedAsset);
             }
         }
 
@@ -222,7 +226,11 @@ impl PortfolioRebalancer {
                 &env,
                 &portfolio.current_balances,
                 &reflector_client,
-            ).unwrap(); // Already verified prices above
+            )
+            .map_err(|err| match err {
+                portfolio::PortfolioValueError::StaleData => Error::StaleData,
+                portfolio::PortfolioValueError::UnsupportedAsset => Error::UnsupportedAsset,
+            })?;
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client

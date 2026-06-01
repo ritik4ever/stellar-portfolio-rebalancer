@@ -1,6 +1,12 @@
 use crate::types::*;
 use soroban_sdk::{Address, Env, Map};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PortfolioValueError {
+    StaleData,
+    UnsupportedAsset,
+}
+
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
     if allocations.is_empty() {
         return false;
@@ -23,7 +29,7 @@ pub fn calculate_portfolio_value(
     env: &Env,
     balances: &Map<Address, i128>,
     reflector_client: &crate::reflector::ReflectorClient,
-) -> Option<i128> {
+) -> Result<i128, PortfolioValueError> {
     let mut total_value = 0i128;
     let current_time = env.ledger().timestamp();
 
@@ -31,19 +37,19 @@ pub fn calculate_portfolio_value(
         if let Some(price_data) =
             reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
         {
-            // Check for stale price (e.g., 1 hour)
-            if price_data.timestamp + 3600 < current_time {
-                return None;
+            // Check for stale price (e.g., 1 hour).
+            if price_data.is_stale(current_time, 3600) {
+                return Err(PortfolioValueError::StaleData);
             }
             let value = (balance * price_data.price) / 10i128.pow(14);
             total_value += value;
         } else {
-            // If any asset price is missing, we can't calculate a reliable total value
-            return None;
+            // Missing Reflector prices mean the asset is not supported by the configured oracle.
+            return Err(PortfolioValueError::UnsupportedAsset);
         }
     }
 
-    Some(total_value)
+    Ok(total_value)
 }
 
 #[allow(dead_code)]

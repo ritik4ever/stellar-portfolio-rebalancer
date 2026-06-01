@@ -53,4 +53,9 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    /// Reflector does not provide price data for an asset used in a portfolio.
+    ///
+    /// This is returned separately from allocation validation failures so
+    /// callers can prompt the user to choose a supported asset.
+    UnsupportedAsset = 12,
 }
