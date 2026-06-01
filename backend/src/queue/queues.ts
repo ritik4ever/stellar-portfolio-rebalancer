@@ -109,6 +109,21 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   }
 }
 
+export function getQueueByName(queueName: string): Queue | null {
+  switch (queueName) {
+    case QUEUE_NAMES.PORTFOLIO_CHECK:
+      return getPortfolioCheckQueue();
+    case QUEUE_NAMES.REBALANCE:
+      return getRebalanceQueue();
+    case QUEUE_NAMES.ANALYTICS_SNAPSHOT:
+      return getAnalyticsSnapshotQueue();
+    case QUEUE_NAMES.IDEMPOTENCY_CLEANUP:
+      return getIdempotencyCleanupQueue();
+    default:
+      return null;
+  }
+}
+
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
