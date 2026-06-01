@@ -344,7 +344,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </span>
                                         <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
                                     </div>
-                                    <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-500">
+                                    <div className="flex items-center space-x-1 text-xs text-gray-600 dark:text-gray-400">
                                         <span>Contract:</span>
                                         <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
                                         <a
@@ -654,9 +654,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                 ${portfolioData?.totalValue?.toLocaleString() || '0'}
                                             </div>
                                             <div className="flex items-center mt-1">
-                                                <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-                                                <span className="text-green-500 font-medium">+{portfolioData?.dayChange || 0}%</span>
-                                                <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
+                                                <TrendingUp className="w-4 h-4 text-green-600 dark:text-green-400 mr-1" />
+                                                <span className="text-green-600 dark:text-green-400 font-medium">+{portfolioData?.dayChange || 0}%</span>
+                                                <span className="text-gray-600 dark:text-gray-400 ml-2">Today</span>
                                             </div>
                                         </div>
                                         <div className="h-64">

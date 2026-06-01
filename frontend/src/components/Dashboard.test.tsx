@@ -1,7 +1,16 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from './Dashboard'
+
+// Dashboard calls useQueryClient() directly, so every render needs a provider.
+const renderWithClient = (ui: React.ReactElement) => {
+    const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+    })
+    return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
 
 const queryMocks = vi.hoisted(() => ({
     useUserPortfolios: vi.fn(),
@@ -110,7 +119,7 @@ describe('Dashboard', () => {
     })
 
     it('renders onboarding CTA for an empty portfolio', async () => {
-        render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+        renderWithClient(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByRole('button', { name: /create portfolio/i })).toBeTruthy()
         expect(screen.getByText(/portfolio dashboard/i)).toBeTruthy()
@@ -137,17 +146,37 @@ describe('Dashboard', () => {
             isLoading: false
         })
 
-        render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+        renderWithClient(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByText('Asset Card XLM')).toBeTruthy()
         expect(screen.getByText('Asset Card USDC')).toBeTruthy()
+    })
+
+    it('renders the day-change with AA-compliant green tokens (not text-green-500 on white)', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({
+            data: [{
+                id: 'p-1',
+                totalValue: 5000,
+                dayChange: 1.2,
+                allocations: [{ asset: 'XLM', target: 100, amount: 5000 }],
+            }],
+            isLoading: false,
+        })
+
+        renderWithClient(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+
+        const dayChange = await screen.findByText(/\+1\.2%/)
+        expect(dayChange.className).toContain('text-green-600')
+        expect(dayChange.className).toContain('dark:text-green-400')
+        // Regression guard: the old ~1.9:1 token must not return.
+        expect(dayChange.className).not.toMatch(/(^|\s)text-green-500(\s|$)/)
     })
 
     it('renders loading state while portfolio data is fetching', async () => {
         queryMocks.useUserPortfolios.mockReturnValue({ data: undefined, isLoading: true })
         queryMocks.usePrices.mockReturnValue({ data: undefined, isLoading: true })
 
-        render(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+        renderWithClient(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByText(/loading portfolio data/i)).toBeTruthy()
     })
