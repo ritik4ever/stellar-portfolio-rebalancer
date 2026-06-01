@@ -309,3 +309,14 @@ export interface RebalanceRollback {
     rolledBackTrades: number
     failures: string[]
 }
+
+export interface IdempotencyRecord {
+    key: string
+    requestHash: string
+    method: string
+    path: string
+    statusCode: number
+    responseBody: string
+    createdAt: string
+    expiresAt: string
+}
