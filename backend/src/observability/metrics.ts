@@ -3,7 +3,6 @@ import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom
 import { observabilityConfig } from './config.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getWorkerHealthSummary } from '../queue/workers/workerHeartbeat.js'
-import { buildReadinessReport } from '../monitoring/readiness.js'
 import type { PriceFeedMeta } from '../types/index.js'
 
 const register = new Registry()
@@ -144,6 +143,7 @@ export async function getMetricsPayload(): Promise<string> {
         return '# metrics disabled\n'
     }
 
+    const { buildReadinessReport } = await import('../monitoring/readiness.js')
     const readiness = await buildReadinessReport()
     readinessGauge.set(readiness.status === 'ready' ? 1 : 0)
 

@@ -42,7 +42,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
     let testDbPath: string
     let createdPortfolioId: string | null = null
 
-    beforeAll(() => {
+    beforeAll(async () => {
         process.env.JWT_SECRET = JWT_SECRET
         process.env.NODE_ENV = 'test'
 

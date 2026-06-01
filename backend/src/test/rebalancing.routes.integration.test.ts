@@ -47,7 +47,7 @@ describe('Rebalancing API Integration Tests', () => {
     let testDbPath: string
     let adminKp: Keypair
 
-    beforeAll(() => {
+    beforeAll(async () => {
         process.env.JWT_SECRET = JWT_SECRET
         process.env.NODE_ENV = 'test'
 
@@ -146,10 +146,10 @@ describe('Rebalancing API Integration Tests', () => {
         it('records a rebalance event and returns it', async () => {
             const eventData = {
                 portfolioId: 'test-portfolio-001',
-                userId: 'GTEST123456789ABCDEF',
-                oldAllocations: { XLM: 60, USDC: 40 },
-                newAllocations: { XLM: 50, USDC: 50 },
-                reason: 'threshold_breached',
+                trigger: 'Threshold exceeded (8.2%)',
+                trades: 2,
+                gasUsed: '0.02 XLM',
+                status: 'completed',
                 isAutomatic: false
             }
 
