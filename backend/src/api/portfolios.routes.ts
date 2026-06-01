@@ -4,8 +4,8 @@ import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
+import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
-import { riskManagementService } from '../services/serviceContainer.js'
 import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -157,6 +157,32 @@ portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: 
         })
     } catch (error) {
         logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/rebalance-status', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const isLocked = await rebalanceLockService.isLocked(portfolioId)
+        const history = await rebalanceHistoryService.getRebalanceHistory(portfolioId, 1)
+        const lastEvent = history.length > 0 ? history[0] : null
+        const status = isLocked ? 'in_progress' : lastEvent?.status ?? 'idle'
+
+        return ok(res, {
+            portfolioId,
+            status,
+            isLocked,
+            lastEvent,
+            lastRebalanceAt: portfolio.lastRebalance ?? null
+        })
+    } catch (error) {
+        logger.error('[ERROR] Rebalance status failed', { error: getErrorObject(error), portfolioId: req.params.id })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

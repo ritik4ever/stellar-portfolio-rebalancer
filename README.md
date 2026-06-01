@@ -117,10 +117,11 @@ Other providers: SendGrid, Mailgun, AWS SES.
 
 Test Notifications:
 ```bash
-curl -X POST http://localhost:3001/api/v1/notifications/test \
+curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 ```
+> Note: this is a debug-only endpoint. Set `ENABLE_DEBUG_ROUTES=true` in `backend/.env` and use the admin auth headers required by `/api/v1/debug/*` routes.
 
 ## Development
 Start development servers:

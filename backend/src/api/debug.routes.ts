@@ -81,6 +81,91 @@ debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdm
     }
 })
 
+debugRouter.post('/debug/notifications/test-all', blockDebugInProduction, requireAdmin, adminRateLimiter, validateRequest(debugTestNotificationSchema), async (req: Request, res: Response) => {
+    try {
+        const userId = (req.body.userId ?? req.user?.address) as string | undefined
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+
+        const preferences = notificationService.getPreferences(userId)
+        if (!preferences) {
+            return fail(res, 404, 'NOT_FOUND', 'No notification preferences found for this user')
+        }
+
+        const eventTypes: Array<'rebalance' | 'circuitBreaker' | 'priceMovement' | 'riskChange'> = [
+            'rebalance',
+            'circuitBreaker',
+            'priceMovement',
+            'riskChange'
+        ]
+
+        const results = await Promise.all(eventTypes.map(async (eventType) => {
+            const payloadBase = {
+                userId,
+                eventType,
+                timestamp: new Date().toISOString()
+            }
+
+            const payloadByType = {
+                rebalance: {
+                    title: 'Test: Portfolio Rebalanced',
+                    message: 'Test rebalance notification - 3 trades executed.',
+                    data: { portfolioId: 'test-portfolio-123', trades: 3, gasUsed: '0.0234 XLM' }
+                },
+                circuitBreaker: {
+                    title: 'Test: Circuit Breaker Triggered',
+                    message: 'Test circuit breaker notification - BTC moved 22.5%.',
+                    data: { asset: 'BTC', priceChange: '22.5', cooldownMinutes: 5 }
+                },
+                priceMovement: {
+                    title: 'Test: Large Price Movement',
+                    message: 'Test price movement notification - ETH up 12.34%.',
+                    data: { asset: 'ETH', priceChange: '12.34', direction: 'increased' }
+                },
+                riskChange: {
+                    title: 'Test: Risk Level Changed',
+                    message: 'Test risk change notification - Risk increased to high.',
+                    data: { portfolioId: 'test-portfolio-123', oldLevel: 'medium', newLevel: 'high' }
+                }
+            } as const
+
+            try {
+                await notificationService.notify({
+                    ...payloadBase,
+                    ...payloadByType[eventType]
+                })
+
+                return {
+                    eventType,
+                    success: true,
+                    sentTo: {
+                        email: preferences.emailEnabled ? preferences.emailAddress : null,
+                        webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
+                    },
+                    timestamp: payloadBase.timestamp
+                }
+            } catch (error) {
+                return {
+                    eventType,
+                    success: false,
+                    error: getErrorMessage(error),
+                    sentTo: {
+                        email: preferences.emailEnabled ? preferences.emailAddress : null,
+                        webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
+                    },
+                    timestamp: payloadBase.timestamp
+                }
+            }
+        }))
+
+        logger.info('Debug test notifications sent', { userId, results })
+
+        return ok(res, { results })
+    } catch (error) {
+        logger.error('Failed to send debug test notifications', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 debugRouter.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
         const apiKey = process.env.COINGECKO_API_KEY
