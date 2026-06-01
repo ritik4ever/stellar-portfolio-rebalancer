@@ -198,4 +198,44 @@ describe('NotificationTest', () => {
 
         resolve({ results: [] })
     })
+
+    it('uses fallback copy for a bulk test failure without an error string', async () => {
+        vi.spyOn(api, 'post').mockResolvedValue({
+            results: [
+                {
+                    eventType: 'riskChange',
+                    success: false,
+                    timestamp: '2026-06-01T00:01:00.000Z',
+                },
+            ],
+        } as any)
+
+        renderWithQuery(<NotificationTest userId="user-1" />)
+
+        fireEvent.click(screen.getByRole('button', { name: /test all notification types/i }))
+
+        expect(await screen.findByText(/test notification failed/i)).toBeTruthy()
+    })
+
+    it('clears mutation banners and result cards when clearing results', async () => {
+        vi.spyOn(api, 'post').mockResolvedValue({
+            message: 'Rebalance test sent',
+            sentTo: { email: 'user@example.com', webhook: null },
+            timestamp: '2026-06-01T00:00:00.000Z',
+        } as any)
+
+        renderWithQuery(<NotificationTest userId="user-1" />)
+
+        fireEvent.click(screen.getByRole('button', { name: /test rebalance/i }))
+
+        expect(await screen.findByText(/rebalance test sent/i)).toBeTruthy()
+        expect(screen.getByText(/test notification sent/i)).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: /clear all test results/i }))
+
+        await waitFor(() => {
+            expect(screen.queryByText(/rebalance test sent/i)).toBeNull()
+            expect(screen.queryByText(/test notification sent/i)).toBeNull()
+        })
+    })
 })
