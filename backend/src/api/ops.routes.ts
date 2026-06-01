@@ -21,6 +21,7 @@ import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
 import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue } from '../queue/queues.js'
+import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 
 export const opsRouter = Router()
 
@@ -83,6 +84,7 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
                 enabled: true,
                 alertsActive: Object.values(circuitBreakers).some((cb: any) => cb.isTriggered)
             },
+            anomalySummary: getAnomalySummary(),
             autoRebalancer: {
                 status: autoRebalancerStatus,
                 statistics: autoRebalancerStats,

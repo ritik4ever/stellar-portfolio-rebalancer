@@ -1,10 +1,11 @@
-import React, { useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import React, { useMemo, useState } from 'react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceDot } from 'recharts'
 import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 
 // TanStack Query Hooks
 import { usePortfolioAnalytics, usePerformanceSummary } from '../hooks/queries/useAnalyticsQuery'
+import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 
 interface PerformanceChartProps {
     portfolioId: string | null
@@ -12,27 +13,39 @@ interface PerformanceChartProps {
 
 const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     const [days, setDays] = useState(30)
+    const [compareMode, setCompareMode] = useState(false)
     const { isDark } = useTheme()
 
+    const requestedDays = compareMode ? days * 2 : days
+
     // Query for analytics data
-    const { data: analyticsDataResult, isLoading: analyticsLoading, error: analyticsError } = usePortfolioAnalytics(portfolioId, days)
+    const { data: analyticsDataResult, isLoading: analyticsLoading, error: analyticsError } = usePortfolioAnalytics(portfolioId, requestedDays)
 
     // Query for performance summary
     const { data: summaryDataResult, isLoading: summaryLoading, error: summaryError } = usePerformanceSummary(portfolioId)
 
+    // Query for rebalance history events used for chart markers
+    const { data: historyResult, isLoading: historyLoading, error: historyError } = useRebalanceHistory(portfolioId, 1, 50)
+
     // Determine finalized data and loading state
     const analyticsData = analyticsDataResult?.data || []
     const performanceSummary = summaryDataResult
-    const loading = portfolioId && portfolioId !== 'demo' ? (analyticsLoading || summaryLoading) : false
-    const error = analyticsError || summaryError ? 'Failed to load performance data' : null
+    const loading = portfolioId && portfolioId !== 'demo' ? (analyticsLoading || summaryLoading || historyLoading) : false
+    const error = analyticsError || summaryError || historyError ? 'Failed to load performance data' : null
 
-    const formatChartData = () => {
-        return analyticsData.map((snapshot: any) => ({
-            date: new Date(snapshot.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-            value: Number(snapshot.totalValue.toFixed(2)),
-            timestamp: snapshot.timestamp
-        }))
-    }
+    const formatChartData = useMemo(() => {
+        return analyticsData.map((snapshot: any) => {
+            const value = typeof snapshot.totalValue === 'number' ? snapshot.totalValue : Number(snapshot.totalValue || 0)
+            const date = new Date(snapshot.timestamp)
+            return {
+                date: Number.isFinite(date.getTime())
+                    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : 'Unknown',
+                value: Number.isFinite(value) ? Number(value.toFixed(2)) : 0,
+                timestamp: snapshot.timestamp,
+            }
+        })
+    }, [analyticsData])
 
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('en-US', {
@@ -103,15 +116,18 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
         )
     }
 
-    const chartData = formatChartData()
+    const chartData = formatChartData
     const metrics = performanceSummary?.metrics
+    const currentPeriodData = compareMode ? chartData.slice(-days) : chartData
+    const previousPeriodData = compareMode && chartData.length > days ? chartData.slice(0, chartData.length - days) : []
+    const compareUnavailable = compareMode && previousPeriodData.length < days
 
     return (
         <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-6">
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Portfolio Performance</h2>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-3 gap-3">
                         <select
                             value={days}
                             onChange={(e) => setDays(Number(e.target.value))}
@@ -121,10 +137,17 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                             <option value={30}>30 days</option>
                             <option value={90}>90 days</option>
                         </select>
+                        <button
+                            type="button"
+                            onClick={() => setCompareMode((current) => !current)}
+                            className={`px-3 py-1 text-sm rounded-lg border ${compareMode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600'} hover:shadow-sm transition-colors`}
+                        >
+                            {compareMode ? 'Comparing previous period' : 'Compare previous period'}
+                        </button>
                     </div>
                 </div>
 
-                {chartData.length === 0 ? (
+                {currentPeriodData.length === 0 ? (
                     <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
                         <div className="text-center">
                             <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
@@ -133,43 +156,94 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                     </div>
                 ) : (
-                    <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
-                                <XAxis
-                                    dataKey="date"
-                                    stroke={isDark ? '#9CA3AF' : '#666'}
-                                    tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
-                                    interval="preserveStartEnd"
-                                />
-                                <YAxis
-                                    stroke={isDark ? '#9CA3AF' : '#666'}
-                                    tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
-                                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: isDark ? '#1F2937' : '#fff',
-                                        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                                        borderRadius: '8px',
-                                        padding: '8px 12px',
-                                        color: isDark ? '#F9FAFB' : '#111827'
-                                    }}
-                                    formatter={(value: number) => formatCurrency(value)}
-                                    labelFormatter={(label) => `Date: ${label}`}
-                                />
-                                <Legend />
-                                <Line
-                                    type="monotone"
-                                    dataKey="value"
-                                    stroke="#3B82F6"
-                                    strokeWidth={3}
-                                    dot={false}
-                                    name="Portfolio Value"
-                                />
-                            </LineChart>
-                        </ResponsiveContainer>
+                    <div>
+                        <div className="h-80">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={currentPeriodData} data-testid="line-chart" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
+                                    <XAxis
+                                        dataKey="date"
+                                        stroke={isDark ? '#9CA3AF' : '#666'}
+                                        tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
+                                        interval="preserveStartEnd"
+                                    />
+                                    <YAxis
+                                        stroke={isDark ? '#9CA3AF' : '#666'}
+                                        tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }}
+                                        tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: isDark ? '#1F2937' : '#fff',
+                                            border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                                            borderRadius: '8px',
+                                            padding: '8px 12px',
+                                            color: isDark ? '#F9FAFB' : '#111827'
+                                        }}
+                                        formatter={(value: number) => formatCurrency(value)}
+                                        labelFormatter={(label) => `Date: ${label}`}
+                                    />
+                                    <Legend />
+                                    <Line
+                                        type="monotone"
+                                        dataKey="value"
+                                        stroke="#3B82F6"
+                                        strokeWidth={3}
+                                        dot={false}
+                                        name="Current period"
+                                    />
+                                    {previousPeriodData.length > 0 && (
+                                        <Line
+                                            type="monotone"
+                                            dataKey="value"
+                                            data={previousPeriodData}
+                                            stroke="#A855F7"
+                                            strokeWidth={2}
+                                            dot={false}
+                                            strokeDasharray="5 5"
+                                            name="Prior period"
+                                        />
+                                    )}
+                                    {(historyResult?.history ?? []).map((event: any) => {
+                                        const eventTimestamp = new Date(event.timestamp).getTime()
+                                        const bestMatch = currentPeriodData
+                                            .concat(previousPeriodData)
+                                            .reduce((best: any | null, item: any) => {
+                                                const itemTimestamp = new Date(item.timestamp).getTime()
+                                                if (!Number.isFinite(itemTimestamp)) return best
+                                                if (itemTimestamp > eventTimestamp) return best
+                                                return !best || itemTimestamp > new Date(best.timestamp).getTime() ? item : best
+                                            }, null)
+
+                                        if (!bestMatch) return null
+
+                                        return (
+                                            <ReferenceDot
+                                                key={event.id}
+                                                data-testid="reference-dot"
+                                                x={bestMatch.date}
+                                                y={bestMatch.value}
+                                                r={5}
+                                                stroke="#fff"
+                                                strokeWidth={2}
+                                                fill={event.status === 'failed' ? '#ef4444' : '#f59e0b'}
+                                                label={{
+                                                    position: 'top',
+                                                    value: event.status === 'failed' ? '⚠' : '●',
+                                                    fill: isDark ? '#F9FAFB' : '#111827',
+                                                    fontSize: 12,
+                                                }}
+                                            />
+                                        )
+                                    })}
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                        {compareUnavailable && (
+                            <div className="mt-4 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                                Compare mode is enabled, but there is not enough previous period data available for this timeframe.
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

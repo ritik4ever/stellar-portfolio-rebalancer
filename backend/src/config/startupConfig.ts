@@ -12,6 +12,9 @@ export interface StartupConfig {
   hasRebalanceSigner: boolean;
   jwtAuthEnabled: boolean;
   featureFlags: FeatureFlags;
+  metricsAllowlist: string[];
+  readinessCacheTtlMs: number;
+  consentAuditRetentionDays: number;
   // Cache tuning configuration
   cacheDurationMs: number;
   priceDataMaxAgeSeconds: number;
@@ -171,6 +174,27 @@ export function validateStartupConfigOrThrow(
     .map((v) => v.trim())
     .filter(Boolean);
 
+  const metricsAllowlist = (env.METRICS_ALLOWLIST || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  const readinessCacheTtlMsRaw = (env.READINESS_CACHE_TTL_MS || "2000").trim();
+  const readinessCacheTtlMs = Number.parseInt(readinessCacheTtlMsRaw, 10);
+  if (!Number.isInteger(readinessCacheTtlMs) || readinessCacheTtlMs < 0) {
+    errors.push(
+      `READINESS_CACHE_TTL_MS '${env.READINESS_CACHE_TTL_MS}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
+  const consentAuditRetentionDaysRaw = (env.CONSENT_AUDIT_RETENTION_DAYS || "365").trim();
+  const consentAuditRetentionDays = Number.parseInt(consentAuditRetentionDaysRaw, 10);
+  if (!Number.isInteger(consentAuditRetentionDays) || consentAuditRetentionDays < 1) {
+    errors.push(
+      `CONSENT_AUDIT_RETENTION_DAYS '${env.CONSENT_AUDIT_RETENTION_DAYS}' is invalid. Provide a positive integer.`,
+    );
+  }
+
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
@@ -242,6 +266,9 @@ export function validateStartupConfigOrThrow(
     stellarContractAddress: contractAddress,
     autoRebalancerEnabled,
     corsOrigins,
+    metricsAllowlist,
+    readinessCacheTtlMs: Number.isInteger(readinessCacheTtlMs) ? readinessCacheTtlMs : 2000,
+    consentAuditRetentionDays: Number.isInteger(consentAuditRetentionDays) ? consentAuditRetentionDays : 365,
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
@@ -284,6 +311,8 @@ export function buildStartupSummary(
         : undefined,
     },
     jwtAuthEnabled: config.jwtAuthEnabled,
+    readinessCacheTtlMs: config.readinessCacheTtlMs,
+    consentAuditRetentionDays: config.consentAuditRetentionDays,
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       allowFallbackPrices: config.featureFlags.allowFallbackPrices,
