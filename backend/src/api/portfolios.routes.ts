@@ -65,6 +65,22 @@ portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddlew
     }
 })
 
+// Clone existing portfolio
+portfoliosRouter.post('/portfolio/:id/clone', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+    try {
+        const sourceId = req.params.id;
+        const overrides = req.body as Partial<Portfolio>;
+        const newId = await portfolioStorage.clonePortfolio(sourceId, overrides);
+        return ok(res, { newPortfolioId: newId }, { status: 201 });
+    } catch (error) {
+        logger.error('[ERROR] Clone portfolio failed', { error: getErrorObject(error) });
+        if (error instanceof Error && error.message.includes('not found')) {
+            return fail(res, 404, 'NOT_FOUND', error.message);
+        }
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
 portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
