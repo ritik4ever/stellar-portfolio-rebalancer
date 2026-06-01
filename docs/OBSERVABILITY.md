@@ -35,6 +35,10 @@ Frontend Sentry is configured at build time through Vite env vars in [frontend/.
 
 An application error boundary captures render failures and reports them to Sentry.
 
+### User-facing trust
+
+The landing page briefly describes how monitoring (Sentry, Prometheus, structured logs, and price-quality metrics) supports operational transparency. Operators configure the stack below; end users see the high-level summary on the home screen before connecting a wallet.
+
 ## Running The Stack
 
 Start the app plus the monitoring stack:
