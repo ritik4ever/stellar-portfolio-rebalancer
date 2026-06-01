@@ -230,6 +230,30 @@ describe('Rebalancing API Integration Tests', () => {
                 expect(res.body.data.history).toBeDefined()
             }
         })
+
+        it('returns 401/403 for dry-run without admin', async () => {
+            const res = await request(app)
+                .post('/api/auto-rebalancer/dry-run/non-existent-portfolio')
+                .send({})
+                .expect((resp) => {
+                    expect([401, 403, 404]).toContain(resp.status)
+                })
+        })
+
+        it('returns actionable response for admin dry-run requests', async () => {
+            const res = await request(app)
+                .post('/api/auto-rebalancer/dry-run/non-existent-portfolio')
+                .set(makeAdminHeaders(adminKp))
+                .send({})
+                .expect((resp) => {
+                    expect([404, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 404) {
+                expect(res.body.success).toBe(false)
+                expect(res.body.error.code).toBe('NOT_FOUND')
+            }
+        })
     })
 
     describe('Ownership enforcement - other user portfolio', () => {

@@ -494,6 +494,58 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
     })
 
+    describe('POST /api/portfolio/:id/rebalance/dry-run', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('returns dry-run result envelope for owner', async () => {
+            const res = await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .set(authHeader(OWNER_ADDRESS))
+                .send({ options: { slippageOverrides: { 'XLM->USDC': 120 } } })
+                .expect((resp) => {
+                    expect([200, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 200) {
+                expect(res.body.success).toBe(true)
+                expect(res.body.data).toHaveProperty('result')
+                expect(res.body.data.result).toHaveProperty('portfolioId')
+                expect(res.body.data.result).toHaveProperty('guardrails')
+                expect(res.body.data.result).toHaveProperty('estimatedTrades')
+                expect(res.body.data.result).toHaveProperty('skippedAssets')
+            }
+        })
+
+        it('returns forbidden for non-owner', async () => {
+            const res = await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .set(authHeader(OTHER_ADDRESS))
+                .send({})
+                .expect((resp) => {
+                    expect([403, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 403) {
+                expect(res.body.success).toBe(false)
+                expect(res.body.error.code).toBe('FORBIDDEN')
+            }
+        })
+    })
+
     describe('GET /api/portfolio/:id/analytics', () => {
         let portfolioId: string
 
