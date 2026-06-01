@@ -232,10 +232,25 @@
                   ]
                 },
                 {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
                   "u32": 5
                 },
                 {
                   "u32": 501
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -337,10 +352,25 @@
                       ]
                     },
                     {
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          },
+                          "val": {
+                            "u32": 7
+                          }
+                        }
+                      ]
+                    },
+                    {
                       "u32": 5
                     },
                     {
                       "u32": 501
+                    },
+                    {
+                      "u32": 1
                     }
                   ]
                 }

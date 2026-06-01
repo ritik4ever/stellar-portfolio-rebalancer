@@ -232,22 +232,13 @@
                   ]
                 },
                 {
-                  "map": [
-                    {
-                      "key": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                      },
-                      "val": {
-                        "u32": 7
-                      }
-                    }
-                  ]
+                  "map": []
                 },
                 {
                   "u32": 5
                 },
                 {
-                  "u32": 9
+                  "u32": 50
                 },
                 {
                   "u32": 1
@@ -276,7 +267,7 @@
             ],
             "data": {
               "error": {
-                "contract": 9
+                "contract": 12
               }
             }
           }
@@ -297,7 +288,7 @@
               },
               {
                 "error": {
-                  "contract": 9
+                  "contract": 12
                 }
               }
             ],
@@ -322,7 +313,7 @@
               },
               {
                 "error": {
-                  "contract": 9
+                  "contract": 12
                 }
               }
             ],
@@ -352,22 +343,13 @@
                       ]
                     },
                     {
-                      "map": [
-                        {
-                          "key": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                          },
-                          "val": {
-                            "u32": 7
-                          }
-                        }
-                      ]
+                      "map": []
                     },
                     {
                       "u32": 5
                     },
                     {
-                      "u32": 9
+                      "u32": 50
                     },
                     {
                       "u32": 1
@@ -394,7 +376,7 @@
               },
               {
                 "error": {
-                  "contract": 9
+                  "contract": 12
                 }
               }
             ],
