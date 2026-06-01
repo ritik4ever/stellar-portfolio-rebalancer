@@ -26,7 +26,7 @@ async function main() {
     initializeSentry()
     setupProcessErrorHandlers()
 
-    const redisAvailable = await probeRedis()
+    const redisAvailable = await probeRedis(config)
 
     const app = express()
 
