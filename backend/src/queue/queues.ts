@@ -9,6 +9,8 @@ export const QUEUE_NAMES = {
   IDEMPOTENCY_CLEANUP: "idempotency-cleanup",
 } as const;
 
+export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
+
 export interface PortfolioCheckJobData {
   triggeredBy?: "scheduler" | "manual" | "startup";
   correlationId?: string;
@@ -106,6 +108,21 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
     return idempotencyCleanupQueue;
   } catch {
     return null;
+  }
+}
+
+export function getQueueByName(queueName: string): Queue | null {
+  switch (queueName) {
+    case QUEUE_NAMES.PORTFOLIO_CHECK:
+      return getPortfolioCheckQueue();
+    case QUEUE_NAMES.REBALANCE:
+      return getRebalanceQueue();
+    case QUEUE_NAMES.ANALYTICS_SNAPSHOT:
+      return getAnalyticsSnapshotQueue();
+    case QUEUE_NAMES.IDEMPOTENCY_CLEANUP:
+      return getIdempotencyCleanupQueue();
+    default:
+      return null;
   }
 }
 
