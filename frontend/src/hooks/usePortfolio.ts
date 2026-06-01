@@ -19,83 +19,100 @@
  * ```
  */
 
-import { useState, useEffect } from 'react'
-import { api, ENDPOINTS } from '../config/api'
+import { useState, useEffect } from "react";
+import { api, ENDPOINTS } from "../config/api";
 
 interface PortfolioData {
-    id: string
-    totalValue: number
-    allocations: Array<{
-        asset: string
-        target: number
-        current: number
-        amount: number
-    }>
-    needsRebalance: boolean
-    lastRebalance: string
+  id: string;
+  totalValue: number;
+  allocations: Array<{
+    asset: string;
+    target: number;
+    current: number;
+    amount: number;
+  }>;
+  needsRebalance: boolean;
+  lastRebalance: string;
+}
+function getRollbackMessage(error: unknown): string {
+  const details =
+    error instanceof Error
+      ? error.message
+      : "The server rejected the rebalance request.";
+
+  return `Your portfolio preview was restored because the rebalance could not be saved. ${details} Review your allocation, confirm your wallet/network status, and try again.`;
 }
 
 export const usePortfolio = (portfolioId?: string) => {
-    if (import.meta.env.DEV) {
-        console.warn(
-            '[usePortfolio] DEPRECATED: Use usePortfolioDetails from ./queries/usePortfolioQuery instead. ' +
-            'This hook uses manual polling that duplicates TanStack Query functionality.',
-        )
+  if (import.meta.env.DEV) {
+    console.warn(
+      "[usePortfolio] DEPRECATED: Use usePortfolioDetails from ./queries/usePortfolioQuery instead. " +
+        "This hook uses manual polling that duplicates TanStack Query functionality.",
+    );
+  }
+
+  const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [rollbackMessage, setRollbackMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!portfolioId) return;
+
+    const fetchPortfolio = async () => {
+      try {
+        setLoading(true);
+        const data = await api.get<{ portfolio: PortfolioData }>(
+          ENDPOINTS.PORTFOLIO_DETAIL(portfolioId),
+        );
+        setPortfolio(data.portfolio);
+        setError(null);
+        setRollbackMessage(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPortfolio();
+
+    // Set up polling for real-time updates
+    const interval = setInterval(fetchPortfolio, 30000);
+    return () => clearInterval(interval);
+  }, [portfolioId]);
+
+  const executeRebalance = async () => {
+    if (!portfolioId) return;
+
+    const previousPortfolio = portfolio;
+    setError(null);
+    setRollbackMessage(null);
+    setPortfolio((prev) =>
+      prev
+        ? {
+            ...prev,
+            needsRebalance: false,
+            lastRebalance: new Date().toISOString(),
+          }
+        : prev,
+    );
+
+    try {
+      await api.post(ENDPOINTS.PORTFOLIO_REBALANCE(portfolioId));
+
+      // Refresh portfolio data to invalidate optimistic snapshot
+      const data = await api.get<{ portfolio: PortfolioData }>(
+        ENDPOINTS.PORTFOLIO_DETAIL(portfolioId),
+      );
+      setPortfolio(data.portfolio);
+    } catch (err) {
+      setPortfolio(previousPortfolio);
+      const message = getRollbackMessage(err);
+      setError(message);
+      setRollbackMessage(message);
     }
+  };
 
-    const [portfolio, setPortfolio] = useState<PortfolioData | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
-
-    useEffect(() => {
-        if (!portfolioId) return
-
-        const fetchPortfolio = async () => {
-            try {
-                setLoading(true)
-                const data = await api.get<{ portfolio: PortfolioData }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId))
-                setPortfolio(data.portfolio)
-                setError(null)
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Unknown error')
-            } finally {
-                setLoading(false)
-            }
-        }
-
-        fetchPortfolio()
-
-        // Set up polling for real-time updates
-        const interval = setInterval(fetchPortfolio, 30000)
-        return () => clearInterval(interval)
-    }, [portfolioId])
-
-    const executeRebalance = async () => {
-        if (!portfolioId) return
-
-        const previousPortfolio = portfolio
-        setError(null)
-        setPortfolio(prev =>
-            prev
-                ? {
-                      ...prev,
-                      needsRebalance: false,
-                      lastRebalance: new Date().toISOString(),
-                  }
-                : prev
-        )
-
-        try {
-            await api.post(ENDPOINTS.PORTFOLIO_REBALANCE(portfolioId))
-
-            // Refresh portfolio data to invalidate optimistic snapshot
-            const data = await api.get<{ portfolio: PortfolioData }>(ENDPOINTS.PORTFOLIO_DETAIL(portfolioId))
-            setPortfolio(data.portfolio)
-        } catch (err) {
-            setPortfolio(previousPortfolio)
-            setError(err instanceof Error ? err.message : 'Rebalance failed')
-        }
-    }
-
-    return { portfolio, loading, error, executeRebalance }
-}
+  return { portfolio, loading, error, executeRebalance };
+};
