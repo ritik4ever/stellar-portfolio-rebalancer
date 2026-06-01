@@ -15,8 +15,17 @@ This repository now includes a baseline observability stack for production debug
 Backend observability is enabled with environment variables in [backend/.env.example](C:\Users\HP\Documents\students\drips\stellar-portfolio-rebalancer\backend\.env.example).
 
 - `SENTRY_ENABLED=true` and `SENTRY_DSN=...` send unhandled backend exceptions to Sentry.
+- `SENTRY_ENVIRONMENT` should match the deployed tier, and `SENTRY_RELEASE` should be the full git SHA of the backend build.
 - `NEW_RELIC_ENABLED=true` and `NEW_RELIC_LICENSE_KEY=...` enable backend APM.
 - `METRICS_ENABLED=true` exposes Prometheus metrics at `GET /metrics`.
+
+The deploy workflow resolves those values automatically before the Docker build starts. It writes:
+
+- `SENTRY_RELEASE`
+- `SENTRY_ENVIRONMENT`
+- `LOG_DEPLOYMENT_ENV`
+
+The values are sourced from the current git SHA and the target environment so backend logs, metrics, and Sentry events all point at the same deployment.
 
 The backend publishes:
 
@@ -32,8 +41,24 @@ Frontend Sentry is configured at build time through Vite env vars in [frontend/.
 
 - `VITE_SENTRY_ENABLED=true`
 - `VITE_SENTRY_DSN=...`
+- `VITE_SENTRY_ENVIRONMENT` should match the deployed tier.
+- `VITE_SENTRY_RELEASE` should be the full git SHA of the frontend build.
 
 An application error boundary captures render failures and reports them to Sentry.
+
+### Repeatable release tagging
+
+The root script `npm run sentry:metadata -- --deployment production` prints the exact environment values that CI injects before deployment:
+
+```bash
+npm run sentry:metadata -- --deployment production
+```
+
+Use the matching validation command when you want a fast fail that the backend and frontend Sentry tags stay in sync:
+
+```bash
+npm run validate:sentry-metadata
+```
 
 ## Running The Stack
 
@@ -69,6 +94,8 @@ Prometheus alerts are preconfigured for:
 - failed rebalance queue jobs
 - stale Reflector price rows observed in the last 15 minutes
 - excessive fallback price usage over the last hour
+
+When one of those alerts fires, cross-check the matching Sentry release and environment tags before debugging the stack. That narrows the search to the exact build that produced the failure.
 
 The backend exports dedicated price-quality metrics:
 

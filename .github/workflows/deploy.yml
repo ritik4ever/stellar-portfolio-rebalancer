@@ -11,6 +11,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js for deployment metadata checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve Sentry release metadata
+        run: node scripts/sentry-metadata.mjs --deployment production >> "$GITHUB_ENV"
+
+      - name: Validate Sentry release metadata
+        run: node scripts/sentry-metadata.mjs --validate
+
       - name: Build Docker images
         run: docker compose -f deployment/docker-compose.yml build
 
