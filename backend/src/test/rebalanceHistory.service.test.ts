@@ -36,6 +36,10 @@ describe('RebalanceHistoryService', () => {
             trades: 2,
             gasUsed: '0.02 XLM',
             status: 'completed',
+            isAutomatic: true,
+            actor: 'scheduler',
+            source: 'auto_rebalance',
+            triggerMetadata: { driftPct: 8.2, thresholdPct: 5 },
             portfolio: { allocations: { XLM: 50, BTC: 50 } },
             prices: {
                 XLM: { price: 0.1, change: -2, timestamp: 1 },
@@ -49,6 +53,31 @@ describe('RebalanceHistoryService', () => {
         expect(saved.details.reason).toMatch(/drift exceeded/i)
         expect(saved.details.riskLevel).toBe('medium')
         expect(saved.details.priceDirection).toMatch(/up|down/)
+        expect(saved.actor).toBe('scheduler')
+        expect(saved.source).toBe('auto_rebalance')
+        expect(saved.triggerMetadata).toEqual({ driftPct: 8.2, thresholdPct: 5 })
+    })
+
+    it('infers actor/source from isAutomatic when not provided', async () => {
+        recordMock.mockImplementation((event) => ({ id: 'evt-2', ...event }))
+
+        const { RebalanceHistoryService } = await import('../services/rebalanceHistory.js')
+        const service = new RebalanceHistoryService({
+            analyzePortfolioRisk: vi.fn(() => ({ overallRiskLevel: 'low' }))
+        } as any)
+
+        await service.recordRebalanceEvent({
+            portfolioId: 'p2',
+            trigger: 'Manual Rebalance',
+            trades: 1,
+            gasUsed: '0.01 XLM',
+            status: 'completed',
+            isAutomatic: false,
+        })
+
+        const saved = recordMock.mock.calls[0][0]
+        expect(saved.actor).toBe('user')
+        expect(saved.source).toBe('dashboard')
     })
 
     it('proxies history query calls', async () => {

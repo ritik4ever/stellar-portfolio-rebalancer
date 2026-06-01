@@ -157,4 +157,36 @@ describe('DatabaseService', () => {
             db.close()
         }
     })
+
+    it('purges old consent audit events based on retention days', async () => {
+        const { DatabaseService } = await import('../services/databaseService.js')
+        const db = new DatabaseService()
+        try {
+            const userId = 'GPURGETEST'
+            db.recordConsent(userId, { terms: true, privacy: true, cookies: true })
+            expect(db.getConsentAudit(userId)).toHaveLength(1)
+
+            const deleted = db.purgeOldConsentAuditEvents(0)
+            expect(deleted).toBe(1)
+            expect(db.getConsentAudit(userId)).toHaveLength(0)
+        } finally {
+            db.close()
+        }
+    })
+
+    it('purgeOldConsentAuditEvents returns 0 when no old events exist', async () => {
+        const { DatabaseService } = await import('../services/databaseService.js')
+        const db = new DatabaseService()
+        try {
+            const userId = 'GNOOLD'
+            db.recordConsent(userId, { terms: true, privacy: true, cookies: true })
+            expect(db.getConsentAudit(userId)).toHaveLength(1)
+
+            const deleted = db.purgeOldConsentAuditEvents(36500)
+            expect(deleted).toBe(0)
+            expect(db.getConsentAudit(userId)).toHaveLength(1)
+        } finally {
+            db.close()
+        }
+    })
 })

@@ -126,6 +126,25 @@ consentRouter.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, 
     }
 })
 
+/** GDPR: Purge consent audit events older than the configured retention period. */
+consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, ...protectedCriticalLimiter, (req: Request, res: Response) => {
+    try {
+        const retentionDays = parseInt(req.body.retentionDays as string) || parseInt(process.env.CONSENT_AUDIT_RETENTION_DAYS || '365')
+        if (!Number.isInteger(retentionDays) || retentionDays < 1) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'retentionDays must be a positive integer')
+        }
+        const deletedCount = databaseService.purgeOldConsentAuditEvents(retentionDays)
+        return ok(res, {
+            message: `Consent audit events purged`,
+            retentionDays,
+            deletedCount
+        })
+    } catch (error) {
+        logger.error('[ERROR] Purge consent audit failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 /** GDPR: Delete all data for a user (portfolios, history, consent). Requires JWT when enabled. */
 consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, ...protectedCriticalLimiter, async (req: Request, res: Response) => {
     try {

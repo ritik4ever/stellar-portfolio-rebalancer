@@ -33,8 +33,9 @@ interface DashboardProps {
 type DashboardPriceRow = { price?: number; change?: number; [key: string]: unknown }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'test-notifications'>('overview')
+    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
     const { isDark } = useTheme()
+    const queryClient = useQueryClient()
 
     // Query for user portfolios
     const {
@@ -98,6 +99,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const prices: Record<string, DashboardPriceRow> = hasLivePriceRows
         ? (priceRows as Record<string, DashboardPriceRow>)
         : demoPrices
+
     const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
     const routeDataUnavailable = Boolean(
         publicKey &&
@@ -105,13 +107,34 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         !portfoliosLoading &&
         (!portfolios || portfolios.length === 0)
     )
+
+    const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
+        name: alloc.asset,
+        value: alloc.target || alloc.percentage, // Handle both formats
+        amount: alloc.amount || 0,
+        color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
+    })) || []
+
+    const missingPriceAssets = allocationData.filter((asset: any) => {
+        const row = prices[asset.name]
+        return !row || row.price === undefined || row.price === null
+    })
+    const pricedAssets = allocationData.length - missingPriceAssets.length
+    const hasPartialPriceData = pricedAssets > 0 && missingPriceAssets.length > 0
+    const partialPriceMessage = hasPartialPriceData
+        ? `Some asset quotes are unavailable or fallback-based. ${missingPriceAssets.length} asset${missingPriceAssets.length !== 1 ? 's are' : ' is'} missing fresh market data.`
+        : null
+
     const priceSource = hasLivePriceRows
         ? formatPriceFeedSummary(priceBundle?.feedMeta, true, false)
         : publicKey
-          ? 'No price data'
-          : 'Demo data'
+            ? 'No price data'
+            : 'Demo data'
+    const effectivePriceSource = hasPartialPriceData
+        ? 'Partial price data'
+        : priceSource
     const feedMeta = priceBundle?.feedMeta
-    const showPriceQualityNote = !!(feedMeta?.degraded || feedMeta?.staleOrLimited)
+    const showPriceQualityNote = feedMeta?.degraded || hasPartialPriceData || feedMeta?.staleOrLimited
 
     const executeRebalance = async () => {
         if (!portfolioData?.id || portfolioData.id === 'demo') {
@@ -134,11 +157,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
     const hasHighGasWarning = rebalanceEstimate?.gasWarning || estimateXlm > 0.5
 
-    const queryClient = useQueryClient()
-
     const refreshData = useCallback(async () => {
-        // Invalidate all relevant queries to force a refetch without a full page reload.
-        // This leverages TanStack Query's cache invalidation instead of the naive window.location.reload().
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
             queryClient.invalidateQueries({ queryKey: priceKeys.all }),
@@ -154,22 +173,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         await refreshData()
     }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
 
-    // NEW: Demo reset functionality for local testing
     const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
     const [resettingDemo, setResettingDemo] = useState(false)
-    
+
     const resetDemoPortfolio = useCallback(async () => {
-        if (publicKey) return // Only available in demo mode
-        
+        if (publicKey) return
         setResettingDemo(true)
         try {
-            // Clear any cached demo data and force refresh
             await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
             await queryClient.invalidateQueries({ queryKey: priceKeys.all })
-            
-            // Small delay to show loading state
             await new Promise(resolve => setTimeout(resolve, 500))
-            
             setShowDemoResetConfirm(false)
         } catch (error) {
             console.error('Demo reset failed:', error)
@@ -187,7 +200,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         onNavigate('landing')
     }
 
-    /** GDPR: Delete all user data from the server, then logout and go to landing */
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [deleting, setDeleting] = useState(false)
     const deleteMyData = async () => {
@@ -207,26 +219,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         }
     }
 
-    // Create allocation data from portfolio data
-    const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
-        name: alloc.asset,
-        value: alloc.target || alloc.percentage, // Handle both formats
-        amount: alloc.amount || 0,
-        color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
-    })) || []
-
-    // If portfolio has allocations object instead of array, convert it
-    if (portfolioData?.allocations && typeof portfolioData.allocations === 'object' && !Array.isArray(portfolioData.allocations)) {
-        const allocationsArray = Object.entries(portfolioData.allocations).map(([asset, percentage], index) => ({
-            name: asset,
-            value: percentage as number,
-            amount: (portfolioData.totalValue || 10000) * (percentage as number) / 100,
-            color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
-        }))
-        allocationData.splice(0, allocationData.length, ...allocationsArray)
-    }
-
-    // NEW: Export helpers (Portfolio CSV / JSON) - works in demo mode too
     const buildPortfolioExportRows = () => {
         const rows = (allocationData || []).map((a: any) => {
             const price = prices?.[a.name]?.price ?? ''
@@ -261,7 +253,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         })
     }
 
-    /** Server-side export (full data + rebalance history) — use when connected with real portfolio */
     const exportFromApi = async (format: 'json' | 'csv' | 'pdf') => {
         if (!portfolioData?.id || portfolioData.id === 'demo') {
             alert('Connect your wallet and open a portfolio to export full data (JSON/CSV/PDF) from the server.')
@@ -300,8 +291,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     detailsLoadError && detailsError instanceof Error
                         ? `Latest portfolio details also failed to load: ${detailsError.message}`
                         : pricesLoadError
-                          ? 'Price data failed to refresh. The retry action will attempt a full refetch.'
-                          : 'Retrying will refetch portfolio data and the latest price feed.'
+                            ? 'Price data failed to refresh. The retry action will attempt a full refetch.'
+                            : 'Retrying will refetch portfolio data and the latest price feed.'
                 }
                 onRetry={retryPortfolioLoad}
                 onBack={() => onNavigate('landing')}
@@ -367,7 +358,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                     <div className="flex items-center space-x-4">
                         <ThemeToggle />
-                        {/*  NEW: Export buttons — server-side (full data + history) when connected, client-side for demo */}
                         <div className="flex items-center space-x-2">
                             {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
                                 <>
@@ -406,7 +396,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     >
                                         Export JSON
                                     </button>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Connect wallet for full export (PDF + history)</span>
                                 </>
                             )}
                         </div>
@@ -442,11 +431,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 >
                                     Connect Wallet
                                 </button>
-                                {/* NEW: Demo reset button for local testing */}
                                 <button
                                     onClick={() => setShowDemoResetConfirm(true)}
                                     className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
-                                    title="Reset demo portfolio to default state"
                                 >
                                     <RefreshCw className="w-4 h-4" />
                                     Reset Demo
@@ -464,16 +451,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 </div>
             </div>
 
-            {/* Delete my data confirmation modal */}
+            {/* GDPR: Delete all data confirmation modal */}
             {showDeleteConfirm && (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
                     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
                         <div className="flex items-center gap-2 mb-4">
-                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete my data</h2>
+                            <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete All Your Data?</h2>
                         </div>
                         <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            This will permanently delete your consent records, all portfolios, and rebalance history from our servers. You will be signed out. This action cannot be undone.
+                            This will permanently delete your portfolio configuration, rebalance history, and notification settings from our database. This action cannot be undone.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button
@@ -505,7 +492,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 </div>
             )}
 
-            {/* NEW: Demo reset confirmation modal */}
+            {/* Demo reset confirmation modal */}
             {showDemoResetConfirm && (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
                     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
@@ -577,40 +564,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         >
                             Notifications
                         </button>
-                       
                     </nav>
                 </div>
 
-                {/* Debug Info */}
-                {(import.meta as any).env?.DEV && (
-                    <div className="bg-gray-100 dark:bg-gray-800 p-2 rounded mb-4 text-xs dark:text-gray-300">
-                        <div>Portfolio ID: {portfolioData?.id}</div>
-                        <div>Allocations: {JSON.stringify(allocationData)}</div>
-                        <div>Price source: {priceSource}</div>
-                        {feedMeta ? (
+                {/* Tab Content */}
+                {activeTab === 'overview' && (
+                    <div className="grid lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* Portfolio Value Chart */}
                             <div>
-                                Feed: {feedMeta.provider} / {feedMeta.resolutionHint} / degraded=
-                                {String(feedMeta.degraded)}
-                            </div>
-                        ) : null}
-                    </div>
-                )}
-
-                {activeTab === 'analytics' ? (
-                    <PerformanceChart portfolioId={portfolioData?.id || null} />
-                ) : activeTab === 'notifications' ? (
-                    <NotificationPreferences userId={publicKey || 'demo'} portfolioId={portfolioData?.id || null} />
-                ) :  (
-                    <>
-                        {/* Portfolio Overview */}
-                        <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                            <div className="lg:col-span-2">
-                                {/* NEW: Portfolio Value Skeleton Loading State */}
                                 {loading ? (
                                     <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                         <div className="flex items-center justify-between mb-6">
                                             <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
-                                            <div className="space-x-2 flex items-center">
+                                            <div className="flex items-center space-x-2">
                                                 <div className="w-32 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
                                                 <div className="w-24 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                                             </div>
@@ -628,17 +595,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
                                                 <span>Last updated: just now</span>
                                                 <span
-                                                    className={`px-2 py-1 rounded text-xs ${
-                                                        feedMeta?.degraded
-                                                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
-                                                            : feedMeta?.staleOrLimited
-                                                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
-                                                              : hasLivePriceRows
+                                                    className={`px-2 py-1 rounded text-xs ${feedMeta?.degraded || hasPartialPriceData
+                                                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
+                                                        : feedMeta?.staleOrLimited
+                                                            ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                                                            : hasLivePriceRows
                                                                 ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
                                                                 : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'
-                                                    }`}
+                                                        }`}
                                                 >
-                                                    {priceSource}
+                                                    {effectivePriceSource}
                                                 </span>
                                             </div>
                                         </div>
@@ -646,7 +612,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg px-3 py-2">
                                                 {feedMeta?.degraded
                                                     ? 'Displayed prices are synthetic or fallback — not primary market data.'
-                                                    : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
+                                                    : hasPartialPriceData
+                                                        ? partialPriceMessage
+                                                        : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
                                             </p>
                                         )}
                                         <div className="mb-4">
@@ -654,9 +622,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                 ${portfolioData?.totalValue?.toLocaleString() || '0'}
                                             </div>
                                             <div className="flex items-center mt-1">
-                                                <TrendingUp className="w-4 h-4 text-green-600 dark:text-green-400 mr-1" />
-                                                <span className="text-green-600 dark:text-green-400 font-medium">+{portfolioData?.dayChange || 0}%</span>
-                                                <span className="text-gray-600 dark:text-gray-400 ml-2">Today</span>
+                                                <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
+                                                <span className="text-green-500 font-medium">+{portfolioData?.dayChange || 0}%</span>
+                                                <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
                                             </div>
                                         </div>
                                         <div className="h-64">
@@ -682,239 +650,171 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             </div>
 
                             <div className="space-y-6">
-                                {/* Rebalance Alert */}
-                                {portfolioData?.needsRebalance && (
-                                    <motion.div
-                                        initial={{ opacity: 0, scale: 0.95 }}
-                                        animate={{ opacity: 1, scale: 1 }}
-                                        className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
-                                    >
-                                        <div className="flex items-center mb-3">
-                                            <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
-                                            <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
-                                        </div>
-                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">
-                                            Your portfolio has drifted from target allocation
-                                        </p>
-                                        <p className="text-sm text-orange-700 dark:text-orange-400 mb-2 font-medium">
-                                            Estimated gas: {estimateXlm.toFixed(2)} XLM (~${estimateUsd.toFixed(3)})
-                                        </p>
-                                        <p className="text-xs text-orange-600 dark:text-orange-400 mb-3">
-                                            {rebalanceEstimate?.tradeCount ?? 0} estimated trade{(rebalanceEstimate?.tradeCount ?? 0) === 1 ? '' : 's'} @ {(rebalanceEstimate?.gasPerTradeXlm ?? 0).toFixed(4)} XLM each
-                                        </p>
-                                        {hasHighGasWarning && (
-                                            <p className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 rounded px-2 py-1 mb-3">
-                                                Warning: estimated gas is unusually high ({'>'} 0.5 XLM). Consider reducing trade count.
-                                            </p>
-                                        )}
-                                        {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 && (
-                                            <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
-                                                {rebalanceEstimate.breakdown.map((item: any) => (
-                                                    <div key={item.tradeId} className="flex justify-between">
-                                                        <span>{item.tradeId}</span>
-                                                        <span>{Number(item.estimateXlm || 0).toFixed(4)} XLM</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {(portfolioData as any)?.slippageTolerancePercent != null && (
-                                            <p className="text-xs text-orange-600 dark:text-orange-400 mb-4">
-                                                Max slippage: {(portfolioData as any).slippageTolerancePercent}% — trades beyond this will be rejected
-                                            </p>
-                                        )}
-                                        <button
-                                            onClick={executeRebalance}
-                                            disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
-                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-                                        >
-                                            {executeRebalanceMutation.isPending ? (
-                                                <>
-                                                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                                    Rebalancing...
-                                                </>
-                                            ) : (
-                                                'Execute Rebalance'
-                                            )}
-                                        </button>
-                                        {(portfolioData as any)?.slippageTolerance != null && (
-                                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
-                                                Max slippage: {(portfolioData as any).slippageTolerance}% — trades above this will be rejected
-                                            </p>
-                                        )}
-                                        {(!publicKey || portfolioData?.id === 'demo') && (
-                                            <p className="text-xs text-orange-600 dark:text-orange-400 mt-2 text-center">
-                                                {!publicKey ? 'Connect wallet to execute rebalance' : 'Create a real portfolio to enable rebalancing'}
-                                            </p>
-                                        )}
-                                    </motion.div>
-                                )}
-
-                                {/* NEW: Allocation Chart Skeleton Loading State */}
-                                {loading ? (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                        <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-4 animate-pulse" />
-                                        <div className="h-48 flex items-center justify-center mb-4">
-                                            <div className="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
-                                        </div>
-                                        <div className="space-y-3">
-                                            {[1, 2, 3].map((i) => (
-                                                <div key={i} className="flex items-center justify-between animate-pulse">
-                                                    <div className="flex items-center space-x-2">
-                                                        <div className="w-3 h-3 rounded-full bg-gray-300 dark:bg-gray-700" />
-                                                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                                                    </div>
-                                                    <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
-                                        <div className="h-48 flex items-center justify-center">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <PieChart>
-                                                    <Pie
-                                                        data={allocationData}
-                                                        cx="50%"
-                                                        cy="50%"
-                                                        innerRadius={40}
-                                                        outerRadius={80}
-                                                        paddingAngle={2}
-                                                        dataKey="value"
-                                                    >
-                                                        {allocationData.map((entry: any, index: number) => (
-                                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                                        ))}
-                                                    </Pie>
-                                                </PieChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                        <div className="mt-4 space-y-2">
-                                            {allocationData.map((asset: any, index: number) => (
-                                                <div key={index} className="flex items-center justify-between">
-                                                    <div className="flex items-center">
-                                                        <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
-                                                        <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
-                                                    </div>
-                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{asset.value.toFixed(1)}%</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
+                                {/* Asset Cards */}
+                                <div className="grid lg:grid-cols-2 gap-6">
+                                    {loading ? (
+                                        [1, 2, 3, 4].map((i) => (
+                                            <AssetCard key={`skeleton-${i}`} isLoading={true} />
+                                        ))
+                                    ) : (
+                                        allocationData.map((asset: any, index: number) => {
+                                            const row = prices[asset.name]
+                                            const priceCard = row
+                                                ? {
+                                                    price: typeof row === 'number' ? row : (row as any).price ?? null,
+                                                    change: typeof row === 'number' ? 0 : (row as any).change ?? null,
+                                                    source: (row as any).source,
+                                                    quoteAgeSeconds: (row as any).quoteAgeSeconds,
+                                                    servedFromCache: (row as any).servedFromCache,
+                                                    dataTier: (row as any).dataTier,
+                                                }
+                                                : undefined
+                                            return <AssetCard key={index} asset={asset} price={priceCard} />
+                                        })
+                                    )}
+                                </div>
+                                <RebalanceHistory portfolioId={portfolioData?.id || null} />
                             </div>
                         </div>
 
-                        {/* Price Tracker */}
-                        <div className="mb-8">
+                        <div className="space-y-6">
+                            {/* Rebalance Alert */}
+                            {portfolioData?.needsRebalance && (
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
+                                >
+                                    <div className="flex items-center mb-3">
+                                        <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
+                                        <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
+                                    </div>
+                                    <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">
+                                        Your portfolio has drifted from target allocation
+                                    </p>
+                                    <p className="text-sm text-orange-700 dark:text-orange-400 mb-2 font-medium">
+                                        Estimated gas: {estimateXlm.toFixed(2)} XLM (~${estimateUsd.toFixed(3)})
+                                    </p>
+                                    <button
+                                        onClick={executeRebalance}
+                                        disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
+                                        className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+                                    >
+                                        {executeRebalanceMutation.isPending ? (
+                                            <>
+                                                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                                Rebalancing...
+                                            </>
+                                        ) : (
+                                            'Execute Rebalance'
+                                        )}
+                                    </button>
+                                </motion.div>
+                            )}
+
+                            {/* Allocation Chart */}
+                            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
+                                <div className="h-64 flex items-center justify-center">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie
+                                                data={allocationData}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={80}
+                                                paddingAngle={5}
+                                                dataKey="value"
+                                            >
+                                                {allocationData.map((entry: any, index: number) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="mt-4 space-y-2">
+                                    {allocationData.map((asset: any, index: number) => (
+                                        <div key={index} className="flex items-center justify-between">
+                                            <div className="flex items-center">
+                                                <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
+                                                <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
+                                            </div>
+                                            <span className="text-sm font-semibold text-gray-900 dark:text-white">{asset.value.toFixed(1)}%</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
                             <PriceTracker />
                         </div>
+                    </div>
+                )}
 
-                        {/* NEW: Asset Cards Skeleton Loading State */}
-                        <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                            {loading ? (
-                                // Show skeleton cards while loading
-                                [1, 2, 3].map((i) => (
-                                    <AssetCard key={`skeleton-${i}`} isLoading={true} />
-                                ))
-                            ) : (
-                                // Show actual asset cards when data is loaded
-                                allocationData.map((asset: any, index: number) => {
-                                    const row = prices[asset.name]
-                                    const priceCard =
-                                        row?.price !== undefined
-                                            ? { price: row.price, change: row.change ?? 0 }
-                                            : undefined
-                                    return <AssetCard key={index} asset={asset} price={priceCard} />
-                                })
-                            )}
-                        </div>
+                {activeTab === 'analytics' && (
+                    <div className="space-y-6">
+                        <PerformanceChart portfolioId={portfolioData?.id || null} />
+                    </div>
+                )}
 
-                        {/* Rebalance History */}
-                        <RebalanceHistory portfolioId={portfolioData?.id || null} />
-                    </>
+                {activeTab === 'notifications' && (
+                    <div className="space-y-6">
+                        <NotificationPreferences publicKey={publicKey} />
+                    </div>
                 )}
             </div>
 
-            {/* NEW: Sticky Mobile Action Bar */}
+            {/* Sticky Mobile Action Bar */}
             <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
                 <div className="flex items-center justify-between max-w-sm mx-auto">
-                    {/* Portfolio Value */}
                     <div className="text-center">
                         <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
                         <div className="text-lg font-bold text-gray-900 dark:text-white">
                             ${portfolioData?.totalValue?.toLocaleString() || '10,000'}
                         </div>
-                        <div className={`text-xs flex items-center justify-center gap-1 ${
-                            (portfolioData?.dayChange || 0) >= 0 
-                                ? 'text-green-600 dark:text-green-400' 
-                                : 'text-red-600 dark:text-red-400'
-                        }`}>
-                            {(portfolioData?.dayChange || 0) >= 0 ? (
-                                <TrendingUp className="w-3 h-3" />
-                            ) : (
-                                <TrendingUp className="w-3 h-3 rotate-180" />
-                            )}
+                        <div className={`text-xs flex items-center justify-center gap-1 ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingUp className="w-3 h-3 rotate-180" />}
                             {Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%
                         </div>
                     </div>
 
-                    {/* Action Buttons */}
                     <div className="flex items-center gap-2">
-                        {/* Rebalance Status & Action */}
                         {portfolioData?.needsRebalance ? (
                             <button
                                 onClick={executeRebalance}
                                 disabled={executeRebalanceMutation.isPending || portfolioData?.id === 'demo'}
                                 className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
                             >
-                                {executeRebalanceMutation.isPending ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Zap className="w-4 h-4" />
-                                )}
+                                {executeRebalanceMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                                 Rebalance
                             </button>
                         ) : (
                             <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
                                 <CheckCircle className="w-4 h-4" />
-                                <span className="hidden sm:inline">Balanced</span>
+                                <span>Balanced</span>
                             </div>
                         )}
 
-                        {/* Create Portfolio / Refresh */}
                         {publicKey ? (
-                            <button
-                                onClick={() => onNavigate('setup')}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
-                            >
+                            <button onClick={() => onNavigate('setup')} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors">
                                 <Plus className="w-4 h-4" />
-                                <span className="hidden sm:inline">New</span>
                             </button>
                         ) : (
-                            <button
-                                onClick={() => setShowDemoResetConfirm(true)}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
-                            >
+                            <button onClick={() => setShowDemoResetConfirm(true)} className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm">
                                 <RefreshCw className="w-4 h-4" />
-                                <span className="hidden sm:inline">Reset</span>
                             </button>
                         )}
 
-                        {/* Refresh Data */}
-                        <button
-                            onClick={refreshData}
-                            disabled={loading}
-                            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
-                        >
+                        <button onClick={refreshData} disabled={loading} className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
                             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* Add bottom padding to main content to prevent overlap with mobile action bar */}
+            {/* Bottom padding for mobile bar */}
             <div className="h-20 md:hidden"></div>
         </div>
     )
