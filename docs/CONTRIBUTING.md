@@ -177,6 +177,7 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 | `JWT_SECRET`             | Required for auth (≥32 chars) | Signs access and refresh tokens — never falls back to a built-in value |
 | `JWT_ACCESS_EXPIRY_SEC`  | No (default: 900)             | Access token TTL in seconds                                            |
 | `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800)          | Refresh token TTL in seconds                                           |
+| `JWT_CLOCK_SKEW_SEC`    | No (default: 30, max: 300)    | Bounded tolerance for JWT `iat`/`exp` clock drift between nodes         |
 | `ADMIN_PUBLIC_KEYS`      | Yes for admin routes          | Comma-separated Stellar public keys                                    |
 
 **Rules enforced at startup:**
@@ -184,6 +185,7 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 - If `JWT_SECRET` is **absent** — auth is disabled, `/api/auth/*` routes return `503`, and the server starts normally.
 - If `JWT_SECRET` is **set but shorter than 32 characters** — the server refuses to start with a clear error.
 - The backend **never** falls back to a built-in/default secret; tokens are always signed with your explicitly configured value.
+- `JWT_CLOCK_SKEW_SEC` is validated at startup and should stay small; it absorbs distributed clock drift without intentionally extending session lifetime.
 
 To generate a strong secret:
 

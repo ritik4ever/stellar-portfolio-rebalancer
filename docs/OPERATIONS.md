@@ -135,6 +135,7 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - `JWT_SECRET`: active signing secret (required for issuing new access/refresh tokens).
 - `JWT_PREVIOUS_SECRET`: prior signing secret used before rotation.
 - `JWT_PREVIOUS_SECRET_GRACE_UNTIL`: ISO-8601 UTC timestamp. Old-secret access tokens are accepted only until this time.
+- `JWT_CLOCK_SKEW_SEC`: optional bounded clock tolerance, in seconds, applied to access and refresh token `iat`/`exp` validation. Defaults to `30` and must be between `0` and `300`. Use this only to absorb small NTP drift between API instances, not to extend session length.
 
 ### Rotation runbook
 
@@ -148,9 +149,9 @@ The backend supports a dual-secret validation window so access tokens signed wit
 
 ### Expected behavior
 
-- Tokens signed with `JWT_SECRET` always validate normally.
-- Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
-- After grace expiry, old-secret tokens are rejected with `401`.
+- Tokens signed with `JWT_SECRET` validate normally, with `JWT_CLOCK_SKEW_SEC` tolerance for slightly future `iat` values and slightly past `exp` values.
+- Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`, then use the same `JWT_CLOCK_SKEW_SEC` token timestamp checks.
+- Tokens whose expiry or issued-at time falls outside the skew window are rejected with `401`; the API logs the rejection reason and configured skew seconds for operators.
 
 ## Alerting and observability routing
 

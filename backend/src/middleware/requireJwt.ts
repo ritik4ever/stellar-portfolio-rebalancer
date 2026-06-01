@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import { getAuthConfig } from '../services/authService.js'
+import { getJwtClockSkewSec } from '../config/jwtConfig.js'
+import { logger } from '../utils/logger.js'
 import { fail } from '../utils/apiResponse.js'
 
 export interface JwtUser {
@@ -30,6 +32,10 @@ export function requireJwt(req: Request, res: Response, next: NextFunction): voi
 
     const verification = verifyAccessTokenWithRotation(token)
     if (!verification.ok) {
+        logger.warn('JWT access token rejected', {
+            reason: verification.reason,
+            clockSkewSec: getJwtClockSkewSec(),
+        })
         const isExpired = verification.reason === 'expired'
         fail(
             res,
@@ -73,8 +79,10 @@ function verifyWithSecret(token: string, secret: string):
     | { ok: true; payload: AccessJwtPayload }
     | { ok: false; reason: 'expired' | 'invalid' } {
     try {
-        const decoded = jwt.verify(token, secret)
-        if (!isAccessPayload(decoded)) {
+        const decoded = jwt.verify(token, secret, {
+            clockTolerance: getJwtClockSkewSec(),
+        })
+        if (!isAccessPayload(decoded) || isIssuedInFuture(decoded)) {
             return { ok: false, reason: 'invalid' }
         }
         return { ok: true, payload: decoded }
@@ -84,6 +92,12 @@ function verifyWithSecret(token: string, secret: string):
         }
         return { ok: false, reason: 'invalid' }
     }
+}
+
+function isIssuedInFuture(payload: AccessJwtPayload): boolean {
+    if (typeof payload.iat !== 'number') return false
+    const nowSec = Math.floor(Date.now() / 1000)
+    return payload.iat > nowSec + getJwtClockSkewSec()
 }
 
 function isAccessPayload(payload: string | jwt.JwtPayload): payload is AccessJwtPayload {
