@@ -1,4 +1,4 @@
-﻿groups:
+groups:
   - name: portfolio-observability
     rules:
       # --- API GATEWAY SUBSYSTEM ---

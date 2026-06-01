@@ -91,4 +91,23 @@ describe('WalletManager', () => {
     expect(localStorage.getItem('wallet_type')).toBeNull()
     expect(localStorage.getItem('wallet_connected')).toBeNull()
   })
+
+  it('defaults auto-reconnect to true', () => {
+    expect(walletManager.getAutoReconnect()).toBe(true)
+  })
+
+  it('persists auto-reconnect opt-out', () => {
+    walletManager.setAutoReconnect(false)
+    expect(walletManager.getAutoReconnect()).toBe(false)
+    expect(localStorage.getItem('wallet_auto_reconnect')).toBe('false')
+  })
+
+  it('honours auto-reconnect when re-enabled', () => {
+    walletManager.setAutoReconnect(false)
+    expect(walletManager.getAutoReconnect()).toBe(false)
+
+    walletManager.setAutoReconnect(true)
+    expect(walletManager.getAutoReconnect()).toBe(true)
+    expect(localStorage.getItem('wallet_auto_reconnect')).toBe('true')
+  })
 })
