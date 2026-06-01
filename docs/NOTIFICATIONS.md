@@ -282,6 +282,15 @@ Stellar Portfolio Rebalancer
 </html>
 ```
 
+## Related privacy endpoints
+
+Notification delivery is separate from legal consent, but users often configure both in settings. For **consent and revocation history** (grant/revoke timestamps and policy document versions), use:
+
+- `GET /api/consent/export?format=json` — full portable export (JWT required when auth is enabled)
+- `GET /api/consent/audit` — append-only grant/revoke event list
+
+See [PRIVACY_CONSENT_ALIGNMENT.md](./PRIVACY_CONSENT_ALIGNMENT.md) and [ENVIRONMENT.md](./ENVIRONMENT.md) for policy version variables.
+
 ## API Endpoints
 
 ### Subscribe to Notifications

@@ -77,6 +77,10 @@ This document is the canonical reference for `backend/.env.example`.
 | `EMAIL_MAX_BACKOFF_MS` | integer (ms) | No | `30000` | Cap for exponential email retry delay. |
 | `EMAIL_BACKOFF_MULTIPLIER` | number | No | `2` | Exponential multiplier for email retries (≥ 1). |
 | `NOTIFICATION_RATE_LIMIT_PER_HOUR` | integer | No | `10` | Hourly notification cap per user. |
+| `LEGAL_TERMS_VERSION` | string | No | `1.0.0` | Terms of Service version stored on consent grant/export. |
+| `LEGAL_PRIVACY_VERSION` | string | No | `1.0.0` | Privacy Policy version stored on consent grant/export. |
+| `LEGAL_COOKIE_VERSION` | string | No | `1.0.0` | Cookie Policy version stored on consent grant/export. |
+| `CONSENT_AUDIT_RETENTION_DAYS` | integer | No | `365` | Default retention for `POST /consent/audit/purge`. |
 | `CORS_ORIGINS` | CSV URLs | No | localhost list | Allowed browser origins for CORS. |
 | `LOG_LEVEL` | enum | No | `info` | Application log level. |
 | `LOG_PRETTY` | boolean | No | `false` | Pretty logs when true; JSON logs when false. |
