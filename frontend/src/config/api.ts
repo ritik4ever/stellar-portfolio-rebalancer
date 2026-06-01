@@ -155,8 +155,8 @@ export const API_CONFIG = {
         NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
         NOTIFICATIONS_UNSUBSCRIBE: (userId: string) =>
             `${API_RESOURCE_ROOT}/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
-        NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/notifications/test`,
-        NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/notifications/test-all`,
+        NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/debug/notifications/test`,
+        NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/debug/notifications/test-all`,
         TEST_CORS: '/test/cors',
         TEST_COINGECKO: '/test/coingecko',
         CONSENT_STATUS: `${API_RESOURCE_ROOT}/consent/status`,

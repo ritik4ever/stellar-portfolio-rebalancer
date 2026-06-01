@@ -189,6 +189,21 @@ describe('API path compatibility matrix', () => {
         30_000
     )
 
+    it('GET /api/v1/portfolio/:id/rebalance-status returns the current rebalance status', async () => {
+        const payload = demoPortfolioPayload('rebalance-status-ccc')
+        const created = await request(app).post('/api/v1/portfolio').send(payload).expect(201)
+        const portfolioId = created.body.data.portfolioId as string
+
+        const statusRes = await request(app).get(`/api/v1/portfolio/${portfolioId}/rebalance-status`).expect(200)
+
+        expectNoDeprecationHeaders(statusRes)
+        expect(statusRes.body.success).toBe(true)
+        expect(statusRes.body.data.portfolioId).toBe(portfolioId)
+        expect(statusRes.body.data.status).toEqual(expect.any(String))
+        expect(statusRes.body.data.isLocked).toBe(false)
+        expect(statusRes.body.data.lastRebalanceAt).toEqual(expect.any(String))
+    })
+
     it('GET /auto-rebalancer/status: same shape and stable fields; legacy includes deprecation headers', async () => {
         const v1 = await request(app).get('/api/v1/auto-rebalancer/status').expect(200)
         const legacy = await request(app).get('/api/auto-rebalancer/status').expect(200)
