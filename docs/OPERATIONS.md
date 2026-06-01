@@ -77,6 +77,29 @@ Use `/health` for load balancer liveness. Use `/ready` before traffic shifts in 
 - **Redis restart:** Queues and repeatable job metadata live in Redis. After Redis comes back, restart the API so `probeRedis()` and `startQueueScheduler()` run again; workers must reconnect via `getConnectionOptions()`.
 - **Database:** SQLite (`DB_PATH`) or PostgreSQL (`DATABASE_URL`) holds application data and indexer cursors. Deleting the DB resets consent and portfolios; indexer cursors reset to bootstrap behavior on next start.
 
+## Staging environment management
+
+For preview and staging environments, use the automated reset workflow to ensure the system is in a known-good state. This drops all tables, applies migrations, and seeds E2E test data.
+
+### Resetting the database
+
+```bash
+cd backend
+npm run db:reset:staging
+```
+
+**Safety check:** In environments where `NODE_ENV=production`, you must explicitly set `STAGING_RESET_CONFIRM=true` to prevent accidental data loss.
+
+```bash
+STAGING_RESET_CONFIRM=true npm run db:reset:staging
+```
+
+### Failure conditions
+
+- **Migration Failure:** If migrations fail, the workflow exits with code 1. The database may be partially migrated.
+- **Seeding Failure:** If seeding fails, the system exits with code 1. The database will have tables but may lack required mock data.
+- **No Config:** If neither `DATABASE_URL` nor `DB_PATH` is set, it defaults to a local SQLite file but warns the user.
+
 ## JWT signing secret rotation
 
 The backend supports a dual-secret validation window so access tokens signed with the previous secret remain valid for a controlled grace period.
