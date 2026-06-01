@@ -191,3 +191,16 @@ export function recordReflectorStalePrice(asset: string): void {
 export function recordReflectorFallbackUsage(reason: string): void {
     reflectorFallbackUsageTotal.inc({ reason })
 }
+
+// ── Auth security event metrics (Issue #423) ─────────────────────────────────
+
+const authSecurityEventsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}auth_security_events_total`,
+    help: 'Total authentication security events by type',
+    labelNames: ['event_type'] as const,
+    registers: [register],
+})
+
+export function recordAuthSecurityEvent(eventType: string): void {
+    authSecurityEventsTotal.inc({ event_type: eventType })
+}
