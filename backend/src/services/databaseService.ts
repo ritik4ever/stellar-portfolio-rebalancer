@@ -417,6 +417,43 @@ export class DatabaseService {
     logger.info("[DB] SQLite database ready", { dbPath });
   }
 
+  // ─────────────────────────────────────────────
+  // Backup verification (high‑risk operations)
+  // ─────────────────────────────────────────────
+
+  /**
+   * Checks whether a recent usable backup exists.
+   * The implementation looks for a KV entry `backup_last_success` and ensures it
+   * is within the configured TTL (default 24 hours). Adjust the logic to match
+   * your actual backup service.
+   */
+  private verifyBackupExists(): void {
+    try {
+      const row = this.db
+        .prepare<[string]>("SELECT value FROM kv_store WHERE key = ?")
+        .get("backup_last_success") as { value: string } | undefined;
+      if (!row) {
+        throw new BackupVerificationError(
+          "No backup record found; a recent backup is required before performing this operation.",
+        );
+      }
+      const timestamp = new Date(row.value).getTime();
+      const now = Date.now();
+      const ttlMs = 24 * 60 * 60 * 1000; // 24 hours
+      if (now - timestamp > ttlMs) {
+        throw new BackupVerificationError(
+          "Backup is older than 24 hours; please create a fresh backup before proceeding.",
+        );
+      }
+    } catch (err) {
+      if (err instanceof BackupVerificationError) throw err;
+      // If the KV table does not exist or query fails, treat as missing backup
+      throw new BackupVerificationError(
+        `Backup verification failed: ${err}`,
+      );
+    }
+  }
+
   private _migrateSchema(): void {
     const cols = this.db
       .prepare("PRAGMA table_info(portfolios)")
@@ -748,6 +785,8 @@ export class DatabaseService {
   }
 
   deletePortfolio(id: string): boolean {
+    // Verify a recent backup before destructive delete
+    this.verifyBackupExists();
     try {
       const result = this.db
         .prepare("DELETE FROM portfolios WHERE id = ?")
@@ -875,6 +914,8 @@ export class DatabaseService {
   }
 
   removeAsset(symbol: string): boolean {
+    // Verify a recent backup before destructive asset removal
+    this.verifyBackupExists();
     try {
       const result = this.db
         .prepare("DELETE FROM assets WHERE symbol = ?")
