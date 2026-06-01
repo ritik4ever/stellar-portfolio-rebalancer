@@ -31,7 +31,7 @@ function rowToEvent(r: RebalanceEventRow) {
         actor: details?.actor as 'user' | 'system' | 'admin' | 'scheduler' | undefined,
         source: details?.source as 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance' | undefined,
         triggerMetadata: details?.triggerMetadata as Record<string, unknown> | undefined,
-        eventSource: (r.event_source as 'offchain' | 'simulated' | 'onchain' | undefined) ?? undefined,
+        eventSource: (['offchain', 'simulated', 'onchain'] as const).find(v => v === r.event_source) ?? undefined,
         details: details ?? undefined
     }
 }
