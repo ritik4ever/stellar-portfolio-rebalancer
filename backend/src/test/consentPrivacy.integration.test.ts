@@ -275,6 +275,11 @@ describe('consent and privacy API', () => {
         const portfolioId = (createRes.body?.data?.portfolioId ?? createRes.body?.portfolioId) as string
         expect(portfolioId).toBeTruthy()
 
+        await request(app)
+            .post('/api/consent')
+            .send({ userId: owner, terms: true, privacy: true, cookies: true })
+            .expect(200)
+
         const token = generateAccessToken(owner)
         const exportRes = await request(app)
             .get(`/api/portfolio/${portfolioId}/export`)

@@ -1,5 +1,9 @@
 import { browserPriceService } from '../services/browserPriceService'
-import { getAccessToken, refresh } from '../services/authService'
+import {
+    announceAuthSessionExpired,
+    getAccessToken,
+    refresh,
+} from '../services/authService'
 import {
     debugLog,
     getFrontendDebugConfig,
@@ -37,6 +41,12 @@ export class ApiClientError extends Error {
         this.code = code
         this.details = details
     }
+}
+
+function getErrorCode(body: unknown): string | undefined {
+    if (!body || typeof body !== 'object') return undefined
+    const error = (body as { error?: { code?: unknown } }).error
+    return typeof error?.code === 'string' ? error.code : undefined
 }
 
 const getBaseUrl = (): string => {
@@ -199,13 +209,6 @@ export const apiRequest = async <T>(
         try {
             const payload = await browserPriceService.getCurrentPrices()
             return payload as unknown as T
-            const prices = await browserPriceService.getCurrentPrices()
-            // Source information is embedded in each price entry via the 'source' field
-            debugLog('Price source: Browser (CoinGecko API or fallback)', {
-                assets: Object.keys(prices),
-                sourceSample: prices[Object.keys(prices)[0]]?.source
-            })
-            return prices as unknown as T
         } catch (error) {
             console.error('Browser price service failed, falling back to backend:', error)
             debugLog('Price fallback triggered: Attempting backend API')
@@ -287,15 +290,22 @@ export const apiRequest = async <T>(
             })
         }
 
-        if (response.status === 401 && retryCount === 0 && isApiRequest) {
-            const refreshed = await refresh()
-            if (refreshed) {
-                return apiRequest<T>(endpoint, options, retryCount + 1)
-            }
-        }
-
         if (isApiRequest) {
             const envelope = body as ApiEnvelope<T>
+
+            if (response.status === 401 && retryCount === 0) {
+                const refreshed = await refresh()
+                if (refreshed) {
+                    return apiRequest<T>(endpoint, options, retryCount + 1)
+                }
+
+                announceAuthSessionExpired({
+                    message: envelope.error?.message || 'Your session expired. Sign in again to continue.',
+                    source: endpoint,
+                    status: response.status,
+                    code: envelope.error?.code || getErrorCode(body) || 'UNAUTHORIZED',
+                })
+            }
 
             if (!response.ok || !envelope.success || envelope.data === null) {
                 const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`
@@ -381,6 +391,12 @@ export const downloadPortfolioExport = async (
     if (res.status === 401) {
         const refreshed = await refresh()
         if (refreshed) return downloadPortfolioExport(portfolioId, format)
+        announceAuthSessionExpired({
+            message: 'Your session expired while exporting. Sign in again to retry.',
+            source: `export:${portfolioId}`,
+            status: 401,
+            code: 'UNAUTHORIZED',
+        })
         throw new ApiClientError('Unauthorized', 401, 'UNAUTHORIZED')
     }
 

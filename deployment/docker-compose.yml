@@ -21,6 +21,11 @@ services:
       - frontend_logs:/var/log/nginx
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   backend:
     build:
@@ -54,26 +59,31 @@ services:
       - METRICS_ENABLED=${METRICS_ENABLED:-true}
       - LOG_DEPLOYMENT_ENV=${LOG_DEPLOYMENT_ENV:-local}
       - ALERT_CONTACT=${ALERT_CONTACT:-platform-oncall}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://portfolio:portfolio@postgres:5432/portfolio}
-      - PGHOST=postgres
-      - PGPORT=5432
-      - PGDATABASE=portfolio
-      - PGUSER=portfolio
-      - PGPASSWORD=portfolio
+      - DB_PATH=${DB_PATH:-/app/data/portfolio.db}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - PGHOST=${PGHOST:-}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-}
+      - PGUSER=${PGUSER:-}
+      - PGPASSWORD=${PGPASSWORD:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     ports:
       - "3001:3001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
     volumes:
       - ./logs:/app/logs
+      - backend_data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
   redis:
     image: redis:7-alpine
     container_name: portfolio-redis
     restart: unless-stopped
+    profiles:
+      - full-stack
     ports:
       - "6379:6379"
     volumes:
@@ -86,11 +96,18 @@ services:
       timeout: 3s
       retries: 6
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   postgres:
     image: postgres:15-alpine
     container_name: portfolio-postgres
     restart: unless-stopped
+    profiles:
+      - full-stack
     environment:
       - POSTGRES_DB=portfolio
       - POSTGRES_USER=portfolio
@@ -106,6 +123,11 @@ services:
       timeout: 5s
       retries: 8
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   monitoring:
     build:
@@ -114,7 +136,7 @@ services:
     container_name: portfolio-monitoring
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["node", "dist/index.js"]
     environment:
       - NODE_ENV=${NODE_ENV:-development}
@@ -129,13 +151,18 @@ services:
     depends_on:
       - redis
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   prometheus:
     image: prom/prometheus:v2.54.1
     container_name: portfolio-prometheus
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -150,13 +177,18 @@ services:
       - backend
       - alertmanager
       - blackbox-exporter
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: portfolio-alertmanager
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
@@ -165,13 +197,18 @@ services:
       - --storage.path=/alertmanager
     ports:
       - "9093:9093"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
 
   grafana:
     image: grafana/grafana:11.2.0
     container_name: portfolio-grafana
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -185,26 +222,36 @@ services:
     depends_on:
       - prometheus
       - loki
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   loki:
     image: grafana/loki:3.1.1
     container_name: portfolio-loki
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["-config.file=/etc/loki/loki-config.yml"]
     volumes:
       - ./observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki_data:/loki
     ports:
       - "3100:3100"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
   promtail:
     image: grafana/promtail:3.1.1
     container_name: portfolio-promtail
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["-config.file=/etc/promtail/promtail-config.yml"]
     volumes:
       - ./observability/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
@@ -212,21 +259,32 @@ services:
       - frontend_logs:/var/log/portfolio-frontend:ro
     depends_on:
       - loki
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
 
   blackbox-exporter:
     image: prom/blackbox-exporter:v0.25.0
     container_name: portfolio-blackbox
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
       - --config.file=/etc/blackbox_exporter/config.yml
     ports:
       - "9115:9115"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
 
 volumes:
+  backend_data:
   redis_data:
   postgres_data:
   prometheus_data:

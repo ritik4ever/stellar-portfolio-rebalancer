@@ -55,6 +55,6 @@ export const isFeatureFlagEnabled = (
     flagName: string,
     env: NodeJS.ProcessEnv = process.env
 ): boolean => {
-    const flags = getFeatureFlags(env) as Record<string, boolean>
+    const flags = getFeatureFlags(env) as unknown as Record<string, boolean>
     return flags[flagName] ?? false
 }

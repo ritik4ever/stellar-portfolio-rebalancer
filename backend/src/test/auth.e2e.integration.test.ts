@@ -566,8 +566,7 @@ describe('Protected routes — token ownership and revocation', () => {
             .get(`/api/user/${address}/portfolios`)
             .set('Authorization', `Bearer ${expired}`)
             .expect(401)
-
-        expect(res.body.error?.code).toBe('UNAUTHORIZED')
+        expect(res.body.error?.code).toBe('TOKEN_EXPIRED')
     })
 
     it('returns 401 on protected route with tampered access token', async () => {

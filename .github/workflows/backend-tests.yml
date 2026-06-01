@@ -13,12 +13,17 @@ on:
       - 'backend/**'
       - '.github/workflows/backend-tests.yml'
 
+# Total number of shards the backend test suite is split across. Keep this in
+# sync with the `matrix.shard` list in the `backend-tests` job below.
+env:
+  SHARD_TOTAL: 4
+
 jobs:
-  backend-tests:
+  # OpenAPI contract verification is independent of the test suite, so it runs
+  # once in its own job instead of being repeated in every test shard.
+  openapi-contract:
+    name: OpenAPI contract check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: ['20.x']
 
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -34,21 +39,94 @@ jobs:
         working-directory: ./backend
         run: npm ci
 
-      - name: OpenAPI contract check
+      - name: Verify OpenAPI spec and docs
         working-directory: ./backend
         run: |
           npm run spec:check
           npm run api:validate
 
-      - name: Run backend tests with coverage
-        working-directory: ./backend
-        run: npm run test:coverage
+  # Test files are split into SHARD_TOTAL parallel shards. Vitest distributes
+  # test files across shards, so total wall-clock time scales down roughly
+  # linearly with the shard count. Each shard collects coverage into a blob
+  # report; thresholds are enforced later in the `backend-coverage` job once all
+  # blobs are merged.
+  backend-tests:
+    name: Tests (shard ${{ matrix.shard }} of 4)
+    runs-on: ubuntu-latest
+    strategy:
+      # Run every shard even if one fails so a single shard failure never masks
+      # failures in the others.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
-      - name: Upload backend coverage artifact
-        if: success()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run tests (shard ${{ matrix.shard }})
+        working-directory: ./backend
+        run: npm run test:shard -- --shard=${{ matrix.shard }}/${{ env.SHARD_TOTAL }}
+
+      - name: Upload shard blob report
+        # Upload even when the shard fails so the merge job can still combine the
+        # passing shards' coverage; fail loudly if a shard produced nothing.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage-${{ matrix.node-version }}
+          name: backend-blob-report-${{ matrix.shard }}
+          path: backend/.vitest-reports/*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # Merge the per-shard blob reports into a single coverage report and enforce
+  # the coverage thresholds defined in backend/vitest.config.ts against the full
+  # suite. This job only runs when every shard passed.
+  backend-coverage:
+    name: Merge coverage and enforce thresholds
+    needs: backend-tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Download shard blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: backend/.vitest-reports
+          pattern: backend-blob-report-*
+          merge-multiple: true
+
+      - name: Merge reports and check coverage thresholds
+        working-directory: ./backend
+        run: npm run test:merge-coverage
+
+      - name: Upload merged backend coverage artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
           path: backend/coverage/
           if-no-files-found: warn
 

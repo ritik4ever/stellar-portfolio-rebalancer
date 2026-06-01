@@ -7,11 +7,14 @@ interface AssetCardProps {
         value: number
         amount: number
         color: string
+        issuer?: string
+        domain?: string
+        type?: 'native' | 'credit_alphanum4' | 'credit_alphanum12'
     }
     price?: {
-        price: number
-        change: number
-    }
+        price: number | null
+        change: number | null
+    } | null
     // NEW: Loading skeleton prop
     isLoading?: boolean
 }
@@ -58,9 +61,23 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
     if (!asset) {
         return null
     }
-    const change = price?.change || (Math.random() * 10 - 5)
-    const isPositive = change >= 0
-    const currentPrice = price?.price || 1
+
+    const changeValue = typeof price?.change === 'number' ? price.change : 0
+    const hasChange = typeof price?.change === 'number'
+    const isPositive = changeValue > 0
+    const isNegative = changeValue < 0
+    const isNeutral = changeValue === 0
+
+    const priceValue = price?.price
+    const hasPrice = typeof priceValue === 'number'
+    const formattedPrice = hasPrice
+        ? new Intl.NumberFormat('en-US', {
+              style: 'currency',
+              currency: 'USD',
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+          }).format(priceValue)
+        : 'N/A'
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
@@ -75,11 +92,28 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
                     <div className="ml-3">
                         <h3 className="font-semibold text-gray-900 dark:text-white">{asset.name}</h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{asset.value}% allocation</p>
+                        {/* NEW: Show issuer information for non-native assets */}
+                        {asset.issuer && (
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
+                                {asset.domain ? (
+                                    <span className="text-blue-600 dark:text-blue-400">{asset.domain}</span>
+                                ) : (
+                                    <span>Issuer: {asset.issuer.slice(0, 4)}...{asset.issuer.slice(-4)}</span>
+                                )}
+                            </p>
+                        )}
+                        {asset.type === 'native' && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400">Native Asset</p>
+                        )}
                     </div>
                 </div>
-                <div className={`flex items-center ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
-                    {isPositive ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
-                    <span className="text-sm font-medium">{isPositive ? '+' : ''}{change.toFixed(2)}%</span>
+                <div className={`flex items-center ${isPositive ? 'text-green-500' : isNegative ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                    {isPositive && <TrendingUp className="w-4 h-4 mr-1" data-testid="trend-up" />}
+                    {isNegative && <TrendingDown className="w-4 h-4 mr-1" data-testid="trend-down" />}
+                    {isNeutral && <span className="w-4 h-4 mr-1 flex items-center justify-center font-bold" data-testid="trend-neutral">-</span>}
+                    <span className="text-sm font-medium" data-testid="drift-value">
+                        {hasChange ? `${isPositive ? '+' : ''}${changeValue.toFixed(2)}%` : 'N/A'}
+                    </span>
                 </div>
             </div>
 
@@ -90,7 +124,7 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }
                 </div>
                 <div className="flex justify-between">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Price</span>
-                    <span className="text-sm text-gray-600 dark:text-gray-300">${currentPrice.toFixed(currentPrice < 1 ? 4 : 2)}</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-300" data-testid="price-value">{formattedPrice}</span>
                 </div>
                 <div className="flex justify-between">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Target</span>
