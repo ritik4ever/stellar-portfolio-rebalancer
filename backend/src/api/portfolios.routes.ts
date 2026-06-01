@@ -4,9 +4,10 @@ import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
-import { rebalanceLockService } from '../services/rebalanceLock.js'
+
 import { riskManagementService } from '../services/serviceContainer.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
+import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js';
+import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
@@ -204,7 +205,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
         console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
 
         // Try to acquire lock
-        const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+        const lockAcquired = await acquireWorkerLock(portfolioId);
         if (!lockAcquired) {
             console.log(`[WARNING] Rebalance already in progress for portfolio: ${portfolioId}`);
             return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
@@ -230,7 +231,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
 
             return ok(res, { result });
         } finally {
-            await rebalanceLockService.releaseLock(portfolioId);
+            await releaseWorkerLock(portfolioId);
         }
     } catch (error) {
         if (error instanceof ConflictError) {
