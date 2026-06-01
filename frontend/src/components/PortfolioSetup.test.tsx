@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PortfolioSetup from './PortfolioSetup'
+import "@testing-library/jest-dom/vitest";
 import { api } from '../config/api'
 
 // Strip framer-motion animation props so they don't hit the real DOM
@@ -19,12 +20,17 @@ vi.mock('framer-motion', () => ({
 vi.mock('./ThemeToggle', () => ({ default: () => null }))
 
 const mockMutateAsync = vi.fn()
-vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
-    useCreatePortfolioMutation: () => ({
-        mutateAsync: mockMutateAsync,
-        isPending: false,
-    }),
-}))
+vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
+  buildRollbackMessage: (error: unknown, action = "portfolio update") => {
+    const detail =
+      error instanceof Error ? error.message : "server rejected the update";
+    return `Your optimistic ${action} was rolled back because the server rejected it. ${detail} Please try again.`;
+  },
+  useCreatePortfolioMutation: () => ({
+    mutateAsync: mockMutateAsync,
+    isPending: false,
+  }),
+}));
 
 function renderSetup(publicKey: string | null = null) {
     const client = new QueryClient({
@@ -233,6 +239,23 @@ describe('PortfolioSetup allocation validation', () => {
             fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }))
             expect(mockMutateAsync).toHaveBeenCalledTimes(1)
         })
+        it("shows a clear rollback message when portfolio creation is rejected", async () => {
+          mockMutateAsync.mockRejectedValueOnce(
+            new Error("server rejected allocation update"),
+          );
+
+          renderSetup();
+
+          fireEvent.click(
+            screen.getByRole("button", { name: /create portfolio/i }),
+          );
+
+          const alert = await screen.findByRole("alert");
+
+          expect(alert).toHaveTextContent(/rolled back/i);
+          expect(alert).toHaveTextContent(/server rejected/i);
+          expect(alert).toHaveTextContent(/try again/i);
+        });
 
         it('does not call mutateAsync when total is not 100%', () => {
             renderSetup()

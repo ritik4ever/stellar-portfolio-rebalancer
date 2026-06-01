@@ -22,13 +22,11 @@ import {
   ArrowLeft,
   AlertCircle,
   CheckCircle,
-  Search,
   Save,
   User,
   Zap,
   RefreshCw,
 } from "lucide-react";
-import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 
@@ -178,7 +176,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   );
 
   // NEW: Use enhanced assets query
-  const { data: assets = [], isLoading: assetsLoading } = useAssets();
+    const { data: queriedAssets = [] } = useAssets();
+
+    const assets =
+      queriedAssets.length > 0
+        ? queriedAssets
+        : DEFAULT_ASSET_OPTIONS.map((asset) => ({
+            symbol: asset.value,
+            name: asset.label,
+          }));
 
   useEffect(() => {
     setSavedTemplates(loadSavedTemplates(publicKey || ""));
@@ -475,9 +481,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            role="alert"
-            aria-live="assertive"
-            className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
+            role="status"
+            aria-live="polite"
+            className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-green-800">
               <CheckCircle className="w-5 h-5 mr-2" />
@@ -493,6 +499,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="alert"
+            aria-live="assertive"
             className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-red-800">
