@@ -92,6 +92,16 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
 
+### `get_config_view(env: Env, portfolio_id: u64) -> ConfigView`
+
+- **Purpose:** Snapshot contract-level and portfolio-level configuration into a single debug-friendly view.
+- **Parameters:**
+  - `portfolio_id`: Target portfolio ID to query.
+- **Returns:** `ConfigView` containing administrative, reflector, emergency stop, and portfolio details.
+- **Preconditions / failure behavior:**
+  - Contract must be initialized (panics if admin or reflector keys are missing).
+  - Returns `PortfolioOption::None` if the requested `portfolio_id` does not exist.
+
 ## Error Codes (`contracts/src/types.rs`)
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
@@ -130,9 +140,20 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `last_rebalance: u64`
   - `total_value: i128`
   - `is_active: bool`
+- `PortfolioOption` (`contracts/src/types.rs`)
+  - Enum representing an optional portfolio:
+  - `None`
+  - `Some(Portfolio)`
+- `ConfigView` (`contracts/src/types.rs`)
+  - Composite struct:
+  - `admin: Address`
+  - `reflector_address: Address`
+  - `emergency_stop: bool`
+  - `portfolio: PortfolioOption`
 - `Asset` (`contracts/src/reflector.rs`)
   - Enum: `Stellar(Address)` or `Other(Symbol)`.
 - `PriceData` (`contracts/src/reflector.rs`)
   - Struct with `price: i128` and `timestamp: u64`.
 
 For call builders and generated client bindings, use Soroban CLI/SDK tooling against the compiled WASM artifact.
+

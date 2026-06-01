@@ -264,4 +264,34 @@ impl PortfolioRebalancer {
         admin.require_auth();
         env.storage().instance().set(&DataKey::EmergencyStop, &stop);
     }
+
+    pub fn get_config_view(env: Env, portfolio_id: u64) -> ConfigView {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let emergency_stop = env
+            .storage()
+            .instance()
+            .get(&DataKey::EmergencyStop)
+            .unwrap_or(false);
+
+        let portfolio = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+        {
+            Some(p) => PortfolioOption::Some(p),
+            None => PortfolioOption::None,
+        };
+
+        ConfigView {
+            admin,
+            reflector_address,
+            emergency_stop,
+            portfolio,
+        }
+    }
 }
