@@ -67,7 +67,8 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Returns:** `true` when any tracked asset drift exceeds `rebalance_threshold`, else `false`.
 - **Preconditions / failure behavior:**
   - Portfolio and `ReflectorAddress` must exist in storage (panics on missing values).
-  - Missing price for an asset is skipped in drift comparison for that asset.
+  - Reflector timeout/unavailability semantics: if any held asset has missing or stale price data, the function returns `false` because a deterministic rebalance decision cannot be made.
+  - Price data is stale when `ledger.timestamp - price.timestamp > 3600` seconds.
 
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
@@ -75,14 +76,13 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.
-- **Returns:** `Ok(())` or `Err(Error::SlippageExceeded)`.
+- **Returns:** `Ok(())`, `Err(Error::SlippageExceeded)`, or `Err(Error::StaleData)`.
 - **Preconditions / failure behavior:**
   - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
   - Portfolio must exist and owner must authorize call.
   - Cooldown must be elapsed (`>= 3600` seconds since last rebalance) or panic `"Cooldown active"`.
-  - Every target asset must have non-stale Reflector price data or panic:
-    - `"Stale price data"`
-    - `"Missing price data"`
+  - Every target asset must have Reflector price data with timestamp no more than 3600 seconds older than the current ledger timestamp.
+  - Reflector timeout/unavailability semantics: missing price data and stale price data both return `Err(Error::StaleData)`. The portfolio is not updated and no `("portfolio","rebalanced")` event is emitted.
 
 ### `set_emergency_stop(env: Env, stop: bool) -> ()`
 
@@ -102,7 +102,7 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `2` | `RebalanceNotNeeded` | Reserved variant; currently not explicitly returned by `lib.rs`. |
 | `3` | `EmergencyStop` | Reserved variant; emergency-stop paths currently panic instead of returning this error. |
 | `4` | `CooldownActive` | Reserved variant; cooldown path currently panics instead of returning this error. |
-| `5` | `StaleData` | Reserved variant; stale-price path currently panics instead of returning this error. |
+| `5` | `StaleData` | `execute_rebalance` cannot read current Reflector data: at least one target asset price is missing or older than 3600 seconds. |
 | `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
 | `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
 | `8` | `InvalidThreshold` | `create_portfolio` threshold outside `1..=50`. |

@@ -31,8 +31,10 @@ pub fn calculate_portfolio_value(
         if let Some(price_data) =
             reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
         {
-            // Check for stale price (e.g., 1 hour)
-            if price_data.timestamp + 3600 < current_time {
+            if price_data.is_stale(
+                current_time,
+                crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS,
+            ) {
                 return None;
             }
             let value = (balance * price_data.price) / 10i128.pow(14);

@@ -1,4 +1,7 @@
 #![no_std]
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, Env, Map};
 
 mod portfolio;
@@ -151,31 +154,41 @@ impl PortfolioRebalancer {
             return false;
         }
 
-        // Check drift for each asset
+        // Check drift for each asset. If Reflector is unavailable for any target
+        // asset, report that no deterministic rebalance can be planned.
         for (asset, target_percent) in portfolio.target_allocations.iter() {
             let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
 
-            // Get price from reflector
-            // Note: In a real app we'd need to handle potential failures/missing prices gracefully
-            // For this check, if price missing, we can't calculate drift, so maybe skip or fail?
-            // Let's skip for simplicity in this check
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            let price_data = match reflector_client
+                .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
-                let current_asset_value = (current_balance * price_data.price) / 10i128.pow(14);
-                let current_percent = (current_asset_value * 100) / total_value;
+                Some(price_data) => price_data,
+                None => return false,
+            };
+            if price_data.is_stale(
+                env.ledger().timestamp(),
+                crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS,
+            ) {
+                return false;
+            }
 
-                 let drift = (current_percent - target_percent as i128).abs();
-                if drift > portfolio.rebalance_threshold as i128 {
-                    return true;
-                }
+            let current_asset_value = (current_balance * price_data.price) / 10i128.pow(14);
+            let current_percent = (current_asset_value * 100) / total_value;
+
+            let drift = (current_percent - target_percent as i128).abs();
+            if drift > portfolio.rebalance_threshold as i128 {
+                return true;
             }
         }
 
         false
     }
 
-    pub fn execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error> {
+    pub fn execute_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+    ) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             panic!("Emergency stop active");
         }
@@ -201,14 +214,17 @@ impl PortfolioRebalancer {
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
         for (asset, _) in portfolio.target_allocations.iter() {
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            let price_data = match reflector_client
+                .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
-                if price_data.is_stale(current_time, 3600) {
-                    panic!("Stale price data");
-                }
-            } else {
-                panic!("Missing price data");
+                Some(price_data) => price_data,
+                None => return Err(Error::StaleData),
+            };
+            if price_data.is_stale(
+                current_time,
+                crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS,
+            ) {
+                return Err(Error::StaleData);
             }
         }
 
@@ -222,7 +238,8 @@ impl PortfolioRebalancer {
                 &env,
                 &portfolio.current_balances,
                 &reflector_client,
-            ).unwrap(); // Already verified prices above
+            )
+            .unwrap(); // Already verified prices above
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client
