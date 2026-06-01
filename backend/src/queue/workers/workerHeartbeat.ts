@@ -35,6 +35,35 @@ export interface PersistedWorkerStatus {
  * Uses the same connection as BullMQ
  */
 async function getRedisClient() {
+  // In test mode, use an in-memory Redis-like mock to avoid external dependency
+  if (process.env.NODE_ENV === 'test') {
+    const store: Map<string, { value: string; expiresAt?: number }> = new Map()
+    return {
+      async setex(key: string, ttl: number, value: string) {
+        const expiresAt = Date.now() + ttl * 1000
+        store.set(key, { value, expiresAt })
+      },
+      async keys(pattern: string) {
+        const prefix = pattern.replace(/\*$/, '')
+        return Array.from(store.keys()).filter(k => k.startsWith(prefix))
+      },
+      async get(key: string) {
+        const entry = store.get(key)
+        if (!entry) return null
+        if (entry.expiresAt && Date.now() > entry.expiresAt) {
+          store.delete(key)
+          return null
+        }
+        return entry.value
+      },
+      async del(...keys: string[]) {
+        for (const k of keys) store.delete(k)
+      },
+      disconnect() {},
+      quit() {},
+    } as unknown as any
+  }
+
   const connectionOptions = getConnectionOptions();
   // Dynamic import to avoid circular deps
   const redis = await import('ioredis');

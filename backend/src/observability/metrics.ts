@@ -46,6 +46,13 @@ const readinessGauge = new Gauge({
     registers: [register],
 })
 
+const readinessDependencyLatency = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}readiness_dependency_latency_ms`,
+    help: 'Measured latency (ms) for readiness dependency checks',
+    labelNames: ['dependency'] as const,
+    registers: [register],
+})
+
 const queueDepthGauge = new Gauge({
     name: `${observabilityConfig.metrics.prefix}queue_jobs`,
     help: 'Current queue depth by state',
@@ -147,6 +154,16 @@ export async function getMetricsPayload(): Promise<string> {
     const readiness = await buildReadinessReport()
     readinessGauge.set(readiness.status === 'ready' ? 1 : 0)
 
+    // Populate dependency latency gauges when available
+    if (readiness.checks && typeof readiness.checks === 'object') {
+        for (const [dep, check] of Object.entries(readiness.checks as Record<string, any>)) {
+            const latency = check?.details?.latencyMs
+            if (typeof latency === 'number' && Number.isFinite(latency)) {
+                readinessDependencyLatency.set({ dependency: dep }, latency)
+            }
+        }
+    }
+
     const queueMetrics = await getQueueMetrics()
     for (const [queue, stats] of Object.entries(queueMetrics.queues)) {
         queueDepthGauge.set({ queue, state: 'waiting' }, stats.waiting)
@@ -157,7 +174,12 @@ export async function getMetricsPayload(): Promise<string> {
     }
 
     // Update worker health metrics
-    const workerHealth = await getWorkerHealthSummary()
+    // Call worker health summary with a short timeout so metrics rendering cannot hang
+    const workerHealth = await Promise.race([
+        getWorkerHealthSummary(),
+        new Promise(resolve => setTimeout(() => resolve(null), 1000))
+    ]) as any
+    if (workerHealth) {
     workerHealthTotal.set(workerHealth.total)
     workerHealthyTotal.set(workerHealth.healthy)
     workerUnhealthyTotal.set(workerHealth.unhealthy)
@@ -167,6 +189,14 @@ export async function getMetricsPayload(): Promise<string> {
     // Update per-worker status
     for (const worker of workerHealth.workers) {
         workerStatus.set({ worker_name: worker.name }, worker.ready ? 1 : 0)
+    }
+    } else {
+        // Timeout or failure - set zeroed metrics
+        workerHealthTotal.set(0)
+        workerHealthyTotal.set(0)
+        workerUnhealthyTotal.set(0)
+        workerIdleTotal.set(0)
+        workerLaggingTotal.set(0)
     }
 
     return register.metrics()

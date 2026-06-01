@@ -131,4 +131,24 @@ describe('assetRegistryValidation', () => {
         assets: [
           'USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
           'BTC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQZ3K6Z4Z3B',
-          'USDC:GA5
+          'USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
+        ]
+      }
+
+      expect(() => validateAssetRegistryEntry(entryWithDuplicate)).toThrow(/duplicate|already/i)
+    })
+
+    it('rejects malformed asset entries', () => {
+      const badEntry = { assets: ['NOTVALID', 'FOO:BAR:BAZ'] }
+      expect(() => validateAssetRegistryEntry(badEntry)).toThrow()
+    })
+
+    it('validates stellar asset format helper', () => {
+      expect(isValidStellarAsset('USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN')).toBe(true)
+      expect(isValidStellarAsset('XLM')).toBe(false)
+      expect(isValidStellarAsset('INVALID:KEY')).toBe(false)
+    })
+
+  })
+
+})

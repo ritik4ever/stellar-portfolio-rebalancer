@@ -23,6 +23,7 @@ import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
 import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue } from '../queue/queues.js'
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
+import { buildReadinessReport } from '../monitoring/readiness.js'
 
 export const opsRouter = Router()
 
@@ -105,6 +106,18 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
     } catch (error) {
         logger.error('[ERROR] Failed to get system status', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// GET /api/system/readiness - Detailed readiness with per-dependency latency
+opsRouter.get('/system/readiness', async (_req: Request, res: Response) => {
+    try {
+        const report = await buildReadinessReport()
+        const statusCode = report.status === 'ready' ? 200 : 503
+        return res.status(statusCode).json(report)
+    } catch (error) {
+        logger.error('[ERROR] Failed to build readiness report', { error })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to build readiness report')
     }
 })
 
