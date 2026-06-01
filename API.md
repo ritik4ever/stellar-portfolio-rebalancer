@@ -144,6 +144,7 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **GET /api/rebalance/history** — List rebalance events (query: `portfolioId`, `limit`, `source`, `startTimestamp`, `endTimestamp`, `syncOnChain`).
 - **POST /api/rebalance/history** — Record a rebalance event. Supports `Idempotency-Key`.
 - **POST /api/rebalance/history/sync-onchain** — Sync on-chain rebalance history (admin).
+- **GET /api/rebalance/summary/{portfolioId}** — Get rebalance readiness summary (system readiness, drift, slippage, risk, data freshness) for manual rebalance UI guidance.
 
 ### Risk
 
