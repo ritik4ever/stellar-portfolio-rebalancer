@@ -1,3 +1,6 @@
+#[cfg(test)]
+extern crate std;
+
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
@@ -197,7 +200,6 @@ fn test_deposit_valid() {
 }
 
 #[test]
-#[should_panic(expected = "Amount must be positive")]
 fn test_deposit_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
@@ -214,7 +216,8 @@ fn test_deposit_invalid_amount() {
     allocations.set(asset.clone(), 100);
     let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
-    client.deposit(&pid, &asset, &0);
+    let result = client.try_deposit(&pid, &asset, &0);
+    assert_eq!(result, Err(Ok(Error::InvalidWithdrawAmount)));
 }
 
 #[test]
@@ -321,7 +324,6 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
-#[should_panic(expected = "Cooldown active")]
 fn test_execute_rebalance_cooldown() {
     let env = Env::default();
     env.mock_all_auths();
@@ -348,11 +350,11 @@ fn test_execute_rebalance_cooldown() {
     });
 
     let actual_balances = Map::new(&env);
-    client.execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::CooldownActive)));
 }
 
 #[test]
-#[should_panic(expected = "Emergency stop active")]
 fn test_emergency_stop() {
     let env = Env::default();
     env.mock_all_auths();
@@ -371,11 +373,11 @@ fn test_emergency_stop() {
     allocations.set(asset.clone(), 100);
 
     let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &100);
+    let result = client.try_deposit(&pid, &asset, &100);
+    assert_eq!(result, Err(Ok(Error::EmergencyStop)));
 }
 
 #[test]
-#[should_panic(expected = "Stale price data")]
 fn test_stale_data() {
     let env = Env::default();
     env.mock_all_auths();
@@ -447,7 +449,8 @@ fn test_stale_data() {
     });
 
     let actual_balances = Map::new(&env);
-    client.execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StaleData)));
 }
 
 #[test]
@@ -1458,6 +1461,217 @@ fn benchmark_deposit_gas() {
         env.budget().memory_bytes_cost(),
         BASELINE_DEPOSIT_CPU,
         BASELINE_DEPOSIT_MEM,
+    );
+}
+
+#[test]
+fn test_check_invariants_valid_portfolio() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &500);
+    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
+}
+
+#[test]
+fn test_check_invariants_inactive_portfolio() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+    client.withdraw(&pid, &asset, &100);
+
+    assert_eq!(
+        client.try_check_invariants(&pid),
+        Err(Ok(Error::PortfolioInactive))
+    );
+}
+
+#[test]
+fn test_withdraw_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &1000);
+    client.withdraw(&pid, &asset, &400);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 600);
+    assert!(portfolio.is_active);
+}
+
+#[test]
+fn test_withdraw_insufficient_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+
+    let result = client.try_withdraw(&pid, &asset, &200);
+    assert_eq!(result, Err(Ok(Error::InsufficientBalance)));
+}
+
+#[test]
+fn test_withdraw_full_exit_deactivates_portfolio() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+    client.withdraw(&pid, &asset, &100);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert!(!portfolio.is_active);
+    assert!(!portfolio.current_balances.contains_key(asset));
+}
+
+#[test]
+fn test_admin_force_rebalance_bypasses_cooldown() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    client.deposit(&pid, &asset, &100);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10010;
+    });
+
+    let actual_balances = Map::new(&env);
+    client.admin_force_rebalance(&pid, &actual_balances);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10010);
+}
+
+#[test]
+#[should_panic]
+fn test_admin_force_rebalance_non_admin_rejected() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    client.mock_all_auths().create_portfolio(&user, &allocations, &5, &50);
+    let pid = 1u64;
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "admin_force_rebalance",
+                args: (pid, Map::<Address, i128>::new(&env)).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .admin_force_rebalance(&pid, &Map::new(&env));
+}
+
+#[test]
+fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
+    let env = Env::default();
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 40);
+    allocations.set(Address::generate(&env), 40);
+    let portfolio = Portfolio {
+        user: Address::generate(&env),
+        target_allocations: allocations,
+        current_balances: Map::new(&env),
+        rebalance_threshold: 5,
+        slippage_tolerance: 50,
+        last_rebalance: 0,
+        total_value: 0,
+        is_active: true,
+    };
+    assert_eq!(
+        crate::portfolio::check_portfolio_invariants(&portfolio),
+        Err(Error::InvariantViolation)
     );
 }
 

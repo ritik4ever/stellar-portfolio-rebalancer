@@ -13,6 +13,8 @@ pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
 ///
 /// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
+pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
+pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,4 +55,9 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    InsufficientBalance = 12,
+    InvariantViolation = 13,
+    PortfolioNotFound = 14,
+    PortfolioInactive = 15,
+    InvalidWithdrawAmount = 16,
 }
