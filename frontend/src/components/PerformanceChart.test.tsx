@@ -7,11 +7,16 @@ import PerformanceChart from "./PerformanceChart";
 const queryMocks = vi.hoisted(() => ({
   usePortfolioAnalytics: vi.fn(),
   usePerformanceSummary: vi.fn(),
+  useRebalanceHistory: vi.fn(),
 }));
 
 vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePortfolioAnalytics: queryMocks.usePortfolioAnalytics,
   usePerformanceSummary: queryMocks.usePerformanceSummary,
+}));
+
+vi.mock("../hooks/queries/useHistoryQuery", () => ({
+  useRebalanceHistory: queryMocks.useRebalanceHistory,
 }));
 
 // Mock ThemeContext
@@ -38,6 +43,7 @@ vi.mock("recharts", () => ({
   CartesianGrid: () => <div data-testid="cartesian-grid" />,
   Tooltip: () => <div data-testid="tooltip" />,
   Legend: () => <div data-testid="legend" />,
+  ReferenceDot: () => <div data-testid="reference-dot" />,
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="responsive-container">{children}</div>
   ),
@@ -65,6 +71,12 @@ describe("PerformanceChart", () => {
 
     queryMocks.usePerformanceSummary.mockReturnValue({
       data: null,
+      isLoading: false,
+      error: null,
+    });
+
+    queryMocks.useRebalanceHistory.mockReturnValue({
+      data: { history: [] },
       isLoading: false,
       error: null,
     });
@@ -310,6 +322,65 @@ describe("PerformanceChart", () => {
       expect(
         screen.getByTestId("line-chart").getAttribute("data-chart-length"),
       ).toBe("4");
+    });
+
+    it("should request extended analytics data when compare mode is enabled", () => {
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: {
+          data: [
+            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
+            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1020 },
+            { timestamp: "2024-01-03T00:00:00Z", totalValue: 1040 },
+            { timestamp: "2024-01-04T00:00:00Z", totalValue: 1060 },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const toggle = screen.getByRole('button', {
+        name: /compare previous period/i,
+      });
+      fireEvent.click(toggle);
+
+      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
+        "test-portfolio",
+        60,
+      );
+    });
+
+    it("should render rebalance markers from history events", () => {
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: {
+          data: [
+            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
+            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1100 },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      queryMocks.useRebalanceHistory.mockReturnValue({
+        data: {
+          history: [
+            {
+              id: 'event-1',
+              timestamp: '2024-01-02T00:00:00Z',
+              status: 'completed',
+              trigger: 'Rebalance executed',
+            },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      expect(screen.getAllByTestId('reference-dot').length).toBeGreaterThan(0);
     });
   });
 
