@@ -23,8 +23,13 @@ impl PortfolioRebalancer {
         env.storage()
             .instance()
             .set(&DataKey::ReflectorAddress, &reflector_address);
+        env.storage().instance().set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
         Ok(())
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
     pub fn create_portfolio(
@@ -260,8 +265,12 @@ impl PortfolioRebalancer {
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+        require_admin(&env);
         env.storage().instance().set(&DataKey::EmergencyStop, &stop);
     }
+}
+
+fn require_admin(env: &Env) {
+    let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+    admin.require_auth();
 }
