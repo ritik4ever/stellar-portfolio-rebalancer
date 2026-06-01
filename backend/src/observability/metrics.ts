@@ -73,6 +73,54 @@ const reflectorFallbackUsageTotal = new Counter({
     registers: [register],
 })
 
+// TTL and cache metrics
+const cacheHitRatioGauge = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}cache_hit_ratio`,
+    help: 'Cache hit ratio by asset (0.0 to 1.0)',
+    labelNames: ['asset'] as const,
+    registers: [register],
+})
+
+const cacheAgeHistogram = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}cache_age_milliseconds`,
+    help: 'Age of cached price entries in milliseconds',
+    labelNames: ['asset'] as const,
+    buckets: [100, 500, 1000, 5000, 10000, 30000, 60000, 300000, 600000],
+    registers: [register],
+})
+
+const cacheSizeGauge = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}cache_size_bytes`,
+    help: 'Approximate size of price cache in bytes',
+    registers: [register],
+})
+
+const cacheEntriesGauge = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}cache_entries_total`,
+    help: 'Total number of entries in price cache',
+    registers: [register],
+})
+
+const cacheOperationsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}cache_operations_total`,
+    help: 'Cache operations (hit, miss, eviction, update)',
+    labelNames: ['operation', 'asset'] as const,
+    registers: [register],
+})
+
+const cacheTtlSecondsGauge = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}cache_ttl_seconds`,
+    help: 'Current TTL configuration for price cache in seconds',
+    registers: [register],
+})
+
+const cacheExpirationCounterTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}cache_expirations_total`,
+    help: 'Total number of cache entries that expired',
+    labelNames: ['asset'] as const,
+    registers: [register],
+})
+
 const routeLabel = (req: Request): string => req.route?.path || req.path || 'unknown'
 
 export const metricsMiddleware = (req: Request, res: Response, next: NextFunction): void => {
@@ -138,4 +186,33 @@ export function recordReflectorStalePrice(asset: string): void {
 
 export function recordReflectorFallbackUsage(reason: string): void {
     reflectorFallbackUsageTotal.inc({ reason })
+}
+
+// Cache metrics recording functions
+export function recordCacheHitRatio(asset: string, ratio: number): void {
+    cacheHitRatioGauge.set({ asset }, Math.max(0, Math.min(1, ratio)))
+}
+
+export function recordCacheAge(asset: string, ageMs: number): void {
+    cacheAgeHistogram.observe({ asset }, ageMs)
+}
+
+export function recordCacheSize(sizeBytes: number): void {
+    cacheSizeGauge.set(sizeBytes)
+}
+
+export function recordCacheEntries(count: number): void {
+    cacheEntriesGauge.set(count)
+}
+
+export function recordCacheOperation(operation: 'hit' | 'miss' | 'eviction' | 'update', asset: string): void {
+    cacheOperationsTotal.inc({ operation, asset })
+}
+
+export function recordCacheTtl(ttlSeconds: number): void {
+    cacheTtlSecondsGauge.set(ttlSeconds)
+}
+
+export function recordCacheExpiration(asset: string): void {
+    cacheExpirationCounterTotal.inc({ asset })
 }
