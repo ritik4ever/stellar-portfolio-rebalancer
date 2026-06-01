@@ -259,6 +259,93 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
+    /// Non-mutating simulation path for backend dry-run APIs.
+    /// Returns a map of planned trades (asset -> amount) where positive = buy, negative = sell.
+    /// Performs the same policy checks as `execute_rebalance` but does not update storage.
+    pub fn simulate_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+    ) -> Result<Map<Address, i128>, Error> {
+        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
+            return Err(Error::EmergencyStop);
+        }
+
+        let portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+            .unwrap();
+
+        let current_time = env.ledger().timestamp();
+        // Surface cooldown as a policy failure instead of mutating state
+        if current_time < portfolio.last_rebalance + 3600 {
+            return Err(Error::CooldownActive);
+        }
+
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+
+        // Gather current prices and validate freshness. Any missing/stale price is surfaced.
+        let mut current_prices = Map::new(&env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(price_data) =
+                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            {
+                if price_data.is_stale(current_time, 3600) {
+                    return Err(Error::StaleData);
+                }
+                current_prices.set(asset.clone(), price_data.price);
+            } else {
+                return Err(Error::StaleData);
+            }
+        }
+
+        // Compute total value using live prices; propagate failures as policy errors.
+        let total_value = match portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client) {
+            Some(v) => v,
+            None => return Err(Error::StaleData),
+        };
+
+        // Build a temporary portfolio snapshot with computed total_value for deterministic trade planning
+        let mut snapshot = portfolio.clone();
+        snapshot.total_value = total_value;
+
+        let trades = portfolio::calculate_rebalance_trades(&env, &snapshot, &current_prices);
+
+        // If actual balances are provided, run the same slippage checks as execute_rebalance
+        let mut has_actual_balances = false;
+        for (_, _) in actual_balances.iter() {
+            has_actual_balances = true;
+            break;
+        }
+        if has_actual_balances {
+            if total_value > 0 {
+                for (asset, target_pct) in snapshot.target_allocations.iter() {
+                    let price = current_prices.get(asset.clone()).unwrap();
+                    let expected_value = (total_value * target_pct as i128) / 100;
+                    let expected_balance = (expected_value * 10i128.pow(14)) / price;
+                    let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);
+                    let expected_abs = if expected_balance >= 0 { expected_balance } else { -expected_balance };
+                    if expected_abs > 0 {
+                        let diff = expected_balance - actual_balance;
+                        let diff_abs = if diff >= 0 { diff } else { -diff };
+                        let slippage_bps = (diff_abs * 10000) / expected_abs;
+                        if slippage_bps > snapshot.slippage_tolerance as i128 {
+                            return Err(Error::SlippageExceeded);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(trades)
+    }
+
     pub fn set_emergency_stop(env: Env, stop: bool) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();

@@ -321,6 +321,136 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
+fn test_simulate_rebalance_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let a1 = Address::generate(&env);
+    let a2 = Address::generate(&env);
+    allocations.set(a1.clone(), 50);
+    allocations.set(a2.clone(), 50);
+
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    // Create drift so there are trades
+    client.deposit(&pid, &a1, &200);
+    client.deposit(&pid, &a2, &100);
+
+    // Advance time past cooldown to avoid cooldown policy failure
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    let trades = client.simulate_rebalance(&pid, &Map::new(&env));
+    // Expect trades map to indicate selling a1 and buying a2
+    assert!(trades.get(a1.clone()) < 0);
+    assert!(trades.get(a2.clone()) > 0);
+}
+
+#[test]
+fn test_simulate_rebalance_cooldown() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    // Immediately simulate; should report cooldown as a policy failure
+    let result = client.try_simulate_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::CooldownActive)));
+}
+
+#[test]
+fn test_simulate_rebalance_missing_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_with_missing_price::ReflectorWithMissingPrice);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let priced = Address::generate(&env);
+    let missing = Address::generate(&env);
+    allocations.set(priced.clone(), 50);
+    allocations.set(missing.clone(), 50);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    client.deposit(&pid, &priced, &100);
+    client.deposit(&pid, &missing, &100);
+
+    // Configure reflector to treat `missing` as missing
+    let missing_ref_client = reflector_with_missing_price::ReflectorWithMissingPriceClient::new(&env, &reflector_id);
+    missing_ref_client.set_missing_asset(&missing);
+
+    // Advance time past cooldown
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    let result = client.try_simulate_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::StaleData)));
+}
+
+#[test]
+fn test_simulate_rebalance_slippage_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| { li.timestamp = 10000; });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // Single asset portfolio where actual balance deviates hugely from expected
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    // Deposit some amount
+    client.deposit(&pid, &asset, &1000);
+
+    // Advance time past cooldown
+    env.ledger().with_mut(|li| { li.timestamp = 20000; });
+
+    // Provide actual balances that are wildly off (simulate bad post-trade state)
+    let mut actuals = Map::new(&env);
+    actuals.set(asset.clone(), 1); // extremely low
+
+    let result = client.try_simulate_rebalance(&pid, &actuals);
+    assert_eq!(result, Err(Ok(Error::SlippageExceeded)));
+}
+
+#[test]
 #[should_panic(expected = "Cooldown active")]
 fn test_execute_rebalance_cooldown() {
     let env = Env::default();

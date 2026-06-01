@@ -1,6 +1,7 @@
 # Portfolio Rebalancer Contract ABI
 
 Contract source:
+
 - `contracts/src/lib.rs`
 - `contracts/src/types.rs`
 - `contracts/src/reflector.rs`
@@ -92,23 +93,36 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
 
+### `simulate_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<Map<Address, i128>, Error>`
+
+- **Purpose:** Non-mutating simulation path for backend dry-run APIs. Returns a map of planned trades where positive values indicate buys and negative values indicate sells. Surfaces policy failures (cooldown, stale/missing prices, slippage) as `Error` values instead of panics.
+- **Parameters:**
+  - `portfolio_id`: Portfolio to simulate rebalance for.
+  - `actual_balances`: Optional actual balances for slippage checks; pass an empty map to skip slippage validation.
+- **Returns:** `Ok(Map<Address, i128>)` with planned trades, or one of:
+  - `Err(Error::CooldownActive)` if the portfolio is still in cooldown.
+  - `Err(Error::StaleData)` if any price is missing or stale.
+  - `Err(Error::SlippageExceeded)` if provided `actual_balances` exceed the portfolio's slippage tolerance.
+- **Preconditions / failure behavior:**
+  - Does not require portfolio owner authorization and does not mutate persistent storage.
+
 ## Error Codes (`contracts/src/types.rs`)
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
 
-| Code | Variant | Returned when |
-|---|---|---|
-| `1` | `InvalidAllocation` | `create_portfolio` receives allocation map that fails validation. |
-| `2` | `RebalanceNotNeeded` | Reserved variant; currently not explicitly returned by `lib.rs`. |
-| `3` | `EmergencyStop` | Reserved variant; emergency-stop paths currently panic instead of returning this error. |
-| `4` | `CooldownActive` | Reserved variant; cooldown path currently panics instead of returning this error. |
-| `5` | `StaleData` | Reserved variant; stale-price path currently panics instead of returning this error. |
-| `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
-| `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
-| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `1..=50`. |
-| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
-| `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
-| `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
+| Code | Variant                    | Returned when                                                                           |
+| ---- | -------------------------- | --------------------------------------------------------------------------------------- |
+| `1`  | `InvalidAllocation`        | `create_portfolio` receives allocation map that fails validation.                       |
+| `2`  | `RebalanceNotNeeded`       | Reserved variant; currently not explicitly returned by `lib.rs`.                        |
+| `3`  | `EmergencyStop`            | Reserved variant; emergency-stop paths currently panic instead of returning this error. |
+| `4`  | `CooldownActive`           | Reserved variant; cooldown path currently panics instead of returning this error.       |
+| `5`  | `StaleData`                | Reserved variant; stale-price path currently panics instead of returning this error.    |
+| `6`  | `ExcessiveDrift`           | Reserved variant; currently not explicitly returned by `lib.rs`.                        |
+| `7`  | `AlreadyInitialized`       | `initialize` called after contract already initialized.                                 |
+| `8`  | `InvalidThreshold`         | `create_portfolio` threshold outside `1..=50`.                                          |
+| `9`  | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`.                               |
+| `10` | `SlippageExceeded`         | `execute_rebalance` computed slippage above portfolio tolerance.                        |
+| `11` | `TooManyAssets`            | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`.                 |
 
 ## XDR/Contract Type References
 
