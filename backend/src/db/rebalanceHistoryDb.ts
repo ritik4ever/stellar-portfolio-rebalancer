@@ -12,6 +12,7 @@ export interface RebalanceEventRow {
     risk_alerts: unknown
     error: string | null
     details: unknown
+    event_source: string | null
 }
 
 function rowToEvent(r: RebalanceEventRow) {
@@ -30,6 +31,7 @@ function rowToEvent(r: RebalanceEventRow) {
         actor: details?.actor as 'user' | 'system' | 'admin' | 'scheduler' | undefined,
         source: details?.source as 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance' | undefined,
         triggerMetadata: details?.triggerMetadata as Record<string, unknown> | undefined,
+        eventSource: (['offchain', 'simulated', 'onchain'] as const).find(v => v === r.event_source) ?? undefined,
         details: details ?? undefined
     }
 }
@@ -46,10 +48,11 @@ export async function dbInsertRebalanceEvent(event: {
     error?: string
     details?: unknown
     timestamp?: Date
+    eventSource?: 'offchain' | 'simulated' | 'onchain'
 }) {
     await query(
-        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()))`,
+        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp, event_source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()), $12)`,
         [
             event.id,
             event.portfolioId,
@@ -61,7 +64,8 @@ export async function dbInsertRebalanceEvent(event: {
             event.riskAlerts ? JSON.stringify(event.riskAlerts) : null,
             event.error ?? null,
             event.details ? JSON.stringify(event.details) : null,
-            event.timestamp ?? null
+            event.timestamp ?? null,
+            event.eventSource ?? null
         ]
     )
 }

@@ -168,10 +168,10 @@ export class RebalanceHistoryService {
     async getRebalanceHistory(
         portfolioId?: string,
         limit: number = 50,
-        options: RebalanceHistoryQueryOptions = {}
-    ): Promise<RebalanceEvent[]> {
-        // Always use databaseService (SQLite)
-        return databaseService.getRebalanceHistory(portfolioId, limit, options)
+        options: RebalanceHistoryQueryOptions = {},
+        offset: number = 0
+    ): Promise<{ events: RebalanceEvent[]; total: number }> {
+        return databaseService.getRebalanceHistory(portfolioId, limit, options, offset)
     }
 
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {

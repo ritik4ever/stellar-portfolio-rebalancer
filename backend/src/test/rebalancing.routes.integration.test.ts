@@ -264,4 +264,114 @@ describe('Rebalancing API Integration Tests', () => {
             expect(res.body.data.filters.endTimestamp).toBe(end)
         })
     })
+
+    describe('GET /api/rebalance/history - pagination envelope', () => {
+        it('response includes pagination object with total, limit, offset, hasMore', async () => {
+            const res = await request(app)
+                .get('/api/rebalance/history')
+                .query({ limit: 10 })
+                .expect(200)
+
+            expect(res.body.data.pagination).toBeDefined()
+            expect(typeof res.body.data.pagination.total).toBe('number')
+            expect(res.body.data.pagination.limit).toBe(10)
+            expect(res.body.data.pagination.offset).toBe(0)
+            expect(typeof res.body.data.pagination.hasMore).toBe('boolean')
+        })
+
+        it('meta includes total as well as count', async () => {
+            const res = await request(app)
+                .get('/api/rebalance/history')
+                .expect(200)
+
+            expect(res.body.meta.count).toBeDefined()
+            expect(typeof res.body.meta.total).toBe('number')
+        })
+
+        it('accepts offset parameter and returns correct window', async () => {
+            const portfolioId = `pagination-test-${Date.now()}`
+
+            // Seed three events for the same portfolio
+            for (let i = 0; i < 3; i++) {
+                await request(app)
+                    .post('/api/rebalance/history')
+                    .send({
+                        portfolioId,
+                        trigger: `Manual Rebalance ${i}`,
+                        trades: 1,
+                        gasUsed: '0.01 XLM',
+                        status: 'completed',
+                        isAutomatic: false
+                    })
+            }
+
+            const page1 = await request(app)
+                .get('/api/rebalance/history')
+                .query({ portfolioId, limit: 2, offset: 0 })
+                .expect(200)
+
+            const page2 = await request(app)
+                .get('/api/rebalance/history')
+                .query({ portfolioId, limit: 2, offset: 2 })
+                .expect(200)
+
+            expect(page1.body.data.history).toHaveLength(2)
+            expect(page1.body.data.pagination.total).toBe(3)
+            expect(page1.body.data.pagination.hasMore).toBe(true)
+            expect(page2.body.data.history).toHaveLength(1)
+            expect(page2.body.data.pagination.hasMore).toBe(false)
+
+            // Pages should not overlap
+            const ids1 = page1.body.data.history.map((e: any) => e.id)
+            const ids2 = page2.body.data.history.map((e: any) => e.id)
+            expect(ids1.some((id: string) => ids2.includes(id))).toBe(false)
+        })
+
+        it('rejects offset below zero with 400', async () => {
+            const res = await request(app)
+                .get('/api/rebalance/history')
+                .query({ offset: -1 })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+        })
+    })
+
+    describe('GET /api/rebalance/history - eventSource filter', () => {
+        it('filters by eventSource and only returns matching events', async () => {
+            const portfolioId = `filter-source-test-${Date.now()}`
+
+            await request(app)
+                .post('/api/rebalance/history')
+                .send({
+                    portfolioId,
+                    trigger: 'Offchain trigger',
+                    trades: 1,
+                    gasUsed: '0.01 XLM',
+                    status: 'completed',
+                    isAutomatic: false,
+                    eventSource: 'offchain'
+                })
+            await request(app)
+                .post('/api/rebalance/history')
+                .send({
+                    portfolioId,
+                    trigger: 'Simulated trigger',
+                    trades: 1,
+                    gasUsed: '0.01 XLM',
+                    status: 'completed',
+                    isAutomatic: false,
+                    eventSource: 'simulated'
+                })
+
+            const res = await request(app)
+                .get('/api/rebalance/history')
+                .query({ portfolioId, source: 'simulated' })
+                .expect(200)
+
+            expect(res.body.data.history).toHaveLength(1)
+            expect(res.body.data.pagination.total).toBe(1)
+            expect(res.body.data.history[0].eventSource).toBe('simulated')
+        })
+    })
 })
