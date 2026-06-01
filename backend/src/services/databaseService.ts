@@ -1041,6 +1041,22 @@ export class DatabaseService {
       );
   }
 
+  /**
+   * Purge consent audit events older than the specified number of days.
+   * Returns the number of deleted rows.
+   */
+  purgeOldConsentAuditEvents(retentionDays: number): number {
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const result = this.db
+      .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")
+      .run(cutoff);
+    const count = result.changes;
+    if (count > 0) {
+      logger.info(`[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`);
+    }
+    return count;
+  }
+
   deleteUserData(userId: string): void {
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
     this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
