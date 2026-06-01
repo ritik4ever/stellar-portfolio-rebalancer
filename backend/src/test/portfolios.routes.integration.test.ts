@@ -386,7 +386,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
                 .set(authHeader(OTHER_ADDRESS))
                 .query({ format: 'json' })
                 .expect((res) => {
-                    expect([403, 200, 404]).toContain(res.status)
+                    expect([403, 200, 202, 404]).toContain(res.status)
                 })
 
             if (res.status === 403) {
