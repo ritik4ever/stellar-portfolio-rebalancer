@@ -152,6 +152,51 @@ opsRouter.get('/queue/health', async (req: Request, res: Response) => {
     }
 })
 
+/**
+ * GET /api/workers/health
+ * Returns persisted worker health summary and detailed status
+ * Issue #450: Persist worker heartbeat and status for ops visibility
+ * Allows operators to see which workers are alive, idle, lagging, or unhealthy
+ */
+opsRouter.get('/workers/health', async (_req: Request, res: Response) => {
+    try {
+        const summary = await getWorkerHealthSummary()
+        const status = summary.unhealthy > 0 ? 503 : 200
+        return res.status(status).json({
+            timestamp: new Date().toISOString(),
+            summary: {
+                total: summary.total,
+                healthy: summary.healthy,
+                unhealthy: summary.unhealthy,
+                idle: summary.idle,
+                lagging: summary.lagging
+            },
+            workers: summary.workers
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to get worker health', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * GET /api/workers/status
+ * Returns detailed persisted status for all workers
+ * For dashboards and monitoring systems
+ */
+opsRouter.get('/workers/status', async (_req: Request, res: Response) => {
+    try {
+        const statuses = await getAllPersistedWorkerStatuses()
+        return ok(res, {
+            timestamp: new Date().toISOString(),
+            workers: statuses
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to get worker statuses', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 opsRouter.get('/queue/failed', async (req: Request, res: Response) => {
     try {
         const limit = Math.min(parseInt(req.query.limit as string) || 20, 100)
