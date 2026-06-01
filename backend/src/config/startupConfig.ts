@@ -1,4 +1,8 @@
 import { getFeatureFlags, type FeatureFlags } from "./featureFlags.js";
+import {
+  parseNotificationDeliveryConfig,
+  type NotificationDeliveryConfig,
+} from "./notificationDeliveryConfig.js";
 import { logger } from "../utils/logger.js";
 
 export interface StartupConfig {
@@ -15,6 +19,7 @@ export interface StartupConfig {
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
+  notificationDelivery: NotificationDeliveryConfig;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -194,6 +199,9 @@ export function validateStartupConfigOrThrow(
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
+  const notificationDeliveryResult = parseNotificationDeliveryConfig(env);
+  errors.push(...notificationDeliveryResult.errors);
+
   if (errors.length > 0) {
     const numberedErrors = errors
       .map((msg, idx) => `${idx + 1}. ${msg}`)
@@ -228,6 +236,7 @@ export function validateStartupConfigOrThrow(
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
+    notificationDelivery: notificationDeliveryResult.config,
   };
 }
 
@@ -261,6 +270,21 @@ export function buildStartupSummary(
     jwtAuthEnabled: config.jwtAuthEnabled,
     readinessCacheTtlMs: config.readinessCacheTtlMs,
     consentAuditRetentionDays: config.consentAuditRetentionDays,
+    notificationDelivery: {
+      email: {
+        maxAttempts: config.notificationDelivery.email.maxAttempts,
+        initialBackoffMs: config.notificationDelivery.email.initialBackoffMs,
+        maxBackoffMs: config.notificationDelivery.email.maxBackoffMs,
+        backoffMultiplier: config.notificationDelivery.email.backoffMultiplier,
+      },
+      webhook: {
+        maxAttempts: config.notificationDelivery.webhook.maxAttempts,
+        initialBackoffMs: config.notificationDelivery.webhook.initialBackoffMs,
+        maxBackoffMs: config.notificationDelivery.webhook.maxBackoffMs,
+        backoffMultiplier: config.notificationDelivery.webhook.backoffMultiplier,
+        requestTimeoutMs: config.notificationDelivery.webhook.requestTimeoutMs,
+      },
+    },
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       allowFallbackPrices: config.featureFlags.allowFallbackPrices,
