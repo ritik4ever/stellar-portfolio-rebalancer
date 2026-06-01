@@ -24,6 +24,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { api, ENDPOINTS } from "../config/api";
+import { remainingAllocation } from "../utils/calculations";
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 
@@ -257,6 +258,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     (a) => getAllocationError(a.percentage) !== null,
   );
 
+  /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
+  const remaining = remainingAllocation(allocations);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   /** Adds a new allocation row using the first asset not already in the list */
@@ -383,6 +387,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
+  // Alias so the mobile action bar can reference the same submit handler
+  const handleSubmit = createPortfolio;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -729,6 +735,37 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     {totalPercentage.toFixed(1)}%
                   </span>
                 </div>
+
+                {/* ── Remaining-allocation progress bar ── */}
+                <div
+                  className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden mb-2"
+                  role="progressbar"
+                  aria-valuenow={Math.min(totalPercentage, 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${totalPercentage.toFixed(1)}% of 100% allocated`}
+                >
+                  <div
+                    className={`h-full rounded-full transition-all duration-200 ${
+                      isValidTotal
+                        ? "bg-green-500"
+                        : deviation > 0
+                          ? "bg-red-500"
+                          : "bg-yellow-400"
+                    }`}
+                    style={{ width: `${Math.min(totalPercentage, 100)}%` }}
+                  />
+                </div>
+
+                {/* Remaining label */}
+                {!isValidTotal && (
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>Remaining:</span>
+                    <span className={remaining > 0 ? "text-yellow-600" : "text-red-600"}>
+                      {remaining > 0 ? `+${remaining.toFixed(1)}%` : `${remaining.toFixed(1)}%`}
+                    </span>
+                  </div>
+                )}
 
                 {/*
                  * Deviation guidance text — updates in real time as the user types.
