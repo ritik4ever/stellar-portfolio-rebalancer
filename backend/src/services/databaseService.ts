@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
-import { ConflictError, BackupVerificationError } from "../types/index.js";
+import { ConflictError, BackupVerificationError, IssuerMetadata } from "../types/index.js";
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 
@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS assets (
     contract_address  TEXT,
     issuer_account    TEXT,
     coingecko_id      TEXT,
+    issuer_metadata   TEXT,
     enabled           INTEGER NOT NULL DEFAULT 1,
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
@@ -510,6 +511,14 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
+
+    const assetCols = this.db
+      .prepare("PRAGMA table_info(assets)")
+      .all() as Array<{ name: string }>;
+    if (!assetCols.some((c) => c.name === "issuer_metadata")) {
+      this.db.exec("ALTER TABLE assets ADD COLUMN issuer_metadata TEXT");
+      logger.info("[DB] Migration: added issuer_metadata column to assets");
+    }
   }
 
   private _seedDefaultAssets(): void {
@@ -810,6 +819,7 @@ export class DatabaseService {
     issuerAccount?: string;
     coingeckoId?: string;
     enabled: boolean;
+    issuerMetadata?: IssuerMetadata;
   }> {
     try {
       const rows = this.db
@@ -821,9 +831,10 @@ export class DatabaseService {
             contract_address: string | null;
             issuer_account: string | null;
             coingecko_id: string | null;
+            issuer_metadata: string | null;
             enabled: number;
           }
-        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE enabled = 1 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets ORDER BY symbol")
+        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled FROM assets WHERE enabled = 1 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled FROM assets ORDER BY symbol")
         .all();
       return rows.map((r) => ({
         symbol: r.symbol,
@@ -832,6 +843,7 @@ export class DatabaseService {
         issuerAccount: r.issuer_account ?? undefined,
         coingeckoId: r.coingecko_id ?? undefined,
         enabled: r.enabled === 1,
+        issuerMetadata: r.issuer_metadata ? safeJsonParse(r.issuer_metadata, undefined, `asset(${r.symbol}).issuerMetadata`) : undefined,
       }));
     } catch (err) {
       throw new Error(`Failed to list assets: ${err}`);
@@ -848,6 +860,7 @@ export class DatabaseService {
         issuerAccount?: string;
         coingeckoId?: string;
         enabled: boolean;
+        issuerMetadata?: IssuerMetadata;
       }
     | undefined {
     try {
@@ -860,9 +873,10 @@ export class DatabaseService {
             contract_address: string | null;
             issuer_account: string | null;
             coingecko_id: string | null;
+            issuer_metadata: string | null;
             enabled: number;
           }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled FROM assets WHERE symbol = ?")
+        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled FROM assets WHERE symbol = ?")
         .get(symbol.toUpperCase());
       if (!row) return undefined;
       return {
@@ -872,6 +886,7 @@ export class DatabaseService {
         issuerAccount: row.issuer_account ?? undefined,
         coingeckoId: row.coingecko_id ?? undefined,
         enabled: row.enabled === 1,
+        issuerMetadata: row.issuer_metadata ? safeJsonParse(row.issuer_metadata, undefined, `asset(${row.symbol}).issuerMetadata`) : undefined,
       };
     } catch (err) {
       throw new Error(`Failed to get asset '${symbol}': ${err}`);
@@ -885,6 +900,7 @@ export class DatabaseService {
       contractAddress?: string;
       issuerAccount?: string;
       coingeckoId?: string;
+      issuerMetadata?: IssuerMetadata;
     } = {},
   ): void {
     try {
@@ -892,7 +908,7 @@ export class DatabaseService {
       const now = new Date().toISOString();
       this.db
         .prepare(
-          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
         )
         .run(
           sym,
@@ -900,6 +916,7 @@ export class DatabaseService {
           options.contractAddress ?? null,
           options.issuerAccount ?? null,
           options.coingeckoId ?? null,
+          options.issuerMetadata ? JSON.stringify(options.issuerMetadata) : null,
           now,
           now,
         );
