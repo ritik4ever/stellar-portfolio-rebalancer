@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet release-checklist
+.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet release-checklist snapshot-diff
 
 # Default target
 all: build
@@ -132,6 +132,15 @@ setup-testnet:
 	@echo "  3) Deploy: soroban contract deploy --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm --source deployer --network testnet"
 	@echo "  For more commands, see docs/soroban-cookbook.md"
 
+# Snapshot diff: compare two snapshot directories or files
+# Usage: make snapshot-diff BEFORE=<path> AFTER=<path> [ARGS=--json]
+snapshot-diff:
+	@if [ -z "$(BEFORE)" ] || [ -z "$(AFTER)" ]; then \
+		echo "Usage: make snapshot-diff BEFORE=<before-dir-or-file> AFTER=<after-dir-or-file> [ARGS=--json]"; \
+		exit 1; \
+	fi
+	node ../scripts/snapshot-diff.mjs $(BEFORE) $(AFTER) $(ARGS)
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -145,6 +154,7 @@ help:
 	@echo "  init-contract   - Initialize deployed contract"
 	@echo "  install-tools   - Install required tools"
 	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
+	@echo "  snapshot-diff   - Diff two snapshot dirs/files (BEFORE=<path> AFTER=<path>)"
 	@echo "  release-checklist - Print the release checklist location and contract release steps"
 	@echo "  help            - Show this help message"
 
