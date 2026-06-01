@@ -7,6 +7,7 @@ import {
     StellarDEXService,
     type DEXTradeRequest,
     type DEXTradeExecutionResult,
+    type DEXTradeAssessmentResult,
     type RebalanceExecutionConfig
 } from './dex.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
@@ -41,6 +42,35 @@ export interface RebalanceGasEstimate {
     gasWarning: boolean
     breakdown: Array<{ tradeId: string, estimateXlm: number }>
     xlmPriceUsd: number
+}
+
+export interface RebalanceGuardrailResult {
+    allowed: boolean
+    reason: string
+    details?: Record<string, unknown>
+}
+
+export interface RebalanceDryRunResult {
+    portfolioId: string
+    timestamp: string
+    canExecute: boolean
+    overallStatus: 'ready' | 'partial' | 'blocked'
+    trigger: string
+    estimatedTrades: DEXTradeAssessmentResult[]
+    skippedTrades: DEXTradeAssessmentResult[]
+    skippedAssets: Array<{ asset: string, reason: string }>
+    guardrails: {
+        riskManagement: RebalanceGuardrailResult
+        cooldown: RebalanceGuardrailResult
+        marketConditions: RebalanceGuardrailResult
+        rebalanceRequired: RebalanceGuardrailResult
+    }
+    feeEstimate: {
+        totalFeeXlm: number
+        totalFeeUsd: number
+        xlmPriceUsd: number
+    }
+    estimatedTotalSlippageBps: number
 }
 
 export class StellarService {
@@ -512,15 +542,121 @@ export class StellarService {
         }
     }
 
+    async dryRunRebalance(portfolioId: string, options: ExecuteRebalanceOptions = {}): Promise<RebalanceDryRunResult> {
+        const { portfolioStorage } = await import('./portfolioStorage.js')
+        const { CircuitBreakers } = await import('./circuitBreakers.js')
+        const { ReflectorService } = await import('./reflector.js')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId) as StoredPortfolio | undefined
+        if (!portfolio) {
+            throw new Error('Portfolio not found')
+        }
+
+        const reflector = new ReflectorService()
+        const prices = await reflector.getCurrentPrices()
+
+        const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices)
+        const riskManagementGuardrail: RebalanceGuardrailResult = {
+            allowed: riskCheck.allowed,
+            reason: riskCheck.reason || (riskCheck.allowed ? 'Risk checks passed' : 'Risk checks failed'),
+            details: { alerts: riskCheck.alerts }
+        }
+
+        const cooldownMs = 60 * 60 * 1000
+        const elapsedMs = Date.now() - new Date(portfolio.lastRebalance).getTime()
+        const cooldownAllowed = elapsedMs >= cooldownMs
+        const cooldownGuardrail: RebalanceGuardrailResult = {
+            allowed: cooldownAllowed,
+            reason: cooldownAllowed
+                ? 'Cooldown satisfied'
+                : 'Cooldown period active. Please wait before rebalancing again.',
+            details: {
+                remainingMs: cooldownAllowed ? 0 : Math.max(0, cooldownMs - elapsedMs)
+            }
+        }
+
+        const marketCheck = await CircuitBreakers.checkMarketConditions(prices)
+        const marketGuardrail: RebalanceGuardrailResult = {
+            allowed: marketCheck.safe,
+            reason: marketCheck.safe
+                ? 'Market conditions are safe'
+                : (marketCheck.reason || 'Market conditions are not safe')
+        }
+
+        const needsRebalance = await this.checkRebalanceNeeded(portfolioId)
+        const rebalanceRequiredGuardrail: RebalanceGuardrailResult = {
+            allowed: needsRebalance,
+            reason: needsRebalance ? 'Portfolio drift exceeds rebalance strategy threshold' : 'Rebalance not needed at this time'
+        }
+
+        const portfolioSlippagePct = (portfolio as { slippageTolerancePercent?: number; slippageTolerance?: number }).slippageTolerancePercent
+            ?? (portfolio as { slippageTolerance?: number }).slippageTolerance ?? 1
+        const slippageBps = options.tradeSlippageBps ?? Math.round(portfolioSlippagePct * 100)
+
+        const { trades, trigger, skippedAssets } = this.calculateRebalanceTrades(
+            portfolio,
+            prices,
+            options.tradeSlippageOverrides,
+            slippageBps
+        )
+
+        const dexConfig = this.buildDexConfig({
+            ...options,
+            tradeSlippageBps: options.tradeSlippageBps ?? slippageBps
+        })
+        const dexAssessment = await this.dexService.assessRebalanceTrades(trades, dexConfig)
+        const xlmPriceUsd = prices.XLM?.price ?? 0
+        const totalFeeUsd = Dec.roundStellar(dexAssessment.totalEstimatedFeeXLM * xlmPriceUsd)
+
+        const hardGuardrailsPassed =
+            riskManagementGuardrail.allowed
+            && cooldownGuardrail.allowed
+            && marketGuardrail.allowed
+            && rebalanceRequiredGuardrail.allowed
+
+        const canExecute = hardGuardrailsPassed && dexAssessment.executableTrades.length > 0
+        const overallStatus: RebalanceDryRunResult['overallStatus'] = !hardGuardrailsPassed
+            ? 'blocked'
+            : dexAssessment.status === 'failed'
+                ? 'blocked'
+                : dexAssessment.status === 'partial'
+                    ? 'partial'
+                    : 'ready'
+
+        return {
+            portfolioId,
+            timestamp: new Date().toISOString(),
+            canExecute,
+            overallStatus,
+            trigger,
+            estimatedTrades: dexAssessment.executableTrades,
+            skippedTrades: dexAssessment.skippedTrades,
+            skippedAssets,
+            guardrails: {
+                riskManagement: riskManagementGuardrail,
+                cooldown: cooldownGuardrail,
+                marketConditions: marketGuardrail,
+                rebalanceRequired: rebalanceRequiredGuardrail,
+            },
+            feeEstimate: {
+                totalFeeXlm: dexAssessment.totalEstimatedFeeXLM,
+                totalFeeUsd,
+                xlmPriceUsd,
+            },
+            estimatedTotalSlippageBps: dexAssessment.totalSlippageBps
+        }
+    }
+
     private calculateRebalanceTrades(
         portfolio: StoredPortfolio,
         prices: PricesMap,
         slippageOverrides?: Record<string, number>,
         defaultTradeSlippageBps?: number
-    ): { trades: DEXTradeRequest[], trigger: string } {
+    ): { trades: DEXTradeRequest[], trigger: string, skippedAssets: Array<{ asset: string, reason: string }> } {
         const currentValues: Record<string, number> = {}
         const currentPercents: Record<string, number> = {}
         let totalValue = 0
+        const skippedAssets: Array<{ asset: string, reason: string }> = []
 
         for (const [asset, balance] of Object.entries(portfolio.balances)) {
             const price = prices[asset]?.price || 0
@@ -530,7 +666,11 @@ export class StellarService {
         }
 
         if (totalValue <= 0) {
-            return { trades: [], trigger: 'No Portfolio Value' }
+            return {
+                trades: [],
+                trigger: 'No Portfolio Value',
+                skippedAssets: [{ asset: 'ALL', reason: 'Portfolio has no priced value' }]
+            }
         }
 
         const diffs: Array<{ asset: string, diffValue: number }> = []
@@ -560,7 +700,10 @@ export class StellarService {
 
         for (const over of overs) {
             const fromPrice = prices[over.asset]?.price || 0
-            if (fromPrice <= 0) continue
+            if (fromPrice <= 0) {
+                skippedAssets.push({ asset: over.asset, reason: 'Missing or invalid market price' })
+                continue
+            }
 
             let remainingOverValue = over.diffValue
             for (const under of unders) {
@@ -587,10 +730,17 @@ export class StellarService {
                 remainingOverValue -= transferValue
                 under.needed -= transferValue
             }
+
+            if (remainingOverValue > minTradeUsd) {
+                skippedAssets.push({
+                    asset: over.asset,
+                    reason: 'Insufficient counterpart drift to construct full trade set'
+                })
+            }
         }
 
         const trigger = `Threshold exceeded (${Dec.formatPct(maxDrift, 1)}%)`
-        return { trades, trigger }
+        return { trades, trigger, skippedAssets }
     }
 
     private buildDexConfig(options: ExecuteRebalanceOptions): Partial<RebalanceExecutionConfig> {
