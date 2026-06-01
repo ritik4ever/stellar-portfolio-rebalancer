@@ -38,6 +38,7 @@ This document is the canonical reference for `backend/.env.example`.
 | `AUTO_REBALANCE_CHECK_INTERVAL` | integer (ms) | No | `3600000` | Auto-rebalancer check interval. |
 | `MIN_REBALANCE_INTERVAL` | integer (ms) | No | `86400000` | Minimum time between rebalances per portfolio. |
 | `MAX_AUTO_REBALANCES_PER_DAY` | integer | No | `3` | Daily limit of automatic rebalances per portfolio. |
+| `AUTO_REBALANCER_SHADOW_MODE` | boolean | No | `false` | Records automatic rebalance decisions as simulated pending history events without enqueueing execution jobs. |
 | `RATE_LIMIT_WINDOW_MS` | integer (ms) | No | `60000` | Global request rate-limit window. |
 | `RATE_LIMIT_MAX` | integer | No | `100` | Global max requests per window. |
 | `RATE_LIMIT_WRITE_MAX` | integer | No | `10` | Max write requests per window. |

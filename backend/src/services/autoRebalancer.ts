@@ -9,6 +9,7 @@ import { logger, logAudit } from '../utils/logger.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { isRedisAvailable } from '../queue/connection.js'
 import { getRequestId } from '../utils/requestContext.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 
 export class AutoRebalancerService {
     private stellarService: StellarService
@@ -121,7 +122,9 @@ await queue.add(
         backend: string
         lastStartedAt?: string
         lastInitializationError?: string
+        shadowMode: boolean
     } {
+        const featureFlags = getFeatureFlags()
         return {
             isRunning: this.isRunning,
             initialized: this.initialized,
@@ -131,6 +134,7 @@ await queue.add(
             backend: 'bullmq',
             lastStartedAt: this.lastStartedAt,
             lastInitializationError: this.lastInitializationError,
+            shadowMode: featureFlags.autoRebalancerShadowMode,
         }
     }
 

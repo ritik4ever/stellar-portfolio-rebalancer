@@ -10,7 +10,7 @@ This guide explains how async jobs move through the queue system, how retries wo
 | **Queues**          | portfolio-check, rebalance, analytics-snapshot, idempotency-cleanup  |
 | **Default retries** | 5 attempts with exponential backoff (5s → 10s → 20s → 40s → 80s)     |
 | **Job TTL**         | Successful jobs removed after 100 completions; failed jobs after 200 |
-| **Scheduler**       | Runs when Redis available; registers repeatable cron jobs            |
+| **Scheduler**       | Runs when Redis available; registers repeatable cron jobs and recovers missed intervals after downtime |
 | **Workers**         | Must be explicitly started; not auto-spawned by `npm start`          |
 
 ---
@@ -145,8 +145,9 @@ Time 2:35 — Job marked as permanently failed
 
 ```typescript
 interface PortfolioCheckJobData {
-  triggeredBy?: "scheduler" | "manual" | "startup";
+  triggeredBy?: "scheduler" | "manual" | "startup" | "recovery";
   correlationId?: string;
+  recovery?: MissedScheduledJobRecovery;
 }
 ```
 
@@ -208,8 +209,9 @@ interface RebalanceJobData {
 
 ```typescript
 interface AnalyticsSnapshotJobData {
-  triggeredBy?: "scheduler" | "manual" | "startup";
+  triggeredBy?: "scheduler" | "manual" | "startup" | "recovery";
   correlationId?: string;
+  recovery?: MissedScheduledJobRecovery;
 }
 ```
 
@@ -239,8 +241,9 @@ interface AnalyticsSnapshotJobData {
 
 ```typescript
 interface IdempotencyCleanupJobData {
-  triggeredBy?: "scheduler" | "manual" | "startup";
+  triggeredBy?: "scheduler" | "manual" | "startup" | "recovery";
   correlationId?: string;
+  recovery?: MissedScheduledJobRecovery;
 }
 ```
 
@@ -259,6 +262,20 @@ interface IdempotencyCleanupJobData {
 - If deletion fails: job fails and retries
 
 ---
+
+## Missed Scheduled Job Recovery
+
+On startup, `backend/src/queue/scheduler.ts` reads a Redis checkpoint that records when the scheduler was last seen alive. A lightweight heartbeat refreshes that checkpoint once per minute while the scheduler process is running.
+
+If the elapsed downtime crosses a task interval, the scheduler does not enqueue every missed cron tick. The current scheduled tasks operate on current state, so missed work is compacted into one high-priority recovery job per due task:
+
+| Task | Interval | Recovery behavior |
+| ---- | -------- | ----------------- |
+| `portfolio-check` | 30 minutes | Compact missed checks into one current-state portfolio check |
+| `analytics-snapshot` | 60 minutes | Compact missed snapshots into one current-state snapshot because historical market state cannot be reconstructed |
+| `idempotency-cleanup` | 60 minutes | Compact missed cleanup windows into one cleanup pass |
+
+Recovery jobs use `triggeredBy: "recovery"` and include a `recovery` payload with `action`, `missedRuns`, `lastSchedulerSeenAt`, `recoveredAt`, and `reason`. If no checkpoint exists, or the checkpoint is invalid, recovery is skipped and normal startup jobs are queued with an actionable scheduler log entry.
 
 ## Worker Startup and Shutdown
 

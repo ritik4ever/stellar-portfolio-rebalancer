@@ -94,16 +94,74 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         if (!databaseService.hasFullConsent(portfolio.userAddress)) {
             return fail(res, 403, 'FORBIDDEN', 'Active consent is required before exporting portfolio data')
         }
-        const result = await getPortfolioExport(portfolioId, format)
-        if (!result) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        res.setHeader('Content-Type', result.contentType)
-        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
-        if (Buffer.isBuffer(result.body)) {
-            return res.send(result.body)
+
+        const queue = await import('../queue/queues.js').then(m => m.getPortfolioExportQueue())
+        if (!queue) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Export service is temporarily unavailable (queue missing)')
         }
-        return res.send(result.body)
+
+        const job = await queue.add(`export-${portfolioId}-${Date.now()}`, {
+            portfolioId,
+            format,
+            userId: req.user?.address
+        })
+
+        return ok(res, { jobId: job.id, status: 'processing' }, { status: 202 })
     } catch (error) {
-        logger.error('[ERROR] Portfolio export failed', { error: getErrorObject(error) })
+        logger.error('[ERROR] Portfolio export job creation failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/export/status/:jobId', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const jobId = req.params.jobId
+        
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only check your own export')
+        }
+
+        const queue = await import('../queue/queues.js').then(m => m.getPortfolioExportQueue())
+        if (!queue) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Queue service unavailable')
+        }
+
+        const job = await queue.getJob(jobId)
+        if (!job) {
+            return fail(res, 404, 'NOT_FOUND', 'Export job not found')
+        }
+
+        // Check if job matches the requested portfolio
+        if (job.data.portfolioId !== portfolioId) {
+            return fail(res, 403, 'FORBIDDEN', 'Job does not belong to this portfolio')
+        }
+
+        const state = await job.getState()
+        if (state === 'failed') {
+            return ok(res, { status: 'failed', error: job.failedReason || 'Unknown error during export' })
+        }
+        
+        if (state === 'completed') {
+            const result = job.returnvalue
+            if (!result) {
+                return fail(res, 500, 'INTERNAL_ERROR', 'Job completed but no result found')
+            }
+            res.setHeader('Content-Type', result.contentType)
+            res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+            if (result.bodyBase64) {
+                return res.send(Buffer.from(result.bodyBase64, 'base64'))
+            }
+            return res.send(result.bodyString)
+        }
+
+        return ok(res, { status: 'processing', state })
+    } catch (error) {
+        logger.error('[ERROR] Portfolio export status check failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

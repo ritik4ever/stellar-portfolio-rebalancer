@@ -27,15 +27,11 @@ const runtimeStatus = createWorkerRuntimeStatus("analytics-snapshot", 1);
 export async function processAnalyticsSnapshotJob(
   job: Job<AnalyticsSnapshotJobData>,
 ): Promise<void> {
-  const correlationId = (job.data as AnalyticsSnapshotJobData).correlationId;
-  const requestId = correlationId ?? randomUUID();
-
-  return runWithRequestContext({ requestId }, async () => {
-    logger.info("[WORKER:analytics-snapshot] Capturing portfolio snapshots", {
-      jobId: job.id,
-      triggeredBy: job.data.triggeredBy ?? "scheduler",
-      correlationId,
-    });
+  logger.info("[WORKER:analytics-snapshot] Capturing portfolio snapshots", {
+    jobId: job.id,
+    triggeredBy: job.data.triggeredBy ?? "scheduler",
+    recovery: job.data.recovery,
+  });
 
     await analyticsService.captureAllPortfolios();
 

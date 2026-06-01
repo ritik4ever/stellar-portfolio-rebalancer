@@ -252,7 +252,7 @@ export function buildStartupSummary(
     queueSubsystem: {
       enabled: queueEnabled,
       activeWorkers: queueEnabled
-        ? ["portfolio-check", "rebalance", "analytics-snapshot"]
+        ? ["portfolio-check", "rebalance", "analytics-snapshot", "portfolio-export"]
         : [],
       disabledReason: !queueEnabled
         ? "Redis unreachable — set REDIS_URL to enable BullMQ workers"
@@ -268,6 +268,7 @@ export function buildStartupSummary(
       allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
       allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
+      autoRebalancerShadowMode: config.featureFlags.autoRebalancerShadowMode,
     },
   };
 }
@@ -289,7 +290,7 @@ export function logStartupSubsystems(
       redis: redisAvailable ? "connected" : "unavailable — set REDIS_URL",
       rateLimitStore: `${rateLimitStore} store`,
       queueWorkers: redisAvailable
-        ? "enabled (portfolio-check, rebalance, analytics-snapshot)"
+        ? "enabled (portfolio-check, rebalance, analytics-snapshot, portfolio-export)"
         : "disabled — no Redis",
       queueScheduler: redisAvailable ? "enabled" : "disabled — no Redis",
       autoRebalancer: config.autoRebalancerEnabled
@@ -299,6 +300,7 @@ export function logStartupSubsystems(
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       debugRoutes: config.featureFlags.enableDebugRoutes,
+      autoRebalancerShadowMode: config.featureFlags.autoRebalancerShadowMode,
     },
   });
 

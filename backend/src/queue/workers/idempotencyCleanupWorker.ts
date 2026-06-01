@@ -27,8 +27,11 @@ const runtimeStatus = createWorkerRuntimeStatus("idempotency-cleanup", 1);
 export async function processIdempotencyCleanupJob(
   job: Job<IdempotencyCleanupJobData>,
 ): Promise<void> {
-  const correlationId = (job.data as IdempotencyCleanupJobData).correlationId;
-  const requestId = correlationId ?? randomUUID();
+    logger.info('[WORKER:idempotency-cleanup] Running cleanup cycle', {
+        jobId: job.id,
+        triggeredBy: job.data.triggeredBy ?? 'scheduler',
+        recovery: job.data.recovery,
+    })
 
   return runWithRequestContext({ requestId }, async () => {
     logger.info("[WORKER:idempotency-cleanup] Running cleanup cycle", {
