@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { formatLegalVersionLabel } from '../content/legalMetadata'
 import { useRecordConsentMutation } from '../hooks/mutations/useConsentMutation'
 
 interface ConsentModalProps {
@@ -44,8 +45,14 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                         Accept to continue
                     </h2>
                 </div>
-                <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">
                     To use the Portfolio Rebalancer you must accept the following. You can read each document before accepting.
+                </p>
+                <p
+                    className="text-gray-500 dark:text-gray-500 text-xs mb-6"
+                    data-testid="consent-legal-version"
+                >
+                    {formatLegalVersionLabel()}
                 </p>
                 <div className="space-y-4">
                     <label className="flex items-start gap-3 cursor-pointer">

@@ -81,6 +81,7 @@ export const useUserPortfolios = (address: string | null) => {
         },
         enabled: !!address,
         staleTime: 60000,
+
     })
 }
 
@@ -90,6 +91,7 @@ export const usePortfolioDetails = (id: string | null) => {
         queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_DETAIL(id!)),
         enabled: !!id && id !== 'demo',
         staleTime: 30000,
+
     })
 }
 
@@ -100,5 +102,7 @@ export const useRebalanceEstimate = (id: string | null) => {
         enabled: !!id && id !== 'demo',
         refetchInterval: 30000,
         staleTime: 25000,
+        refetchOnReconnect: false,
+        placeholderData: (previous) => previous,
     })
 }
