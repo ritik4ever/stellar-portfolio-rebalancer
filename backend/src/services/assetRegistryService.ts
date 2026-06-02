@@ -17,8 +17,7 @@ export interface AssetRecord {
     stale: boolean
 }
 
-const STALE_POLICY_MS = Number.parseInt(process.env.ASSET_STALE_POLICY_MS || '86400000', 10) // 24 hours
-const QUARANTINE_POLICY_MS = Number.parseInt(process.env.ASSET_QUARANTINE_POLICY_MS || '604800000', 10) // 7 days
+
 
 export const assetRegistryService = {
     isAssetStale(lastRefreshedAt?: string): boolean {
@@ -64,6 +63,59 @@ export const assetRegistryService = {
             return mapped.filter(a => a.enabled && !a.isQuarantined)
         }
         return mapped
+    },
+
+    /**
+     * Filter, sort, and paginate the asset catalog. Centralises the catalog
+     * browsing logic so routes stay thin and the behaviour is unit-testable.
+     */
+    query(options: AssetQueryOptions = {}): AssetQueryResult {
+        const {
+            enabledOnly = true,
+            search,
+            issuer,
+            sortBy = 'symbol',
+            order = 'asc',
+            page = 1,
+            limit = DEFAULT_PAGE_SIZE
+        } = options
+
+        let assets = databaseService.listAssets(enabledOnly)
+
+        const term = search?.trim().toUpperCase()
+        if (term) {
+            assets = assets.filter(asset =>
+                asset.symbol.includes(term) || asset.name.toUpperCase().includes(term)
+            )
+        }
+
+        const issuerTerm = issuer?.trim().toUpperCase()
+        if (issuerTerm) {
+            assets = assets.filter(asset =>
+                (asset.issuerAccount ?? '').toUpperCase().includes(issuerTerm)
+            )
+        }
+
+        const direction = order === 'desc' ? -1 : 1
+        const sorted = [...assets].sort((a, b) => {
+            let cmp: number
+            if (sortBy === 'name') cmp = a.name.localeCompare(b.name)
+            else if (sortBy === 'enabled') cmp = Number(a.enabled) - Number(b.enabled)
+            else cmp = a.symbol.localeCompare(b.symbol)
+            return cmp * direction
+        })
+
+        const total = sorted.length
+        const safePage = Math.max(1, Math.trunc(page) || 1)
+        const safeLimit = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(limit) || DEFAULT_PAGE_SIZE))
+        const start = (safePage - 1) * safeLimit
+
+        return {
+            assets: sorted.slice(start, start + safeLimit),
+            page: safePage,
+            limit: safeLimit,
+            total
+        }
     },
 
     getBySymbol(symbol: string): AssetRecord | undefined {

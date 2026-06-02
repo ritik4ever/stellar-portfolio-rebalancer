@@ -5,6 +5,7 @@ import {
     runWalletConnectBoot,
     resolveConsentAcceptedNavigation,
     runWalletReconnectBoot,
+    runBootDiagnostics,
     type WalletConnectBootState,
 } from './walletBoot'
 
@@ -27,6 +28,7 @@ describe('runWalletReconnectBoot', () => {
             reconnect: async () => 'GTESTKEY',
             checkConsent: async () => true,
             authLogin,
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'dashboard', publicKey: 'GTESTKEY' })
         expect(authLogin).toHaveBeenCalledWith('GTESTKEY')
@@ -37,6 +39,7 @@ describe('runWalletReconnectBoot', () => {
             reconnect: async () => 'GTESTKEY',
             checkConsent: async () => false,
             authLogin: vi.fn(),
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'needs_consent', publicKey: 'GTESTKEY' })
     })
@@ -48,6 +51,7 @@ describe('runWalletReconnectBoot', () => {
             authLogin: async () => {
                 throw new Error('UNAUTHORIZED')
             },
+            getAutoReconnect: () => true,
         })
         expect(result.outcome).toBe('auth_failed')
         if (result.outcome === 'auth_failed') {
@@ -62,6 +66,7 @@ describe('runWalletReconnectBoot', () => {
             authLogin: async () => {
                 throw new Error('503 Service Unavailable')
             },
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'dashboard', publicKey: 'GTESTKEY' })
     })
@@ -71,6 +76,7 @@ describe('runWalletReconnectBoot', () => {
             reconnect: async () => null,
             checkConsent: vi.fn(),
             authLogin: vi.fn(),
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'no_wallet' })
     })
@@ -82,11 +88,22 @@ describe('runWalletReconnectBoot', () => {
             },
             checkConsent: vi.fn(),
             authLogin: vi.fn(),
+            getAutoReconnect: () => true,
         })
         expect(result.outcome).toBe('reconnect_failed')
         if (result.outcome === 'reconnect_failed') {
             expect(result.message).toMatch(/declined/i)
         }
+    })
+
+    it('skips reconnect when auto-reconnect is opted out', async () => {
+        const result = await runWalletReconnectBoot({
+            reconnect: async () => 'GTESTKEY',
+            checkConsent: vi.fn(),
+            authLogin: vi.fn(),
+            getAutoReconnect: () => false,
+        })
+        expect(result).toEqual({ outcome: 'no_wallet' })
     })
 })
 
@@ -168,5 +185,73 @@ describe('resolveConsentAcceptedNavigation', () => {
 
     it('returns null when there is no pending user', () => {
         expect(resolveConsentAcceptedNavigation(null)).toBeNull()
+    })
+})
+
+describe('runBootDiagnostics', () => {
+    it('passes when wallet is available and API is reachable', async () => {
+        const result = await runBootDiagnostics({
+            checkWallets: () => true,
+            checkApi: async () => true,
+        })
+        expect(result.allPassed).toBe(true)
+        expect(result.checks).toHaveLength(2)
+        expect(result.checks[0]).toMatchObject({ id: 'wallet-detection', status: 'passed' })
+        expect(result.checks[1]).toMatchObject({ id: 'api-reachability', status: 'passed' })
+    })
+
+    it('fails wallet detection when no wallets found', async () => {
+        const result = await runBootDiagnostics({
+            checkWallets: () => false,
+            checkApi: async () => true,
+        })
+        expect(result.allPassed).toBe(false)
+        expect(result.checks[0]).toMatchObject({ id: 'wallet-detection', status: 'failed' })
+        expect(result.checks[1]).toMatchObject({ id: 'api-reachability', status: 'passed' })
+    })
+
+    it('fails API reachability when API is unreachable', async () => {
+        const result = await runBootDiagnostics({
+            checkWallets: () => true,
+            checkApi: async () => false,
+        })
+        expect(result.allPassed).toBe(false)
+        expect(result.checks[0]).toMatchObject({ id: 'wallet-detection', status: 'passed' })
+        expect(result.checks[1]).toMatchObject({ id: 'api-reachability', status: 'failed' })
+    })
+
+    it('handles exceptions from checkWallets gracefully', async () => {
+        const result = await runBootDiagnostics({
+            checkWallets: () => { throw new Error('detection error') },
+            checkApi: async () => true,
+        })
+        expect(result.allPassed).toBe(false)
+        expect(result.checks[0]).toMatchObject({ id: 'wallet-detection', status: 'failed' })
+    })
+
+    it('handles exceptions from checkApi gracefully', async () => {
+        const result = await runBootDiagnostics({
+            checkWallets: () => true,
+            checkApi: async () => { throw new Error('network error') },
+        })
+        expect(result.allPassed).toBe(false)
+        expect(result.checks[1]).toMatchObject({ id: 'api-reachability', status: 'failed' })
+    })
+
+    it('sets timestamp on completion', async () => {
+        const before = Date.now()
+        const result = await runBootDiagnostics({
+            checkWallets: () => true,
+            checkApi: async () => true,
+        })
+        expect(result.timestamp).toBeGreaterThanOrEqual(before)
+    })
+
+    it('supports async checkWallets', async () => {
+        const result = await runBootDiagnostics({
+            checkWallets: async () => true,
+            checkApi: async () => true,
+        })
+        expect(result.allPassed).toBe(true)
     })
 })

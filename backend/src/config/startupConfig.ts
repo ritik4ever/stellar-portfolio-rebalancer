@@ -12,6 +12,10 @@ export interface StartupConfig {
   hasRebalanceSigner: boolean;
   jwtAuthEnabled: boolean;
   featureFlags: FeatureFlags;
+  metricsAllowlist: string[];
+  readinessCacheTtlMs: number;
+  consentAuditRetentionDays: number;
+  featureFlagsFile?: string;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -167,6 +171,27 @@ export function validateStartupConfigOrThrow(
     .map((v) => v.trim())
     .filter(Boolean);
 
+  const metricsAllowlist = (env.METRICS_ALLOWLIST || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  const readinessCacheTtlMsRaw = (env.READINESS_CACHE_TTL_MS || "2000").trim();
+  const readinessCacheTtlMs = Number.parseInt(readinessCacheTtlMsRaw, 10);
+  if (!Number.isInteger(readinessCacheTtlMs) || readinessCacheTtlMs < 0) {
+    errors.push(
+      `READINESS_CACHE_TTL_MS '${env.READINESS_CACHE_TTL_MS}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
+  const consentAuditRetentionDaysRaw = (env.CONSENT_AUDIT_RETENTION_DAYS || "365").trim();
+  const consentAuditRetentionDays = Number.parseInt(consentAuditRetentionDaysRaw, 10);
+  if (!Number.isInteger(consentAuditRetentionDays) || consentAuditRetentionDays < 1) {
+    errors.push(
+      `CONSENT_AUDIT_RETENTION_DAYS '${env.CONSENT_AUDIT_RETENTION_DAYS}' is invalid. Provide a positive integer.`,
+    );
+  }
+
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
@@ -190,6 +215,8 @@ export function validateStartupConfigOrThrow(
     logger.warn("[STARTUP-CONFIG] Warnings", { warnings });
   }
 
+  const featureFlagsFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : undefined;
+
   return {
     nodeEnv: nodeEnv || "development",
     port: Number.isInteger(port) ? port : 3001,
@@ -198,9 +225,13 @@ export function validateStartupConfigOrThrow(
     stellarContractAddress: contractAddress,
     autoRebalancerEnabled,
     corsOrigins,
+    metricsAllowlist,
+    readinessCacheTtlMs: Number.isInteger(readinessCacheTtlMs) ? readinessCacheTtlMs : 2000,
+    consentAuditRetentionDays: Number.isInteger(consentAuditRetentionDays) ? consentAuditRetentionDays : 365,
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
+    featureFlagsFile,
   };
 }
 
@@ -232,6 +263,8 @@ export function buildStartupSummary(
         : undefined,
     },
     jwtAuthEnabled: config.jwtAuthEnabled,
+    readinessCacheTtlMs: config.readinessCacheTtlMs,
+    consentAuditRetentionDays: config.consentAuditRetentionDays,
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       allowFallbackPrices: config.featureFlags.allowFallbackPrices,
@@ -239,6 +272,7 @@ export function buildStartupSummary(
       allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
       allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
+      overrideFile: config.featureFlagsFile || null,
     },
   };
 }
@@ -270,6 +304,7 @@ export function logStartupSubsystems(
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       debugRoutes: config.featureFlags.enableDebugRoutes,
+      overrideFile: config.featureFlagsFile || "none",
     },
   });
 

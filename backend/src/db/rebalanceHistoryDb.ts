@@ -15,6 +15,7 @@ export interface RebalanceEventRow {
 }
 
 function rowToEvent(r: RebalanceEventRow) {
+    const details = r.details as Record<string, unknown> | undefined
     return {
         id: r.id,
         portfolioId: r.portfolio_id,
@@ -26,7 +27,10 @@ function rowToEvent(r: RebalanceEventRow) {
         isAutomatic: r.is_automatic,
         riskAlerts: (r.risk_alerts as any[]) ?? [],
         error: r.error ?? undefined,
-        details: r.details ?? undefined
+        actor: details?.actor as 'user' | 'system' | 'admin' | 'scheduler' | undefined,
+        source: details?.source as 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance' | undefined,
+        triggerMetadata: details?.triggerMetadata as Record<string, unknown> | undefined,
+        details: details ?? undefined
     }
 }
 

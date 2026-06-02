@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, copyFileSync, existsSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
@@ -45,6 +45,21 @@ interface PortfolioRow {
   version: number;
   strategy?: string;
   strategy_config?: string;
+}
+
+interface PortfolioDraftRow {
+  id: string;
+  user_address: string;
+  label: string | null;
+  allocations: string;
+  threshold: number;
+  slippage_tolerance_percent: number;
+  strategy: string;
+  strategy_config: string;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  published_portfolio_id: string | null;
 }
 
 interface RebalanceHistoryRow {
@@ -181,6 +196,27 @@ CREATE TABLE IF NOT EXISTS consent_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
     ON consent_audit_events (user_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS portfolio_drafts (
+    id            TEXT PRIMARY KEY,
+    user_address  TEXT NOT NULL,
+    label         TEXT,
+    allocations   TEXT NOT NULL,
+    threshold     REAL NOT NULL DEFAULT 5,
+    slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
+    strategy      TEXT NOT NULL DEFAULT 'threshold',
+    strategy_config TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    published_portfolio_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_user
+    ON portfolio_drafts (user_address, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_expires
+    ON portfolio_drafts (expires_at);
 `;
 
 // ─────────────────────────────────────────────
@@ -363,6 +399,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
 }
 
 function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
+  const details = safeJsonParse(row.details, undefined, `event(${row.id}).details`);
   return {
     id: row.id,
     portfolioId: row.portfolio_id,
@@ -378,7 +415,10 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
       `event(${row.id}).risk_alerts`,
     ),
     error: row.error ?? undefined,
-    details: safeJsonParse(row.details, undefined, `event(${row.id}).details`),
+    actor: details?.actor,
+    source: details?.source,
+    triggerMetadata: details?.triggerMetadata,
+    details,
   };
 }
 
@@ -472,17 +512,7 @@ export class DatabaseService {
           ON consent_audit_events (user_id, timestamp);
     `);
 
-    const assetCols = this.db
-      .prepare("PRAGMA table_info(assets)")
-      .all() as Array<{ name: string }>;
-    if (!assetCols.some((c) => c.name === "last_refreshed_at")) {
-      this.db.exec("ALTER TABLE assets ADD COLUMN last_refreshed_at TEXT");
-      this.db.exec("UPDATE assets SET last_refreshed_at = datetime('now')");
-      logger.info("[DB] Migration: added last_refreshed_at column to assets");
-    }
-    if (!assetCols.some((c) => c.name === "is_quarantined")) {
-      this.db.exec("ALTER TABLE assets ADD COLUMN is_quarantined INTEGER NOT NULL DEFAULT 0");
-      logger.info("[DB] Migration: added is_quarantined column to assets");
+
     }
   }
 
@@ -1104,6 +1134,22 @@ export class DatabaseService {
       );
   }
 
+  /**
+   * Purge consent audit events older than the specified number of days.
+   * Returns the number of deleted rows.
+   */
+  purgeOldConsentAuditEvents(retentionDays: number): number {
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const result = this.db
+      .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")
+      .run(cutoff);
+    const count = result.changes;
+    if (count > 0) {
+      logger.info(`[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`);
+    }
+    return count;
+  }
+
   deleteUserData(userId: string): void {
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
     this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
@@ -1148,6 +1194,9 @@ export class DatabaseService {
     details?: any;
     timestamp?: string;
     eventSource?: "offchain" | "simulated" | "onchain";
+    actor?: "user" | "system" | "admin" | "scheduler";
+    source?: "dashboard" | "api" | "contract" | "scheduler" | "auto_rebalance";
+    triggerMetadata?: Record<string, unknown>;
     onChainConfirmed?: boolean;
     onChainEventType?: string;
     onChainTxHash?: string;
@@ -1157,6 +1206,13 @@ export class DatabaseService {
     isSimulated?: boolean;
   }): RebalanceEvent {
     try {
+      const mergedDetails = {
+        ...(eventData.details ?? {}),
+        ...(eventData.actor !== undefined && { actor: eventData.actor }),
+        ...(eventData.source !== undefined && { source: eventData.source }),
+        ...(eventData.triggerMetadata !== undefined && { triggerMetadata: eventData.triggerMetadata }),
+      };
+
       const event: RebalanceEvent = {
         id: generateId(),
         portfolioId: eventData.portfolioId,
@@ -1168,7 +1224,10 @@ export class DatabaseService {
         isAutomatic: eventData.isAutomatic ?? false,
         riskAlerts: eventData.riskAlerts ?? [],
         error: eventData.error,
-        details: eventData.details,
+        actor: eventData.actor,
+        source: eventData.source,
+        triggerMetadata: eventData.triggerMetadata,
+        details: mergedDetails,
         eventSource: eventData.eventSource,
         onChainConfirmed: eventData.onChainConfirmed,
         onChainEventType: eventData.onChainEventType,
@@ -1518,8 +1577,274 @@ export class DatabaseService {
     }
   }
 
+  // ──────────────────────────────────────────
+  // Portfolio draft methods
+  // ──────────────────────────────────────────
+
+  createDraft(data: {
+    userAddress: string;
+    label?: string;
+    allocations: Record<string, number>;
+    threshold: number;
+    slippageTolerancePercent?: number;
+    strategy?: string;
+    strategyConfig?: Record<string, unknown>;
+    expiresInDays?: number;
+  }): string {
+    const id = generateId();
+    const now = new Date().toISOString();
+    const expiresAt = new Date(
+      Date.now() + (data.expiresInDays ?? 7) * 24 * 60 * 60 * 1000
+    ).toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO portfolio_drafts (id, user_address, label, allocations, threshold, slippage_tolerance_percent, strategy, strategy_config, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        data.userAddress,
+        data.label ?? null,
+        JSON.stringify(data.allocations),
+        data.threshold,
+        data.slippageTolerancePercent ?? 1,
+        data.strategy ?? 'threshold',
+        JSON.stringify(data.strategyConfig ?? {}),
+        now,
+        now,
+        expiresAt,
+      );
+    return id;
+  }
+
+  getDraft(id: string): Record<string, unknown> | undefined {
+    const row = this.db
+      .prepare<[string], PortfolioDraftRow>(
+        "SELECT * FROM portfolio_drafts WHERE id = ?"
+      )
+      .get(id);
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      userAddress: row.user_address,
+      label: row.label,
+      allocations: safeJsonParse(row.allocations, {}, `draft(${row.id}).allocations`),
+      threshold: row.threshold,
+      slippageTolerancePercent: row.slippage_tolerance_percent,
+      strategy: row.strategy,
+      strategyConfig: safeJsonParse(row.strategy_config, {}, `draft(${row.id}).strategy_config`),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      expiresAt: row.expires_at,
+      publishedPortfolioId: row.published_portfolio_id,
+    };
+  }
+
+  updateDraft(id: string, updates: {
+    label?: string;
+    allocations?: Record<string, number>;
+    threshold?: number;
+    slippageTolerancePercent?: number;
+    strategy?: string;
+    strategyConfig?: Record<string, unknown>;
+  }): boolean {
+    const existing = this.db
+      .prepare<[string], PortfolioDraftRow>("SELECT * FROM portfolio_drafts WHERE id = ?")
+      .get(id);
+    if (!existing) return false;
+    const now = new Date().toISOString();
+    const allocations = updates.allocations
+      ? JSON.stringify(updates.allocations)
+      : existing.allocations;
+    const strategyConfig = updates.strategyConfig
+      ? JSON.stringify(updates.strategyConfig)
+      : existing.strategy_config;
+    this.db
+      .prepare(
+        `UPDATE portfolio_drafts SET
+           label = ?, allocations = ?, threshold = ?, slippage_tolerance_percent = ?,
+           strategy = ?, strategy_config = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        updates.label ?? existing.label,
+        allocations,
+        updates.threshold ?? existing.threshold,
+        updates.slippageTolerancePercent ?? existing.slippage_tolerance_percent,
+        updates.strategy ?? existing.strategy,
+        strategyConfig,
+        now,
+        id,
+      );
+    return true;
+  }
+
+  publishDraft(draftId: string): string | undefined {
+    const draft = this.getDraft(draftId);
+    if (!draft) return undefined;
+    const portfolioId = this.createPortfolio(
+      draft.userAddress as string,
+      draft.allocations as Record<string, number>,
+      draft.threshold as number,
+      draft.slippageTolerancePercent as number,
+      draft.strategy as string,
+      draft.strategyConfig as Record<string, unknown>,
+    );
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE portfolio_drafts SET published_portfolio_id = ?, updated_at = ? WHERE id = ?")
+      .run(portfolioId, now, draftId);
+    return portfolioId;
+  }
+
+  listDrafts(userAddress: string): Array<Record<string, unknown>> {
+    const rows = this.db
+      .prepare<[string], PortfolioDraftRow>(
+        "SELECT * FROM portfolio_drafts WHERE user_address = ? AND expires_at > datetime('now') ORDER BY updated_at DESC"
+      )
+      .all(userAddress);
+    return rows.map((row) => ({
+      id: row.id,
+      userAddress: row.user_address,
+      label: row.label,
+      allocations: safeJsonParse(row.allocations, {}, `draft(${row.id}).allocations`),
+      threshold: row.threshold,
+      slippageTolerancePercent: row.slippage_tolerance_percent,
+      strategy: row.strategy,
+      strategyConfig: safeJsonParse(row.strategy_config, {}, `draft(${row.id}).strategy_config`),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      expiresAt: row.expires_at,
+      publishedPortfolioId: row.published_portfolio_id,
+    }));
+  }
+
+  deleteDraft(id: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM portfolio_drafts WHERE id = ?")
+      .run(id);
+    return result.changes > 0;
+  }
+
+  cleanupExpiredDrafts(): number {
+    const result = this.db
+      .prepare("DELETE FROM portfolio_drafts WHERE expires_at <= datetime('now')")
+      .run();
+    return result.changes;
+  backup(backupPath?: string): string {
+    try {
+      const dbPath = process.env.DB_PATH || "./data/portfolio.db";
+      const defaultBackupDir = join(dirname(dbPath), "backups");
+      mkdirSync(defaultBackupDir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const defaultBackupPath = join(defaultBackupDir, `portfolio-backup-${timestamp}.db`);
+      const finalBackupPath = backupPath || defaultBackupPath;
+
+      this.db.backup(finalBackupPath);
+      logger.info(`[DB] Backup created successfully at ${finalBackupPath}`);
+      return finalBackupPath;
+    } catch (err) {
+      throw new Error(`Failed to create backup: ${err}`);
+    }
+  }
+
+  restore(backupPath: string): void {
+    try {
+      if (!existsSync(backupPath)) {
+        throw new Error(`Backup file not found: ${backupPath}`);
+      }
+
+      const dbPath = process.env.DB_PATH || "./data/portfolio.db";
+      
+      // First close current connection
+      this.db.close();
+
+      try {
+        // Copy backup to current DB path
+        copyFileSync(backupPath, dbPath);
+        logger.info(`[DB] Restored from backup: ${backupPath}`);
+
+        // Reopen the database connection
+        this.db = new Database(dbPath);
+        this.db.exec(SCHEMA_SQL);
+        this._migrateSchema();
+        this._seedDefaultAssets();
+      } catch (copyErr) {
+        // If copy failed, try to reopen original DB if possible
+        try {
+          this.db = new Database(dbPath);
+          this.db.exec(SCHEMA_SQL);
+          this._migrateSchema();
+          this._seedDefaultAssets();
+        } catch (reopenErr) {
+          // Ignore
+        }
+        throw copyErr;
+      }
+    } catch (err) {
+      throw new Error(`Failed to restore backup: ${err}`);
+    }
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  // ──────────────────────────────────────────
+  // Replay checkpoint methods
+  // ──────────────────────────────────────────
+
+  getReplayCheckpoint(replayId: string): Record<string, unknown> | undefined {
+    const raw = this.getIndexerState(`replay_checkpoint.${replayId}`);
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+
+  setReplayCheckpoint(replayId: string, data: Record<string, unknown>): void {
+    this.setIndexerState(`replay_checkpoint.${replayId}`, JSON.stringify(data));
+  }
+
+  getReplayIntegrityHash(): string | undefined {
+    return this.getIndexerState('replay_integrity_hash');
+  }
+
+  setReplayIntegrityHash(hash: string): void {
+    this.setIndexerState('replay_integrity_hash', hash);
+  }
+
+  getLastReplayedLedger(): number | undefined {
+    const val = this.getIndexerState('replay_last_ledger');
+    return val ? parseInt(val, 10) : undefined;
+  }
+
+  setLastReplayedLedger(ledger: number): void {
+    this.setIndexerState('replay_last_ledger', String(ledger));
+  }
+
+  getReplayEventCount(): number {
+    const val = this.getIndexerState('replay_event_count');
+    return val ? parseInt(val, 10) : 0;
+  }
+
+  setReplayEventCount(count: number): void {
+    this.setIndexerState('replay_event_count', String(count));
+  }
+
+  getReplayStatus(): {
+    lastReplayedLedger: number | undefined;
+    eventCount: number;
+    integrityHash: string | undefined;
+  } {
+    return {
+      lastReplayedLedger: this.getLastReplayedLedger(),
+      eventCount: this.getReplayEventCount(),
+      integrityHash: this.getReplayIntegrityHash(),
+    };
   }
 
   // ──────────────────────────────────────────

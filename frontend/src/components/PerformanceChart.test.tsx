@@ -7,11 +7,21 @@ import PerformanceChart from "./PerformanceChart";
 const queryMocks = vi.hoisted(() => ({
   usePortfolioAnalytics: vi.fn(),
   usePerformanceSummary: vi.fn(),
+  useRebalanceHistory: vi.fn(),
+}));
+
+// Mock export utilities
+const exportMocks = vi.hoisted(() => ({
+  downloadCSV: vi.fn(),
+  toCSV: vi.fn((rows, headers) => 'mocked-csv-content'),
 }));
 
 vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePortfolioAnalytics: queryMocks.usePortfolioAnalytics,
   usePerformanceSummary: queryMocks.usePerformanceSummary,
+}));
+
+
 }));
 
 // Mock ThemeContext
@@ -38,6 +48,7 @@ vi.mock("recharts", () => ({
   CartesianGrid: () => <div data-testid="cartesian-grid" />,
   Tooltip: () => <div data-testid="tooltip" />,
   Legend: () => <div data-testid="legend" />,
+  ReferenceDot: () => <div data-testid="reference-dot" />,
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="responsive-container">{children}</div>
   ),
@@ -49,6 +60,7 @@ vi.mock("lucide-react", () => ({
   TrendingDown: () => <div data-testid="trending-down" />,
   BarChart3: () => <div data-testid="bar-chart3" />,
   AlertCircle: () => <div data-testid="alert-circle" />,
+  Download: () => <div data-testid="download" />,
 }));
 
 describe("PerformanceChart", () => {
@@ -65,6 +77,16 @@ describe("PerformanceChart", () => {
 
     queryMocks.usePerformanceSummary.mockReturnValue({
       data: null,
+      isLoading: false,
+      error: null,
+
+    // Reset export mocks
+    exportMocks.downloadCSV.mockReset();
+    exportMocks.toCSV.mockReturnValue('mocked-csv-content');
+    });
+
+    queryMocks.useRebalanceHistory.mockReturnValue({
+      data: { history: [] },
       isLoading: false,
       error: null,
     });
@@ -166,7 +188,7 @@ describe("PerformanceChart", () => {
       expect(chart.getAttribute("data-chart-length")).toBe("3");
     });
 
-    it("should demonstrate the current bug with null/undefined values", () => {
+    it("should coerce null snapshot values to zero without crashing", () => {
       const snapshotsWithNulls = [
         { timestamp: "2024-01-01T00:00:00Z", totalValue: null },
         { timestamp: "2024-01-02T00:00:00Z", totalValue: 1000.0 },
@@ -178,10 +200,9 @@ describe("PerformanceChart", () => {
         error: null,
       });
 
-      // This should fail due to the bug in formatChartData function
-      expect(() => {
-        render(<PerformanceChart portfolioId="test-portfolio" />);
-      }).toThrow("Cannot read properties of null");
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+      const chart = screen.getByTestId("line-chart");
+      expect(chart.getAttribute("data-chart-length")).toBe("2");
     });
   });
 
@@ -310,6 +331,65 @@ describe("PerformanceChart", () => {
       expect(
         screen.getByTestId("line-chart").getAttribute("data-chart-length"),
       ).toBe("4");
+    });
+
+    it("should request extended analytics data when compare mode is enabled", () => {
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: {
+          data: [
+            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
+            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1020 },
+            { timestamp: "2024-01-03T00:00:00Z", totalValue: 1040 },
+            { timestamp: "2024-01-04T00:00:00Z", totalValue: 1060 },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const toggle = screen.getByRole('button', {
+        name: /compare previous period/i,
+      });
+      fireEvent.click(toggle);
+
+      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
+        "test-portfolio",
+        60,
+      );
+    });
+
+    it("should render rebalance markers from history events", () => {
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: {
+          data: [
+            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
+            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1100 },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      queryMocks.useRebalanceHistory.mockReturnValue({
+        data: {
+          history: [
+            {
+              id: 'event-1',
+              timestamp: '2024-01-02T00:00:00Z',
+              status: 'completed',
+              trigger: 'Rebalance executed',
+            },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      expect(screen.getAllByTestId('reference-dot').length).toBeGreaterThan(0);
     });
   });
 
@@ -500,6 +580,152 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
+
+  describe("CSV Export", () => {
+    it("should render export button", () => {
+      const knownSnapshots = [
+        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
+        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.5 },
+      ];
+
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: { data: knownSnapshots },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const exportButton = screen.getByText("Export CSV");
+      expect(exportButton).toBeTruthy();
+    });
+
+    it("should export chart data as CSV when button is clicked", () => {
+      const knownSnapshots = [
+        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
+        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.5 },
+      ];
+
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: { data: knownSnapshots },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const exportButton = screen.getByText("Export CSV");
+      fireEvent.click(exportButton);
+
+      // Verify toCSV was called with correct data structure
+      expect(exportMocks.toCSV).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            timestamp: "2024-01-01T00:00:00Z",
+            portfolioValue: 1000,
+          }),
+          expect.objectContaining({
+            timestamp: "2024-01-02T00:00:00Z",
+            portfolioValue: 1050.5,
+          }),
+        ]),
+        ["timestamp", "date", "portfolioValue"]
+      );
+
+      // Verify downloadCSV was called with filename and CSV content
+      expect(exportMocks.downloadCSV).toHaveBeenCalledWith(
+        expect.stringMatching(/^portfolio_performance_test-portfolio_30days_/),
+        "mocked-csv-content"
+      );
+    });
+
+    it("should disable export button when no data is available", () => {
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: { data: [] },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const exportButton = screen.getByText("Export CSV");
+      expect(exportButton).toHaveProperty("disabled", true);
+    });
+
+    it("should export data with correct time period in filename", () => {
+      const knownSnapshots = [
+        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
+      ];
+
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: { data: knownSnapshots },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      // Change time period to 7 days
+      const select = screen.getByDisplayValue("30 days");
+      fireEvent.change(select, { target: { value: "7" } });
+
+      const exportButton = screen.getByText("Export CSV");
+      fireEvent.click(exportButton);
+
+      // Verify filename includes 7days
+      expect(exportMocks.downloadCSV).toHaveBeenCalledWith(
+        expect.stringMatching(/7days/),
+        expect.any(String)
+      );
+    });
+
+    it("should include all required columns in CSV export", () => {
+      const knownSnapshots = [
+        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.0 },
+      ];
+
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: { data: knownSnapshots },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const exportButton = screen.getByText("Export CSV");
+      fireEvent.click(exportButton);
+
+      // Verify the headers passed to toCSV
+      expect(exportMocks.toCSV).toHaveBeenCalledWith(
+        expect.any(Array),
+        ["timestamp", "date", "portfolioValue"]
+      );
+    });
+
+    it("should format values correctly for CSV export", () => {
+      const knownSnapshots = [
+        { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000.123 },
+        { timestamp: "2024-01-02T00:00:00Z", totalValue: 1050.567 },
+      ];
+
+      queryMocks.usePortfolioAnalytics.mockReturnValue({
+        data: { data: knownSnapshots },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+
+      const exportButton = screen.getByText("Export CSV");
+      fireEvent.click(exportButton);
+
+      const csvRows = exportMocks.toCSV.mock.calls[0][0];
+      
+      // Values should be rounded to 2 decimal places
+      expect(csvRows[0].portfolioValue).toBe(1000.12);
+      expect(csvRows[1].portfolioValue).toBe(1050.57);
+    });
+  });
       const chart = screen.getByTestId("line-chart");
       expect(chart).toBeTruthy();
       expect(chart.getAttribute("data-chart-length")).toBe("3");

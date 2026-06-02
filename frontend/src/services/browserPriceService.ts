@@ -31,6 +31,16 @@ export interface BrowserPricesPayload {
     feedMeta: BrowserPriceFeedMeta
 }
 
+export interface BrowserPriceCacheEntry {
+    key: string
+    assetCount: number
+    ageMs: number
+    ttlRemainingMs: number
+    resolutionHint: BrowserPriceFeedMeta['resolutionHint']
+    sources: string[]
+    cachedAtMs: number
+}
+
 class BrowserPriceService {
     private cache: Map<string, { data: BrowserPricesMap; timestamp: number }> = new Map()
     private readonly CACHE_DURATION = 60000
@@ -305,6 +315,36 @@ class BrowserPriceService {
                 dataTier: 'synthetic_fallback'
             }
         }
+    }
+
+    getCacheInspectorEntries(): BrowserPriceCacheEntry[] {
+        const now = Date.now()
+        return Array.from(this.cache.entries()).map(([key, bucket]) => {
+            const ageMs = now - bucket.timestamp
+            const sources = [
+                ...new Set(
+                    Object.values(bucket.data)
+                        .map((row) => row.source)
+                        .filter(Boolean),
+                ),
+            ]
+            const resolutionHint: BrowserPriceFeedMeta['resolutionHint'] =
+                ageMs >= this.CACHE_DURATION
+                    ? 'error_recovery_cache'
+                    : sources.includes('fallback_browser')
+                      ? 'synthetic_fallback'
+                      : 'cached_only'
+
+            return {
+                key,
+                assetCount: Object.keys(bucket.data).length,
+                ageMs,
+                ttlRemainingMs: Math.max(0, this.CACHE_DURATION - ageMs),
+                resolutionHint,
+                sources,
+                cachedAtMs: bucket.timestamp,
+            }
+        })
     }
 
     clearCache(): void {
