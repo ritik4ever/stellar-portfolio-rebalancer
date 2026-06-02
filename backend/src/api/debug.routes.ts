@@ -5,6 +5,7 @@ import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { validateRequest } from '../middleware/validate.js'
 import { debugTestNotificationSchema } from './validation.js'
 import { notificationService } from '../services/notificationService.js'
+import { buildTestNotificationPayload } from '../services/notificationTemplates.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
@@ -32,39 +33,7 @@ debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdm
             return fail(res, 404, 'NOT_FOUND', 'No notification preferences found for this user')
         }
 
-        const payloadBase = {
-            userId,
-            eventType: normalizedEventType,
-            timestamp: new Date().toISOString()
-        }
-
-        const payloadByType = {
-            rebalance: {
-                title: 'Test: Portfolio Rebalanced',
-                message: 'Test rebalance notification - 3 trades executed.',
-                data: { portfolioId: 'test-portfolio-123', trades: 3, gasUsed: '0.0234 XLM' }
-            },
-            circuitBreaker: {
-                title: 'Test: Circuit Breaker Triggered',
-                message: 'Test circuit breaker notification - BTC moved 22.5%.',
-                data: { asset: 'BTC', priceChange: '22.5', cooldownMinutes: 5 }
-            },
-            priceMovement: {
-                title: 'Test: Large Price Movement',
-                message: 'Test price movement notification - ETH up 12.34%.',
-                data: { asset: 'ETH', priceChange: '12.34', direction: 'increased' }
-            },
-            riskChange: {
-                title: 'Test: Risk Level Changed',
-                message: 'Test risk change notification - Risk increased to high.',
-                data: { portfolioId: 'test-portfolio-123', oldLevel: 'medium', newLevel: 'high' }
-            }
-        } as const
-
-        await notificationService.notify({
-            ...payloadBase,
-            ...payloadByType[normalizedEventType]
-        })
+        await notificationService.notify(buildTestNotificationPayload(userId, normalizedEventType))
 
         logger.info('Debug test notification sent', { userId, eventType: normalizedEventType })
         return ok(res, {

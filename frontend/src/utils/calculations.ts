@@ -4,6 +4,9 @@ interface Trade {
     amount: number
 }
 
+
+}
+
 export const calculateRebalanceTrades = (portfolio: any): Trade[] => {
     const trades: Trade[] = []
 

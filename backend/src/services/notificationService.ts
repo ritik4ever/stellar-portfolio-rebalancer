@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import {
   dbSaveNotificationPreferences,
@@ -5,6 +6,8 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbSaveDigestEvent,
+  dbGetAndDeleteDigestEventsBefore,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
@@ -17,7 +20,7 @@ import { normalizeNotificationPreferences } from "./notificationPreferences.js";
 
 export interface NotificationPayload {
   userId: string;
-  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange";
+  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
   message: string;
   data?: any;
@@ -48,7 +51,6 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
-      // Log as 'skipped' since the webhook preconditions were not met
       dbLogNotificationOutcome(payload.userId, 'webhook', payload.eventType, 'skipped', 'Webhook disabled or no URL provided');
       return;
     }
@@ -65,6 +67,14 @@ class WebhookProvider implements NotificationProvider {
     await this.sendWithRetry(preferences.webhookUrl, webhookPayload, 0);
   }
 
+  private computeSignature(body: string): string | undefined {
+    const secret = process.env.WEBHOOK_SIGNING_SECRET;
+    if (!secret) return undefined;
+    const hmac = createHmac("sha256", secret);
+    hmac.update(body, "utf8");
+    return `sha256=${hmac.digest("hex")}`;
+  }
+
   private async sendWithRetry(
     url: string,
     payload: any,
@@ -74,13 +84,20 @@ class WebhookProvider implements NotificationProvider {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
 
+      const body = JSON.stringify(payload);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "User-Agent": "StellarPortfolioRebalancer/1.0",
+      };
+      const signature = this.computeSignature(body);
+      if (signature) {
+        headers["X-Signature-256"] = signature;
+      }
+
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "StellarPortfolioRebalancer/1.0",
-        },
-        body: JSON.stringify(payload),
+        headers,
+        body,
         signal: controller.signal,
       });
 
@@ -95,7 +112,6 @@ class WebhookProvider implements NotificationProvider {
         event: payload.event,
         userId: payload.userId,
       });
-      // Capture successful delivery outcome payload
       dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'sent');
     } catch (error) {
       const errorMessage =
@@ -106,14 +122,11 @@ class WebhookProvider implements NotificationProvider {
         error: errorMessage,
       });
 
-      // Retry once prior to total failure assertion
       if (attempt < this.MAX_RETRIES) {
-        // Track the intermittent failure state as 'retried'
         dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'retried', errorMessage);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         await this.sendWithRetry(url, payload, attempt + 1);
       } else {
-        // Log final failure out to the DB if the max retries parameter is exceeded
         dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'failed', errorMessage);
         throw error;
       }
@@ -342,12 +355,23 @@ export class NotificationService {
       return;
     }
 
-    // Check if user wants this event type
-    if (!preferences.events[payload.eventType]) {
+    // Check if user wants this event type (skip for digest payloads)
+    if (payload.eventType !== 'digest' && !preferences.events[(payload.eventType as any)]) {
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,
       });
+      return;
+    }
+
+    // If the user has a digest preference other than immediate, queue the event
+    if ((preferences as any).digestMode && (preferences as any).digestMode !== 'immediate') {
+      try {
+        dbSaveDigestEvent(payload.userId, payload.eventType, payload.title, payload.message, payload.data);
+        dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'skipped', `Queued for ${(preferences as any).digestMode} digest`);
+      } catch (error) {
+        logger.error('Failed to queue digest event', { error: error instanceof Error ? error.message : String(error), userId: payload.userId })
+      }
       return;
     }
 
@@ -370,6 +394,109 @@ export class NotificationService {
 
     // Wait for all providers to complete (but don't block the main flow)
     await Promise.allSettled(promises);
+  }
+
+  /**
+   * Process queued digest events for a given mode ('daily'|'weekly').
+   * This will retrieve events up to now, group by user, and send a single digest per user
+   * if the user's preference matches the requested mode. Events for users who don't
+   * match are re-queued.
+   */
+  async processDigests(mode: 'daily' | 'weekly'): Promise<void> {
+    const cutoff = new Date().toISOString()
+    const events = dbGetAndDeleteDigestEventsBefore(cutoff)
+
+    const byUser: Record<string, typeof events> = {}
+    for (const ev of events) {
+      byUser[ev.user_id] = byUser[ev.user_id] || []
+      byUser[ev.user_id].push(ev)
+    }
+
+    for (const [userId, userEvents] of Object.entries(byUser)) {
+      try {
+        const prefs = this.getPreferences(userId)
+        if (!prefs) {
+          logger.info('Skipping digest for user without preferences', { userId })
+          continue
+        }
+
+        if ((prefs as any).digestMode !== mode) {
+          // Re-queue events (preserve them for the correct schedule)
+          for (const ev of userEvents) {
+            dbSaveDigestEvent(ev.user_id, ev.event_type, ev.title, ev.message, ev.data ? JSON.parse(ev.data) : undefined)
+          }
+          continue
+        }
+
+        // Build digest payload
+        const digestTitle = `${mode.charAt(0).toUpperCase() + mode.slice(1)} Digest (${userEvents.length} events)`
+        const digestMessage = userEvents
+          .map((e) => `- [${e.event_type}] ${e.title} (${e.created_at})\n${e.message}`)
+          .join('\n\n')
+
+        const payload: NotificationPayload = {
+          userId,
+          eventType: 'digest',
+          title: digestTitle,
+          message: digestMessage,
+          data: { events: userEvents.map((e) => ({ eventType: e.event_type, title: e.title, message: e.message, data: e.data ? JSON.parse(e.data) : undefined, timestamp: e.created_at })) },
+          timestamp: new Date().toISOString(),
+        }
+
+        // Send digest through providers
+        const promises = this.providers.map(async (provider) => {
+          try {
+            await provider.send(payload, prefs)
+          } catch (error) {
+            logger.error('Failed to send digest via provider', { provider: provider.constructor.name, userId, error: error instanceof Error ? error.message : String(error) })
+          }
+        })
+        await Promise.allSettled(promises)
+      } catch (error) {
+        logger.error('Error processing digest for user', { userId, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  }
+
+  /**
+   * Verify an incoming webhook callback signature.
+   * Expects the X-Signature-256 header in the format `sha256=<hex>`.
+   * Uses timing-safe comparison to prevent timing attacks.
+   */
+  static verifyCallbackSignature(
+    rawBody: string,
+    signatureHeader: string | undefined,
+    secret: string | undefined,
+  ): boolean {
+    if (!signatureHeader || !secret) {
+      logger.warn("Webhook callback verification skipped: missing signature or secret");
+      return false;
+    }
+
+    const prefix = "sha256=";
+    if (!signatureHeader.startsWith(prefix)) {
+      logger.warn("Webhook callback verification failed: invalid signature format");
+      return false;
+    }
+
+    const receivedSig = signatureHeader.slice(prefix.length);
+    if (!/^[a-f0-9]{64}$/i.test(receivedSig)) {
+      logger.warn("Webhook callback verification failed: malformed signature hex");
+      return false;
+    }
+
+    const hmac = createHmac("sha256", secret);
+    hmac.update(rawBody, "utf8");
+    const expectedSig = hmac.digest("hex");
+
+    try {
+      return timingSafeEqual(
+        Buffer.from(receivedSig, "hex"),
+        Buffer.from(expectedSig, "hex"),
+      );
+    } catch {
+      return false;
+    }
   }
 
   getAllPreferences(): NotificationPreferences[] {

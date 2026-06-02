@@ -1,0 +1,9 @@
+{
+  "demoMode": false,
+  "allowFallbackPrices": false,
+  "enableDebugRoutes": true,
+  "allowMockPriceHistory": false,
+  "allowDemoBalanceFallback": false,
+  "enableDemoDbSeed": false,
+  "allowPublicUserPortfoliosInDemo": false
+}

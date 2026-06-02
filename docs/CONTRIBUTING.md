@@ -392,6 +392,43 @@ STELLAR_CONTRACT_ADDRESS=C...YOUR_CONTRACT_ADDRESS
 STELLAR_REBALANCE_SECRET=S...YOUR_SIGNING_SECRET
 ```
 
+### Rebalance simulation snapshot tests
+
+Rebalance allocation snapshots provide deterministic validation of the rebalance logic:
+
+```bash
+cd backend
+npm test -- src/test/snapshots/rebalanceSnapshots.test.ts
+```
+
+After intentionally changing rebalance allocation logic, regenerate the snapshots:
+
+```bash
+cd backend
+npm run snapshots:regenerate
+```
+
+Commit the updated `src/test/snapshots/fixtures/rebalance-snapshots.json` alongside the logic change. The snapshot test will fail on unexpected allocation drift.
+
+### Event replay validation
+
+The contract event indexer supports replay validation for detecting duplicate, missing, or out-of-order events:
+
+```bash
+cd backend
+
+# Validate current event integrity
+npm run replay:verify
+
+# Replay events and persist checkpoints
+npm run replay:run
+
+# View replay status
+npx tsx scripts/verify-replay.ts status
+```
+
+Replay checkpoints are persisted to the database key-value store. The integrity hash is computed from ingested event IDs, portfolio IDs, timestamps, and statuses to detect state divergence.
+
 ### Contract tests
 
 ```bash
@@ -515,7 +552,18 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
-## 13. Commit message conventions
+## 13. Pull request requirements
+
+Every pull request must link to at least one issue using `Fixes #<issue-number>` in the PR description. If the change intentionally has no related issue, explain why in the `Rationale for no issue` section of the PR template.
+
+A CI check (`PR Lint`) runs on every PR to verify that the body references an issue or contains a rationale. PRs that fail this check are blocked from merging.
+
+This requirement ensures:
+- Backlog management stays traceable from issue to release notes.
+- Reviewers understand the motivation behind every change.
+- The changelog and release notes can be generated from structured PR metadata.
+
+## 14. Commit message conventions
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
 
@@ -550,7 +598,7 @@ scripts/check-commit-messages.sh origin/main..HEAD
 
 If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
 
-## 14. Optional local Git hooks
+## 15. Optional local Git hooks
 
 Install the optional hook templates when you want fast feedback before committing or pushing:
 
@@ -580,15 +628,40 @@ Missing optional scripts are reported as skips. Any configured command that exit
 
 ---
 
-## Further reading
+---
+ 
+## Architecture Decision Records (ADRs)
 
+Major architectural decisions and their rationales are captured in **[docs/adr/](adr/README.md)**.
+
+### When to write an ADR
+
+- When introducing a new architectural pattern (e.g., switching to a new state management library).
+- When making a high-impact choice with significant trade-offs (e.g., choosing a specific database strategy).
+- When changing fundamental infrastructure or communication protocols.
+
+
+### How to contribute an ADR
+
+1. Copy `docs/adr/template.md` to a new file named `docs/adr/NNNN-my-decision-title.md`.
+2. Fill in the details (Context, Decision, Consequences).
+3. Submit as part of your Pull Request.
+
+---
+
+
+
+
+- [Branch protection and required checks](BRANCH_PROTECTION.md) — CI checks that block merges, merge requirements, common failure scenarios
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
 - [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
+- [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design
@@ -597,3 +670,7 @@ Missing optional scripts are reported as skips. Any configured command that exit
 - [Queue worker lifecycle](QUEUE_WORKER_LIFECYCLE.md) — Job states, retry policy, worker deployment
 - [Contract deployment checklist](CONTRACT_DEPLOYMENT_CHECKLIST.md) — Environment-specific steps for local, testnet, staging, production
 - [Privacy and consent alignment](PRIVACY_CONSENT_ALIGNMENT.md) — Legal wording, consent flow, GDPR compliance
+
+### Legal content version
+
+Legal copy is versioned in `frontend/src/content/legalMetadata.ts` (`LEGAL_BUNDLE_VERSION`, `LEGAL_EFFECTIVE_DATE`). The same label is shown on legal pages and in the consent modal. When you change Terms, Privacy, or Cookie text in `frontend/src/components/Legal.tsx`, bump both constants and note the change in your PR so users and auditors can match UI text to a specific release.

@@ -3,6 +3,7 @@ import express, { Express } from 'express'
 import cors from 'cors'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
+import { createHmac } from 'node:crypto'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -17,19 +18,36 @@ vi.mock('../utils/logger.js', () => ({
     }
 }))
 
+// Pass-through rate limit middleware to avoid hitting rate limits during tests
+const passThroughMiddleware = (_req: any, _res: any, next: () => void) => next()
+vi.mock('../middleware/rateLimit.js', () => ({
+    writeRateLimiter: passThroughMiddleware,
+    protectedWriteLimiter: [passThroughMiddleware, passThroughMiddleware],
+    writeBurstLimiter: passThroughMiddleware,
+    burstProtectionLimiter: passThroughMiddleware,
+    globalRateLimiter: passThroughMiddleware,
+    authRateLimiter: passThroughMiddleware,
+    criticalRateLimiter: passThroughMiddleware,
+    adminRateLimiter: passThroughMiddleware,
+    protectedCriticalLimiter: [passThroughMiddleware, passThroughMiddleware],
+    requestMonitoringMiddleware: passThroughMiddleware,
+    closeRateLimitStore: vi.fn(),
+    getRateLimitStoreType: () => 'memory' as const,
+}))
+
 const JWT_SECRET = 'test-jwt-secret-for-notification-tests-min-32-chars!!'
 const TEST_USER = 'GNOTIFTEST123456789ABCDEF'
 const OTHER_USER = 'GOTHERUSER123456789ABCDEF'
 
-function createApp(): Express {
+async function createApp(): Promise<Express> {
     const app = express()
     app.use(cors({ origin: true, credentials: true }))
     app.use(express.json({ limit: '10mb' }))
     app.set('trust proxy', 1)
 
     // Mount only notifications routes
-    const { notificationsRouter } = require('../api/notifications.routes.js') as any
-    app.use('/api', notificationsRouter)
+    const mod = await import('../api/notifications.routes.js')
+    app.use('/api', mod.notificationsRouter)
 
     return app
 }
@@ -43,8 +61,8 @@ describe('Notification Preferences API Integration Tests', () => {
     let app: Express
     let testDbPath: string
 
-    beforeAll(() => {
-        process.env.JWT_SECRET = JWT_SECRET
+    beforeAll(async () => {
+        process.env.WEBHOOK_SIGNING_SECRET = 'test-webhook-secret-for-callback-tests-32c!!'
         process.env.NODE_ENV = 'test'
 
         const testDir = join(tmpdir(), `stellar-notif-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -52,7 +70,7 @@ describe('Notification Preferences API Integration Tests', () => {
         testDbPath = join(testDir, 'test.db')
         process.env.DB_PATH = testDbPath
 
-        app = createApp()
+        app = await createApp()
     })
 
     afterAll(() => {
@@ -60,7 +78,7 @@ describe('Notification Preferences API Integration Tests', () => {
             try { rmSync(testDbPath, { force: true }) } catch {}
         }
         delete process.env.DB_PATH
-        delete process.env.JWT_SECRET
+        delete process.env.WEBHOOK_SIGNING_SECRET
     })
 
     beforeEach(() => {
@@ -263,16 +281,18 @@ describe('Notification Preferences API Integration Tests', () => {
             process.env.JWT_SECRET = JWT_SECRET
         })
 
+        afterAll(() => {
+            delete process.env.JWT_SECRET
+        })
+
         it('returns 401 without auth token when JWT is enabled', async () => {
-            // The requireJwtWhenEnabled middleware checks if auth is enabled
             const res = await request(app)
                 .get('/api/notifications/preferences')
                 .query({ userId: TEST_USER })
-                .expect(200)  // Works because JWT might not be enforced in test env
+                .expect(401)
 
-            // When auth IS enabled, missing token should fail
-            // We verify the endpoint at least handles the request
-            expect(res.body).toBeDefined()
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('UNAUTHORIZED')
         })
 
         it('uses JWT user address when auth is enabled', async () => {
@@ -323,6 +343,17 @@ describe('Notification Preferences API Integration Tests', () => {
             expect(res.body.success).toBe(false)
             expect(res.body.error.code).toBe('FORBIDDEN')
         })
+
+        it('returns 403 when accessing another users logs with JWT', async () => {
+            const res = await request(app)
+                .get('/api/notifications/logs')
+                .set(authHeader(OTHER_USER))
+                .query({ userId: TEST_USER })
+                .expect(403)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('FORBIDDEN')
+        })
     })
 
     describe('DELETE /api/notifications/unsubscribe', () => {
@@ -366,16 +397,67 @@ describe('Notification Preferences API Integration Tests', () => {
             expect(res.body.success).toBe(true)
             expect(Array.isArray(res.body.data.logs)).toBe(true)
         })
+    })
 
-        it('returns 403 when accessing another users logs with JWT', async () => {
+    describe('POST /api/notifications/webhook/callback - signature verification', () => {
+        const WEBHOOK_SECRET = 'test-webhook-secret-for-callback-tests-32c!!'
+        const CALLBACK_BODY = { event: 'delivery_receipt', status: 'received', userId: TEST_USER }
+        const CALLBACK_BODY_RAW = JSON.stringify(CALLBACK_BODY)
+
+        function signBody(body: string, secret: string): string {
+            const hmac = createHmac('sha256', secret)
+            hmac.update(body, 'utf8')
+            return `sha256=${hmac.digest('hex')}`
+        }
+
+        it('returns 200 when signature is valid', async () => {
+            const sig = signBody(CALLBACK_BODY_RAW, WEBHOOK_SECRET)
+
             const res = await request(app)
-                .get('/api/notifications/logs')
-                .set(authHeader(OTHER_USER))
-                .query({ userId: TEST_USER })
-                .expect(403)
+                .post('/api/notifications/webhook/callback')
+                .set('X-Signature-256', sig)
+                .send(CALLBACK_BODY)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.status).toBe('verified')
+        })
+
+        it('returns 401 when signature is invalid', async () => {
+            const res = await request(app)
+                .post('/api/notifications/webhook/callback')
+                .set('X-Signature-256', 'sha256=0000000000000000000000000000000000000000000000000000000000000000')
+                .send(CALLBACK_BODY)
+                .expect(401)
 
             expect(res.body.success).toBe(false)
-            expect(res.body.error.code).toBe('FORBIDDEN')
+            expect(res.body.error.code).toBe('UNAUTHORIZED')
+        })
+
+        it('returns 401 when signature header is missing', async () => {
+            const res = await request(app)
+                .post('/api/notifications/webhook/callback')
+                .send(CALLBACK_BODY)
+                .expect(401)
+
+            expect(res.body.success).toBe(false)
+        })
+
+        it('returns 503 when WEBHOOK_SIGNING_SECRET is not configured', async () => {
+            const originalSecret = process.env.WEBHOOK_SIGNING_SECRET
+            delete process.env.WEBHOOK_SIGNING_SECRET
+
+            const sig = signBody(CALLBACK_BODY_RAW, 'some-secret')
+            const res = await request(app)
+                .post('/api/notifications/webhook/callback')
+                .set('X-Signature-256', sig)
+                .send(CALLBACK_BODY)
+                .expect(503)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE')
+
+            process.env.WEBHOOK_SIGNING_SECRET = originalSecret
         })
     })
 })

@@ -5,6 +5,7 @@ import {
     dbStoreIdempotencyResult
 } from '../db/idempotencyDb.js'
 import { fail } from '../utils/apiResponse.js'
+import { stableStringify } from '../utils/helpers.js'
 
 export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
     const key = req.headers['idempotency-key'] as string | undefined
@@ -25,7 +26,7 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
     const requestHash = createHash('sha256')
         .update(req.method)
         .update(req.path)
-        .update(JSON.stringify(req.body ?? {}))
+        .update(stableStringify(req.body ?? {}))
         .update(requestUser)
         .digest('hex')
 

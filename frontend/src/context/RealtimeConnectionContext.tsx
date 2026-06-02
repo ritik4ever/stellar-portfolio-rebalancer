@@ -11,11 +11,13 @@ import { getWebSocketUrl } from '../config/api'
 import {
     RebalancerWSClient,
     type RealtimeConnectionState,
+    type RealtimeReconnectInfo,
 } from '../services/websocket.client'
 
 export type RealtimeConnectionContextValue = {
     state: RealtimeConnectionState
     statusDetail: string | null
+    reconnectInfo: RealtimeReconnectInfo | null
     reconnect: () => void
     disconnect: () => void
     send: (type: string, payload: unknown) => boolean
@@ -26,6 +28,7 @@ const RealtimeConnectionContext = createContext<RealtimeConnectionContextValue |
 export function RealtimeConnectionProvider({ children }: { children: React.ReactNode }) {
     const [state, setState] = useState<RealtimeConnectionState>('disconnected')
     const [statusDetail, setStatusDetail] = useState<string | null>(null)
+    const [reconnectInfo, setReconnectInfo] = useState<RealtimeReconnectInfo | null>(null)
     const clientRef = useRef<RebalancerWSClient | null>(null)
 
     useEffect(() => {
@@ -38,11 +41,19 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
         const client = new RebalancerWSClient(getWebSocketUrl(), {
             onStateChange: setState,
             onStatusDetail: setStatusDetail,
+            onReconnectInfo: setReconnectInfo,
         })
         clientRef.current = client
         client.connect()
 
+        const onVisibility = () => {
+            client.setPaused(document.visibilityState === 'hidden')
+        }
+        document.addEventListener('visibilitychange', onVisibility)
+        onVisibility()
+
         return () => {
+            document.removeEventListener('visibilitychange', onVisibility)
             client.disconnect()
             clientRef.current = null
         }
@@ -61,8 +72,8 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
     }, [])
 
     const value = useMemo(
-        () => ({ state, statusDetail, reconnect, disconnect, send }),
-        [state, statusDetail, reconnect, disconnect, send],
+        () => ({ state, statusDetail, reconnectInfo, reconnect, disconnect, send }),
+        [state, statusDetail, reconnectInfo, reconnect, disconnect, send],
     )
 
     return (
