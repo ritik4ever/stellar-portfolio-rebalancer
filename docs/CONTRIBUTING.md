@@ -580,7 +580,28 @@ Missing optional scripts are reported as skips. Any configured command that exit
 
 ---
 
-## Further reading
+---
+ 
+## Architecture Decision Records (ADRs)
+
+Major architectural decisions and their rationales are captured in **[docs/adr/](adr/README.md)**.
+
+### When to write an ADR
+
+- When introducing a new architectural pattern (e.g., switching to a new state management library).
+- When making a high-impact choice with significant trade-offs (e.g., choosing a specific database strategy).
+- When changing fundamental infrastructure or communication protocols.
+
+### How to contribute an ADR
+
+1. Copy `docs/adr/template.md` to a new file named `docs/adr/NNNN-my-decision-title.md`.
+2. Fill in the details (Context, Decision, Consequences).
+3. Submit as part of your Pull Request.
+
+---
+
+ ## Further reading
+
 
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
@@ -588,6 +609,7 @@ Missing optional scripts are reported as skips. Any configured command that exit
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
+- [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
@@ -597,3 +619,7 @@ Missing optional scripts are reported as skips. Any configured command that exit
 - [Queue worker lifecycle](QUEUE_WORKER_LIFECYCLE.md) — Job states, retry policy, worker deployment
 - [Contract deployment checklist](CONTRACT_DEPLOYMENT_CHECKLIST.md) — Environment-specific steps for local, testnet, staging, production
 - [Privacy and consent alignment](PRIVACY_CONSENT_ALIGNMENT.md) — Legal wording, consent flow, GDPR compliance
+
+### Legal content version
+
+Legal copy is versioned in `frontend/src/content/legalMetadata.ts` (`LEGAL_BUNDLE_VERSION`, `LEGAL_EFFECTIVE_DATE`). The same label is shown on legal pages and in the consent modal. When you change Terms, Privacy, or Cookie text in `frontend/src/components/Legal.tsx`, bump both constants and note the change in your PR so users and auditors can match UI text to a specific release.
