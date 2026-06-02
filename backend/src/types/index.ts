@@ -280,6 +280,27 @@ export interface SystemStatus {
 // Additional utility types
 export type AssetCode = 'XLM' | 'BTC' | 'ETH' | 'USDC'
 
+// Metadata about an asset issuer retrieved from stellar.toml
+export interface IssuerMetadata {
+    org_name?: string
+    description?: string
+    homepage_url?: string
+    cert_url?: string
+    org_url?: string
+    org_logo?: string
+    org_description?: string
+    version?: string
+}
+
+export interface ParsedAssetCreatePayload {
+    symbol: string
+    name: string
+    contractAddress?: string
+    issuerAccount?: string
+    coingeckoId?: string
+    issuerMetadata?: IssuerMetadata
+}
+
 export interface RebalanceRequest {
     portfolioId: string
     userAddress: string

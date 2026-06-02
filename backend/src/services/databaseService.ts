@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
-import { ConflictError, BackupVerificationError } from "../types/index.js";
+
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 
@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS assets (
     contract_address  TEXT,
     issuer_account    TEXT,
     coingecko_id      TEXT,
+    issuer_metadata   TEXT,
     enabled           INTEGER NOT NULL DEFAULT 1,
     last_refreshed_at TEXT,
     is_quarantined    INTEGER NOT NULL DEFAULT 0,
@@ -864,6 +865,7 @@ export class DatabaseService {
             contract_address: string | null;
             issuer_account: string | null;
             coingecko_id: string | null;
+            issuer_metadata: string | null;
             enabled: number;
             last_refreshed_at: string | null;
             is_quarantined: number;
@@ -909,6 +911,7 @@ export class DatabaseService {
             contract_address: string | null;
             issuer_account: string | null;
             coingecko_id: string | null;
+            issuer_metadata: string | null;
             enabled: number;
             last_refreshed_at: string | null;
             is_quarantined: number;
@@ -938,6 +941,7 @@ export class DatabaseService {
       contractAddress?: string;
       issuerAccount?: string;
       coingeckoId?: string;
+      issuerMetadata?: IssuerMetadata;
     } = {},
   ): void {
     try {
@@ -953,6 +957,7 @@ export class DatabaseService {
           options.contractAddress ?? null,
           options.issuerAccount ?? null,
           options.coingeckoId ?? null,
+          options.issuerMetadata ? JSON.stringify(options.issuerMetadata) : null,
           now,
           now,
           now,

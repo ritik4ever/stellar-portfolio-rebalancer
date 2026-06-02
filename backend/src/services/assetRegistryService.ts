@@ -1,4 +1,5 @@
 import { databaseService } from './databaseService.js'
+import { issuerMetadataService } from './issuerMetadataService.js'
 import {
     AssetRegistryConflictError,
     parseAssetCreatePayload
@@ -137,7 +138,7 @@ export const assetRegistryService = {
         return map
     },
 
-    add(
+    async add(
         symbol: unknown,
         name: unknown,
         options: {
@@ -145,15 +146,20 @@ export const assetRegistryService = {
             issuerAccount?: unknown
             coingeckoId?: unknown
         } = {}
-    ): void {
+    ): Promise<void> {
         const parsed = parseAssetCreatePayload(symbol, name, options)
         if (databaseService.getAssetBySymbol(parsed.symbol)) {
             throw new AssetRegistryConflictError(`An asset with symbol ${parsed.symbol} already exists`)
         }
+        const flags = getFeatureFlags()
+        const metadata = (flags.enableIssuerMetadata && parsed.issuerAccount)
+            ? await issuerMetadataService.getMetadata(parsed.issuerAccount)
+            : undefined;
         databaseService.addAsset(parsed.symbol, parsed.name, {
             contractAddress: parsed.contractAddress,
             issuerAccount: parsed.issuerAccount,
-            coingeckoId: parsed.coingeckoId
+            coingeckoId: parsed.coingeckoId,
+            issuerMetadata: metadata
         })
     },
 
