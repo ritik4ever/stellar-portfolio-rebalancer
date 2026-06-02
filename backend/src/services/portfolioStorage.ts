@@ -158,6 +158,42 @@ export class PortfolioStorage {
         return this.portfolios.delete(id)
     }
 
+    /**
+     * Clone an existing portfolio, optionally overriding fields.
+     * Returns the new portfolio ID.
+     */
+    async clonePortfolio(sourceId: string, overrides: Partial<Portfolio> = {}): Promise<string> {
+        const source = await this.getPortfolio(sourceId)
+        if (!source) throw new Error(`Source portfolio ${sourceId} not found`)
+        const userAddress = overrides.userAddress ?? source.userAddress
+        const allocations = overrides.allocations ?? source.allocations
+        const threshold = overrides.threshold ?? source.threshold
+        const slippageTolerance = overrides.slippageTolerance ?? source.slippageTolerance ?? 1
+        const strategy = overrides.strategy ?? source.strategy
+        const strategyConfig = overrides.strategyConfig ?? source.strategyConfig ?? {}
+        // Preserve balances if they exist
+        if (Object.keys(source.balances).length > 0) {
+            const newId = await this.createPortfolioWithBalances(
+                userAddress,
+                allocations,
+                threshold,
+                source.balances,
+                slippageTolerance,
+            )
+            // Update strategy if provided
+            if (strategy) {
+                await this.updatePortfolio(newId, { strategy, strategyConfig })
+            }
+            return newId
+        } else {
+            const newId = await this.createPortfolio(userAddress, allocations, threshold)
+            if (strategy) {
+                await this.updatePortfolio(newId, { strategy, strategyConfig })
+            }
+            return newId
+        }
+    }
+
     clearAll(): void {
         this.portfolios.clear()
     }
