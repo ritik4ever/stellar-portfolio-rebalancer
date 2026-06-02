@@ -600,7 +600,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 
 ---
 
- ## Further reading
+
 
 
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
@@ -611,6 +611,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 - [Notification system](NOTIFICATIONS.md)
 - [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design
