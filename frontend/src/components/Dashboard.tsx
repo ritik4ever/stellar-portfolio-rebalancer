@@ -49,6 +49,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
     const { isDark } = useTheme()
+    const queryClient = useQueryClient()
 
     // Query for user portfolios
     const {
@@ -118,6 +119,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const prices: Record<string, DashboardPriceRow> = hasLivePriceRows
         ? (priceRows as Record<string, DashboardPriceRow>)
         : demoPrices
+
     const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
     const routeDataUnavailable = Boolean(
         publicKey &&
@@ -125,12 +127,51 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         !portfoliosLoading &&
         (!portfolios || portfolios.length === 0)
     )
+
+    const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
+        name: alloc.asset,
+        value: alloc.target || alloc.percentage, // Handle both formats
+        amount: alloc.amount || 0,
+        color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
+    })) || []
+
+    const missingPriceAssets = allocationData.filter((asset: any) => {
+        const row = prices[asset.name]
+        return !row || row.price === undefined || row.price === null
+    })
+    const pricedAssets = allocationData.length - missingPriceAssets.length
+    const hasPartialPriceData = pricedAssets > 0 && missingPriceAssets.length > 0
+    const partialPriceMessage = hasPartialPriceData
+        ? `Some asset quotes are unavailable or fallback-based. ${missingPriceAssets.length} asset${missingPriceAssets.length !== 1 ? 's are' : ' is'} missing fresh market data.`
+        : null
+
     const priceSource = hasLivePriceRows
         ? formatPriceFeedSummary(priceBundle?.feedMeta, true, false)
         : publicKey
             ? 'No price data'
             : 'Demo data'
+    const effectivePriceSource = hasPartialPriceData
+        ? 'Partial price data'
+        : priceSource
     const feedMeta = priceBundle?.feedMeta
+    const showPriceQualityNote = feedMeta?.degraded || hasPartialPriceData || feedMeta?.staleOrLimited
+
+    const executeRebalance = async () => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') {
+            alert('Rebalancing not available in demo mode. Please create a real portfolio.')
+            return
+        }
+
+        try {
+            const result = await executeRebalanceMutation.mutateAsync()
+            alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
+        } catch (error: any) {
+            console.error('Rebalance failed:', error)
+            const msg = error.message ?? 'Rebalance failed. Please try again.'
+            const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
+            alert(isSlippage ? `Slippage too high: ${msg}` : msg)
+        }
+    }
 
     const estimateXlm = rebalanceEstimate?.gasEstimateXlm ?? 0
     const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
@@ -141,6 +182,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const refreshData = useCallback(async () => {
         // Invalidate all relevant queries to force a refetch without a full page reload.
         // This leverages TanStack Query's cache invalidation instead of the naive window.location.reload().
+    const refreshData = useCallback(async () => {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
             queryClient.invalidateQueries({ queryKey: priceKeys.all }),
@@ -200,6 +242,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             // Small delay to show loading state
             await new Promise(resolve => setTimeout(resolve, 500))
 
+        if (publicKey) return
+        setResettingDemo(true)
+        try {
+            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
+            await queryClient.invalidateQueries({ queryKey: priceKeys.all })
+            await new Promise(resolve => setTimeout(resolve, 500))
             setShowDemoResetConfirm(false)
         } catch (error) {
             console.error('Demo reset failed:', error)
@@ -368,6 +416,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </button>
                 </div>
             )}
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
+                    <p className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
+                </div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
             {/* Header */}
             <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
 
@@ -387,6 +448,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 <div className="flex items-center space-x-4 mt-1">
                                     <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">
+                                            {walletType} Wallet
+                                        </span>
+                                        <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-1 text-xs text-gray-600 dark:text-gray-400">
+                                        <span>Contract:</span>
+                                        <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
+                                        <a
+                                            href={`https://stellar.expert/explorer/testnet/contract/${contractAddress}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-700"
+                                        >
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    </div>
 
                                 </div>
                             ) : (
@@ -490,7 +567,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 <button
                                     onClick={() => setShowDemoResetConfirm(true)}
                                     className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
-                                    title="Reset demo portfolio to default state"
                                 >
                                     <RefreshCw className="w-4 h-4" />
                                     Reset Demo
@@ -553,6 +629,71 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             {/* NEW: Demo reset confirmation modal */}
             {showDemoResetConfirm && (
             {showDeleteConfirm ? (
+
+            {/* GDPR: Delete all data confirmation modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete All Your Data?</h2>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Perfect for testing and screenshots.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowDemoResetConfirm(false)}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                            This will permanently delete your account and all associated data. This action cannot be undone.
+                            This will permanently delete your portfolio configuration, rebalance history, and notification settings from our database. This action cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={deleting}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={resetDemoPortfolio}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                            >
+                                {resettingDemo ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                        Resetting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCw className="w-4 h-4" />
+                                        Reset Demo
+                                onClick={deleteMyData}
+                                disabled={deleting}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                            >
+                                {deleting ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete all my data
+                                    </>
+                                )}
+
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showDeleteConfirm ? (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
                     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
                         <div className="flex items-center gap-2 mb-4">
@@ -567,11 +708,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 onClick={() => setShowDemoResetConfirm(false)}
                                 disabled={resettingDemo}
                                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
-                            This will permanently delete your account and all associated data. This action cannot be undone.
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-
                             >
                                 Cancel
                             </button>
@@ -591,17 +727,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         Reset Demo
                                     </>
                                 )}
-
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                            >
-                                Cancel
-                            </button>
-                            <button
-
                             </button>
                         </div>
                     </div>
@@ -640,6 +765,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
+                            Analytics
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('notifications')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
+                                }`}
+                        >
                             Notifications
                         </button>
                     </nav>
@@ -659,6 +793,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         ) : null}
                     </div>
                 )}
+                {/* Tab Content */}
+                {activeTab === 'overview' && (
+                    <div className="grid lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* Portfolio Value Chart */}
+                            <div>
 
                 {activeTab === 'analytics' ? (
                     <PerformanceChart portfolioId={portfolioData?.id || null} />
@@ -674,7 +814,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <div data-testid="dashboard-value-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                         <div className="flex items-center justify-between mb-6">
                                             <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
-                                            <div className="space-x-2 flex items-center">
+                                            <div className="flex items-center space-x-2">
                                                 <div className="w-32 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
                                                 <div className="w-24 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                                             </div>
@@ -707,6 +847,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </div>
                                         {showPriceQualityNote && (
                                             <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg p-2">
+                                            <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg px-3 py-2">
 
                                                 {feedMeta?.degraded
                                                     ? 'Displayed prices are synthetic or fallback — not primary market data.'
@@ -776,14 +917,39 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                 Warning: estimated gas is unusually high ({'>'}0.5 XLM). Consider reducing trade count.
                                             </p>
                                         )}
-                                        {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 && (
-                                            <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
-                                                {rebalanceEstimate.breakdown.map((item: any) => (
-                                                    <div key={item.tradeId} className="flex justify-between">
-                                                        <span>{item.tradeId}</span>
-                                                        <span>{Number(item.estimateXlm || 0).toFixed(4)} XLM</span>
-                                                    </div>
+                                    </button>
+                                </motion.div>
+                            )}
+
+                            {/* Allocation Chart */}
+                            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
+                                <div className="h-64 flex items-center justify-center">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie
+                                                data={allocationData}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={80}
+                                                paddingAngle={5}
+                                                dataKey="value"
+                                            >
+                                                {allocationData.map((entry: any, index: number) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
                                                 ))}
+                                            </Pie>
+                                            <Tooltip />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="mt-4 space-y-2">
+                                    {allocationData.map((asset: any, index: number) => (
+                                        <div key={index} className="flex items-center justify-between">
+                                            <div className="flex items-center">
+                                                <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
+                                                <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
                                             </div>
                                         )}
                                         {(portfolioData as any)?.slippageTolerancePercent != null && (
@@ -825,61 +991,25 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         <div className="h-48 flex items-center justify-center mb-4">
                                             <div className="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
                                         </div>
-                                        <div className="space-y-3">
-                                            {[1, 2, 3].map((i) => (
-                                                <div key={i} className="flex items-center justify-between animate-pulse">
-                                                    <div className="flex items-center space-x-2">
-                                                        <div className="w-3 h-3 rounded-full bg-gray-300 dark:bg-gray-700" />
-                                                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                                                    </div>
-                                                    <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
-                                        <div className="h-48 flex items-center justify-center">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <PieChart>
-                                                    <Pie
-                                                        data={allocationData}
-                                                        cx="50%"
-                                                        cy="50%"
-                                                        innerRadius={40}
-                                                        outerRadius={80}
-                                                        paddingAngle={2}
-                                                        dataKey="value"
-                                                    >
-                                                        {allocationData.map((entry: any, index: number) => (
-                                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                                        ))}
-                                                    </Pie>
-                                                </PieChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                        <div className="mt-4 space-y-2">
-                                            {allocationData.map((asset: any, index: number) => (
-                                                <div key={index} className="flex items-center justify-between">
-                                                    <div className="flex items-center">
-                                                        <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
-                                                        <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
-                                                    </div>
-                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{asset.value.toFixed(1)}%</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
 
-                        {/* Price Tracker */}
-                        <div className="mb-8">
                             <PriceTracker />
                         </div>
+                    </div>
+                )}
 
+                {activeTab === 'analytics' && (
+                    <div className="space-y-6">
+                        <PerformanceChart portfolioId={portfolioData?.id || null} />
+                    </div>
+                )}
+
+                {activeTab === 'notifications' && (
+                    <div className="space-y-6">
+                        <NotificationPreferences publicKey={publicKey} />
+                    </div>
                         {/* NEW: Asset Cards Skeleton Loading State */}
                         <div className="grid lg:grid-cols-3 gap-6 mb-8">
                             {loading ? (
@@ -916,10 +1046,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 )}
             </main>
 
-            {/* NEW: Sticky Mobile Action Bar */}
+           
+            {/* Sticky Mobile Action Bar */}
             <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
                 <div className="flex items-center justify-between max-w-sm mx-auto">
-                    {/* Portfolio Value */}
                     <div className="text-center">
                         <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
                         <div className="text-lg font-bold text-gray-900 dark:text-white">
@@ -934,6 +1064,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             ) : (
                                 <TrendingUp className="w-3 h-3 rotate-180" />
                             )}
+                        <div className={`text-xs flex items-center justify-center gap-1 ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingUp className="w-3 h-3 rotate-180" />}
                             {Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%
                         </div>
                     </div>
@@ -941,6 +1073,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2">
                         {/* Rebalance Status & Action */}
+                    <div className="flex items-center gap-2">
                         {portfolioData?.needsRebalance ? (
                             <button
                                 onClick={executeRebalance}
@@ -952,6 +1085,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 ) : (
                                     <Zap className="w-4 h-4" />
                                 )}
+                                {executeRebalanceMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                                 Rebalance
                             </button>
                         ) : (
@@ -986,6 +1120,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             disabled={loading}
                             className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
                         >
+                                <span>Balanced</span>
+                            </div>
+                        )}
+
+                        {publicKey ? (
+                            <button onClick={() => onNavigate('setup')} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors">
+                                <Plus className="w-4 h-4" />
+                            </button>
+                        ) : (
+                            <button onClick={() => setShowDemoResetConfirm(true)} className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm">
+                                <RefreshCw className="w-4 h-4" />
+                            </button>
+                        )}
+
+                        <button onClick={refreshData} disabled={loading} className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
                             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
@@ -993,6 +1142,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
             </div>
 
             {/* Add bottom padding to main content to prevent overlap with mobile action bar */}
+            {/* Bottom padding for mobile bar */}
             <div className="h-20 md:hidden"></div>
         </div>
     )
