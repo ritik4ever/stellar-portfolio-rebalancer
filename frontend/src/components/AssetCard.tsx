@@ -48,12 +48,7 @@ function getFallbackLabel(price?: AssetCardProps['price']): string | null {
 const AssetCard: React.FC<AssetCardProps> = ({ asset, price, isLoading = false }) => {
     if (isLoading) {
         return (
-            <div
-                className="bg-white dark:bg-gray-800 rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 dark:border-gray-700 motion-safe:animate-pulse"
-                aria-busy="true"
-                aria-label="Loading asset"
-            >
-                <div className="flex items-center justify-between mb-3 sm:mb-4">
+
                     <div className="flex items-center">
                         <div className="w-8 sm:w-10 h-8 sm:h-10 rounded-full bg-gray-300 dark:bg-gray-700" />
                         <div className="ml-2 sm:ml-3 space-y-1 sm:space-y-2">
