@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  NODE_VERSION: "18"
+  NODE_VERSION: "20"
   # Default: quarantined tests are skipped. The nightly job and workflow_dispatch
   # override this to "run" so flaky tests can be checked in isolation.
   QUARANTINE_MODE: ${{ github.event.inputs.quarantine_mode || (github.event_name == 'schedule' && 'run') || 'skip' }}
