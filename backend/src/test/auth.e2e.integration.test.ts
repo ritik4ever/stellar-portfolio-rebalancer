@@ -517,6 +517,47 @@ describe('POST /api/auth/logout-all — all sessions', () => {
 
         expect(stillValid.body.success).toBe(true)
     })
+
+    it('returns recent auth audit events for a valid access token', async () => {
+        const kp = Keypair.random()
+        const login = await loginWithWallet(kp)
+
+        const refreshRes = await request(app)
+            .post('/api/auth/refresh')
+            .send({ refreshToken: login.refreshToken })
+            .expect(200)
+
+        const accessToken = refreshRes.body.data.accessToken
+        const sessionRefreshToken = refreshRes.body.data.refreshToken
+
+        await request(app)
+            .post('/api/auth/logout')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .send({ refreshToken: sessionRefreshToken })
+            .expect(200)
+
+        const auditRes = await request(app)
+            .get('/api/auth/audit')
+            .set('Authorization', `Bearer ${accessToken}`)
+            .expect(200)
+
+        expect(auditRes.body.success).toBe(true)
+        expect(Array.isArray(auditRes.body.data.events)).toBe(true)
+        expect(auditRes.body.data.events.length).toBeGreaterThanOrEqual(3)
+        expect(auditRes.body.data.events[0].action).toBe('revocation')
+        expect(auditRes.body.data.events[1].action).toBe('refresh')
+        expect(auditRes.body.data.events[2].action).toBe('login')
+        expect(auditRes.body.data.events[0].userAddress).toBe(kp.publicKey())
+    })
+
+    it('returns 401 when retrieving audit events without authentication', async () => {
+        const res = await request(app)
+            .get('/api/auth/audit')
+            .expect(401)
+
+        expect(res.body.success).toBe(false)
+        expect(res.body.error?.code).toBe('UNAUTHORIZED')
+    })
 })
 
 // ── Protected route behaviour under token changes ─────────────────────────────

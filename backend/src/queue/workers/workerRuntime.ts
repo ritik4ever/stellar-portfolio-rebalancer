@@ -2,6 +2,7 @@ import { Job } from "bullmq";
 import { persistWorkerStatus } from './workerHeartbeat.js';
 import { getDLQQueue, DLQJobData } from '../queues.js';
 import { logger } from '../../utils/logger.js';
+import { query } from '../../db/client.js';
 
 export interface WorkerRuntimeStatus {
     name: string
@@ -15,6 +16,42 @@ export interface WorkerRuntimeStatus {
     lastSuccessfulRunAt?: string
     lastErrorAt?: string
     schedulerRegistered: boolean
+}
+
+/** Simple deterministic hash to map a string into a 32‑bit integer for advisory lock keys. */
+function stringHash32(str: string): number {
+    let hash = 0
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i)
+        hash |= 0 // convert to 32‑bit integer
+    }
+    return hash
+}
+
+/** Acquire a PostgreSQL advisory lock for the given worker name.
+ *  Returns true when the lock is successfully obtained; otherwise false.
+ */
+export async function acquireWorkerLock(name: string): Promise<boolean> {
+    const key = stringHash32(name)
+    try {
+        const res = await query('SELECT pg_try_advisory_lock($1) AS locked', [key])
+        // pg returns a column named "locked" with a boolean value
+        return (res.rows[0] as any).locked === true
+    } catch (err) {
+        // If the DB is not configured or the query fails, treat as lock unavailable
+        console.error('[LOCK] Failed to acquire advisory lock', { name, err })
+        return false
+    }
+}
+
+/** Release a previously acquired advisory lock for the given worker name. */
+export async function releaseWorkerLock(name: string): Promise<void> {
+    const key = stringHash32(name)
+    try {
+        await query('SELECT pg_advisory_unlock($1)', [key])
+    } catch (err) {
+        console.error('[LOCK] Failed to release advisory lock', { name, err })
+    }
 }
 
 export function createWorkerRuntimeStatus(name: string, concurrency: number): WorkerRuntimeStatus {
