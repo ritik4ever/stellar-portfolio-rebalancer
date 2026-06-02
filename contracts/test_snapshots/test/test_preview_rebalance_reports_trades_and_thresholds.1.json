@@ -91,11 +91,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 20000000
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -122,11 +119,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 10000000
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -140,7 +134,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 0,
-    "timestamp": 1000,
+    "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -261,7 +255,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 100
+                                "lo": 20000000
                               }
                             }
                           },
@@ -272,7 +266,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 100
+                                "lo": 10000000
                               }
                             }
                           }
@@ -292,7 +286,7 @@
                         "symbol": "last_rebalance"
                       },
                       "val": {
-                        "u64": 1000
+                        "u64": 0
                       }
                     },
                     {
@@ -819,11 +813,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 20000000
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -858,11 +849,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 20000000
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -921,11 +909,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 10000000
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -960,11 +945,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 10000000
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -1009,7 +991,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "check_rebalance_needed"
+                "symbol": "preview_rebalance"
               }
             ],
             "data": {
@@ -1086,7 +1068,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1162,7 +1144,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1238,7 +1220,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1314,7 +1296,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1336,11 +1318,169 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "check_rebalance_needed"
+                "symbol": "preview_rebalance"
               }
             ],
             "data": {
-              "bool": false
+              "map": [
+                {
+                  "key": {
+                    "symbol": "candidate_trades"
+                  },
+                  "val": {
+                    "map": [
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": -1,
+                            "lo": 18446744073704551616
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 5000000
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "rebalance_needed"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "skip_reasons"
+                  },
+                  "val": {
+                    "map": []
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "skipped_assets"
+                  },
+                  "val": {
+                    "vec": []
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "threshold_decisions"
+                  },
+                  "val": {
+                    "map": [
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "current_percent"
+                              },
+                              "val": {
+                                "u32": 66
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "drift"
+                              },
+                              "val": {
+                                "u32": 16
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "exceeds_threshold"
+                              },
+                              "val": {
+                                "bool": true
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "target_percent"
+                              },
+                              "val": {
+                                "u32": 50
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "current_percent"
+                              },
+                              "val": {
+                                "u32": 33
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "drift"
+                              },
+                              "val": {
+                                "u32": 17
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "exceeds_threshold"
+                              },
+                              "val": {
+                                "bool": true
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "target_percent"
+                              },
+                              "val": {
+                                "u32": 50
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_value"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 3000000000
+                    }
+                  }
+                }
+              ]
             }
           }
         }

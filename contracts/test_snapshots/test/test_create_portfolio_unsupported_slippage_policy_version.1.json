@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 6,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
@@ -226,21 +226,31 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 60
-                      }
-                    },
-                    {
-                      "key": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                      },
-                      "val": {
-                        "u32": 30
+                        "u32": 100
                       }
                     }
                   ]
                 },
                 {
-
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
+                  "u32": 5
+                },
+                {
+                  "u32": 50
+                },
+                {
+                  "u32": 99
                 }
               ]
             }
@@ -266,7 +276,7 @@
             ],
             "data": {
               "error": {
-                "contract": 1
+                "contract": 13
               }
             }
           }
@@ -287,7 +297,7 @@
               },
               {
                 "error": {
-                  "contract": 1
+                  "contract": 13
                 }
               }
             ],
@@ -312,7 +322,7 @@
               },
               {
                 "error": {
-                  "contract": 1
+                  "contract": 13
                 }
               }
             ],
@@ -336,21 +346,31 @@
                             "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                           },
                           "val": {
-                            "u32": 60
-                          }
-                        },
-                        {
-                          "key": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                          },
-                          "val": {
-                            "u32": 30
+                            "u32": 100
                           }
                         }
                       ]
                     },
                     {
-
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          },
+                          "val": {
+                            "u32": 7
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "u32": 5
+                    },
+                    {
+                      "u32": 50
+                    },
+                    {
+                      "u32": 99
                     }
                   ]
                 }
@@ -374,7 +394,7 @@
               },
               {
                 "error": {
-                  "contract": 1
+                  "contract": 13
                 }
               }
             ],

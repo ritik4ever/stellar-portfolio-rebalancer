@@ -4,6 +4,7 @@ Contract source:
 
 - `contracts/src/lib.rs`
 - `contracts/src/types.rs`
+- `contracts/src/portfolio.rs`
 - `contracts/src/reflector.rs`
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
@@ -23,30 +24,20 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Contract must not already be initialized.
 
-- **State:** `EmergencyStop` is initialized to `false` during contract initialization.
 
-### `get_admin(env: Env) -> Address`
-
-- **Purpose:** Reads the configured admin address from contract instance storage.
-- **Parameters:**
-  - `env`: Soroban execution environment.
-- **Returns:** Stored admin `Address`.
-- **Notes:**
-  - External clients can use this to confirm the configured governance/admin address before invoking privileged actions.
-
-### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32) -> Result<u64, Error>`
 
 - **Purpose:** Creates a new user portfolio and emits a `("portfolio","created")` event.
 - **Parameters:**
   - `user`: Portfolio owner; must authorize this call.
   - `target_allocations`: Target allocations per asset (`Address -> percentage`).
-  - `rebalance_threshold`: Drift threshold percent (must be between `MIN_REBALANCE_THRESHOLD` and `MAX_REBALANCE_THRESHOLD`, i.e., `1..=50`).
-  - `slippage_tolerance`: Slippage tolerance in basis points (must be between `MIN_SLIPPAGE_TOLERANCE_BPS` and `MAX_SLIPPAGE_TOLERANCE_BPS`, i.e., `10..=500`).
+
 - **Returns:** `Ok(portfolio_id)` or one of:
   - `Err(Error::InvalidAllocation)`
+  - `Err(Error::InvalidAssetDecimals)`
   - `Err(Error::TooManyAssets)`
   - `Err(Error::InvalidThreshold)`
   - `Err(Error::InvalidSlippageTolerance)`
+  - `Err(Error::UnsupportedSlippagePolicyVersion)`
 - **Preconditions:**
   - `user.require_auth()` succeeds.
   - Allocation map passes `portfolio::validate_allocations`.
@@ -73,19 +64,19 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Portfolio must exist; otherwise contract panics on `.unwrap()`.
 
-### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128, memo: String) -> ()`
+
 
 - **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")`.
 - **Parameters:**
   - `portfolio_id`: Target portfolio.
   - `asset`: Asset address key used in `current_balances`.
-  - `amount`: Amount to add (must be positive).
-  - `memo`: Optional memo string for correlating deposits outside the contract (e.g., deposit reference IDs). Pass an empty string if unused.
+
 - **Returns:** No return value.
 - **Event payload:** `(portfolio_id: u64, asset: Address, amount: i128, memo: String)`
 - **Preconditions / failure behavior:**
   - `amount > 0` (otherwise panic `"Amount must be positive"`).
   - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
+  - Portfolio must be active (otherwise panic `"Portfolio paused"`).
   - Portfolio must exist (otherwise panic on `.unwrap()`).
   - Portfolio owner authorization required (`portfolio.user.require_auth()`).
 
@@ -100,26 +91,23 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
-- **Purpose:** Validates post-trade balances against slippage tolerance, updates `last_rebalance`, and emits `("portfolio","rebalanced")`.
+- **Purpose:** Validates post-trade balances against slippage tolerance (per `slippage_policy_version` on the portfolio), updates `last_rebalance`, and emits `("portfolio","rebalanced")`.
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.
 - **Returns:** `Ok(())` or one of:
-  - `Err(Error::EmergencyStop)`
+
   - `Err(Error::CooldownActive)`
   - `Err(Error::StaleData)`
   - `Err(Error::SlippageExceeded)`
 - **Preconditions / failure behavior:**
   - Emergency stop must be off (otherwise returns `Err(Error::EmergencyStop)`).
   - Portfolio must exist and owner must authorize call.
-  - Cooldown must be elapsed (`>= 3600` seconds since last rebalance) or returns `Err(Error::CooldownActive)`.
-  - Every target asset must have non-stale Reflector price data or returns `Err(Error::StaleData)`.
-  - If `actual_balances` are provided, the current portfolio value must be computable from non-stale prices and every checked balance must be within slippage tolerance.
-  - Failed validations do not update `last_rebalance` and do not emit `("portfolio","rebalanced")`; callers may retry once the failing condition is fixed.
+
 
 ### `set_emergency_stop(env: Env, stop: bool) -> ()`
 
-- **Purpose:** Toggles emergency stop flag in instance storage.
+- **Purpose:** Toggles emergency stop flag in instance storage and records `ContractPauseReason`. Emits `("contract","emergency_stop")` with `(stop, reason_code)`.
 - **Parameters:** `stop` boolean.
 - **Returns:** No return value.
 - **Preconditions:**
@@ -202,23 +190,22 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
 - `Address` (`soroban_sdk::Address`)
   - Used for users, assets, and external contract references.
 - `Map<Address, u32>`
-  - Used for `target_allocations` where value is target percentage.
+  - Used for `target_allocations`, `asset_decimals`, and percentage or decimal metadata.
 - `Map<Address, i128>`
-  - Used for `current_balances` and `actual_balances`.
+  - Used for `current_balances`, `actual_balances`, and `candidate_trades`.
 - `Portfolio` (`contracts/src/types.rs`)
   - Composite struct:
   - `user: Address`
   - `target_allocations: Map<Address, u32>`
   - `current_balances: Map<Address, i128>`
+  - `asset_decimals: Map<Address, u32>`
   - `rebalance_threshold: u32`
   - `slippage_tolerance: u32`
+  - `slippage_policy_version: u32`
   - `last_rebalance: u64`
   - `total_value: i128`
   - `is_active: bool`
-- `FeeConfig` (`contracts/src/types.rs`)
-  - Struct: `fee_bps: u32` (fee in basis points, max 1000 when enabled), `fee_recipient: Address`, `enabled: bool`.
-- `UpgradeEvent` (`contracts/src/types.rs`)
-  - Struct: `from_hash: Bytes` (previous WASM hash, empty if first upgrade), `to_hash: Bytes` (new WASM hash), `timestamp: u64`.
+
 - `Asset` (`contracts/src/reflector.rs`)
   - Enum: `Stellar(Address)` or `Other(Symbol)`.
 - `PriceData` (`contracts/src/reflector.rs`)

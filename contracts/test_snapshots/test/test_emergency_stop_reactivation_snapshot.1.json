@@ -30,10 +30,12 @@
                   ]
                 },
                 {
+
                   "u32": 5
                 },
                 {
                   "u32": 50
+
                 }
               ]
             }
@@ -100,9 +102,7 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
+
                 }
               ]
             }
@@ -201,6 +201,7 @@
                   "map": [
                     {
                       "key": {
+
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -237,6 +238,7 @@
                     },
                     {
                       "key": {
+
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
@@ -245,6 +247,7 @@
                     },
                     {
                       "key": {
+
                         "symbol": "slippage_tolerance"
                       },
                       "val": {
@@ -335,6 +338,7 @@
                         "key": {
                           "vec": [
                             {
+
                               "symbol": "EmergencyStop"
                             }
                           ]
@@ -655,10 +659,12 @@
                   ]
                 },
                 {
+
                   "u32": 5
                 },
                 {
                   "u32": 50
+
                 }
               ]
             }
@@ -750,6 +756,7 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -797,6 +804,7 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -845,9 +853,7 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
+
                 }
               ]
             }
@@ -884,9 +890,7 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
+
                 }
               ]
             }
@@ -961,6 +965,7 @@
               "map": [
                 {
                   "key": {
+
                     "symbol": "current_balances"
                   },
                   "val": {
@@ -997,6 +1002,7 @@
                 },
                 {
                   "key": {
+
                     "symbol": "rebalance_threshold"
                   },
                   "val": {
@@ -1005,6 +1011,7 @@
                 },
                 {
                   "key": {
+
                     "symbol": "slippage_tolerance"
                   },
                   "val": {
