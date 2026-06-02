@@ -3,6 +3,7 @@ import type { PricesMap, PriceData, PriceFeedMeta, PricesFeedPayload } from '../
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { databaseService } from './databaseService.js'
 import { recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice } from '../observability/metrics.js'
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
@@ -255,6 +256,12 @@ export class ReflectorService {
                 serverFetchedAtMs: Date.now(),
                 dataTier: 'primary'
             }
+
+            try {
+                databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
+            } catch (err) {
+                logger.error(`[ASSET-REGISTRY] Failed to update freshness for ${asset} during Reflector fetch`, { err })
+            }
         })
 
         if (Object.keys(out).length === 0 && staleCount > 0) {
@@ -385,6 +392,12 @@ export class ReflectorService {
                         price: priceData.price,
                         change: priceData.change
                     })
+
+                    try {
+                        databaseService.setAssetFreshness(asset, new Date().toISOString(), false)
+                    } catch (err) {
+                        logger.error(`[ASSET-REGISTRY] Failed to update freshness for ${asset} during CoinGecko fetch`, { err })
+                    }
                 } else {
                     logger.warn('[WARNING] No data received for asset', { asset, coinId })
                 }
