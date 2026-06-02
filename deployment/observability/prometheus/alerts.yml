@@ -35,6 +35,36 @@ groups:
           summary: Frontend uptime probe failed
           description: The frontend root endpoint has been unavailable for 5 minutes.
 
+      - alert: BackendApiRootFailed
+        expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: Backend public API root probe failed
+          description: The backend root API endpoint is unavailable from the external probe.
+
+      - alert: ApiDocsProbeFailed
+        expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/api-docs"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: API documentation endpoint is unavailable
+          description: The backend OpenAPI docs page is unavailable from the external probe.
+
+      - alert: WebSocketHandshakeFailed
+        expr: probe_success{job="portfolio-websocket", instance="http://backend:3001/"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: websocket
+        annotations:
+          summary: Backend WebSocket handshake is failing
+          description: The external WebSocket probe is unable to complete a handshake to the backend.
+
       - alert: Elevated5xxRate
         expr: sum(rate(stellar_portfolio_http_requests_total{status_code=~"5.."}[5m])) / clamp_min(sum(rate(stellar_portfolio_http_requests_total[5m])), 1) > 0.05
         for: 10m
