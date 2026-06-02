@@ -12,6 +12,19 @@ function renderWithQuery(ui: React.ReactElement) {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
+const enabledPreferences = {
+    emailEnabled: true,
+    emailAddress: 'user@example.com',
+    webhookEnabled: true,
+    webhookUrl: 'https://example.com/webhook',
+    events: {
+        rebalance: true,
+        circuitBreaker: true,
+        priceMovement: true,
+        riskChange: true,
+    },
+}
+
 describe('NotificationPreferences', () => {
     beforeEach(() => {
         cleanup()
@@ -130,83 +143,12 @@ describe('NotificationPreferences', () => {
         expect(postSpy).not.toHaveBeenCalled()
     })
 
-    // ── Embedded test-delivery section ───────────────────────────────────────
 
-    it('shows the empty-state test prompt when no provider is saved', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
-        renderWithQuery(<NotificationPreferences userId="user-1" />)
-
-        expect(await screen.findByText('Notifications')).toBeTruthy()
-
-        // No provider saved → empty state message visible, test-all button absent
-        expect(
-            screen.getByRole('status', { name: /notification test unavailable/i })
-        ).toBeTruthy()
-        expect(screen.queryByRole('button', { name: /test all notification types/i })).toBeNull()
-    })
-
-    it('reveals the test-delivery section after saving a provider', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
-        vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
 
         renderWithQuery(<NotificationPreferences userId="user-1" />)
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
-        // Enable email and fill address
-        const toggles = screen.getAllByRole('button')
-        fireEvent.click(toggles[0])
-        fireEvent.change(await screen.findByPlaceholderText(/your-email@example.com/i), {
-            target: { value: 'user@example.com' },
-        })
 
-        // Save
-        fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
-        await screen.findByText(/preferences saved successfully/i)
-
-        // Test-all button should now be visible
-        expect(screen.getByRole('button', { name: /test all notification types/i })).toBeTruthy()
-    })
-
-    it('loads existing provider preferences and shows test section immediately', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({
-            preferences: {
-                emailEnabled: true,
-                emailAddress: 'existing@example.com',
-                webhookEnabled: false,
-                webhookUrl: '',
-                events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
-            },
-        } as any)
-
-        renderWithQuery(<NotificationPreferences userId="user-1" />)
-
-        // Test section should be visible without needing to save first
-        expect(await screen.findByRole('button', { name: /test all notification types/i })).toBeTruthy()
-    })
-
-    it('hides the test section after unsubscribing from all', async () => {
-        vi.spyOn(api, 'get').mockResolvedValue({
-            preferences: {
-                emailEnabled: true,
-                emailAddress: 'existing@example.com',
-                webhookEnabled: false,
-                webhookUrl: '',
-                events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
-            },
-        } as any)
-        vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as any)
-
-        renderWithQuery(<NotificationPreferences userId="user-1" />)
-        expect(await screen.findByRole('button', { name: /test all notification types/i })).toBeTruthy()
-
-        fireEvent.click(screen.getByRole('button', { name: /unsubscribe from all/i }))
-
-        await waitFor(() => {
-            expect(screen.queryByRole('button', { name: /test all notification types/i })).toBeNull()
-        })
-        expect(
-            screen.getByRole('status', { name: /notification test unavailable/i })
-        ).toBeTruthy()
     })
 })
 

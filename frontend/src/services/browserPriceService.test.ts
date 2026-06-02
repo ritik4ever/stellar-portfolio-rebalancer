@@ -101,6 +101,23 @@ describe('browserPriceService', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
+  it('exposes cache inspector metadata for developer tools', async () => {
+    const mockData = { prices: { XLM: { price: 0.10, timestamp: Date.now() / 1000, source: 'reflector' } } }
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockData,
+    } as Response)
+
+    await browserPriceService.getCurrentPrices()
+    const entries = browserPriceService.getCacheInspectorEntries()
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.key).toBe('prices')
+    expect(entries[0]?.assetCount).toBe(1)
+    expect(entries[0]?.sources).toContain('reflector')
+  })
+
   it('serves stale cache when fetch fails and cache exists', async () => {
     const mockData = { prices: { XLM: { price: 0.10, timestamp: Date.now() / 1000 } } }
     
