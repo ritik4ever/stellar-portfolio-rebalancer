@@ -9,36 +9,41 @@ import { requireAdmin } from '../middleware/auth.js'
 import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest } from '../middleware/validate.js'
-import { adminAddAssetSchema, adminPatchAssetSchema } from './validation.js'
+import { adminAddAssetSchema, adminPatchAssetSchema, assetsListQuerySchema } from './validation.js'
 import { logger, logAudit } from '../utils/logger.js'
-import { getErrorObject, getErrorMessage, parseOptionalBoolean } from '../utils/helpers.js'
+import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 
 export const assetsRouter = Router()
 
-/** Public: list enabled assets for portfolio setup and frontend */
+/**
+ * Public: browse the asset catalog with pagination, sorting, and
+ * issuer/symbol filtering. Defaults to enabled assets only, sorted by symbol.
+ */
 assetsRouter.get('/assets', (req: Request, res: Response) => {
     try {
-        const enabledOnly = parseOptionalBoolean(req.query.enabledOnly) !== false
-        const queryCode = typeof req.query.code === 'string' ? req.query.code.trim().toUpperCase() : ''
-        const querySearch = typeof req.query.search === 'string' ? req.query.search.trim().toUpperCase() : ''
-        const queryQ = typeof req.query.q === 'string' ? req.query.q.trim().toUpperCase() : ''
-        const term = queryCode || querySearch || queryQ
-        const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1)
-        const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '20'), 10) || 20))
-
-        let assets = assetRegistryService.list(enabledOnly)
-        if (term) {
-            assets = assets.filter(asset =>
-                asset.symbol.includes(term) || asset.name.toUpperCase().includes(term)
-            )
+        const parsed = assetsListQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+            const message = parsed.error.issues
+                .map(issue => `${issue.path.join('.') || 'query'}: ${issue.message}`)
+                .join('; ')
+            logger.warn('[WARN] List assets rejected invalid query', { query: req.query, message })
+            return fail(res, 400, 'VALIDATION_ERROR', message)
         }
 
-        const total = assets.length
-        const start = (page - 1) * limit
-        const pagedAssets = assets.slice(start, start + limit)
+        const { enabledOnly, code, search, q, issuer, sortBy, order, page, limit } = parsed.data
 
-        return ok(res, { assets: pagedAssets, page, limit, total })
+        const result = assetRegistryService.query({
+            enabledOnly: enabledOnly !== false,
+            search: code || search || q,
+            issuer,
+            sortBy,
+            order,
+            page,
+            limit
+        })
+
+        return ok(res, result)
     } catch (error) {
         logger.error('[ERROR] List assets failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))

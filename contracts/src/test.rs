@@ -1074,7 +1074,7 @@ fn test_create_portfolio_invalid_allocation() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 60);
     allocations.set(Address::generate(&env), 30); // sums to 90, not 100
-    client.create_portfolio(&user, &allocations, &5, &50);
+    client.create_portfolio(&user, &allocations, &MIN_REBALANCE_THRESHOLD, &MIN_SLIPPAGE_TOLERANCE_BPS);
 }
 
 #[test]
@@ -1091,7 +1091,7 @@ fn test_create_portfolio_threshold_too_low() {
 
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
-    client.create_portfolio(&user, &allocations, &0, &50);
+    client.create_portfolio(&user, &allocations, &(MIN_REBALANCE_THRESHOLD - 1), &50);
 }
 
 #[test]
@@ -1108,7 +1108,7 @@ fn test_create_portfolio_threshold_too_high() {
 
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
-    client.create_portfolio(&user, &allocations, &51, &50);
+    client.create_portfolio(&user, &allocations, &(MAX_REBALANCE_THRESHOLD + 1), &50);
 }
 
 #[test]
@@ -1154,7 +1154,7 @@ fn test_create_portfolio_slippage_too_low() {
     let user = Address::generate(&env);
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
-    client.create_portfolio(&user, &allocations, &5, &9);
+    client.create_portfolio(&user, &allocations, &5, &(MIN_SLIPPAGE_TOLERANCE_BPS - 1));
 }
 
 #[test]
@@ -1169,7 +1169,20 @@ fn test_create_portfolio_slippage_too_high() {
     let user = Address::generate(&env);
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
-    client.create_portfolio(&user, &allocations, &5, &501);
+    client.create_portfolio(&user, &allocations, &5, &(MAX_SLIPPAGE_TOLERANCE_BPS + 1));
+}
+
+#[test]
+fn test_config_constants_accessors() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    assert_eq!(client.min_rebalance_threshold(), MIN_REBALANCE_THRESHOLD);
+    assert_eq!(client.max_rebalance_threshold(), MAX_REBALANCE_THRESHOLD);
+    assert_eq!(client.min_slippage_tolerance_bps(), MIN_SLIPPAGE_TOLERANCE_BPS);
+    assert_eq!(client.max_slippage_tolerance_bps(), MAX_SLIPPAGE_TOLERANCE_BPS);
+    assert_eq!(client.max_portfolio_assets(), MAX_PORTFOLIO_ASSETS);
 }
 
 #[test]
