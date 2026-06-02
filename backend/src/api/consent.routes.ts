@@ -11,7 +11,6 @@ import {
     recordConsentSchema
 } from './validation.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 
@@ -49,7 +48,7 @@ consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (r
 })
 
 /** GDPR: Grant active consent and append an immutable audit event. */
-consentRouter.post('/consent/grant', requireJwtWhenEnabled, ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(consentGrantSchema), (req: Request, res: Response) => {
+consentRouter.post('/consent/grant', requireJwtWhenEnabled, idempotencyMiddleware, validateRequest(consentGrantSchema), (req: Request, res: Response) => {
     try {
         const userId = resolveConsentUserId(req, req.body.userId)
         if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
@@ -79,7 +78,7 @@ consentRouter.post('/consent/grant', requireJwtWhenEnabled, ...protectedWriteLim
 })
 
 /** GDPR: Revoke active consent and append an immutable audit event. */
-consentRouter.post('/consent/revoke', requireJwtWhenEnabled, ...protectedCriticalLimiter, idempotencyMiddleware, validateRequest(consentRevokeSchema), (req: Request, res: Response) => {
+consentRouter.post('/consent/revoke', requireJwtWhenEnabled, idempotencyMiddleware, validateRequest(consentRevokeSchema), (req: Request, res: Response) => {
     try {
         const userId = resolveConsentUserId(req, req.body.userId)
         if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
@@ -115,7 +114,7 @@ consentRouter.get('/consent/audit', requireJwtWhenEnabled, validateQuery(consent
 })
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-consentRouter.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
+consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
     try {
         const { userId, terms, privacy, cookies } = req.body
         databaseService.recordConsent(userId, { terms, privacy, cookies, ...consentRequestMeta(req) })
@@ -127,7 +126,7 @@ consentRouter.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, 
 })
 
 /** GDPR: Purge consent audit events older than the configured retention period. */
-consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, ...protectedCriticalLimiter, (req: Request, res: Response) => {
+consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, (req: Request, res: Response) => {
     try {
         const retentionDays = parseInt(req.body.retentionDays as string) || parseInt(process.env.CONSENT_AUDIT_RETENTION_DAYS || '365')
         if (!Number.isInteger(retentionDays) || retentionDays < 1) {
@@ -146,7 +145,7 @@ consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, ...protectedCr
 })
 
 /** GDPR: Delete all data for a user (portfolios, history, consent). Requires JWT when enabled. */
-consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, ...protectedCriticalLimiter, async (req: Request, res: Response) => {
+consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
         const address = req.params.address
         const userId = req.user?.address ?? address

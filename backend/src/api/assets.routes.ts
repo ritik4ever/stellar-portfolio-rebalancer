@@ -6,7 +6,6 @@ import {
 } from '../services/assetRegistryValidation.js'
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { requireAdmin } from '../middleware/auth.js'
-import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest } from '../middleware/validate.js'
 import { adminAddAssetSchema, adminPatchAssetSchema, assetsListQuerySchema } from './validation.js'
@@ -99,7 +98,7 @@ assetsRouter.get('/admin/rate-limits/metrics', requireAdmin, (req: Request, res:
 })
 
 /** Admin: add asset */
-assetsRouter.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
+assetsRouter.post('/admin/assets', requireAdmin, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
         assetRegistryService.add(
@@ -141,7 +140,7 @@ assetsRouter.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMi
 })
 
 /** Admin: remove asset */
-assetsRouter.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+assetsRouter.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
@@ -169,7 +168,7 @@ assetsRouter.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, asy
 })
 
 /** Admin: enable/disable asset */
-assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
+assetsRouter.patch('/admin/assets/:symbol', requireAdmin, idempotencyMiddleware, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         const { enabled } = req.body

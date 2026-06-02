@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { notificationService } from '../services/notificationService.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
-import { writeRateLimiter, protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
 import { notificationSubscribeSchema, notificationQuerySchema } from './validation.js'
@@ -13,7 +12,7 @@ import { ok, fail } from '../utils/apiResponse.js'
 export const notificationsRouter = Router()
 
 // Subscribe to notifications
-notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(notificationSubscribeSchema), async (req: Request, res: Response) => {
+notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, idempotencyMiddleware, validateRequest(notificationSubscribeSchema), async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, derive userId from the token only.
         // Reject requests that try to subscribe on behalf of a different address.
@@ -85,7 +84,7 @@ notificationsRouter.get('/notifications/preferences', requireJwtWhenEnabled, val
 })
 
 // Unsubscribe from notifications
-notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, writeRateLimiter, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
+notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, only allow unsubscribing own preferences.
         let userId: string | undefined

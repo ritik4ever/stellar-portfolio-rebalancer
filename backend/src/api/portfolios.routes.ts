@@ -6,7 +6,6 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
 import { riskManagementService } from '../services/serviceContainer.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
@@ -25,7 +24,7 @@ const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 
-portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio', idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
         if (!parsed.success) {
@@ -174,8 +173,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-// Manual portfolio rebalance
-portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...protectedCriticalLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
