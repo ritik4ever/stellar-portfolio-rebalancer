@@ -1,4 +1,4 @@
-#[cfg(test)]
+
 extern crate std;
 
 use super::*;
@@ -2209,3 +2209,77 @@ fn assert_cost_within_tolerance(name: &str, cpu: u64, mem: u64, baseline_cpu: u6
         mem_limit
     );
 }
+
+#[test]
+fn test_get_config_view_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    let config_view = client.get_config_view(&pid);
+
+    assert_eq!(config_view.admin, admin);
+    assert_eq!(config_view.reflector_address, reflector_id);
+    assert_eq!(config_view.emergency_stop, false);
+    
+    let portfolio = match config_view.portfolio {
+        PortfolioOption::Some(p) => p,
+        PortfolioOption::None => panic!("Expected PortfolioOption::Some"),
+    };
+    assert_eq!(portfolio.user, user);
+    assert_eq!(portfolio.rebalance_threshold, 5);
+    assert_eq!(portfolio.slippage_tolerance, 50);
+}
+
+#[test]
+fn test_get_config_view_no_portfolio() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    // Get config for non-existent portfolio_id 999
+    let config_view = client.get_config_view(&999);
+
+    assert_eq!(config_view.admin, admin);
+    assert_eq!(config_view.reflector_address, reflector_id);
+    assert_eq!(config_view.emergency_stop, false);
+    assert_eq!(config_view.portfolio, PortfolioOption::None);
+}
+
+#[test]
+fn test_get_config_view_emergency_stop() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+    client.set_emergency_stop(&true);
+
+    let config_view = client.get_config_view(&1);
+
+    assert_eq!(config_view.admin, admin);
+    assert_eq!(config_view.reflector_address, reflector_id);
+    assert_eq!(config_view.emergency_stop, true);
+    assert_eq!(config_view.portfolio, PortfolioOption::None);
+}
+
+

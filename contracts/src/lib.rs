@@ -572,9 +572,5 @@ fn validate_asset_decimals(allocations: &Map<Address, u32>, asset_decimals: &Map
             None => return false,
         }
     }
-    true
-}
 
-fn validate_slippage_policy_version(version: u32) -> bool {
-    version == SLIPPAGE_POLICY_VERSION_V1
 }

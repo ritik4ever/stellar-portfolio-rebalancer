@@ -183,3 +183,21 @@ pub enum Error {
     TooManyAssets = 11,
 
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PortfolioOption {
+    None,
+    Some(Portfolio),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigView {
+    pub admin: Address,
+    pub reflector_address: Address,
+    pub emergency_stop: bool,
+    pub portfolio: PortfolioOption,
+}
+
+
