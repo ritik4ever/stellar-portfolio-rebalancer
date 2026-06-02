@@ -8,6 +8,7 @@ import {
     Memo
 } from '@stellar/stellar-sdk'
 import { Dec } from '../utils/decimal.js'
+import type { ExecutionExplanation } from '../types/index.js'
 
 export interface DEXTradeRequest {
     tradeId: string
@@ -63,6 +64,7 @@ export interface DEXRebalanceExecutionResult {
     totalSlippageBps: number
     rollback: DEXRollbackResult
     failureReason?: string
+    explanation: ExecutionExplanation
 }
 
 interface MarketAssessment {
@@ -232,15 +234,45 @@ export class StellarDEXService {
             rollback.failures = rollbackResult.failures
         }
 
+        const totalSlippageBps = slippageWeight > 0 ? (slippageWeightedSum / slippageWeight) : 0
+        const allTrades = [...executedTrades, ...failedTrades]
+        const skippedAlternatives: string[] = []
+        for (const t of allTrades) {
+            if (t.spreadBps > config.maxSpreadBps) {
+                skippedAlternatives.push(`${t.fromAsset}→${t.toAsset}: spread ${Dec.formatBps(t.spreadBps)} bps exceeded max`)
+            } else if (t.liquidityCoverage < config.minLiquidityCoverage) {
+                skippedAlternatives.push(`${t.fromAsset}→${t.toAsset}: liquidity ${t.liquidityCoverage.toFixed(2)}x below required`)
+            }
+        }
+
+        const routeLength = executedTrades.length + failedTrades.length
+        let rationale: string
+        if (status === 'success') {
+            rationale = `Executed ${executedTrades.length} trade(s) with avg slippage ${Dec.formatBps(totalSlippageBps)} bps`
+        } else if (status === 'partial') {
+            rationale = `Partial fill: ${executedTrades.length} trade(s) executed, ${partialFills.length} partially filled`
+        } else {
+            rationale = failureReason || 'Execution failed'
+        }
+
+        const explanation: ExecutionExplanation = {
+            routeLength,
+            estimatedSlippage: totalSlippageBps,
+            skippedAlternatives,
+            rationale,
+            ...(status === 'failed' && failureReason ? { failureReason } : {})
+        }
+
         return {
             status,
             executedTrades,
             partialFills,
             failedTrades,
             totalEstimatedFeeXLM,
-            totalSlippageBps: slippageWeight > 0 ? (slippageWeightedSum / slippageWeight) : 0,
+            totalSlippageBps,
             rollback,
-            failureReason
+            failureReason,
+            explanation
         }
     }
 

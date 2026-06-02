@@ -34,6 +34,10 @@ export const createPortfolioSchema = z.object({
     }).optional(),
 }).strict();
 
+export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
+    version: z.number().int().min(1, "Version must be a positive integer")
+});
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({

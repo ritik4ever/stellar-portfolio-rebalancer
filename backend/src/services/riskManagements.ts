@@ -1,4 +1,4 @@
-import type { PricesMap } from '../types/index.js'
+import type { PricesMap, RiskHeatmap } from '../types/index.js'
 import { assetRegistryService } from './assetRegistryService.js'
 import { logger } from '../utils/logger.js'
 
@@ -381,6 +381,43 @@ export class RiskManagementService {
         }
 
         return recommendations
+    }
+
+    calculateRiskHeatmap(
+        allocationsInput: Record<string, number>,
+        _prices: PricesMap
+    ): RiskHeatmap {
+        const weights = this.normalizeAllocations(allocationsInput || {})
+        const stats = this.computeStatisticalRiskMetrics(weights)
+        
+        const concentrationRisk = this.calculateConcentrationRisk(weights)
+        const volatilityScore = this.calculateVolatilityScore(stats.ewmaVolatility)
+        const drawdownScore = this.safeRatio(stats.maxDrawdown, this.DRAWDOWN_BLOCK_THRESHOLD)
+
+        const normConcentration = Math.min(1, Math.max(0, concentrationRisk))
+        const normVolatility = Math.min(1, Math.max(0, volatilityScore))
+        const normDrawdown = Math.min(1, Math.max(0, drawdownScore))
+
+        const getLevel = (score: number): 'low' | 'medium' | 'high' => {
+            if (score > 0.8) return 'high'
+            if (score > 0.4) return 'medium'
+            return 'low'
+        }
+
+        return {
+            concentration: {
+                score: Number(normConcentration.toFixed(4)),
+                level: getLevel(normConcentration)
+            },
+            volatility: {
+                score: Number(normVolatility.toFixed(4)),
+                level: getLevel(normVolatility)
+            },
+            drawdown: {
+                score: Number(normDrawdown.toFixed(4)),
+                level: getLevel(normDrawdown)
+            }
+        }
     }
 
     private checkVolatility(asset: string): RiskAlert | null {

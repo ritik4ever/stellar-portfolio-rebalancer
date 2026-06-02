@@ -4,9 +4,10 @@ import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
-import { rebalanceLockService } from '../services/rebalanceLock.js'
+
 import { riskManagementService } from '../services/serviceContainer.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
+import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js';
+import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
@@ -17,6 +18,8 @@ import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { ConflictError } from '../types/index.js'
+import { updatePortfolioSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 
 export const portfoliosRouter = Router()
@@ -65,14 +68,76 @@ portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddlew
     }
 })
 
+// Update portfolio with optimistic concurrency control
+portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(updatePortfolioSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
+        const { version, ...updates } = req.body;
+        if (version === undefined) return fail(res, 400, 'VALIDATION_ERROR', 'Version is required for update');
+        const okUpdate = await portfolioStorage.updatePortfolio(portfolioId, updates, version);
+        if (!okUpdate) return fail(res, 409, 'CONFLICT', 'Version conflict', { currentVersion: (await portfolioStorage.getPortfolio(portfolioId))?.version });
+        const updated = await portfolioStorage.getPortfolio(portfolioId);
+        return ok(res, { portfolio: updated }, { status: 200 });
+    } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message);
+        }
+        logger.error('[ERROR] Update portfolio failed', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
 portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        const portfolio = await stellarService.getPortfolio(portfolioId)
-        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        
+        let portfolio: any
+        let riskHeatmap: any = undefined
+        
+        try {
+            portfolio = await stellarService.getPortfolio(portfolioId)
+            
+            try {
+                const prices = await reflectorService.getCurrentPrices()
+                riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
+            } catch (err) {
+                logger.warn('[WARN] Failed to calculate risk heatmap for portfolio, falling back', { portfolioId, error: getErrorObject(err) })
+            }
+        } catch (error) {
+            const errMsg = getErrorMessage(error)
+            if (errMsg.includes('Portfolio not found')) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
+            
+            logger.warn('[WARN] Failed to fetch portfolio with prices, attempting storage fallback', { portfolioId, error: getErrorObject(error) })
+            const rawPortfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (!rawPortfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
+            
+            portfolio = {
+                id: portfolioId,
+                userAddress: rawPortfolio.userAddress,
+                totalValue: rawPortfolio.totalValue || 0,
+                allocations: Object.entries(rawPortfolio.allocations).map(([asset, target]) => ({
+                    asset,
+                    target,
+                    current: target,
+                    amount: 0,
+                    balance: rawPortfolio.balances[asset] || 0,
+                    price: 0
+                })),
+                needsRebalance: false,
+                lastRebalance: rawPortfolio.lastRebalance,
+                threshold: rawPortfolio.threshold,
+                slippageTolerancePercent: rawPortfolio.slippageTolerancePercent ?? rawPortfolio.slippageTolerance ?? 1,
+                dayChange: 0
+            }
+        }
 
-        return ok(res, { portfolio })
+        return ok(res, { portfolio, riskHeatmap })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -291,7 +356,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
         console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
 
         // Try to acquire lock
-        const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+        const lockAcquired = await acquireWorkerLock(portfolioId);
         if (!lockAcquired) {
             console.log(`[WARNING] Rebalance already in progress for portfolio: ${portfolioId}`);
             return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
@@ -315,14 +380,20 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
 
             const result = await stellarService.executeRebalance(portfolioId);
 
+            logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
+
             return ok(res, { result });
         } finally {
-            await rebalanceLockService.releaseLock(portfolioId);
+            await releaseWorkerLock(portfolioId);
         }
     } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message);
+        }
         console.error('[ERROR] Manual rebalance failed:', error);
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
+
 });
 
 // ================================
@@ -377,6 +448,34 @@ portfoliosRouter.get('/portfolio/:id/performance-summary', async (req: Request, 
         return ok(res, { portfolioId, ...summary })
     } catch (error) {
         logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        }
+
+        let portfolio: any
+        try {
+            portfolio = await stellarService.getPortfolio(portfolioId)
+        } catch (error) {
+            const errMsg = getErrorMessage(error)
+            if (errMsg.includes('Portfolio not found')) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
+            throw error
+        }
+
+        const prices = await reflectorService.getCurrentPrices()
+        const riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
+
+        return ok(res, { riskHeatmap })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio risk diagnostics failed', { error: getErrorObject(error), portfolioId: req.params.id })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

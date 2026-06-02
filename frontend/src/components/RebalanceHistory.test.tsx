@@ -51,6 +51,17 @@ describe('RebalanceHistory', () => {
         expect(screen.getByText(/2 trades/i)).toBeTruthy()
     })
 
+    it('renders skeleton loading state', () => {
+        useHistoryMock.mockReturnValue({
+            data: undefined,
+            isLoading: true,
+            error: null
+        })
+
+        render(<RebalanceHistory portfolioId="p1" isLoading={true} />)
+        expect(screen.getByTestId('rebalance-history-skeleton')).toBeInTheDocument()
+    })
+
     it('shows fallback error state', async () => {
         useHistoryMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error('boom') })
 

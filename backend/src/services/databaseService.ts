@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
-import { ConflictError, BackupVerificationError, IssuerMetadata } from "../types/index.js";
+
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 
