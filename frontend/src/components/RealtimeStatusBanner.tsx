@@ -1,8 +1,5 @@
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
-import { Loader2, WifiOff, Radio, Pause } from 'lucide-react'
 
-export default function RealtimeStatusBanner() {
-    const { state, statusDetail, reconnectInfo, reconnect } = useRealtimeConnection()
 
     if (state === 'connected') {
         return (
@@ -50,39 +47,14 @@ export default function RealtimeStatusBanner() {
             ? Math.max(1, Math.round(reconnectInfo.nextRetryMs / 1000))
             : null
 
+    const buttonClass =
+        state === 'disconnected'
+            ? 'bg-white/85 text-red-900 ring-red-200 dark:bg-red-900/40 dark:text-red-50 dark:ring-red-700'
+            : 'bg-white/85 text-amber-900 ring-amber-200 dark:bg-amber-900/40 dark:text-amber-50 dark:ring-amber-700'
+
     return (
         <div
-            className={`fixed top-3 right-3 z-40 max-w-[calc(100vw-1.5rem)] rounded-2xl border px-3 py-2 text-sm shadow-lg backdrop-blur ${barClass}`}
-            role="alert"
-            aria-live="assertive"
-        >
-            <div className="flex items-center gap-2">
-                {state === 'disconnected' ? (
-                    <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
-                ) : state === 'paused' ? (
-                    <Pause className="h-4 w-4 shrink-0" aria-hidden />
-                ) : (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                )}
-                <div className="min-w-0">
-                    <div className="truncate font-medium">{label}</div>
-                    {statusDetail ? (
-                        <div className="truncate text-[11px] opacity-85">{statusDetail}</div>
-                    ) : retrySeconds != null && state === 'reconnecting' ? (
-                        <div className="truncate text-[11px] opacity-85">
-                            Retrying in about {retrySeconds}s
-                        </div>
-                    ) : null}
-                </div>
-                {state === 'disconnected' || state === 'paused' ? (
-                    <button
-                        type="button"
-                        onClick={() => reconnect()}
-                        className="ml-1 rounded-full bg-white/85 px-3 py-1 text-xs font-medium ring-1 hover:bg-white dark:bg-black/20"
-                    >
-                        {state === 'paused' ? 'Resume' : 'Retry connection'}
-                    </button>
-                ) : null}
+
             </div>
             {showDrilldown && (
                 <ReadinessDrilldown
