@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { formatLegalVersionLabel } from '../content/legalMetadata'
 import { useRecordConsentMutation } from '../hooks/mutations/useConsentMutation'
 
 interface ConsentModalProps {
@@ -19,11 +20,13 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
     const [cookies, setCookies] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const recordConsent = useRecordConsentMutation(userId)
+    const submitting = recordConsent.isPending
 
     const allAccepted = terms && privacy && cookies
 
+
     const handleAccept = async () => {
-        if (!allAccepted) return
+        if (!allAccepted || submitting) return
         setError(null)
         try {
             await recordConsent.mutateAsync()
@@ -33,7 +36,6 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
         }
     }
 
-    const submitting = recordConsent.isPending
 
     return (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
@@ -44,29 +46,22 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                         Accept to continue
                     </h2>
                 </div>
-
-                <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">
                     To use the Portfolio Rebalancer you must accept the following. You can read each document before accepting.
                 </p>
-
-                <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-                    <h3 className="font-semibold mb-2">Consent document version history</h3>
-                    <p className="mb-3">
-                        Before re-accepting, review what may have changed in the consent documents.
-                    </p>
-                    <ul className="list-disc space-y-1 pl-5">
-                        <li>Terms of Service may include updated disclaimers, liability terms, and smart contract risk language.</li>
-                        <li>Privacy Policy may include updated data handling, retention, and compliance information.</li>
-                        <li>Cookie Policy may include updated cookie usage and preference details.</li>
-                    </ul>
-                </div>
-
+                <p
+                    className="text-gray-500 dark:text-gray-500 text-xs mb-6"
+                    data-testid="consent-legal-version"
+                >
+                    {formatLegalVersionLabel()}
+                </p>
                 <div className="space-y-4">
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input
                             type="checkbox"
                             checked={terms}
                             onChange={(e) => setTerms(e.target.checked)}
+                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
@@ -87,6 +82,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             type="checkbox"
                             checked={privacy}
                             onChange={(e) => setPrivacy(e.target.checked)}
+                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
@@ -107,6 +103,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             type="checkbox"
                             checked={cookies}
                             onChange={(e) => setCookies(e.target.checked)}
+                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">

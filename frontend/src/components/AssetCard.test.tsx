@@ -70,4 +70,17 @@ describe('AssetCard', () => {
             expect(screen.getByTestId('drift-value')).toHaveTextContent('N/A')
         })
     })
+
+    describe('Partial fallback and source labels', () => {
+        it('shows fallback source label when price source is fallback', () => {
+            render(<AssetCard asset={mockAsset} price={{ price: 0.5, change: -1, source: 'fallback_browser' }} />)
+            expect(screen.getByText('Fallback price')).toBeTruthy()
+            expect(screen.getByTestId('price-value')).toHaveTextContent('$0.50')
+        })
+
+        it('shows cached price label when price is served from cache', () => {
+            render(<AssetCard asset={mockAsset} price={{ price: 0.5, change: -1, source: 'coingecko_browser', servedFromCache: true }} />)
+            expect(screen.getByText('Cached price')).toBeTruthy()
+        })
+    })
 })

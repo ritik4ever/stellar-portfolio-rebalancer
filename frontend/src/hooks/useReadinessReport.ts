@@ -209,5 +209,7 @@ export function useReadinessReport() {
         void load(ac.signal)
     }, [load])
 
-    return { report, notices, loadError, loading, refresh }
+    const bootReady = !loading
+
+    return { report, notices, loadError, loading, bootReady, refresh }
 }

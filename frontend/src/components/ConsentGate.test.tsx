@@ -4,6 +4,7 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ConsentGate from './ConsentGate'
 import { api } from '../config/api'
+import { formatLegalVersionLabel } from '../content/legalMetadata'
 
 const CONSENT_KEY = 'consent:user-1'
 
@@ -67,6 +68,9 @@ describe('ConsentGate', () => {
     it('shows consent modal when user has no active consent', async () => {
         renderWithQuery(<ConsentHarness />)
         expect(await screen.findByText(/accept to continue/i)).toBeTruthy()
+        expect(screen.getByTestId('consent-legal-version')).toHaveTextContent(
+            formatLegalVersionLabel(),
+        )
     })
 
     it('shows consent document version history before acceptance', async () => {

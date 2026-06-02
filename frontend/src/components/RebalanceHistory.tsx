@@ -1,5 +1,5 @@
 import React from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search } from 'lucide-react'
 
 // TanStack Query Hooks
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
@@ -50,9 +50,13 @@ interface RebalanceHistoryProps {
 const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
     const [page, setPage] = React.useState(1)
     const limit = 10
+    const [search, setSearch] = React.useState('')
+    const [statusFilter, setStatusFilter] = React.useState('')
+    const [triggerFilter, setTriggerFilter] = React.useState('')
+    const [dateFilter, setDateFilter] = React.useState('')
 
     // Query for rebalance history
-    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit)
+    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit, search, statusFilter, triggerFilter, dateFilter)
 
     // Demo history generator
     const getDemoHistory = (): RebalanceEvent[] => {
@@ -134,7 +138,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
     }
 
     // Determine finalized data
-    const history: RebalanceEvent[] = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : [])
+    let filtered = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : []); if(search) filtered = filtered.filter((e:any) => e.trigger.toLowerCase().includes(search.toLowerCase()) || e.details?.reason?.toLowerCase().includes(search.toLowerCase())); if(statusFilter) filtered = filtered.filter((e:any) => e.status === statusFilter); if(triggerFilter) filtered = filtered.filter((e:any) => e.trigger.includes(triggerFilter)); if(dateFilter) filtered = filtered.filter((e:any) => e.timestamp.startsWith(dateFilter)); const history: RebalanceEvent[] = filtered
     const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
     const totalPages = Math.ceil(totalCount / limit)
     const error = queryError ? 'Failed to load rebalance history' : null
@@ -334,8 +338,17 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         )}
                     </div>
                 </div>
+                    {/* Filters UI */}
+                    <div className="mt-4 flex flex-col sm:flex-row gap-3">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <input type="text" placeholder="Search trigger or reason..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="">All Status</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="pending">Pending</option></select>
+                        <select value={triggerFilter} onChange={(e) => setTriggerFilter(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="">All Triggers</option><option value="Scheduled rebalance">Scheduled</option><option value="Threshold exceeded (8.2%)">Threshold Exceeded</option></select>
+                        <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
             </div>
-
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
                 {history.length === 0 ? (
                     <div className="p-6 text-center text-gray-500 dark:text-gray-400">
