@@ -440,6 +440,8 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
 - **GET /api/portfolio/{id}/performance-summary** — Performance summary.
+- **GET /api/portfolio/{id}/export** — Start portfolio export job (query: `format=json|csv|pdf`). Returns 202 Accepted with a `jobId`.
+- **GET /api/portfolio/{id}/export/status/{jobId}** — Poll export job status. Returns the file content when complete, or job status while processing.
 
 ### Rebalance history
 
