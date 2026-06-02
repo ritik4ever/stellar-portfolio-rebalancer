@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
@@ -68,6 +68,7 @@ interface ConsentAuditRow {
   timestamp: string;
   ip_address: string | null;
   user_agent: string | null;
+  document_version: string | null;
 }
 
 export interface ConsentRecord {
@@ -76,6 +77,7 @@ export interface ConsentRecord {
   cookieAcceptedAt: string | null;
   revokedAt: string | null;
   active: boolean;
+  documentVersion: string | null;
 }
 
 export interface ConsentAuditEvent {
@@ -85,6 +87,18 @@ export interface ConsentAuditEvent {
   timestamp: string;
   ipAddress: string | null;
   userAgent: string | null;
+  documentVersion: string | null;
+}
+
+/**
+ * Compute a SHA-256 hex digest of the supplied legal document text.
+ * Returns a deterministic 64-char lowercase hex string.
+ * When `text` is falsy a sentinel hash is returned so that every consent
+ * record always carries a non-null version reference.
+ */
+export function computeDocumentVersionHash(text?: string): string {
+  const input = text || "";
+  return createHash("sha256").update(input, "utf8").digest("hex");
 }
 
 // ─────────────────────────────────────────────
@@ -164,6 +178,7 @@ CREATE TABLE IF NOT EXISTS legal_consent (
     is_active           INTEGER NOT NULL DEFAULT 1,
     ip_address          TEXT,
     user_agent          TEXT,
+    document_version    TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -174,7 +189,8 @@ CREATE TABLE IF NOT EXISTS consent_audit_events (
     action      TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
     timestamp   TEXT NOT NULL,
     ip_address  TEXT,
-    user_agent  TEXT
+    user_agent  TEXT,
+    document_version TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
@@ -468,11 +484,28 @@ export class DatabaseService {
           action      TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
           timestamp   TEXT NOT NULL,
           ip_address  TEXT,
-          user_agent  TEXT
+          user_agent  TEXT,
+          document_version TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
+
+    // Migration: add document_version to legal_consent and consent_audit_events
+    const legalConsentCols = this.db
+      .prepare("PRAGMA table_info(legal_consent)")
+      .all() as Array<{ name: string }>;
+    if (!legalConsentCols.some((c) => c.name === "document_version")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN document_version TEXT");
+      logger.info("[DB] Migration: added document_version column to legal_consent");
+    }
+    const auditCols = this.db
+      .prepare("PRAGMA table_info(consent_audit_events)")
+      .all() as Array<{ name: string }>;
+    if (!auditCols.some((c) => c.name === "document_version")) {
+      this.db.exec("ALTER TABLE consent_audit_events ADD COLUMN document_version TEXT");
+      logger.info("[DB] Migration: added document_version column to consent_audit_events");
+    }
   }
 
   private _seedDefaultAssets(): void {
@@ -910,14 +943,16 @@ export class DatabaseService {
       cookies: boolean;
       ipAddress?: string;
       userAgent?: string;
+      documentText?: string;
     },
   ): void {
     const now = new Date().toISOString();
+    const docVersion = computeDocumentVersionHash(opts.documentText);
     const grant = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, ip_address, user_agent, updated_at)
-               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?)
+          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, ip_address, user_agent, document_version, updated_at)
+               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
                  privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
@@ -926,6 +961,7 @@ export class DatabaseService {
                  is_active = 1,
                  ip_address = excluded.ip_address,
                  user_agent = excluded.user_agent,
+                 document_version = excluded.document_version,
                  updated_at = excluded.updated_at`,
         )
         .run(
@@ -935,11 +971,13 @@ export class DatabaseService {
           opts.cookies ? now : null,
           opts.ipAddress ?? null,
           opts.userAgent ?? null,
+          docVersion,
           now,
         );
-      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent);
+      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion);
     });
     grant();
+    logger.info("[DB] Consent recorded", { userId, documentVersion: docVersion });
   }
 
   revokeConsent(
@@ -947,19 +985,22 @@ export class DatabaseService {
     opts: {
       ipAddress?: string;
       userAgent?: string;
+      documentText?: string;
     } = {},
   ): void {
     const now = new Date().toISOString();
+    const docVersion = opts.documentText ? computeDocumentVersionHash(opts.documentText) : null;
     const revoke = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO legal_consent (user_id, revoked_at, is_active, ip_address, user_agent, updated_at)
-               VALUES (?, ?, 0, ?, ?, ?)
+          `INSERT INTO legal_consent (user_id, revoked_at, is_active, ip_address, user_agent, document_version, updated_at)
+               VALUES (?, ?, 0, ?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  revoked_at = excluded.revoked_at,
                  is_active = 0,
                  ip_address = excluded.ip_address,
                  user_agent = excluded.user_agent,
+                 document_version = COALESCE(excluded.document_version, document_version),
                  updated_at = excluded.updated_at`,
         )
         .run(
@@ -967,11 +1008,13 @@ export class DatabaseService {
           now,
           opts.ipAddress ?? null,
           opts.userAgent ?? null,
+          docVersion,
           now,
         );
-      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent);
+      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent, docVersion);
     });
     revoke();
+    logger.info("[DB] Consent revoked", { userId, documentVersion: docVersion });
   }
 
   getConsent(userId: string): ConsentRecord | undefined {
@@ -984,8 +1027,9 @@ export class DatabaseService {
           cookie_accepted_at: string | null;
           revoked_at: string | null;
           is_active: number;
+          document_version: string | null;
         }
-      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active FROM legal_consent WHERE user_id = ?")
+      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, document_version FROM legal_consent WHERE user_id = ?")
       .get(userId);
     if (!row) return undefined;
     return {
@@ -994,6 +1038,7 @@ export class DatabaseService {
       cookieAcceptedAt: row.cookie_accepted_at,
       revokedAt: row.revoked_at,
       active: row.is_active === 1,
+      documentVersion: row.document_version,
     };
   }
 
@@ -1007,7 +1052,7 @@ export class DatabaseService {
   getConsentAudit(userId: string): ConsentAuditEvent[] {
     const rows = this.db
       .prepare<[string], ConsentAuditRow>(
-        `SELECT id, user_id, action, timestamp, ip_address, user_agent
+        `SELECT id, user_id, action, timestamp, ip_address, user_agent, document_version
          FROM consent_audit_events
          WHERE user_id = ?
          ORDER BY timestamp ASC, id ASC`,
@@ -1020,6 +1065,7 @@ export class DatabaseService {
       timestamp: row.timestamp,
       ipAddress: row.ip_address,
       userAgent: row.user_agent,
+      documentVersion: row.document_version,
     }));
   }
 
@@ -1029,11 +1075,12 @@ export class DatabaseService {
     timestamp: string,
     ipAddress?: string,
     userAgent?: string,
+    documentVersion?: string | null,
   ): void {
     this.db
       .prepare(
-        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent, document_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         generateId(),
@@ -1042,6 +1089,7 @@ export class DatabaseService {
         timestamp,
         ipAddress ?? null,
         userAgent ?? null,
+        documentVersion ?? null,
       );
   }
 
