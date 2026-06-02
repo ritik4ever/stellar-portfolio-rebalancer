@@ -19,6 +19,7 @@ export interface StartupConfig {
   cacheDurationMs: number;
   priceDataMaxAgeSeconds: number;
   minRequestIntervalMs: number;
+  featureFlagsFile?: string;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -258,6 +259,8 @@ export function validateStartupConfigOrThrow(
     logger.warn("[STARTUP-CONFIG] Warnings", { warnings });
   }
 
+  const featureFlagsFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : undefined;
+
   return {
     nodeEnv: nodeEnv || "development",
     port: Number.isInteger(port) ? port : 3001,
@@ -275,6 +278,7 @@ export function validateStartupConfigOrThrow(
     cacheDurationMs,
     priceDataMaxAgeSeconds,
     minRequestIntervalMs,
+    featureFlagsFile,
   };
 }
 
@@ -320,6 +324,7 @@ export function buildStartupSummary(
       allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
       allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
+      overrideFile: config.featureFlagsFile || null,
     },
   };
 }
@@ -351,6 +356,7 @@ export function logStartupSubsystems(
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       debugRoutes: config.featureFlags.enableDebugRoutes,
+      overrideFile: config.featureFlagsFile || "none",
     },
   });
 
