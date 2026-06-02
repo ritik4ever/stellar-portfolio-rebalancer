@@ -1,32 +1,49 @@
 import 'dotenv/config'
 import { createServer } from 'node:http'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import swaggerUi from 'swagger-ui-express'
 import { WebSocketServer } from 'ws'
 import { validateStartupConfigOrThrow, buildStartupSummary, logStartupSubsystems } from './config/startupConfig.js'
 import { logger } from './utils/logger.js'
-import { v1Router } from './api/v1Router.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
-import { legacyApiDeprecation } from './middleware/legacyApiDeprecation.js'
-import { startQueueScheduler } from './queue/scheduler.js'
 import { probeRedis } from './queue/connection.js'
 import { getRateLimitStoreType } from './middleware/rateLimit.js'
 import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
-import { metricsMiddleware, getMetricsPayload, getMetricsContentType } from './observability/metrics.js'
-import { buildReadinessReport } from './monitoring/readiness.js'
-import { mountApiRoutes, mountLegacyNonApiRedirects } from './http/mountApiRoutes.js'
+import { formatStartupSelfTestReport, runStartupSelfTest } from './monitoring/startupSelfTest.js'
 import { buildCorsOptions, enforceCorsOriginAllowlist } from './http/corsSecurity.js'
 import spec from './openapi/spec.js'
-import { initRobustWebSocket } from './services/websocket.service.js'
 
-async function main() {
+const isStartupSelfTestRequested = (argv: string[] = process.argv): boolean => argv.includes('--startup-self-test')
+
+export async function main(argv: string[] = process.argv): Promise<void> {
+    if (isStartupSelfTestRequested(argv)) {
+        const report = await runStartupSelfTest(process.env)
+        const output = formatStartupSelfTestReport(report)
+        if (report.ok) {
+            console.log(output)
+            process.exitCode = 0
+        } else {
+            console.error(output)
+            process.exitCode = 1
+        }
+        return
+    }
+
     const config = validateStartupConfigOrThrow()
+
     initializeSentry()
     setupProcessErrorHandlers()
 
     const redisAvailable = await probeRedis()
+    const { mountApiRoutes, mountLegacyNonApiRedirects } = await import('./http/mountApiRoutes.js')
+    const { initRobustWebSocket } = await import('./services/websocket.service.js')
+    const { startQueueScheduler } = await import('./queue/scheduler.js')
+    const { metricsMiddleware, getMetricsPayload, getMetricsContentType } = await import('./observability/metrics.js')
+    const { buildReadinessReport } = await import('./monitoring/readiness.js')
 
     const app = express()
 
@@ -45,6 +62,7 @@ async function main() {
         const report = await buildReadinessReport()
         res.status(report.status === 'ready' ? 200 : 503).json(report)
     }
+
     app.get('/readiness', sendReadiness)
     app.get('/ready', sendReadiness)
 
@@ -61,6 +79,7 @@ async function main() {
             logger.warn('[METRICS] Blocked /metrics access from IP', { ip: req.ip })
             return res.status(403).json({ error: 'Forbidden', message: 'Metrics endpoint is restricted' })
         }
+
         try {
             res.setHeader('Content-Type', getMetricsContentType())
             res.status(200).send(await getMetricsPayload())
@@ -73,24 +92,21 @@ async function main() {
     mountApiRoutes(app)
     mountLegacyNonApiRedirects(app)
 
+    app.get('/health', (_req: Request, res: Response) => {
+        res.status(200).type('text/plain').send('ok')
+    })
+
+    app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
+
+    const serveOpenApiJson = (_req: Request, res: Response) => {
+        res.setHeader('Content-Type', 'application/json')
+        res.json(spec)
+    }
+
+    app.get('/api-docs.json', serveOpenApiJson)
+    app.get('/api-docs/openapi.json', serveOpenApiJson)
+
     app.use(apiErrorHandler)
-/** Plain-text liveness for load balancers */
-app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).type('text/plain').send('ok')
-})
-
-/** Interactive API docs — served from the canonical spec.ts source of truth */
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
-
-const serveOpenApiJson = (_req: Request, res: Response) => {
-    res.setHeader('Content-Type', 'application/json')
-    res.json(spec)
-}
-
-app.get('/api-docs.json', serveOpenApiJson)
-app.get('/api-docs/openapi.json', serveOpenApiJson)
-
-app.use(apiErrorHandler)
 
     const server = createServer(app)
     const wss = new WebSocketServer({ server })
@@ -113,7 +129,9 @@ app.use(apiErrorHandler)
     })
 }
 
-main().catch((err: unknown) => {
-    console.error('[STARTUP] Fatal error:', String(err))
-    process.exit(1)
-})
+if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
+    main().catch((err: unknown) => {
+        console.error('[STARTUP] Fatal error:', String(err))
+        process.exit(1)
+    })
+}
