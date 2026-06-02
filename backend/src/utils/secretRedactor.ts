@@ -9,6 +9,8 @@ const STELLAR_SECRET_REGEX = /S[A-Z2-7]{55}/g;
 const CG_API_KEY_REGEX = /c?g-[a-zA-Z0-9_-]{10,}/g;
 // Matches general query parameter API keys: ?api_key=SECRET or &apikey=SECRET or ?x_cg_pro_api_key=SECRET
 const QUERY_PARAM_KEY_REGEX = /([?&](?:api_key|apikey|x_cg_pro_api_key|x_cg_demo_api_key)=)[^&]+/gi;
+// Matches Bearer tokens in Authorization header values
+const BEARER_TOKEN_REGEX = /\bBearer\s+\S+/gi;
 
 const REDACTED_HINT = '[REDACTED]';
 
@@ -25,6 +27,12 @@ const SENSITIVE_KEY_TOKENS = [
     'password',
     'x-cg-pro-api-key',
     'x-cg-demo-api-key',
+    'webhookurl',
+    'webhook',
+    'smtppass',
+    'smtpuser',
+    'emailaddress',
+    'email',
 ];
 
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -52,7 +60,9 @@ export function redactString(str: string): string {
         // Redact explicit CoinGecko Keys if identifiable
         .replace(CG_API_KEY_REGEX, REDACTED_HINT)
         // Redact keys in URLs
-        .replace(QUERY_PARAM_KEY_REGEX, `$1${REDACTED_HINT}`);
+        .replace(QUERY_PARAM_KEY_REGEX, `$1${REDACTED_HINT}`)
+        // Redact Bearer tokens
+        .replace(BEARER_TOKEN_REGEX, `Bearer ${REDACTED_HINT}`);
 
     return redacted;
 }
