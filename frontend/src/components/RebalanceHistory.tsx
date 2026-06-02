@@ -1,11 +1,10 @@
 import React from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search } from 'lucide-react'
 
-// TanStack Query Hooks
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
-
-//  NEW: export utils
 import { downloadCSV, toCSV } from '../utils/export'
+import { rebalanceHistoryCopy } from '../content/uiCopy'
+import { formatShortDate, formatTime, formatNumber } from '../utils/localeFormat'
 
 interface RebalanceEvent {
     id: string
@@ -45,14 +44,19 @@ interface RebalanceEvent {
 
 interface RebalanceHistoryProps {
     portfolioId?: string
+    isLoading?: boolean
 }
 
-const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
+const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoading: forcedLoading = false }) => {
     const [page, setPage] = React.useState(1)
     const limit = 10
+    const [search, setSearch] = React.useState('')
+    const [statusFilter, setStatusFilter] = React.useState('')
+    const [triggerFilter, setTriggerFilter] = React.useState('')
+    const [dateFilter, setDateFilter] = React.useState('')
 
     // Query for rebalance history
-    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit)
+    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit, search, statusFilter, triggerFilter, dateFilter)
 
     // Demo history generator
     const getDemoHistory = (): RebalanceEvent[] => {
@@ -134,30 +138,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
     }
 
     // Determine finalized data
-    const history: RebalanceEvent[] = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : [])
+    let filtered = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : []); if(search) filtered = filtered.filter((e:any) => e.trigger.toLowerCase().includes(search.toLowerCase()) || e.details?.reason?.toLowerCase().includes(search.toLowerCase())); if(statusFilter) filtered = filtered.filter((e:any) => e.status === statusFilter); if(triggerFilter) filtered = filtered.filter((e:any) => e.trigger.includes(triggerFilter)); if(dateFilter) filtered = filtered.filter((e:any) => e.timestamp.startsWith(dateFilter)); const history: RebalanceEvent[] = filtered
     const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
     const totalPages = Math.ceil(totalCount / limit)
-    const error = queryError ? 'Failed to load rebalance history' : null
-    const loading = isLoading && !data
 
-    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
-        const date = new Date(timestamp)
 
-        const dateFormatted = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        })
-
-        const timeFormatted = date.toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-        })
-
-        return { dateFormatted, timeFormatted }
-    }
+    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => ({
+        dateFormatted: formatShortDate(timestamp),
+        timeFormatted: formatTime(timestamp),
+    })
 
     const formatTimestamp = (timestamp: string) => {
         const date = new Date(timestamp)
@@ -188,7 +177,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             case 'failed':
                 return <AlertTriangle className="w-5 h-5 text-red-600" />
             case 'pending':
-                return <Clock className="w-5 h-5 text-yellow-600 animate-pulse" />
+                return <Clock className="w-5 h-5 text-yellow-600 motion-safe:animate-pulse" />
             default:
                 return <CheckCircle className="w-5 h-5 text-green-600" />
         }
@@ -225,20 +214,20 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
             return (
                 <span className="text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded flex items-center">
                     <Link className="w-3 h-3 mr-1" />
-                    On-chain
+                    {rebalanceHistoryCopy.onChain}
                 </span>
             )
         }
         if (event.isSimulated || event.eventSource === 'simulated') {
             return (
                 <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-1 rounded">
-                    Simulated
+                    {rebalanceHistoryCopy.simulated}
                 </span>
             )
         }
         return (
             <span className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">
-                Off-chain
+                {rebalanceHistoryCopy.offChain}
             </span>
         )
     }
@@ -295,8 +284,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
 
     if (loading) {
         return (
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
-                <div className="animate-pulse">
+
                     <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
                     <div className="space-y-3">
                         {[1, 2, 3].map(i => (
@@ -304,27 +292,27 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         ))}
                     </div>
                 </div>
-            </div>
+            </section>
         )
     }
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm">
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm" aria-labelledby="rebalance-history-heading">
+            <header className="p-6 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Rebalance History</h2>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Recent portfolio rebalancing activities with risk management</p>
+                        <h2 id="rebalance-history-heading" className="text-lg font-semibold text-gray-900 dark:text-white">{rebalanceHistoryCopy.title}</h2>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{rebalanceHistoryCopy.subtitle}</p>
                     </div>
 
-                    {/*  NEW: Export button */}
                     <div className="flex items-center space-x-3">
                         <button
+                            type="button"
                             onClick={exportHistoryCSV}
                             disabled={history.length === 0}
                             className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
                         >
-                            Export CSV
+                            {rebalanceHistoryCopy.exportCsv}
                         </button>
 
                         {error && (
@@ -334,14 +322,12 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         )}
                     </div>
                 </div>
-            </div>
 
-            <div className="divide-y divide-gray-100 dark:divide-gray-700">
                 {history.length === 0 ? (
-                    <div className="p-6 text-center text-gray-500 dark:text-gray-400">
-                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
-                        <p>No rebalancing history yet</p>
-                        <p className="text-sm mt-1">Portfolio rebalances will appear here when they occur</p>
+                    <div className="p-6 text-center text-gray-500 dark:text-gray-400" role="status">
+                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" aria-hidden />
+                        <p>{rebalanceHistoryCopy.emptyTitle}</p>
+                        <p className="text-sm mt-1">{rebalanceHistoryCopy.emptyDetail}</p>
                     </div>
                 ) : (
                     history.map((event) => {
@@ -350,7 +336,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                             : formatDateTime(event.timestamp)
 
                         return (
-                            <div key={event.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            <div key={event.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" role="listitem">
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-start space-x-4">
                                         <div className="flex-shrink-0">
@@ -412,7 +398,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                                                     <span>Execution: {formatExecutionTime(event.details.executionTime)}</span>
                                                 )}
                                                 {event.details?.amount && (
-                                                    <span>Amount: ${event.details.amount.toLocaleString()}</span>
+                                                    <span>Amount: ${formatNumber(event.details.amount)}</span>
                                                 )}
                                                 {event.details?.totalSlippageBps != null && (
                                                     <span>Slippage: {(event.details.totalSlippageBps / 100).toFixed(2)}%</span>
@@ -510,15 +496,15 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                         <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
-                            <span>Showing {history.length} of {totalCount} rebalance{totalCount !== 1 ? 's' : ''}</span>
+                            <span>{rebalanceHistoryCopy.showing(history.length, totalCount)}</span>
                             <div className="hidden md:flex items-center space-x-4">
                                 <div className="flex items-center">
-                                    <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
-                                    <span>Automated</span>
+                                    <div className="w-2 h-2 bg-green-500 rounded-full mr-1" aria-hidden />
+                                    <span>{rebalanceHistoryCopy.legendAutomated}</span>
                                 </div>
                                 <div className="flex items-center">
-                                    <div className="w-2 h-2 bg-orange-500 rounded-full mr-1"></div>
-                                    <span>Risk</span>
+                                    <div className="w-2 h-2 bg-orange-500 rounded-full mr-1" aria-hidden />
+                                    <span>{rebalanceHistoryCopy.legendRisk}</span>
                                 </div>
                             </div>
                         </div>
@@ -558,7 +544,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                     </div>
                 </div>
             )}
-        </div>
+        </section>
     )
 }
 

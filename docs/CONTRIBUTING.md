@@ -392,6 +392,43 @@ STELLAR_CONTRACT_ADDRESS=C...YOUR_CONTRACT_ADDRESS
 STELLAR_REBALANCE_SECRET=S...YOUR_SIGNING_SECRET
 ```
 
+### Rebalance simulation snapshot tests
+
+Rebalance allocation snapshots provide deterministic validation of the rebalance logic:
+
+```bash
+cd backend
+npm test -- src/test/snapshots/rebalanceSnapshots.test.ts
+```
+
+After intentionally changing rebalance allocation logic, regenerate the snapshots:
+
+```bash
+cd backend
+npm run snapshots:regenerate
+```
+
+Commit the updated `src/test/snapshots/fixtures/rebalance-snapshots.json` alongside the logic change. The snapshot test will fail on unexpected allocation drift.
+
+### Event replay validation
+
+The contract event indexer supports replay validation for detecting duplicate, missing, or out-of-order events:
+
+```bash
+cd backend
+
+# Validate current event integrity
+npm run replay:verify
+
+# Replay events and persist checkpoints
+npm run replay:run
+
+# View replay status
+npx tsx scripts/verify-replay.ts status
+```
+
+Replay checkpoints are persisted to the database key-value store. The integrity hash is computed from ingested event IDs, portfolio IDs, timestamps, and statuses to detect state divergence.
+
 ### Contract tests
 
 ```bash
@@ -592,6 +629,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 - When making a high-impact choice with significant trade-offs (e.g., choosing a specific database strategy).
 - When changing fundamental infrastructure or communication protocols.
 
+
 ### How to contribute an ADR
 
 1. Copy `docs/adr/template.md` to a new file named `docs/adr/NNNN-my-decision-title.md`.
@@ -600,9 +638,10 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 
 ---
 
- ## Further reading
 
 
+
+- [Branch protection and required checks](BRANCH_PROTECTION.md) — CI checks that block merges, merge requirements, common failure scenarios
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
 - [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
@@ -611,6 +650,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 - [Notification system](NOTIFICATIONS.md)
 - [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design
