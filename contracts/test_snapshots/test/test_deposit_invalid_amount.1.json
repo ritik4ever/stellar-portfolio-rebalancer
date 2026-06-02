@@ -30,25 +30,10 @@
                   ]
                 },
                 {
-                  "map": [
-                    {
-                      "key": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                      },
-                      "val": {
-                        "u32": 7
-                      }
-                    }
-                  ]
-                },
-                {
                   "u32": 5
                 },
                 {
                   "u32": 50
-                },
-                {
-                  "u32": 1
                 }
               ]
             }
@@ -57,7 +42,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -148,23 +132,6 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "asset_decimals"
-                      },
-                      "val": {
-                        "map": [
-                          {
-                            "key": {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                            },
-                            "val": {
-                              "u32": 7
-                            }
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -189,26 +156,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "pause_reason"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
                         "u32": 5
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "slippage_policy_version"
-                      },
-                      "val": {
-                        "u32": 1
                       }
                     },
                     {
@@ -303,24 +254,24 @@
                         "key": {
                           "vec": [
                             {
-                              "symbol": "EmergencyStop"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "bool": false
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
                               "symbol": "Initialized"
                             }
                           ]
                         },
                         "val": {
                           "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 0
                         }
                       },
                       {
@@ -524,25 +475,10 @@
                   ]
                 },
                 {
-                  "map": [
-                    {
-                      "key": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                      },
-                      "val": {
-                        "u32": 7
-                      }
-                    }
-                  ]
-                },
-                {
                   "u32": 5
                 },
                 {
                   "u32": 50
-                },
-                {
-                  "u32": 1
                 }
               ]
             }
@@ -560,10 +496,10 @@
           "v0": {
             "topics": [
               {
-                "symbol": "portfolio"
+                "string": "portfolio"
               },
               {
-                "symbol": "created"
+                "string": "created"
               }
             ],
             "data": {
@@ -635,9 +571,6 @@
                     "hi": 0,
                     "lo": 0
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -663,7 +596,7 @@
             ],
             "data": {
               "error": {
-                "contract": 25
+                "contract": 13
               }
             }
           }
@@ -684,7 +617,7 @@
               },
               {
                 "error": {
-                  "contract": 25
+                  "contract": 13
                 }
               }
             ],
@@ -709,7 +642,7 @@
               },
               {
                 "error": {
-                  "contract": 25
+                  "contract": 13
                 }
               }
             ],
@@ -734,181 +667,10 @@
                         "hi": 0,
                         "lo": 0
                       }
-                    },
-                    {
-                      "string": ""
                     }
                   ]
                 }
               ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
-              },
-              {
-                "symbol": "deposit"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "u64": 1
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
-                },
-                {
-                  "string": ""
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "deposit"
-              }
-            ],
-            "data": {
-              "error": {
-                "contract": 25
-              }
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 25
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 25
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract call failed"
-                },
-                {
-                  "symbol": "deposit"
-                },
-                {
-                  "vec": [
-                    {
-                      "u64": 1
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                    },
-                    {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 0
-                      }
-                    },
-                    {
-                      "string": ""
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 25
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating error to panic"
             }
           }
         }

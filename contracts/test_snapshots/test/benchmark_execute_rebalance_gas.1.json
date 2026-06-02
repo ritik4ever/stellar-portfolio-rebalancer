@@ -83,7 +83,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 0,
-    "timestamp": 20000,
+    "timestamp": 15000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -204,7 +204,7 @@
                         "symbol": "last_rebalance"
                       },
                       "val": {
-                        "u64": 20000
+                        "u64": 15000
                       }
                     },
                     {
@@ -341,6 +341,18 @@
                         },
                         "val": {
                           "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 15000
                         }
                       },
                       {
@@ -756,7 +768,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 20000
+                    "u64": 15000
                   }
                 }
               ]
@@ -787,7 +799,7 @@
                   "u64": 1
                 },
                 {
-                  "u64": 20000
+                  "u64": 15000
                 }
               ]
             }

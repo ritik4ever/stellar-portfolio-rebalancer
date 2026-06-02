@@ -13,6 +13,25 @@ pub use types::*;
 #[contract]
 pub struct PortfolioRebalancer;
 
+fn guard_ledger_timestamp(env: &Env) -> u64 {
+    let current = env.ledger().timestamp();
+    let last: Option<u64> = env.storage().instance().get(&DataKey::LastTimestamp);
+
+    if let Some(last_ts) = last {
+        if current < last_ts {
+            panic!("Timestamp drift: time moved backward");
+        }
+        if current > last_ts.saturating_add(MAX_TIMESTAMP_DRIFT_SECONDS) {
+            panic!("Timestamp drift: too far in the future");
+        }
+    }
+
+    env.storage()
+        .instance()
+        .set(&DataKey::LastTimestamp, &current);
+    current
+}
+
 #[contractimpl]
 impl PortfolioRebalancer {
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
@@ -78,7 +97,7 @@ impl PortfolioRebalancer {
             rebalance_threshold,
             slippage_tolerance,
             slippage_policy_version,
-            last_rebalance: env.ledger().timestamp(),
+            last_rebalance: guard_ledger_timestamp(&env),
             total_value: 0,
             is_active: true,
             pause_reason: PauseReason::None,
@@ -449,9 +468,9 @@ impl PortfolioRebalancer {
             .unwrap_or(portfolio.user.clone());
         steward.require_auth();
 
-        let current_time = env.ledger().timestamp();
+        let current_time = guard_ledger_timestamp(env);
         if !bypass_cooldown
-            && current_time < portfolio.last_rebalance + REBALANCE_COOLDOWN_SECONDS
+            && current_time < portfolio.last_rebalance.saturating_add(REBALANCE_COOLDOWN_SECONDS)
         {
             return Err(Error::CooldownActive);
         }
