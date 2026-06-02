@@ -27,6 +27,7 @@ describe('runWalletReconnectBoot', () => {
             reconnect: async () => 'GTESTKEY',
             checkConsent: async () => true,
             authLogin,
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'dashboard', publicKey: 'GTESTKEY' })
         expect(authLogin).toHaveBeenCalledWith('GTESTKEY')
@@ -37,6 +38,7 @@ describe('runWalletReconnectBoot', () => {
             reconnect: async () => 'GTESTKEY',
             checkConsent: async () => false,
             authLogin: vi.fn(),
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'needs_consent', publicKey: 'GTESTKEY' })
     })
@@ -48,6 +50,7 @@ describe('runWalletReconnectBoot', () => {
             authLogin: async () => {
                 throw new Error('UNAUTHORIZED')
             },
+            getAutoReconnect: () => true,
         })
         expect(result.outcome).toBe('auth_failed')
         if (result.outcome === 'auth_failed') {
@@ -62,6 +65,7 @@ describe('runWalletReconnectBoot', () => {
             authLogin: async () => {
                 throw new Error('503 Service Unavailable')
             },
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'dashboard', publicKey: 'GTESTKEY' })
     })
@@ -71,6 +75,7 @@ describe('runWalletReconnectBoot', () => {
             reconnect: async () => null,
             checkConsent: vi.fn(),
             authLogin: vi.fn(),
+            getAutoReconnect: () => true,
         })
         expect(result).toEqual({ outcome: 'no_wallet' })
     })
@@ -82,11 +87,22 @@ describe('runWalletReconnectBoot', () => {
             },
             checkConsent: vi.fn(),
             authLogin: vi.fn(),
+            getAutoReconnect: () => true,
         })
         expect(result.outcome).toBe('reconnect_failed')
         if (result.outcome === 'reconnect_failed') {
             expect(result.message).toMatch(/declined/i)
         }
+    })
+
+    it('skips reconnect when auto-reconnect is opted out', async () => {
+        const result = await runWalletReconnectBoot({
+            reconnect: async () => 'GTESTKEY',
+            checkConsent: vi.fn(),
+            authLogin: vi.fn(),
+            getAutoReconnect: () => false,
+        })
+        expect(result).toEqual({ outcome: 'no_wallet' })
     })
 })
 
