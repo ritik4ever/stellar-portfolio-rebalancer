@@ -66,6 +66,68 @@ async function getRedisClient() {
 
   const connectionOptions = getConnectionOptions();
   // Dynamic import to avoid circular deps
+  // In tests, avoid connecting to a real Redis server by returning an in-memory mock.
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    // Simple in-memory Redis-like client supporting the subset used in tests
+    class MockRedis {
+      store: Map<string, { value: string; expiresAt?: number }> = new Map();
+
+      _cleanExpired() {
+        const now = Date.now();
+        for (const [k, v] of this.store.entries()) {
+          if (v.expiresAt && v.expiresAt <= now) this.store.delete(k);
+        }
+      }
+
+      async setex(key: string, ttl: number, value: string) {
+        const expiresAt = Date.now() + ttl * 1000;
+        this.store.set(key, { value, expiresAt });
+        return 'OK';
+      }
+
+      async get(key: string) {
+        this._cleanExpired();
+        const v = this.store.get(key);
+        return v ? v.value : null;
+      }
+
+      async keys(pattern: string) {
+        this._cleanExpired();
+        if (pattern.endsWith('*')) {
+          const prefix = pattern.slice(0, -1);
+          return Array.from(this.store.keys()).filter((k) => k.startsWith(prefix));
+        }
+        return Array.from(this.store.keys()).filter((k) => k === pattern);
+      }
+
+      async del(...keys: string[]) {
+        let removed = 0;
+        for (const k of keys) {
+          if (this.store.delete(k)) removed++;
+        }
+        return removed;
+      }
+
+      async quit() {
+        this.store.clear();
+        return 'OK';
+      }
+
+      disconnect() {
+        this.store.clear();
+      }
+    }
+
+    // reuse a single mock instance across calls so tests can observe stored keys
+    // attach to global to persist between imports in the test process
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (!global.__mockRedisInstance) global.__mockRedisInstance = new MockRedis();
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return global.__mockRedisInstance as any;
+  }
+
   const redis = await import('ioredis');
   return new redis.default(connectionOptions);
 }

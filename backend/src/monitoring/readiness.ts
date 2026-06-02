@@ -299,11 +299,20 @@ export async function buildReadinessReport() {
     (check) => !check.required || check.status === "ready",
   );
 
+  // Surface probe-bypass config for ops visibility (secret value is NEVER
+  // included — only whether one is configured).
+  const probeBypass = {
+    probePaths: ["/health", "/ready", "/readiness", "/metrics"],
+    loopbackBypassEnabled: true,
+    secretConfigured: Boolean(process.env.HEALTH_PROBE_SECRET),
+  };
+
   const report = {
     status: ready ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     checks,
+    probeBypass,
   };
 
   if (cacheTtlMs > 0) {
