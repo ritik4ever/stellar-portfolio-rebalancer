@@ -629,6 +629,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 - When making a high-impact choice with significant trade-offs (e.g., choosing a specific database strategy).
 - When changing fundamental infrastructure or communication protocols.
 
+
 ### How to contribute an ADR
 
 1. Copy `docs/adr/template.md` to a new file named `docs/adr/NNNN-my-decision-title.md`.
