@@ -22,23 +22,37 @@ interface IndexedOnChainEvent {
 }
 
 interface ContractEventIndexerStatus {
-  enabled: boolean;
-  running: boolean;
-  contractAddress?: string;
-  rpcUrl?: string;
-  pollIntervalMs: number;
-  lastRunAt?: string;
-  lastSuccessfulRunAt?: string;
-  lastFailedRunAt?: string;
-  lastError?: string;
-  lastIngestedCount: number;
-  cursor?: string;
-  latestLedger?: number;
-  consecutiveFailures: number;
-  recentErrors: string[];
-  expectedEventSchemaVersion: number;
-  declaredEventSchemaVersion?: number;
-  contractEventSchemaOk: boolean;
+    enabled: boolean
+    running: boolean
+    contractAddress?: string
+    rpcUrl?: string
+    pollIntervalMs: number
+    lastRunAt?: string
+    lastSuccessfulRunAt?: string
+    lastFailedRunAt?: string
+    lastError?: string
+    lastIngestedCount: number
+    cursor?: string
+    latestLedger?: number
+    consecutiveFailures: number
+    recentErrors: string[]
+    expectedEventSchemaVersion: number
+    declaredEventSchemaVersion?: number
+    contractEventSchemaOk: boolean
+    replayValidation?: {
+        lastReplayedLedger: number | undefined
+        eventCount: number
+        integrityHash: string | undefined
+    }
+}
+
+interface ReplayValidationResult {
+    valid: boolean
+    eventsReplayed: number
+    totalEvents: number
+    ledgerRange: { start: number; end: number }
+    integrityHash: string
+    errors: string[]
 }
 
 const INDEXER_STATE_NAME = "soroban_event_indexer";
@@ -452,10 +466,240 @@ export class ContractEventIndexerService {
     throw lastError;
   }
 
-  private pushRecentError(summary: string): void {
-    this.recentErrors.push(summary);
-    if (this.recentErrors.length > MAX_RECENT_ERRORS) {
-      this.recentErrors.shift();
+    computeIngestedEventsHash(): string {
+        const hash = createHash('sha256')
+        const events = databaseService.getRebalanceHistory(undefined, 1000)
+        for (const ev of events) {
+            hash.update(ev.id)
+            hash.update(ev.portfolioId)
+            hash.update(ev.timestamp)
+            hash.update(ev.status)
+        }
+        return hash.digest('hex')
+    }
+
+    async validateReplay(ledgerRange?: { start: number; end: number }): Promise<ReplayValidationResult> {
+        const errors: string[] = []
+        const checkpoint = databaseService.getReplayStatus()
+        const currentHash = this.computeIngestedEventsHash()
+
+        const storedHash = databaseService.getReplayIntegrityHash()
+        if (storedHash && storedHash !== currentHash) {
+            errors.push(`Integrity hash mismatch: stored=${storedHash}, current=${currentHash}`)
+        }
+
+        const events = databaseService.getRebalanceHistory(undefined, 5000)
+        const onChainEvents = events.filter((e) => e.eventSource === 'onchain')
+        const eventIds = new Set<string>()
+        for (const ev of onChainEvents) {
+            if (eventIds.has(ev.id)) {
+                errors.push(`Duplicate event ID detected: ${ev.id}`)
+            }
+            eventIds.add(ev.id)
+        }
+
+        let lastLedger = 0
+        for (const ev of onChainEvents) {
+            const ledger = ev.onChainLedger ?? 0
+            if (ledger > 0 && ledger < lastLedger) {
+                errors.push(`Out-of-order event: ${ev.id} ledger ${ledger} < previous ${lastLedger}`)
+            }
+            if (ledger > 0) lastLedger = ledger
+        }
+
+        if (ledgerRange) {
+            const inRange = onChainEvents.filter((ev) => {
+                const l = ev.onChainLedger ?? 0
+                return l >= ledgerRange.start && l <= ledgerRange.end
+            })
+            if (inRange.length === 0) {
+                errors.push(`No events found in ledger range ${ledgerRange.start}-${ledgerRange.end}`)
+            }
+        }
+
+        return {
+            valid: errors.length === 0,
+            eventsReplayed: onChainEvents.length,
+            totalEvents: events.length,
+            ledgerRange: ledgerRange ?? { start: 0, end: lastLedger },
+            integrityHash: currentHash,
+            errors,
+        }
+    }
+
+    async replayEvents(ledgerRange?: { start: number; end: number }): Promise<{
+        ingested: number
+        validation: ReplayValidationResult
+    }> {
+        if (!this.isEnabled()) {
+            return { ingested: 0, validation: await this.validateReplay(ledgerRange) }
+        }
+
+        if (!ledgerRange) {
+            const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+            ledgerRange = {
+                start: Math.max(1, latest.sequence - this.bootstrapWindowLedgers),
+                end: latest.sequence,
+            }
+        }
+
+        const result = await this.syncOnce()
+        const validation = await this.validateReplay(ledgerRange)
+
+        if (validation.valid) {
+            const hash = this.computeIngestedEventsHash()
+            databaseService.setReplayIntegrityHash(hash)
+            databaseService.setLastReplayedLedger(ledgerRange.end)
+            databaseService.setReplayEventCount(validation.eventsReplayed)
+
+            const replayId = `replay_${ledgerRange.start}_${ledgerRange.end}_${Date.now()}`
+            databaseService.setReplayCheckpoint(replayId, {
+                startLedger: ledgerRange.start,
+                endLedger: ledgerRange.end,
+                eventCount: validation.eventsReplayed,
+                integrityHash: hash,
+                timestamp: new Date().toISOString(),
+            })
+        }
+
+        this.status.replayValidation = {
+            lastReplayedLedger: ledgerRange.end,
+            eventCount: validation.eventsReplayed,
+            integrityHash: validation.integrityHash,
+        }
+
+        return { ingested: result.ingested, validation }
+    }
+
+    async syncOnce(): Promise<{ ingested: number; latestLedger?: number }> {
+        if (!this.isEnabled()) return { ingested: 0 }
+        if (this.isSyncing) return { ingested: 0, latestLedger: this.status.latestLedger }
+
+        const schemaCheck = checkContractEventSchemaVersion()
+        if (!schemaCheck.ok) {
+            this.status.lastRunAt = new Date().toISOString()
+            this.status.lastError = schemaCheck.message
+            this.status.contractEventSchemaOk = false
+            logger.error('[CHAIN-INDEXER] Contract event schema mismatch', { message: schemaCheck.message })
+            return { ingested: 0, latestLedger: this.status.latestLedger }
+        }
+        this.status.contractEventSchemaOk = true
+
+        this.isSyncing = true
+        try {
+            const storedCursor = databaseService.getIndexerState(INDEXER_CURSOR_KEY)
+            const storedLatestLedger = Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || undefined
+
+            let cursor = storedCursor
+            let startLedger: number | undefined
+            if (!cursor) {
+                const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+                const floorLedger = Math.max(1, latest.sequence - this.bootstrapWindowLedgers)
+                startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
+            }
+
+            let ingested = 0
+            let latestLedger = storedLatestLedger
+            let pagesRead = 0
+
+            while (pagesRead < this.maxPagesPerSync) {
+                const response = await this.rpcCallWithRetry(() =>
+                    this.rpcServer.getEvents({
+                        cursor,
+                        startLedger,
+                        limit: this.pageLimit,
+                        filters: [{ type: 'contract' }]
+                    })
+                )
+                pagesRead++
+                latestLedger = response.latestLedger
+
+                if (!response.events.length) break
+
+                for (const event of response.events) {
+                    let indexed: ReturnType<typeof this.toIndexedOnChainEvent>
+                    try {
+                        indexed = this.toIndexedOnChainEvent(event)
+                    } catch (err) {
+                        logger.warn('[CHAIN-INDEXER] Skipping malformed event', { error: String(err), txHash: event.txHash })
+                        continue
+                    }
+                    if (!indexed) continue
+
+                    const dedupKey = `${indexed.ledger}:${indexed.txHash}:${indexed.kind}:${indexed.portfolioId}`
+                    if (this.seenEventKeys.has(dedupKey)) {
+                        continue
+                    }
+                    this.seenEventKeys.add(dedupKey)
+                    
+                    // Prevent unbounded memory growth
+                    if (this.seenEventKeys.size > 10000) {
+                        const iterator = this.seenEventKeys.values()
+                        for (let i = 0; i < 1000; i++) {
+                            const val = iterator.next().value
+                            if (val !== undefined) {
+                                this.seenEventKeys.delete(val)
+                            }
+                        }
+                    }
+
+                    databaseService.ensurePortfolioExists(indexed.portfolioId, indexed.userAddress || 'ONCHAIN-INDEXER')
+                    databaseService.recordRebalanceEvent({
+                        portfolioId: indexed.portfolioId,
+                        timestamp: indexed.timestamp,
+                        trigger: indexed.trigger,
+                        reasonCode: 'ON_CHAIN_SYNC',
+                        trades: indexed.trades,
+                        gasUsed: 'on-chain',
+                        status: 'completed',
+                        isAutomatic: false,
+                        eventSource: 'onchain',
+                        onChainConfirmed: true,
+                        onChainEventType: indexed.kind,
+                        onChainTxHash: indexed.txHash,
+                        onChainLedger: indexed.ledger,
+                        onChainContractId: indexed.contractId,
+                        onChainPagingToken: indexed.pagingToken,
+                        isSimulated: false
+                    })
+                    ingested++
+                }
+
+                const nextCursor = response.events[response.events.length - 1]?.pagingToken
+                if (!nextCursor || nextCursor === cursor) break
+                cursor = nextCursor
+                startLedger = undefined
+            }
+
+            if (cursor) databaseService.setIndexerState(INDEXER_CURSOR_KEY, cursor)
+            if (latestLedger) databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(latestLedger))
+
+            this.status.lastRunAt = new Date().toISOString()
+            this.status.lastSuccessfulRunAt = this.status.lastRunAt
+            this.status.lastError = undefined
+            this.status.lastIngestedCount = ingested
+            this.status.cursor = cursor
+            this.status.latestLedger = latestLedger
+            this.status.enabled = true
+            this.consecutiveFailures = 0
+
+            return { ingested, latestLedger }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            const now = new Date().toISOString()
+            this.status.lastRunAt = now
+            this.status.lastFailedRunAt = now
+            this.status.lastError = message
+            this.consecutiveFailures++
+            this.pushRecentError(`[${now}] ${message}`)
+            logger.error('[CHAIN-INDEXER] Sync failed', {
+                error: message,
+                consecutiveFailures: this.consecutiveFailures
+            })
+            return { ingested: 0, latestLedger: this.status.latestLedger }
+        } finally {
+            this.isSyncing = false
+        }
     }
   }
 

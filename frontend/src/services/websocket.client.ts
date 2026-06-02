@@ -1,4 +1,12 @@
-import { WS_PROTOCOL_VERSION } from '../constants/wsProtocol'
+import {
+    WS_PROTOCOL_VERSION,
+    WS_SUBSCRIBE_TYPE,
+    WS_SUBSCRIBED_TYPE,
+    WS_HEARTBEAT_TYPE,
+    WS_ERROR_TYPE,
+    WS_RECONNECT_MAX_ATTEMPTS,
+    WS_RECONNECT_SUGGESTED_BACKOFF_MS
+} from '../constants/wsProtocol'
 
 export type RealtimeConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'paused'
 
@@ -17,8 +25,8 @@ export type RebalancerWSOptions = {
     onReconnectInfo?: (info: RealtimeReconnectInfo | null) => void
 }
 
-const DEFAULT_MAX_ATTEMPTS = 12
-const DEFAULT_MAX_BACKOFF_MS = 30_000
+const DEFAULT_MAX_ATTEMPTS = WS_RECONNECT_MAX_ATTEMPTS
+const DEFAULT_MAX_BACKOFF_MS = WS_RECONNECT_SUGGESTED_BACKOFF_MS
 
 export class RebalancerWSClient {
     private ws: WebSocket | null = null
@@ -124,14 +132,33 @@ export class RebalancerWSClient {
 
         this.ws.onopen = () => {
             this.reconnectCycles = 0
-            this.onStatusDetail?.(null)
-            this.onReconnectInfo?.(null)
-            this.setState('connected')
+
         }
 
         this.ws.onmessage = (event) => {
             try {
-                const data = JSON.parse(event.data as string) as unknown
+                const data = JSON.parse(event.data as string) as Record<string, unknown>
+
+                if (data.type === WS_SUBSCRIBED_TYPE) {
+                    this.onStatusDetail?.(null)
+                    this.setState('connected')
+                    return
+                }
+
+                if (data.type === WS_HEARTBEAT_TYPE) {
+                    this.onMessage?.(data)
+                    return
+                }
+
+                if (data.type === WS_ERROR_TYPE) {
+                    const payload = data.payload
+                    this.onStatusDetail?.(
+                        typeof payload === 'string'
+                            ? payload
+                            : 'Realtime connection error',
+                    )
+                }
+
                 this.onMessage?.(data)
             } catch {
                 this.onMessage?.(event.data)

@@ -9,8 +9,13 @@
  *   - Submit blocked until all fields and total are valid
  */
 
-import { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion' // AnimatePresence added to animate error messages in/out
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
+// TanStack Query Mutations
+import {
+  buildRollbackMessage,
+  useCreatePortfolioMutation,
+} from "../hooks/mutations/usePortfolioMutations";
 import {
   Plus,
   Trash2,
@@ -21,26 +26,12 @@ import {
   User,
   Zap,
   RefreshCw,
-  RotateCcw,
-  X,
-} from 'lucide-react'
-import ThemeToggle from './ThemeToggle'
-import AssetSelector from './AssetSelector' // NEW: Enhanced asset selector with search
+} from "lucide-react";
 
-// TanStack Query Mutations
-import { useCreatePortfolioMutation } from '../hooks/mutations/usePortfolioMutations'
-import { useAssets } from '../hooks/queries/useAssetsQuery' // NEW: Use enhanced assets query
-import {
-  clearPortfolioSetupDraft,
-  loadPortfolioSetupDraft,
-  savePortfolioSetupDraft,
-  type PortfolioSetupDraft,
-} from '../hooks/usePortfolio'
-import {
-  clearPortfolioCloneDraft,
-  loadPortfolioCloneDraft,
-  type PortfolioCloneDraft,
-} from "../utils/portfolioCloneDraft";
+import ThemeToggle from "./ThemeToggle";
+import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
+
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,11 +69,11 @@ export interface PortfolioTemplate {
 
 export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
   {
-    id: 'conservative',
-    name: 'Conservative',
+    id: "conservative",
+    name: "Conservative",
     description:
-      'Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.',
-    riskLevel: 'low',
+      "Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.",
+    riskLevel: "low",
     allocations: [
       { asset: 'USDC', percentage: 60 },
       { asset: 'XLM', percentage: 30 },
@@ -90,11 +81,11 @@ export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
     ],
   },
   {
-    id: 'balanced',
-    name: 'Balanced',
+    id: "balanced",
+    name: "Balanced",
     description:
-      'Mix of stablecoins and crypto. Moderate risk with growth potential.',
-    riskLevel: 'medium',
+      "Mix of stablecoins and crypto. Moderate risk with growth potential.",
+    riskLevel: "medium",
     allocations: [
       { asset: 'USDC', percentage: 40 },
       { asset: 'XLM', percentage: 30 },
@@ -114,28 +105,28 @@ export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
     ],
   },
   {
-    id: 'stablecoin-focus',
-    name: 'Stablecoin Focus',
+    id: "stablecoin-focus",
+    name: "Stablecoin Focus",
     description:
-      'Mostly USDC with some XLM. Minimal exposure to crypto volatility.',
-    riskLevel: 'low',
+      "Mostly USDC with some XLM. Minimal exposure to crypto volatility.",
+    riskLevel: "low",
     allocations: [
       { asset: 'USDC', percentage: 80 },
       { asset: 'XLM', percentage: 20 },
     ],
   },
   {
-    id: 'custom',
-    name: 'Custom',
+    id: "custom",
+    name: "Custom",
     description:
-      'Define your own allocation. Start from scratch and add assets.',
-    riskLevel: 'medium',
-    allocations: [{ asset: 'XLM', percentage: 100 }],
+      "Define your own allocation. Start from scratch and add assets.",
+    riskLevel: "medium",
+    allocations: [{ asset: "XLM", percentage: 100 }],
   },
 ]
 
 const SAVED_TEMPLATES_KEY = (userId: string) =>
-  `portfolio-templates-${userId || 'anonymous'}`
+  `portfolio-templates-${userId || "anonymous"}`;
 
 function loadSavedTemplates(userId: string): PortfolioTemplate[] {
   try {
@@ -152,7 +143,7 @@ function saveSavedTemplates(
   userId: string,
   templates: PortfolioTemplate[],
 ): void {
-  localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates))
+  localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates));
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -164,54 +155,31 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // ── State ──────────────────────────────────────────────────────────────────
 
   const [allocations, setAllocations] = useState<Allocation[]>(() => {
-    const balanced = PORTFOLIO_TEMPLATES.find((t) => t.id === 'balanced')
+    const balanced = PORTFOLIO_TEMPLATES.find((t) => t.id === "balanced");
     return balanced
       ? balanced.allocations.map((a) => ({ ...a }))
-      : [{ asset: 'XLM', percentage: 40 }]
-  })
-  const [threshold, setThreshold] = useState(5)
-  const [slippageTolerance, setSlippageTolerance] = useState(1)
-  const [strategy, setStrategy] = useState<string>('threshold')
+      : [{ asset: "XLM", percentage: 40 }];
+  });
+  const [threshold, setThreshold] = useState(5);
+  const [slippageTolerance, setSlippageTolerance] = useState(1);
+  const [strategy, setStrategy] = useState<string>("threshold");
   const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>(
     {},
-  )
-  const [autoRebalance, setAutoRebalance] = useState(true)
-  const [error, setError] = useState<string | null>(null) // submit-level error message
-  const [success, setSuccess] = useState(false) // shows success banner after creation
-  const [isDemoMode] = useState(true) // demo mode: skips real wallet requirement
+  );
+  const [autoRebalance, setAutoRebalance] = useState(true);
+  const [error, setError] = useState<string | null>(null); // submit-level error message
+  const [success, setSuccess] = useState(false); // shows success banner after creation
+  const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
   const [selectedTemplateId, setSelectedTemplateId] =
-    useState<string>('balanced')
+    useState<string>("balanced");
   const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(
-    () => loadSavedTemplates(publicKey || ''),
-  )
-  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(
-    null,
-  )
-  const [draftError, setDraftError] = useState<string | null>(null)
-  const [draftRestored, setDraftRestored] = useState(false)
-  const [draftPromptResolved, setDraftPromptResolved] = useState(false)
-  const hasMountedDraftSaver = useRef(false)
+    () => loadSavedTemplates(publicKey || ""),
+  );
+  const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
+    loadPortfolioCloneDraft(),
+  );
 
-  // NEW: Use enhanced assets query
-  const { data: assets = [], isLoading: assetsLoading } = useAssets()
-  const selectableAssets =
-    assets.length >= DEFAULT_ASSET_OPTIONS.length
-      ? assets
-      : DEFAULT_ASSET_OPTIONS.map((asset) => ({
-          symbol: asset.value,
-          displayName: asset.label,
-          searchText: asset.label.toLowerCase(),
-        }))
 
-  useEffect(() => {
-    setSavedTemplates(loadSavedTemplates(publicKey || ''))
-    const draftResult = loadPortfolioSetupDraft(publicKey)
-    setPendingDraft(draftResult.status === 'loaded' ? draftResult.draft : null)
-    setDraftError(draftResult.status === 'failed' ? draftResult.error : null)
-    setDraftRestored(false)
-    setDraftPromptResolved(draftResult.status !== 'loaded')
-    hasMountedDraftSaver.current = false
-  }, [publicKey])
 
   useEffect(() => {
     if (!draftPromptResolved) return
@@ -302,27 +270,27 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   const getRiskLevelLabel = (level: RiskLevel): string => {
     switch (level) {
-      case 'low':
-        return 'Low risk'
-      case 'medium':
-        return 'Medium risk'
-      case 'high':
-        return 'High risk'
+      case "low":
+        return "Low risk";
+      case "medium":
+        return "Medium risk";
+      case "high":
+        return "High risk";
       default:
-        return 'Risk'
+        return "Risk";
     }
   }
 
   const getRiskLevelClass = (level: RiskLevel): string => {
     switch (level) {
-      case 'low':
-        return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-      case 'medium':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300'
-      case 'high':
-        return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+      case "low":
+        return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
+      case "medium":
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
+      case "high":
+        return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+        return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
     }
   }
   // Mutation for portfolio creation
@@ -396,6 +364,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const hasAnyFieldError = allocations.some(
     (a) => getAllocationError(a.percentage) !== null,
   )
+
+  /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
+  const remaining = remainingAllocation(allocations);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -518,14 +489,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       clearPortfolioCloneDraft();
       setCloneDraft(null);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Network error. Please try again.',
-      )
+      setError(buildRollbackMessage(err, "portfolio creation"));
     }
   }
 
   // Compute once before render so the value is consistent across the JSX tree
-  const totalStatus = totalDeviationMessage()
+  const totalStatus = totalDeviationMessage();
+  // Alias so the mobile action bar can reference the same submit handler
+  const handleSubmit = createPortfolio;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -695,6 +666,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="status"
+            aria-live="polite"
             className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-green-800">
@@ -711,6 +684,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="alert"
+            aria-live="assertive"
             className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-red-800">
@@ -718,6 +693,45 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <span>{error}</span>
             </div>
           </motion.div>
+        )}
+
+        {/* ── First-time user quick-start / empty state ── */}
+        {savedTemplates.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm mb-6">
+            <div className="flex items-start">
+              <div className="flex-1">
+                <h4 className="text-md font-semibold text-gray-900 dark:text-white">Quick start</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  New here? Try a template to populate allocations, or learn how to set up a portfolio.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate(PORTFOLIO_TEMPLATES.find(t => t.id === 'balanced')!)}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+                  >
+                    Try Balanced Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
+                    className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                  >
+                    Read setup guide
+                  </button>
+                  {!publicKey && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('landing')}
+                      className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                    >
+                      Connect wallet
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ── Main two-column layout ── */}
@@ -760,7 +774,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     </span>
                     <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                       {template.allocations.length} asset
-                      {template.allocations.length !== 1 ? 's' : ''}
+                      {template.allocations.length !== 1 ? "s" : ""}
                     </div>
                   </button>
                 ))}
@@ -795,7 +809,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             </p>
                             <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                               {template.allocations.length} asset
-                              {template.allocations.length !== 1 ? 's' : ''}
+                              {template.allocations.length !== 1 ? "s" : ""}
                             </div>
                           </button>
                           <button
@@ -876,7 +890,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           <AssetSelector
                             value={allocation.asset}
                             onChange={(asset) =>
-                              updateAllocation(index, 'asset', asset)
+                              updateAllocation(index, "asset", asset)
                             }
                             placeholder="Select asset..."
                             className="w-full"
@@ -983,6 +997,37 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   </span>
                 </div>
 
+                {/* ── Remaining-allocation progress bar ── */}
+                <div
+                  className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden mb-2"
+                  role="progressbar"
+                  aria-valuenow={Math.min(totalPercentage, 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${totalPercentage.toFixed(1)}% of 100% allocated`}
+                >
+                  <div
+                    className={`h-full rounded-full transition-all duration-200 ${
+                      isValidTotal
+                        ? "bg-green-500"
+                        : deviation > 0
+                          ? "bg-red-500"
+                          : "bg-yellow-400"
+                    }`}
+                    style={{ width: `${Math.min(totalPercentage, 100)}%` }}
+                  />
+                </div>
+
+                {/* Remaining label */}
+                {!isValidTotal && (
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>Remaining:</span>
+                    <span className={remaining > 0 ? "text-yellow-600" : "text-red-600"}>
+                      {remaining > 0 ? `+${remaining.toFixed(1)}%` : `${remaining.toFixed(1)}%`}
+                    </span>
+                  </div>
+                )}
+
                 {/*
                  * Deviation guidance text — updates in real time as the user types.
                  *
@@ -1048,14 +1093,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     <option value="custom">Custom rules</option>
                   </select>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {strategy === 'threshold' &&
-                      'Rebalance when allocation drift exceeds the threshold.'}
-                    {strategy === 'periodic' &&
-                      'Rebalance on a fixed schedule (e.g. every 7 or 30 days).'}
-                    {strategy === 'volatility' &&
-                      'Rebalance when market volatility exceeds a percentage threshold.'}
-                    {strategy === 'custom' &&
-                      'Minimum days between rebalances plus threshold check.'}
+                    {strategy === "threshold" &&
+                      "Rebalance when allocation drift exceeds the threshold."}
+                    {strategy === "periodic" &&
+                      "Rebalance on a fixed schedule (e.g. every 7 or 30 days)."}
+                    {strategy === "volatility" &&
+                      "Rebalance when market volatility exceeds a percentage threshold."}
+                    {strategy === "custom" &&
+                      "Minimum days between rebalances plus threshold check."}
                   </p>
                 </div>
 
@@ -1259,37 +1304,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
-            <button
-              type="button"
-              onClick={createPortfolio}
-              disabled={
-                !isValidTotal ||
-                hasAnyFieldError ||
-                createPortfolioMutation.isPending
-              }
-              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-            >
-              {createPortfolioMutation.isPending ? (
-                <>
-                  <Zap className="w-4 h-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                'Create Portfolio'
-              )}
-            </button>
 
-            {/*
-             * Helper hint shown beneath the disabled button.
-             * Explains why the button is inactive so users aren't left guessing.
-             * Hidden once the API call starts (createPortfolioMutation.isPending) to avoid mixed messaging.
-             */}
-            {(hasAnyFieldError || !isValidTotal) &&
-              !createPortfolioMutation.isPending && (
-                <p className="text-xs text-gray-400 text-center mt-2">
-                  Fix validation errors above to continue
-                </p>
-              )}
           </div>
         </div>
 
@@ -1304,14 +1319,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <div
                 className={`text-lg font-bold ${
                   isValidTotal
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-red-600 dark:text-red-400'
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400"
                 }`}
               >
                 {totalPercentage.toFixed(1)}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                {allocations.length} asset{allocations.length !== 1 ? 's' : ''}
+                {allocations.length} asset{allocations.length !== 1 ? "s" : ""}
               </div>
             </div>
 
@@ -1319,8 +1334,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             <div className="flex items-center gap-2">
               {/* Back Button */}
               <button
-                type="button"
-                onClick={() => onNavigate('dashboard')}
+                onClick={() => onNavigate("dashboard")}
                 className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -1331,11 +1345,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <button
                 type="button"
                 onClick={createPortfolio}
-                disabled={
-                  hasAnyFieldError ||
-                  !isValidTotal ||
-                  createPortfolioMutation.isPending
-                }
+
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (
@@ -1361,4 +1371,4 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   )
 }
 
-export default PortfolioSetup
+export default PortfolioSetup;

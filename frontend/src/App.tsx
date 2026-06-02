@@ -12,7 +12,10 @@ import {
     isAuthServiceUnavailable,
     resolveConsentAcceptedNavigation,
     runWalletReconnectBoot,
+    runBootDiagnostics,
+    type BootCheck,
 } from './app/walletBoot'
+import BootDiagnosticsPanel from './components/BootDiagnosticsPanel'
 import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
@@ -25,6 +28,7 @@ import {
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
+import { appCopy } from './content/uiCopy'
 
 function App() {
     const queryClient = useQueryClient()
@@ -37,6 +41,10 @@ function App() {
     const [sessionRecovery, setSessionRecovery] = useState<string | null>(null)
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
+    const { notices, loadError, loading: readinessLoading, bootReady } = useReadinessReport()
+    const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
+    const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
+    const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
 
     const showBackendBanner = loadError || notices.length > 0
     const showApiCompatibilityBanner =
@@ -50,8 +58,25 @@ function App() {
               ? 'pt-14'
               : 'pt-4'
 
+    const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
+    const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
+
     useEffect(() => {
         checkWalletConnection()
+        runBootDiagnostics({
+            checkWallets: () => {
+                const wallets = walletManager.getAvailableWallets()
+                return wallets.length > 0
+            },
+            checkApi: async () => {
+                try {
+                    await api.get(ENDPOINTS.HEALTH)
+                    return true
+                } catch {
+                    return false
+                }
+            },
+        }).then((result) => setBootChecks(result.checks))
     }, [])
 
     useEffect(() => {
@@ -262,14 +287,14 @@ function App() {
                             onClick={() => setApiCompatibilityDismissed(true)}
                             className="shrink-0 rounded px-2 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10"
                         >
-                            Dismiss
+                            {appCopy.dismiss}
                         </button>
                     </div>
                 </div>
             ) : null}
             {apiCompatibilityLoading && !apiCompatibility ? (
                 <span className="sr-only" role="status">
-                    Checking API configuration
+                    {appCopy.checkingApiConfig}
                 </span>
             ) : null}
             <DeveloperDrawer publicKey={publicKey} />
@@ -282,7 +307,7 @@ function App() {
                     <div className="flex items-start gap-3">
                         <div className="mt-0.5 text-lg">⚠️</div>
                         <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold">Session expired</p>
+                            <p className="text-sm font-semibold">{appCopy.sessionExpiredTitle}</p>
                             <p className="mt-1 text-sm leading-5 opacity-90">{sessionRecovery}</p>
                             {sessionRecoverySource ? (
                                 <p className="mt-1 text-[11px] uppercase tracking-[0.2em] opacity-70">
@@ -296,7 +321,7 @@ function App() {
                                     disabled={isRecoveringSession}
                                     className="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {isRecoveringSession ? 'Reconnecting…' : 'Retry sign-in'}
+                                    {isRecoveringSession ? appCopy.reconnecting : appCopy.retrySignIn}
                                 </button>
                                 <button
                                     type="button"
@@ -306,7 +331,7 @@ function App() {
                                     }}
                                     className="rounded-full border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-100 dark:hover:bg-amber-900/40"
                                 >
-                                    Dismiss
+                                    {appCopy.dismiss}
                                 </button>
                             </div>
                         </div>
@@ -346,13 +371,51 @@ function App() {
                     onBack={() => handleNavigate('landing')}
                 />
             ) : currentView === 'landing' ? (
-                <Landing
-                    onNavigate={handleNavigate}
-                    onConnectWallet={connectWallet}
-                    onNeedsConsent={handleNeedsConsent}
-                    isConnecting={isConnecting}
-                    publicKey={publicKey}
-                />
+                <div className="relative">
+                    <Landing
+                        onNavigate={handleNavigate}
+                        onConnectWallet={connectWallet}
+                        onNeedsConsent={handleNeedsConsent}
+                        isConnecting={isConnecting}
+                        publicKey={publicKey}
+                    />
+                    {!publicKey ? (
+                        <div className="fixed bottom-4 left-4 z-40 max-w-xs">
+                            <button
+                                type="button"
+                                onClick={() => setShowBootDiagnostics(!showBootDiagnostics)}
+                                className="mb-1 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-xs text-slate-500 shadow-sm backdrop-blur hover:bg-white hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            >
+                                {showBootDiagnostics ? 'Hide' : 'Show'} startup checks
+                            </button>
+                            {showBootDiagnostics ? (
+                                <BootDiagnosticsPanel
+                                    checks={bootChecks}
+                                    onRetry={() => {
+                                        setBootChecks([
+                                            { id: 'wallet-detection', label: 'Wallet extension', status: 'loading' },
+                                            { id: 'api-reachability', label: 'API reachability', status: 'loading' },
+                                        ])
+                                        runBootDiagnostics({
+                                            checkWallets: () => {
+                                                const wallets = walletManager.getAvailableWallets()
+                                                return wallets.length > 0
+                                            },
+                                            checkApi: async () => {
+                                                try {
+                                                    await api.get(ENDPOINTS.HEALTH)
+                                                    return true
+                                                } catch {
+                                                    return false
+                                                }
+                                            },
+                                        }).then((result) => setBootChecks(result.checks))
+                                    }}
+                                />
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
             ) : currentView === 'dashboard' ? (
                 <Dashboard
                     onNavigate={handleNavigate}

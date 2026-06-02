@@ -77,3 +77,21 @@ CREATE TABLE IF NOT EXISTS notification_logs (
 
 CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_notification_logs_created_at ON notification_logs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS portfolio_drafts (
+    id VARCHAR(64) PRIMARY KEY,
+    user_address VARCHAR(256) NOT NULL,
+    label VARCHAR(256),
+    allocations JSONB NOT NULL DEFAULT '{}',
+    threshold REAL NOT NULL DEFAULT 5,
+    slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
+    strategy VARCHAR(32) NOT NULL DEFAULT 'threshold',
+    strategy_config JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+    published_portfolio_id VARCHAR(64)
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_user ON portfolio_drafts(user_address, expires_at DESC);
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_expires ON portfolio_drafts(expires_at);
