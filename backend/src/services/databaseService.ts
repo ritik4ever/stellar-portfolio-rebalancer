@@ -8,6 +8,9 @@ import { logger } from "../utils/logger.js";
 
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
+import { dbQueryDuration } from "../observability/metrics.js";
+
+const SLOW_QUERY_THRESHOLD_MS = 100;
 
 function isSqliteAssetSymbolUniqueViolation(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -458,40 +461,7 @@ export class DatabaseService {
     logger.info("[DB] SQLite database ready", { dbPath });
   }
 
-  // ─────────────────────────────────────────────
-  // Backup verification (high‑risk operations)
-  // ─────────────────────────────────────────────
 
-  /**
-   * Checks whether a recent usable backup exists.
-   * The implementation looks for a KV entry `backup_last_success` and ensures it
-   * is within the configured TTL (default 24 hours). Adjust the logic to match
-   * your actual backup service.
-   */
-  private verifyBackupExists(): void {
-    try {
-      const row = this.db
-        .prepare<[string]>("SELECT value FROM kv_store WHERE key = ?")
-        .get("backup_last_success") as { value: string } | undefined;
-      if (!row) {
-        throw new BackupVerificationError(
-          "No backup record found; a recent backup is required before performing this operation.",
-        );
-      }
-      const timestamp = new Date(row.value).getTime();
-      const now = Date.now();
-      const ttlMs = 24 * 60 * 60 * 1000; // 24 hours
-      if (now - timestamp > ttlMs) {
-        throw new BackupVerificationError(
-          "Backup is older than 24 hours; please create a fresh backup before proceeding.",
-        );
-      }
-    } catch (err) {
-      if (err instanceof BackupVerificationError) throw err;
-      // If the KV table does not exist or query fails, treat as missing backup
-      throw new BackupVerificationError(
-        `Backup verification failed: ${err}`,
-      );
     }
   }
 
@@ -610,35 +580,37 @@ export class DatabaseService {
     strategy: string = "threshold",
     strategyConfig: Record<string, unknown> = {},
   ): string {
-    try {
-      const id = generateId();
-      const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `
+    return this._withTiming("createPortfolio", () => {
+      try {
+        const id = generateId();
+        const now = new Date().toISOString();
+        this.db
+          .prepare(
+            `
                 INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
             `,
-        )
-        .run(
-          id,
-          userAddress,
-          JSON.stringify(allocations),
-          threshold,
-          slippageTolerancePercent,
-          JSON.stringify({}),
-          0,
-          now,
-          now,
-          strategy,
-          JSON.stringify(strategyConfig),
+          )
+          .run(
+            id,
+            userAddress,
+            JSON.stringify(allocations),
+            threshold,
+            slippageTolerancePercent,
+            JSON.stringify({}),
+            0,
+            now,
+            now,
+            strategy,
+            JSON.stringify(strategyConfig),
+          );
+        return id;
+      } catch (err) {
+        throw new Error(
+          `Failed to create portfolio for user '${userAddress}': ${err}`,
         );
-      return id;
-    } catch (err) {
-      throw new Error(
-        `Failed to create portfolio for user '${userAddress}': ${err}`,
-      );
-    }
+      }
+    });
   }
 
   createPortfolioWithBalances(
@@ -686,33 +658,37 @@ export class DatabaseService {
   }
 
   getPortfolio(id: string): Portfolio | undefined {
-    try {
-      const row = this.db
-        .prepare<
-          [string],
-          PortfolioRow
-        >("SELECT * FROM portfolios WHERE id = ?")
-        .get(id);
-      return row ? rowToPortfolio(row) : undefined;
-    } catch (err) {
-      throw new Error(`Failed to retrieve portfolio '${id}': ${err}`);
-    }
+    return this._withTiming("getPortfolio", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string],
+            PortfolioRow
+          >("SELECT * FROM portfolios WHERE id = ?")
+          .get(id);
+        return row ? rowToPortfolio(row) : undefined;
+      } catch (err) {
+        throw new Error(`Failed to retrieve portfolio '${id}': ${err}`);
+      }
+    });
   }
 
   getUserPortfolios(userAddress: string): Portfolio[] {
-    try {
-      const rows = this.db
-        .prepare<
-          [string],
-          PortfolioRow
-        >("SELECT * FROM portfolios WHERE user_address = ?")
-        .all(userAddress);
-      return rows.map(rowToPortfolio);
-    } catch (err) {
-      throw new Error(
-        `Failed to retrieve portfolios for user '${userAddress}': ${err}`,
-      );
-    }
+    return this._withTiming("getUserPortfolios", () => {
+      try {
+        const rows = this.db
+          .prepare<
+            [string],
+            PortfolioRow
+          >("SELECT * FROM portfolios WHERE user_address = ?")
+          .all(userAddress);
+        return rows.map(rowToPortfolio);
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve portfolios for user '${userAddress}': ${err}`,
+        );
+      }
+    });
   }
 
   /**
@@ -733,99 +709,105 @@ export class DatabaseService {
     updates: Partial<Portfolio>,
     expectedVersion?: number,
   ): boolean {
-    try {
-      const row = this.db
-        .prepare<
-          [string],
-          PortfolioRow
-        >("SELECT * FROM portfolios WHERE id = ?")
-        .get(id);
-      if (!row) return false;
+    return this._withTiming("updatePortfolio", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string],
+            PortfolioRow
+          >("SELECT * FROM portfolios WHERE id = ?")
+          .get(id);
+        if (!row) return false;
 
-      const current = rowToPortfolio(row);
-      const merged = { ...current, ...updates };
+        const current = rowToPortfolio(row);
+        const merged = { ...current, ...updates };
 
-      if (expectedVersion !== undefined) {
-        // Compare-and-set: only update when version matches
-        const result = this.db
-          .prepare(
-            `
+        if (expectedVersion !== undefined) {
+          // Compare-and-set: only update when version matches
+          const result = this.db
+            .prepare(
+              `
                     UPDATE portfolios
                     SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
                         total_value = ?, last_rebalance = ?, version = version + 1
                     WHERE id = ? AND version = ?
                 `,
-          )
-          .run(
-            merged.userAddress,
-            JSON.stringify(merged.allocations),
-            merged.threshold,
-            JSON.stringify(merged.balances),
-            merged.totalValue,
-            merged.lastRebalance,
-            id,
-            expectedVersion,
-          );
+            )
+            .run(
+              merged.userAddress,
+              JSON.stringify(merged.allocations),
+              merged.threshold,
+              JSON.stringify(merged.balances),
+              merged.totalValue,
+              merged.lastRebalance,
+              id,
+              expectedVersion,
+            );
 
-        if (result.changes === 0) {
-          // Row exists but version didn't match — concurrent write detected
-          const currentRow = this.db
-            .prepare<
-              [string],
-              { version: number }
-            >("SELECT version FROM portfolios WHERE id = ?")
-            .get(id);
-          throw new ConflictError(currentRow?.version ?? -1);
-        }
-      } else {
-        // Unchecked update — still increment version for future versioned callers
-        this.db
-          .prepare(
-            `
+          if (result.changes === 0) {
+            // Row exists but version didn't match — concurrent write detected
+            const currentRow = this.db
+              .prepare<
+                [string],
+                { version: number }
+              >("SELECT version FROM portfolios WHERE id = ?")
+              .get(id);
+            throw new ConflictError(currentRow?.version ?? -1);
+          }
+        } else {
+          // Unchecked update — still increment version for future versioned callers
+          this.db
+            .prepare(
+              `
                     UPDATE portfolios
                     SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
                         total_value = ?, last_rebalance = ?, version = version + 1
                     WHERE id = ?
                 `,
-          )
-          .run(
-            merged.userAddress,
-            JSON.stringify(merged.allocations),
-            merged.threshold,
-            JSON.stringify(merged.balances),
-            merged.totalValue,
-            merged.lastRebalance,
-            id,
-          );
-      }
+            )
+            .run(
+              merged.userAddress,
+              JSON.stringify(merged.allocations),
+              merged.threshold,
+              JSON.stringify(merged.balances),
+              merged.totalValue,
+              merged.lastRebalance,
+              id,
+            );
+        }
 
-      return true;
-    } catch (err) {
-      if (err instanceof ConflictError) throw err;
-      throw new Error(`Failed to update portfolio '${id}': ${err}`);
-    }
+        return true;
+      } catch (err) {
+        if (err instanceof ConflictError) throw err;
+        throw new Error(`Failed to update portfolio '${id}': ${err}`);
+      }
+    });
   }
 
   getAllPortfolios(): Portfolio[] {
-    try {
-      const rows = this.db
-        .prepare<[], PortfolioRow>("SELECT * FROM portfolios")
-        .all();
-      return rows.map(rowToPortfolio);
-    } catch (err) {
-      throw new Error(`Failed to retrieve all portfolios: ${err}`);
-    }
+    return this._withTiming("getAllPortfolios", () => {
+      try {
+        const rows = this.db
+          .prepare<[], PortfolioRow>("SELECT * FROM portfolios")
+          .all();
+        return rows.map(rowToPortfolio);
+      } catch (err) {
+        throw new Error(`Failed to retrieve all portfolios: ${err}`);
+      }
+    });
   }
 
   getPortfolioCount(): number {
-    try {
-      const result = this.db
-        .prepare("SELECT COUNT(*) as cnt FROM portfolios")
-        .get() as { cnt: number };
-      return result.cnt;
-    } catch (err) {
-      throw new Error(`Failed to count portfolios: ${err}`);
-    }
+    return this._withTiming("getPortfolioCount", () => {
+      try {
+        const result = this.db
+          .prepare("SELECT COUNT(*) as cnt FROM portfolios")
+          .get() as { cnt: number };
+        return result.cnt;
+      } catch (err) {
+        throw new Error(`Failed to count portfolios: ${err}`);
+      }
+    });
   }
 
   deletePortfolio(id: string): boolean {
@@ -1235,10 +1217,10 @@ export class DatabaseService {
   // ──────────────────────────────────────────
 
   recordRebalanceEvent(eventData: {
-    portfolioId: string;
-    trigger: string;
-    trades: number;
-    gasUsed: string;
+    portfolioId: string,
+    trigger: string,
+    trades: number,
+    gasUsed: string,
     status: "completed" | "failed" | "pending";
     isAutomatic?: boolean;
     riskAlerts?: any[];
@@ -1292,35 +1274,22 @@ export class DatabaseService {
         isSimulated: eventData.isSimulated,
       };
 
-      this.db
-        .prepare(
-          `
+        this.db
+          .prepare(
+            `
                 INSERT INTO rebalance_history
                     (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-        )
-        .run(
-          event.id,
-          event.portfolioId,
-          event.timestamp,
-          event.trigger,
-          event.reasonCode ?? null,
-          event.trades,
-          event.gasUsed,
-          event.status,
-          event.isAutomatic ? 1 : 0,
-          event.riskAlerts?.length ? JSON.stringify(event.riskAlerts) : null,
-          event.error ?? null,
-          event.details ? JSON.stringify(event.details) : null,
-        );
 
-      return event;
-    } catch (err) {
-      throw new Error(
-        `Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`,
-      );
-    }
+
+        return event;
+      } catch (err) {
+        throw new Error(
+          `Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`,
+        );
+      }
+    });
   }
 
   getRebalanceHistory(
@@ -1328,86 +1297,94 @@ export class DatabaseService {
     limit: number = 50,
     options?: RebalanceHistoryQueryOptions,
   ): RebalanceEvent[] {
-    try {
-      if (portfolioId) {
+    return this._withTiming("getRebalanceHistory", () => {
+      try {
+        if (portfolioId) {
+          const rows = this.db
+            .prepare<
+              [string, number],
+              RebalanceHistoryRow
+            >("SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?")
+            .all(portfolioId, limit);
+          return rows.map(rowToEvent);
+        }
+
         const rows = this.db
           .prepare<
-            [string, number],
+            [number],
             RebalanceHistoryRow
-          >("SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?")
-          .all(portfolioId, limit);
+          >("SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?")
+          .all(limit);
         return rows.map(rowToEvent);
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve rebalance history${
+            portfolioId ? ` for portfolio '${portfolioId}'` : ""
+          }: ${err}`,
+        );
       }
-
-      const rows = this.db
-        .prepare<
-          [number],
-          RebalanceHistoryRow
-        >("SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?")
-        .all(limit);
-      return rows.map(rowToEvent);
-    } catch (err) {
-      throw new Error(
-        `Failed to retrieve rebalance history${
-          portfolioId ? ` for portfolio '${portfolioId}'` : ""
-        }: ${err}`,
-      );
-    }
+    });
   }
 
   getRecentAutoRebalances(
     portfolioId: string,
     limit: number = 10,
   ): RebalanceEvent[] {
-    try {
-      const rows = this.db
-        .prepare<[string, number], RebalanceHistoryRow>(
-          `
+    return this._withTiming("getRecentAutoRebalances", () => {
+      try {
+        const rows = this.db
+          .prepare<[string, number], RebalanceHistoryRow>(
+            `
                 SELECT * FROM rebalance_history
                 WHERE portfolio_id = ? AND is_automatic = 1
                 ORDER BY timestamp DESC LIMIT ?
             `,
-        )
-        .all(portfolioId, limit);
-      return rows.map(rowToEvent);
-    } catch (err) {
-      throw new Error(
-        `Failed to retrieve auto-rebalances for portfolio '${portfolioId}': ${err}`,
-      );
-    }
+          )
+          .all(portfolioId, limit);
+        return rows.map(rowToEvent);
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve auto-rebalances for portfolio '${portfolioId}': ${err}`,
+        );
+      }
+    });
   }
 
   getAutoRebalancesSince(portfolioId: string, since: Date): RebalanceEvent[] {
-    try {
-      const rows = this.db
-        .prepare<[string, string], RebalanceHistoryRow>(
-          `
+    return this._withTiming("getAutoRebalancesSince", () => {
+      try {
+        const rows = this.db
+          .prepare<[string, string], RebalanceHistoryRow>(
+            `
                 SELECT * FROM rebalance_history
                 WHERE portfolio_id = ? AND is_automatic = 1 AND timestamp >= ?
                 ORDER BY timestamp DESC
             `,
-        )
-        .all(portfolioId, since.toISOString());
-      return rows.map(rowToEvent);
-    } catch (err) {
-      throw new Error(
-        `Failed to retrieve auto-rebalances since ${since.toISOString()} for portfolio '${portfolioId}': ${err}`,
-      );
-    }
+          )
+          .all(portfolioId, since.toISOString());
+        return rows.map(rowToEvent);
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve auto-rebalances since ${since.toISOString()} for portfolio '${portfolioId}': ${err}`,
+        );
+      }
+    });
   }
 
   getAllAutoRebalances(): RebalanceEvent[] {
-    try {
-      const rows = this.db
-        .prepare<
-          [],
-          RebalanceHistoryRow
-        >("SELECT * FROM rebalance_history WHERE is_automatic = 1 ORDER BY timestamp DESC")
-        .all();
-      return rows.map(rowToEvent);
-    } catch (err) {
-      throw new Error(`Failed to retrieve all auto-rebalances: ${err}`);
-    }
+    return this._withTiming("getAllAutoRebalances", () => {
+      try {
+        const rows = this.db
+          .prepare<
+            [],
+            RebalanceHistoryRow
+          >("SELECT * FROM rebalance_history WHERE is_automatic = 1 ORDER BY timestamp DESC")
+          .all();
+        return rows.map(rowToEvent);
+      } catch (err) {
+        throw new Error(`Failed to retrieve all auto-rebalances: ${err}`);
+      }
+    });
   }
 
   initializeDemoData(portfolioId: string): void {
@@ -1590,49 +1567,53 @@ export class DatabaseService {
     change?: number,
     source?: string,
   ): void {
-    try {
-      this.db
-        .prepare(
-          `
+    return this._withTiming("savePriceSnapshot", () => {
+      try {
+        this.db
+          .prepare(
+            `
                 INSERT INTO price_snapshots (asset, price, change, source, captured_at)
                 VALUES (?, ?, ?, ?, ?)
             `,
-        )
-        .run(
-          asset,
-          price,
-          change ?? null,
-          source ?? null,
-          new Date().toISOString(),
+          )
+          .run(
+            asset,
+            price,
+            change ?? null,
+            source ?? null,
+            new Date().toISOString(),
+          );
+      } catch (err) {
+        throw new Error(
+          `Failed to save price snapshot for asset '${asset}': ${err}`,
         );
-    } catch (err) {
-      throw new Error(
-        `Failed to save price snapshot for asset '${asset}': ${err}`,
-      );
-    }
+      }
+    });
   }
 
   getLatestPriceSnapshot(
     asset: string,
   ): { price: number; change?: number; capturedAt: string } | undefined {
-    try {
-      const row = this.db
-        .prepare<
-          [string],
-          { price: number; change: number | null; captured_at: string }
-        >("SELECT price, change, captured_at FROM price_snapshots WHERE asset = ? ORDER BY captured_at DESC LIMIT 1")
-        .get(asset);
-      if (!row) return undefined;
-      return {
-        price: row.price,
-        change: row.change ?? undefined,
-        capturedAt: row.captured_at,
-      };
-    } catch (err) {
-      throw new Error(
-        `Failed to retrieve price snapshot for asset '${asset}': ${err}`,
-      );
-    }
+    return this._withTiming("getLatestPriceSnapshot", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string],
+            { price: number; change: number | null; captured_at: string }
+          >("SELECT price, change, captured_at FROM price_snapshots WHERE asset = ? ORDER BY captured_at DESC LIMIT 1")
+          .get(asset);
+        if (!row) return undefined;
+        return {
+          price: row.price,
+          change: row.change ?? undefined,
+          capturedAt: row.captured_at,
+        };
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve price snapshot for asset '${asset}': ${err}`,
+        );
+      }
+    });
   }
 
   // ──────────────────────────────────────────
@@ -1910,29 +1891,33 @@ export class DatabaseService {
   // ──────────────────────────────────────────
 
   getIndexerState(key: string): string | undefined {
-    try {
-      const row = this.db
-        .prepare<
-          [string],
-          { value: string }
-        >("SELECT value FROM kv_store WHERE key = ?")
-        .get(key);
-      return row?.value;
-    } catch {
-      return undefined;
-    }
+    return this._withTiming("getIndexerState", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string],
+            { value: string }
+          >("SELECT value FROM kv_store WHERE key = ?")
+          .get(key);
+        return row?.value;
+      } catch {
+        return undefined;
+      }
+    });
   }
 
   setIndexerState(key: string, value: string): void {
-    try {
-      this.db
-        .prepare(
-          "INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        )
-        .run(key, value);
-    } catch (err) {
-      throw new Error(`Failed to set indexer state key '${key}': ${err}`);
-    }
+    return this._withTiming("setIndexerState", () => {
+      try {
+        this.db
+          .prepare(
+            "INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+          )
+          .run(key, value);
+      } catch (err) {
+        throw new Error(`Failed to set indexer state key '${key}': ${err}`);
+      }
+    });
   }
 
   ensurePortfolioExists(portfolioId: string, userAddress: string): void {
