@@ -8,7 +8,13 @@ import {
     WS_RECONNECT_SUGGESTED_BACKOFF_MS
 } from '../constants/wsProtocol'
 
-export type RealtimeConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+export type RealtimeConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'paused'
+
+export type RealtimeReconnectInfo = {
+    attempt: number
+    maxAttempts: number
+    nextRetryMs: number
+}
 
 export type RebalancerWSOptions = {
     maxReconnectAttempts?: number
@@ -16,6 +22,7 @@ export type RebalancerWSOptions = {
     onStateChange?: (state: RealtimeConnectionState) => void
     onMessage?: (data: unknown) => void
     onStatusDetail?: (detail: string | null) => void
+    onReconnectInfo?: (info: RealtimeReconnectInfo | null) => void
 }
 
 const DEFAULT_MAX_ATTEMPTS = WS_RECONNECT_MAX_ATTEMPTS
@@ -29,10 +36,13 @@ export class RebalancerWSClient {
     private readonly onStateChange?: (state: RealtimeConnectionState) => void
     private readonly onMessage?: (data: unknown) => void
     private readonly onStatusDetail?: (detail: string | null) => void
+    private readonly onReconnectInfo?: (info: RealtimeReconnectInfo | null) => void
 
     private intentionalClose = false
+    private pausedByVisibility = false
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null
     private reconnectCycles = 0
+    private pendingRetryMs: number | null = null
 
     constructor(url: string, options: RebalancerWSOptions = {}) {
         this.url = url
@@ -41,6 +51,7 @@ export class RebalancerWSClient {
         this.onStateChange = options.onStateChange
         this.onMessage = options.onMessage
         this.onStatusDetail = options.onStatusDetail
+        this.onReconnectInfo = options.onReconnectInfo
     }
 
     private setState(state: RealtimeConnectionState): void {
@@ -52,10 +63,26 @@ export class RebalancerWSClient {
             clearTimeout(this.reconnectTimer)
             this.reconnectTimer = null
         }
+        this.pendingRetryMs = null
+        this.onReconnectInfo?.(null)
+    }
+
+    private emitReconnectInfo(delay: number): void {
+        this.pendingRetryMs = delay
+        this.onReconnectInfo?.({
+            attempt: this.reconnectCycles + 1,
+            maxAttempts: this.maxReconnectAttempts,
+            nextRetryMs: delay,
+        })
     }
 
     private scheduleReconnect(): void {
         this.clearReconnectTimer()
+        if (this.pausedByVisibility) {
+            this.onStatusDetail?.('Live updates paused while this tab is in the background.')
+            this.setState('paused')
+            return
+        }
         if (this.reconnectCycles >= this.maxReconnectAttempts) {
             this.onStatusDetail?.(
                 `Could not restore the live connection after ${this.maxReconnectAttempts} retries.`,
@@ -69,6 +96,8 @@ export class RebalancerWSClient {
         this.onStatusDetail?.(
             `Next retry in ${Math.round(delay / 1000)}s (${this.reconnectCycles + 1}/${this.maxReconnectAttempts})`,
         )
+        this.emitReconnectInfo(delay)
+        this.setState('reconnecting')
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null
             this.reconnectCycles += 1
@@ -78,12 +107,20 @@ export class RebalancerWSClient {
 
     private openSocket(): void {
         if (this.intentionalClose) return
+        if (this.pausedByVisibility) {
+            this.setState('paused')
+            return
+        }
         if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
             return
         }
 
         this.onStatusDetail?.(null)
         this.setState(this.reconnectCycles === 0 ? 'connecting' : 'reconnecting')
+        if (this.reconnectCycles > 0) {
+            const delay = this.pendingRetryMs ?? 1000
+            this.emitReconnectInfo(delay)
+        }
 
         try {
             this.ws = new WebSocket(this.url)
@@ -95,8 +132,7 @@ export class RebalancerWSClient {
 
         this.ws.onopen = () => {
             this.reconnectCycles = 0
-            this.onStatusDetail?.('Subscribing to live updates...')
-            this.send(WS_SUBSCRIBE_TYPE, {})
+
         }
 
         this.ws.onmessage = (event) => {
@@ -143,6 +179,25 @@ export class RebalancerWSClient {
         }
     }
 
+    setPaused(paused: boolean): void {
+        this.pausedByVisibility = paused
+        if (paused) {
+            this.clearReconnectTimer()
+            if (this.ws) {
+                this.ws.close()
+                this.ws = null
+            }
+            this.onStatusDetail?.('Live updates paused while this tab is in the background.')
+            this.setState('paused')
+            return
+        }
+        if (!this.intentionalClose && this.ws?.readyState !== WebSocket.OPEN) {
+            this.onStatusDetail?.(null)
+            this.reconnectCycles = 0
+            this.openSocket()
+        }
+    }
+
     connect(): void {
         this.intentionalClose = false
         this.reconnectCycles = 0
@@ -152,6 +207,7 @@ export class RebalancerWSClient {
 
     resume(): void {
         this.intentionalClose = false
+        this.pausedByVisibility = false
         this.reconnectCycles = 0
         this.onStatusDetail?.(null)
         this.clearReconnectTimer()

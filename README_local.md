@@ -60,6 +60,14 @@ cd backend && npm run dev
 cd frontend && npm run dev
 ```
 
+Before trusting a new backend environment or deployment, run the startup sweep:
+
+```bash
+cd backend && npm run startup:self-test
+```
+
+It validates config, database, queues, and provider connectivity using the same backend entrypoint without starting the HTTP server.
+
 ### Docker Compose
 
 You can also run the stack using Docker Compose:

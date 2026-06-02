@@ -1,17 +1,12 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import {
-  WSMessageSchema,
-  PROTOCOL_VERSION,
-  HEARTBEAT_INTERVAL_MS,
-  RECONNECT_MAX_ATTEMPTS,
-  RECONNECT_SUGGESTED_BACKOFF_MS
-} from '../types/websocket.js';
+
 import { logger } from '../utils/logger.js';
 
 interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
   isSubscribed?: boolean;
   userId?: string;
+  sessionMetadata?: WSSessionMetadata;
 }
 
 let attachedServer: WebSocketServer | null = null;
@@ -56,12 +51,46 @@ export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
   });
 }
 
+/**
+ * Extract JWT token from WebSocket upgrade request
+ * Supports both Authorization header and query parameter (for browsers)
+ */
+function extractTokenFromRequest(req: any): string | null {
+  // Try Authorization header first (standard)
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+
+  // Fall back to query parameter (for browser WebSocket clients)
+  const url = new URL(req.url || '', 'ws://localhost');
+  return url.searchParams.get('token');
+}
+
 export const initRobustWebSocket = (wss: WebSocketServer) => {
   attachedServer = wss;
+  const authConfig = getAuthConfig();
 
   const interval = setInterval(() => {
     wss.clients.forEach((ws) => {
       const client = ws as ExtWebSocket;
+      
+      // Check token expiry
+      if (client.sessionMetadata) {
+        const now = Date.now();
+        if (now >= client.sessionMetadata.tokenExpiryTimestamp * 1000) {
+          logger.info('[WS] Terminating connection — token expired', {
+            userId: client.userId,
+            expiredAt: client.sessionMetadata.tokenExpiresAt
+          });
+          ws.close(
+            1008, // Policy Violation
+            `Token expired at ${client.sessionMetadata.tokenExpiresAt}`
+          );
+          return;
+        }
+      }
+
       if (client.isAlive === false) {
         logger.info('[WS] Terminating inactive connection', { userId: client.userId });
         return ws.terminate();
@@ -88,34 +117,34 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
     attachedServer = null;
   });
 
-  wss.on('connection', (ws: WebSocket, req) => {
+  wss.on('connection', (ws: WebSocket, req: any) => {
     const extWs = ws as ExtWebSocket;
     extWs.isAlive = true;
-    extWs.isSubscribed = false;
-    const requestUrl = req.url ?? '';
-    const wsUrl = new URL(requestUrl, 'ws://localhost');
-    extWs.userId = wsUrl.searchParams.get('userId') ?? undefined;
 
-    logger.info('[WS] Client connected', { userId: extWs.userId });
 
     ws.on('pong', () => {
       extWs.isAlive = true;
     });
 
-    sendWsMessage(ws, {
-      type: 'CONNECTION_ACK',
-      payload: {
-        message: 'Validation and Monitoring Active',
-        heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-        reconnectPolicy: {
-          maxAttempts: RECONNECT_MAX_ATTEMPTS,
-          suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
-        }
-      }
-    });
+
 
     ws.on('message', (rawData) => {
       extWs.isAlive = true;
+
+      // Re-validate token on each message if auth is enabled
+      if (authConfig.enabled && extWs.sessionMetadata) {
+        const now = Date.now();
+        if (now >= extWs.sessionMetadata.tokenExpiryTimestamp * 1000) {
+          logger.warn('[WS] Message rejected — token expired', {
+            userId: extWs.userId
+          });
+          ws.close(
+            1008, // Policy Violation
+            `Token expired at ${extWs.sessionMetadata.tokenExpiresAt}`
+          );
+          return;
+        }
+      }
 
       try {
         const parsed = JSON.parse(rawData.toString());
@@ -152,13 +181,25 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
               payload: `Unsupported message type: ${validated.type}. Expected PING or SUBSCRIBE.`
             });
         }
-      } catch (error) {
-        logger.warn('[WS] Rejecting invalid message format', { error: String(error), userId: extWs.userId });
-        sendWsMessage(ws, {
+
           type: 'ERROR',
           payload: `Incompatible version or format. Use v${PROTOCOL_VERSION}`
         });
       }
+    });
+
+    ws.on('close', (_code, reason) => {
+      logger.info('[WS] Client disconnected', {
+        userId: extWs.userId,
+        reason: reason.toString()
+      });
+    });
+
+    ws.on('error', (error) => {
+      logger.error('[WS] Connection error', {
+        userId: extWs.userId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     });
   });
 };
