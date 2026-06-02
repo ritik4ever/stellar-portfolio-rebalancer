@@ -1,5 +1,79 @@
 # Database migrations
 
+## Contract upgrade checklist
+
+When upgrading the Soroban contract WASM, follow this checklist to avoid storage incompatibilities:
+
+### Pre-upgrade
+
+1. **Compute current WASM hash**:
+   ```bash
+   soroban contract wasm hash --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+   ```
+   Save this hash for rollback.
+
+2. **Check storage shape**:
+   - Review `DataKey` variants in `contracts/src/types.rs`. New variants are safe; renamed or removed variants are **breaking**.
+   - Review `Portfolio` struct fields. Adding fields is safe for new portfolios; existing entries remain deserializable only if your upgrade code handles legacy data (e.g., via migration).
+   - If storage layout changes, write a migration function invoked during `upgrade()` before calling `update_current_contract_wasm`.
+
+3. **Backup the current WASM artifact**:
+   ```bash
+   cp target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm previous.wasm
+   ```
+
+4. **Verify test snapshots pass**:
+   ```bash
+   make test
+   ```
+   Snapshot fixtures in `test_snapshots/` must match the new behavior before deploying.
+
+### Upgrade steps
+
+```bash
+# 1. Install new WASM blob (returns hash)
+NEW_HASH=$(soroban contract install \
+  --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \
+  --source $STELLAR_SECRET_KEY \
+  --network $STELLAR_NETWORK)
+
+# 2. Point contract instance to new WASM
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $STELLAR_SECRET_KEY \
+  --network $STELLAR_NETWORK \
+  -- upgrade \
+  --new_wasm_hash $NEW_HASH
+
+# 3. Verify upgrade event was emitted
+# Check for ("portfolio","upgraded") event with from_hash, to_hash, timestamp.
+```
+
+### Rollback
+
+```bash
+# Point contract back to previous WASM hash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $STELLAR_SECRET_KEY \
+  --network $STELLAR_NETWORK \
+  -- upgrade \
+  --new_wasm_hash $PREVIOUS_HASH
+```
+
+### Storage compatibility notes
+
+| Storage change | Compatibility | Migration needed? |
+|---|---|---|
+| Add `DataKey` variant | Safe | No |
+| Rename/remove `DataKey` variant | Breaking | Yes |
+| Add field to `Portfolio` | Safe for new entries | Yes for existing entries |
+| Remove field from `Portfolio` | Breaking | Yes |
+| Add new event topic | Safe | No |
+| Change event payload shape | Breaking (indexer) | Yes, update `CONTRACT_EVENTS.md` |
+
+---
+
 This project uses a **versioned migration framework** for PostgreSQL. Schema changes are applied deterministically and can be rolled back when needed.
 
 ## Quick reference

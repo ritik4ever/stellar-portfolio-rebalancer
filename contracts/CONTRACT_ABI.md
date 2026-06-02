@@ -46,14 +46,16 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Portfolio must exist; otherwise contract panics on `.unwrap()`.
 
-### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> ()`
+### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128, memo: String) -> ()`
 
 - **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")`.
 - **Parameters:**
   - `portfolio_id`: Target portfolio.
   - `asset`: Asset address key used in `current_balances`.
-  - `amount`: Amount to add.
+  - `amount`: Amount to add (must be positive).
+  - `memo`: Optional memo string for correlating deposits outside the contract (e.g., deposit reference IDs). Pass an empty string if unused.
 - **Returns:** No return value.
+- **Event payload:** `(portfolio_id: u64, asset: Address, amount: i128, memo: String)`
 - **Preconditions / failure behavior:**
   - `amount > 0` (otherwise panic `"Amount must be positive"`).
   - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
@@ -91,6 +93,31 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Returns:** No return value.
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
+
+### `set_fee_config(env: Env, config: FeeConfig) -> ()`
+
+- **Purpose:** Sets fee configuration for the contract. Disabled by default (`enabled: false`).
+- **Parameters:**
+  - `config`: `FeeConfig` struct with `fee_bps: u32`, `fee_recipient: Address`, `enabled: bool`.
+- **Returns:** No return value.
+- **Panics:** When `enabled` is `true` and `fee_bps > 1000` (10% max).
+- **Preconditions:**
+  - Admin address must authorize the call.
+
+### `get_fee_config(env: Env) -> FeeConfig`
+
+- **Purpose:** Returns the current fee configuration.
+- **Returns:** `FeeConfig` with `enabled: false` defaults when not yet set.
+
+### `upgrade(env: Env, new_wasm_hash: BytesN<32>) -> ()`
+
+- **Purpose:** Upgrades the contract WASM to a new version. Emits `("portfolio","upgraded")` event.
+- **Parameters:**
+  - `new_wasm_hash`: 32-byte WASM hash of the new contract code.
+- **Returns:** No return value.
+- **Event payload:** `UpgradeEvent { from_hash: Bytes, to_hash: Bytes, timestamp: u64 }`
+- **Preconditions:**
+  - Admin address must authorize the call.
 
 ### `min_rebalance_threshold(env: Env) -> u32`
 
@@ -134,6 +161,9 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
+| `12` | `FeeTooHigh` | Reserved variant; fee validation currently panics instead of returning this error. |
+| `13` | `NotAllowed` | Reserved variant; authorization failures currently panic instead of returning this error. |
+| `14` | `UpgradeFailed` | Reserved variant; upgrade failures currently panic instead of returning this error. |
 
 ## XDR/Contract Type References
 
@@ -155,6 +185,10 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `last_rebalance: u64`
   - `total_value: i128`
   - `is_active: bool`
+- `FeeConfig` (`contracts/src/types.rs`)
+  - Struct: `fee_bps: u32` (fee in basis points, max 1000 when enabled), `fee_recipient: Address`, `enabled: bool`.
+- `UpgradeEvent` (`contracts/src/types.rs`)
+  - Struct: `from_hash: Bytes` (previous WASM hash, empty if first upgrade), `to_hash: Bytes` (new WASM hash), `timestamp: u64`.
 - `Asset` (`contracts/src/reflector.rs`)
   - Enum: `Stellar(Address)` or `Other(Symbol)`.
 - `PriceData` (`contracts/src/reflector.rs`)
