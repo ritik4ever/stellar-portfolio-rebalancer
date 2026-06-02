@@ -31,12 +31,12 @@ Manual execution is also available via the analytics service:
 
 ```typescript
 const stats = await analyticsService.compactAnalyticsForPortfolio(
-    portfolioId,
-    cutoffDays = 90,
-    recentDays = 7
-)
+  portfolioId,
+  (cutoffDays = 90),
+  (recentDays = 7),
+);
 // or
-const allStats = await analyticsService.compactAllPortfolios(90, 7)
+const allStats = await analyticsService.compactAllPortfolios(90, 7);
 ```
 
 ## Database Operations
@@ -50,8 +50,8 @@ The `dbCompactAnalyticsSnapshots()` function handles the SQL logic:
 
 ```sql
 -- Phase 1: Delete old snapshots
-DELETE FROM analytics_snapshots 
-WHERE portfolio_id = $1 
+DELETE FROM analytics_snapshots
+WHERE portfolio_id = $1
   AND timestamp < NOW() - INTERVAL '1 day' * $2;
 
 -- Phase 2: Keep last-of-day for intermediate range
@@ -76,14 +76,15 @@ Each compaction produces:
 
 ```typescript
 interface CompactionStats {
-  portfolioId: string
-  deletedCount: number           // Snapshots removed
-  retainedCount: number          // Snapshots remaining
-  compactionCutoffTimestamp: string
+  portfolioId: string;
+  deletedCount: number; // Snapshots removed
+  retainedCount: number; // Snapshots remaining
+  compactionCutoffTimestamp: string;
 }
 ```
 
 **Logs**:
+
 - **INFO**: Start/completion of compaction cycle with summary (total portfolios, deleted/retained counts)
 - **ERROR**: Failures with portfolio ID and error details
 
@@ -113,6 +114,7 @@ Worker file: `backend/src/queue/workers/analyticsCompactionWorker.ts`
 ### Readiness Check
 
 The `/readiness` endpoint includes:
+
 - Queue health: `QUEUE_NAMES.ANALYTICS_COMPACTION`
 - Worker status: `analyticsCompaction`
 
@@ -127,6 +129,7 @@ The `/api/v1/system/status` endpoint includes analytics-compaction worker runtim
 File: `backend/src/test/analyticsCompaction.test.ts`
 
 Test coverage:
+
 - Correct database function calls with parameters
 - Default parameter handling
 - Validation (cutoffDays >= recentDays)
@@ -137,6 +140,7 @@ Test coverage:
 ### Integration Testing
 
 1. **Manual Trigger** (development):
+
    ```bash
    # Requires direct service call or API endpoint if added
    curl -X POST http://localhost:3001/api/v1/admin/analytics/compact
@@ -155,16 +159,17 @@ Test coverage:
 
 ### Failure Cases & Recovery
 
-| Scenario | Behavior | Log Level |
-|----------|----------|-----------|
-| Database unavailable | Job retries (exponential backoff) | WARN/ERROR |
-| Portfolio with 0 snapshots | Skipped (no-op) | INFO |
-| Parameter validation failure | Job rejected immediately | ERROR |
-| Partial portfolio failure | Stops at first error | ERROR |
+| Scenario                     | Behavior                          | Log Level  |
+| ---------------------------- | --------------------------------- | ---------- |
+| Database unavailable         | Job retries (exponential backoff) | WARN/ERROR |
+| Portfolio with 0 snapshots   | Skipped (no-op)                   | INFO       |
+| Parameter validation failure | Job rejected immediately          | ERROR      |
+| Partial portfolio failure    | Stops at first error              | ERROR      |
 
 ### Logging
 
 All errors include:
+
 - Portfolio ID (if portfolio-specific)
 - Error message/stack
 - Correlation ID for request tracing
@@ -187,11 +192,13 @@ All errors include:
 ## Example Scenario
 
 **Initial State**:
+
 - Portfolio `ABC-123` has 168 hourly snapshots (7 days)
 - Plus 2,400 hourly snapshots from 90 days prior (100 days old)
 - Total: 2,568 snapshots
 
 **After Compaction** (cutoffDays=90, recentDays=7):
+
 - Delete 2,400 (100+ days old)
 - Keep 168 recent snapshots
 - In 7-90 range: Reduce to ~12 (1 per day)
