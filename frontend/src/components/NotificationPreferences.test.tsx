@@ -12,6 +12,19 @@ function renderWithQuery(ui: React.ReactElement) {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
+const enabledPreferences = {
+    emailEnabled: true,
+    emailAddress: 'user@example.com',
+    webhookEnabled: true,
+    webhookUrl: 'https://example.com/webhook',
+    events: {
+        rebalance: true,
+        circuitBreaker: true,
+        priceMovement: true,
+        riskChange: true,
+    },
+}
+
 describe('NotificationPreferences', () => {
     beforeEach(() => {
         cleanup()
@@ -128,5 +141,76 @@ describe('NotificationPreferences', () => {
         expect(saveBtn.disabled).toBe(true)
         fireEvent.click(saveBtn)
         expect(postSpy).not.toHaveBeenCalled()
+    })
+
+    it('shows an optional reason step before unsubscribing', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: enabledPreferences } as any)
+        vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: /unsubscribe from all/i }))
+
+        expect(screen.getByRole('dialog', { name: /before you unsubscribe/i })).toBeTruthy()
+        expect(screen.getByLabelText(/reason \(optional\)/i)).toBeTruthy()
+        expect(screen.getByRole('button', { name: /skip and unsubscribe/i })).toBeTruthy()
+    })
+
+    it('skips the optional reason and unsubscribes with the original request', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: enabledPreferences } as any)
+        const deleteSpy = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: /unsubscribe from all/i }))
+        fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), {
+            target: { value: 'Too frequent' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /skip and unsubscribe/i }))
+
+        await waitFor(() => {
+            expect(deleteSpy).toHaveBeenCalledWith(ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE('user-1'))
+        })
+        expect(await screen.findByText(/preferences saved successfully/i)).toBeTruthy()
+    })
+
+    it('submits a trimmed optional reason when provided', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: enabledPreferences } as any)
+        const deleteSpy = vi.spyOn(api, 'delete').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: /unsubscribe from all/i }))
+        fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), {
+            target: { value: ' Too many alerts ' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /^unsubscribe$/i }))
+
+        await waitFor(() => {
+            expect(deleteSpy).toHaveBeenCalledWith(
+                ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE('user-1', 'Too many alerts')
+            )
+        })
+    })
+
+    it('keeps the reason step open when unsubscribe fails', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: enabledPreferences } as any)
+        vi.spyOn(api, 'delete').mockRejectedValue(new Error('Network unavailable'))
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: /unsubscribe from all/i }))
+        fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), {
+            target: { value: 'Not useful right now' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /^unsubscribe$/i }))
+
+        expect(await screen.findByText(/network unavailable/i)).toBeTruthy()
+        expect(screen.getByRole('dialog', { name: /before you unsubscribe/i })).toBeTruthy()
+        expect(screen.getByDisplayValue(/not useful right now/i)).toBeTruthy()
     })
 })
