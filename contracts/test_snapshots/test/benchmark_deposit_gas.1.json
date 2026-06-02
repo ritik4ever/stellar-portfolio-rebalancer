@@ -634,10 +634,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "created"
+                "symbol": "created"
               }
             ],
             "data": {
@@ -729,10 +729,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "deposit"
+                "symbol": "deposit"
               }
             ],
             "data": {
@@ -748,9 +748,6 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }

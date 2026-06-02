@@ -64,12 +64,25 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Portfolio must exist; otherwise contract panics on `.unwrap()`.
 
+### `check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error>`
 
 
-- **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")`.
+- **Purpose:** On-demand validation of core portfolio assumptions (allocations, thresholds, non-negative balances, active state).
+- **Parameters:** `portfolio_id`.
+- **Returns:** `Ok(())` when invariants hold, or `Err(Error::InvariantViolation)`, `Err(Error::PortfolioInactive)`, or `Err(Error::PortfolioNotFound)`.
+
+### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> Result<(), Error>`
+
+- **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")` with payload `(portfolio_id, asset, amount)`.
 - **Parameters:**
   - `portfolio_id`: Target portfolio.
   - `asset`: Asset address key used in `current_balances`.
+  - `amount`: Amount to add.
+- **Returns:** `Ok(())` or an error variant.
+- **Preconditions / failure behavior:**
+  - `amount > 0` or `Err(Error::InvalidWithdrawAmount)`.
+  - Emergency stop must be off or `Err(Error::EmergencyStop)`.
+  - Portfolio must exist or `Err(Error::PortfolioNotFound)`.
 
 - **Returns:** No return value.
 - **Event payload:** `(portfolio_id: u64, asset: Address, amount: i128, memo: String)`
@@ -79,6 +92,15 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
   - Portfolio must be active (otherwise panic `"Portfolio paused"`).
   - Portfolio must exist (otherwise panic on `.unwrap()`).
   - Portfolio owner authorization required (`portfolio.user.require_auth()`).
+
+### `withdraw(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> Result<(), Error>`
+
+- **Purpose:** Withdraws an amount from `current_balances`, deactivates the portfolio when all balances reach zero, and emits `("portfolio","withdraw")` with payload `(portfolio_id, asset, amount)`.
+- **Parameters:** Same shape as `deposit`.
+- **Returns:** `Ok(())` or `Err(Error::InsufficientBalance)`, `Err(Error::InvalidWithdrawAmount)`, `Err(Error::EmergencyStop)`, `Err(Error::PortfolioNotFound)`, or invariant errors.
+- **Preconditions:**
+  - `amount > 0` and `current_balance >= amount`.
+  - Portfolio owner authorization required.
 
 ### `check_rebalance_needed(env: Env, portfolio_id: u64) -> bool`
 
@@ -91,6 +113,23 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
+- **Purpose:** Validates post-trade balances against slippage tolerance, updates `last_rebalance`, and emits `("portfolio","rebalanced")` with payload `(portfolio_id, timestamp)`.
+- **Parameters:**
+  - `portfolio_id`: Portfolio to rebalance.
+  - `actual_balances`: Actual balances used for slippage checks.
+- **Returns:** `Ok(())` or `Err(Error::SlippageExceeded)`, `Err(Error::CooldownActive)`, `Err(Error::StaleData)`, `Err(Error::EmergencyStop)`.
+- **Preconditions / failure behavior:**
+  - Emergency stop must be off.
+  - Portfolio must exist and owner must authorize call.
+  - Cooldown must be elapsed (`>= REBALANCE_COOLDOWN_SECONDS`, 3600) or `Err(Error::CooldownActive)`.
+  - Every target asset must have non-stale Reflector price data or `Err(Error::StaleData)`.
+
+### `admin_force_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only rebalance that bypasses the user cooldown, emits `("portfolio","cooldown_override")` with `(portfolio_id, admin, timestamp)`, then emits the standard rebalanced event.
+- **Parameters:** Same as `execute_rebalance`.
+- **Returns:** Same error set as `execute_rebalance` except cooldown is not enforced.
+- **Preconditions:** Admin address in `DataKey::Admin` must authorize the call.
 - **Purpose:** Validates post-trade balances against slippage tolerance (per `slippage_policy_version` on the portfolio), updates `last_rebalance`, and emits `("portfolio","rebalanced")`.
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
@@ -204,19 +243,29 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 |---|---|---|
 | `1` | `InvalidAllocation` | `create_portfolio` receives allocation map that fails validation. |
 | `2` | `RebalanceNotNeeded` | Reserved variant; currently not explicitly returned by `lib.rs`. |
-| `3` | `EmergencyStop` | Global emergency stop is active during `execute_rebalance`. |
-| `4` | `CooldownActive` | `execute_rebalance` called within 1-hour cooldown of last rebalance. |
-| `5` | `StaleData` | Reserved variant; stale-price path currently panics instead of returning this error. |
+| `3` | `EmergencyStop` | `deposit`, `withdraw`, or rebalance while emergency stop is active. |
+| `4` | `CooldownActive` | `execute_rebalance` called before cooldown elapses. |
+| `5` | `StaleData` | Rebalance when Reflector price data is missing or stale. |
 | `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
 | `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
 | `8` | `InvalidThreshold` | `create_portfolio` threshold outside `1..=50`. |
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
-| `12` | `Unauthorized` | Reserved variant; unauthorized operation. |
+| `12` | `Unauthorized` | Unauthorized operation. |
 | `13` | `StalePrice` | `execute_rebalance` detected stale price data (>1 hour old). |
 | `14` | `MissingPrice` | `execute_rebalance` cannot find price for a portfolio asset. |
 | `15` | `MalformedPrice` | `execute_rebalance` received non-positive price value. |
+| `16` | `PortfolioPaused` | Operation on a portfolio that has been paused. |
+| `17` | `PreviewUnavailable` | Price data unavailable for rebalance preview. |
+| `18` | `InvalidAssetDecimals` | `create_portfolio` asset decimals invalid. |
+| `19` | `UnsupportedSlippagePolicyVersion` | `create_portfolio` with unsupported slippage version. |
+| `20` | `AssetDecimalsMismatch` | Asset decimals mismatch in portfolio operations. |
+| `21` | `InsufficientBalance` | `withdraw` amount exceeds `current_balances` for the asset. |
+| `22` | `InvariantViolation` | `check_invariants` or pre-mutation invariant validation failed. |
+| `23` | `PortfolioNotFound` | Unknown `portfolio_id`. |
+| `24` | `PortfolioInactive` | Operation requires an active portfolio (`is_active == true`). |
+| `25` | `InvalidWithdrawAmount` | `withdraw` or `deposit` with non-positive `amount`. |
 
 ## Valuation Errors (`contracts/src/portfolio.rs`)
 

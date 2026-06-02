@@ -23,6 +23,8 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 ///
 /// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
+pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
+pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
 
 /// Minimum allowed rebalance threshold percentage.
 ///
@@ -174,6 +176,11 @@ pub enum Error {
     InvalidAssetDecimals = 18,
     UnsupportedSlippagePolicyVersion = 19,
     AssetDecimalsMismatch = 20,
+    InsufficientBalance = 21,
+    InvariantViolation = 22,
+    PortfolioNotFound = 23,
+    PortfolioInactive = 24,
+    InvalidWithdrawAmount = 25,
 }
 
 #[contracttype]
