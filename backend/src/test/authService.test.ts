@@ -17,6 +17,7 @@ vi.mock("../db/refreshTokenDb.js", () => ({
   deleteRefreshTokenById: vi.fn(() => Promise.resolve(true)),
   deleteAllRefreshTokensForUser: vi.fn(() => Promise.resolve(0)),
   generateRefreshTokenId: vi.fn(() => "mock-jti"),
+  touchRefreshToken: vi.fn(() => Promise.resolve()),
 }));
 
 describe("authService – JWT secret enforcement", () => {

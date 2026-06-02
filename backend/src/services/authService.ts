@@ -9,7 +9,10 @@ import {
   deleteRefreshTokenById,
   deleteAllRefreshTokensForUser,
   generateRefreshTokenId,
+  touchRefreshToken,
 } from "../db/refreshTokenDb.js";
+import { logger } from "../utils/logger.js";
+import type { RefreshTokenMetadata } from "../types/index.js";
 import { logger, logAudit } from "../utils/logger.js";
 
 const ACCESS_EXPIRY_SEC = parseInt(
@@ -104,6 +107,10 @@ export function generateAccessToken(address: string): string {
   );
 }
 
+export async function issueTokens(
+  address: string,
+  metadata?: RefreshTokenMetadata | null,
+): Promise<AuthTokens> {
 interface TokenCreationResult extends AuthTokens {
   refreshId: string;
 }
@@ -119,7 +126,7 @@ async function createTokensForUser(address: string): Promise<TokenCreationResult
     { expiresIn: REFRESH_EXPIRY_SEC },
   );
   const expiresAt = new Date(Date.now() + REFRESH_EXPIRY_SEC * 1000);
-  await createRefreshToken(refreshId, address, refreshToken, expiresAt);
+  await createRefreshToken(refreshId, address, refreshToken, expiresAt, metadata);
   return {
     accessToken,
     refreshToken,
@@ -168,6 +175,11 @@ export async function refreshTokens(
     return null;
   }
   await deleteRefreshTokenById(row.id);
+  const metadata: RefreshTokenMetadata = {
+    ...(row.metadata || {}),
+    lastUsedAt: new Date().toISOString(),
+  };
+  return issueTokens(row.user_address, metadata);
   const result = await createTokensForUser(row.user_address);
   recordAuthAuditEvent({
     action: "refresh",

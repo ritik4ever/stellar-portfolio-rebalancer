@@ -2,7 +2,11 @@
 
 Please include a summary of the changes and the related issue(s) being resolved.
 
+**Every PR must link to an issue.** If this PR intentionally has no related issue, explain why in the rationale section below.
+
 Fixes # (issue)
+
+> Rationale for no issue (if applicable):
 
 ## Type of Change
 
@@ -27,5 +31,6 @@ If your changes affect any HTTP route, request/response schema, database schema,
 - [ ] I have commented my code, particularly in hard-to-understand areas
 - [ ] I have made corresponding changes to the documentation
 - [ ] My changes generate no new warnings
+- [ ] **This PR links to an issue or provides a rationale for no issue**
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
