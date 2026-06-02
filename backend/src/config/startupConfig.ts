@@ -16,6 +16,14 @@ export interface StartupConfig {
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
   featureFlagsFile?: string;
+  rateLimitWindowMs: number;
+  rateLimitMax: number;
+  rateLimitWriteMax: number;
+  rateLimitAuthMax: number;
+  rateLimitCriticalMax: number;
+  rateLimitBurstWindowMs: number;
+  rateLimitBurstMax: number;
+  rateLimitWriteBurstMax: number;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -195,6 +203,54 @@ export function validateStartupConfigOrThrow(
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
+  const rateLimitWindowMsRaw = (env.RATE_LIMIT_WINDOW_MS || "60000").trim();
+  const rateLimitWindowMs = Number.parseInt(rateLimitWindowMsRaw, 10);
+  if (!Number.isInteger(rateLimitWindowMs) || rateLimitWindowMs <= 0) {
+    errors.push(`RATE_LIMIT_WINDOW_MS '${env.RATE_LIMIT_WINDOW_MS}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitMaxRaw = (env.RATE_LIMIT_MAX || "100").trim();
+  const rateLimitMax = Number.parseInt(rateLimitMaxRaw, 10);
+  if (!Number.isInteger(rateLimitMax) || rateLimitMax <= 0) {
+    errors.push(`RATE_LIMIT_MAX '${env.RATE_LIMIT_MAX}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitWriteMaxRaw = (env.RATE_LIMIT_WRITE_MAX || "10").trim();
+  const rateLimitWriteMax = Number.parseInt(rateLimitWriteMaxRaw, 10);
+  if (!Number.isInteger(rateLimitWriteMax) || rateLimitWriteMax <= 0) {
+    errors.push(`RATE_LIMIT_WRITE_MAX '${env.RATE_LIMIT_WRITE_MAX}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitAuthMaxRaw = (env.RATE_LIMIT_AUTH_MAX || "5").trim();
+  const rateLimitAuthMax = Number.parseInt(rateLimitAuthMaxRaw, 10);
+  if (!Number.isInteger(rateLimitAuthMax) || rateLimitAuthMax <= 0) {
+    errors.push(`RATE_LIMIT_AUTH_MAX '${env.RATE_LIMIT_AUTH_MAX}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitCriticalMaxRaw = (env.RATE_LIMIT_CRITICAL_MAX || "3").trim();
+  const rateLimitCriticalMax = Number.parseInt(rateLimitCriticalMaxRaw, 10);
+  if (!Number.isInteger(rateLimitCriticalMax) || rateLimitCriticalMax <= 0) {
+    errors.push(`RATE_LIMIT_CRITICAL_MAX '${env.RATE_LIMIT_CRITICAL_MAX}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitBurstWindowMsRaw = (env.RATE_LIMIT_BURST_WINDOW_MS || "10000").trim();
+  const rateLimitBurstWindowMs = Number.parseInt(rateLimitBurstWindowMsRaw, 10);
+  if (!Number.isInteger(rateLimitBurstWindowMs) || rateLimitBurstWindowMs <= 0) {
+    errors.push(`RATE_LIMIT_BURST_WINDOW_MS '${env.RATE_LIMIT_BURST_WINDOW_MS}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitBurstMaxRaw = (env.RATE_LIMIT_BURST_MAX || "20").trim();
+  const rateLimitBurstMax = Number.parseInt(rateLimitBurstMaxRaw, 10);
+  if (!Number.isInteger(rateLimitBurstMax) || rateLimitBurstMax <= 0) {
+    errors.push(`RATE_LIMIT_BURST_MAX '${env.RATE_LIMIT_BURST_MAX}' is invalid. Provide a positive integer.`);
+  }
+
+  const rateLimitWriteBurstMaxRaw = (env.RATE_LIMIT_WRITE_BURST_MAX || "3").trim();
+  const rateLimitWriteBurstMax = Number.parseInt(rateLimitWriteBurstMaxRaw, 10);
+  if (!Number.isInteger(rateLimitWriteBurstMax) || rateLimitWriteBurstMax <= 0) {
+    errors.push(`RATE_LIMIT_WRITE_BURST_MAX '${env.RATE_LIMIT_WRITE_BURST_MAX}' is invalid. Provide a positive integer.`);
+  }
+
   if (errors.length > 0) {
     const numberedErrors = errors
       .map((msg, idx) => `${idx + 1}. ${msg}`)
@@ -232,6 +288,14 @@ export function validateStartupConfigOrThrow(
     jwtAuthEnabled,
     featureFlags,
     featureFlagsFile,
+    rateLimitWindowMs,
+    rateLimitMax,
+    rateLimitWriteMax,
+    rateLimitAuthMax,
+    rateLimitCriticalMax,
+    rateLimitBurstWindowMs,
+    rateLimitBurstMax,
+    rateLimitWriteBurstMax,
   };
 }
 
