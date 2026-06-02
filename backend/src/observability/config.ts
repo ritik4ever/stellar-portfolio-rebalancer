@@ -9,12 +9,21 @@ const parseNumber = (value: string | undefined, fallback: number): number => {
     return Number.isFinite(parsed) ? parsed : fallback
 }
 
+const pickFirstDefined = (...values: Array<string | undefined>): string | undefined => {
+    for (const value of values) {
+        if (value == null) continue
+        const trimmed = value.trim()
+        if (trimmed !== '') return trimmed
+    }
+    return undefined
+}
+
 export const observabilityConfig = {
     sentry: {
         enabled: parseBoolean(process.env.SENTRY_ENABLED, false) && !!process.env.SENTRY_DSN,
         dsn: process.env.SENTRY_DSN,
-        environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
-        release: process.env.SENTRY_RELEASE,
+        environment: pickFirstDefined(process.env.SENTRY_ENVIRONMENT, process.env.NODE_ENV, 'development'),
+        release: pickFirstDefined(process.env.SENTRY_RELEASE),
         tracesSampleRate: parseNumber(process.env.SENTRY_TRACES_SAMPLE_RATE, 0.2),
         profilesSampleRate: parseNumber(process.env.SENTRY_PROFILES_SAMPLE_RATE, 0.1),
     },

@@ -107,3 +107,29 @@ export function isSqliteAssetPrimaryKeyConflict(err: unknown): boolean {
         (err as { code: string }).code === 'SQLITE_CONSTRAINT_PRIMARYKEY'
     )
 }
+
+export function isValidStellarAsset(asset: string): boolean {
+    const parts = asset.split(':')
+    if (parts.length !== 2) return false
+    const [code, issuer] = parts
+    return SYMBOL_PATTERN.test(code) && /^G[A-Z2-7]{55}$/.test(issuer)
+}
+
+export function validateAssetRegistryEntry(entry: { assets: string[] }): void {
+    if (!entry || !Array.isArray(entry.assets)) {
+        throw new AssetRegistryValidationError('entry.assets must be an array')
+    }
+    const seen = new Set<string>()
+    for (const asset of entry.assets) {
+        if (asset.toUpperCase() === 'XLM') {
+            throw new AssetRegistryValidationError('Native XLM is not allowed as a non-contract asset')
+        }
+        if (!isValidStellarAsset(asset)) {
+            throw new AssetRegistryValidationError(`Invalid Stellar asset format: ${asset}`)
+        }
+        if (seen.has(asset)) {
+            throw new AssetRegistryValidationError(`Duplicate asset detected in entry: ${asset}`)
+        }
+        seen.add(asset)
+    }
+}
