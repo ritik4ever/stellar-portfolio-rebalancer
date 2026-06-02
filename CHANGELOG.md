@@ -86,6 +86,7 @@ Changelog entries are organized by impact:
 - Use clear, non-technical language when possible
 - Reference issue/PR numbers: `(#123)`
 - Group related changes under single entries when appropriate
+- **API Changes documentation**: Any modification to the API specification (`spec.ts` or `openapi.json`) requires matching updates to either `API.md` or `CHANGELOG.md` within the same Pull Request (enforced in CI).
 
 **For maintainers**:
 
@@ -111,6 +112,10 @@ Changelog entries are organized by impact:
 ## [Unreleased]
 
 ### Added
+
+- Public roadmap with Now, Next, Later buckets ([#573](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/573))
+  - Created `docs/ROADMAP.md` with detailed project roadmap
+  - Added roadmap summary table to `README.md` for quick reference
 
 - GitHub Actions build attestations for frontend and backend release bundles, plus CycloneDX SBOM artifacts for frontend, backend, and contracts.
 - A repository-level npm audit baseline and CI policy gate, with a backend-local wrapper command for maintainers.

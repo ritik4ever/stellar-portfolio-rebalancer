@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet release-checklist snapshot-diff
+
 
 # Default target
 all: build
@@ -8,6 +8,7 @@ all: build
 # Build the contract
 build:
 	cargo build --target wasm32-unknown-unknown --release
+	@$(MAKE) hash
 
 # Build with optimization
 build-optimized:
@@ -16,6 +17,30 @@ build-optimized:
 		soroban contract optimize --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm; \
 	else \
 		echo "Soroban CLI not found. Install it for optimization."; \
+	fi
+	@$(MAKE) hash
+
+# Calculate WASM hash
+hash:
+	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm ]; then \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Release):    " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Release):    " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+		else \
+			echo -n "WASM Hash (Release):    " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | awk '{print $$NF}'; \
+		fi; \
+	else \
+		echo "WASM target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm not found. Build it first."; \
+	fi
+	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm ]; then \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Optimized):  " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Optimized):  " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+		else \
+			echo -n "WASM Hash (Optimized):  " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | awk '{print $$NF}'; \
+		fi; \
 	fi
 
 # Run tests
@@ -154,9 +179,6 @@ help:
 	@echo "  init-contract   - Initialize deployed contract"
 	@echo "  install-tools   - Install required tools"
 	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
-	@echo "  snapshot-diff   - Diff two snapshot dirs/files (BEFORE=<path> AFTER=<path>)"
-	@echo "  release-checklist - Print the release checklist location and contract release steps"
-	@echo "  help            - Show this help message"
 
 # Contract release checklist
 release-checklist:
