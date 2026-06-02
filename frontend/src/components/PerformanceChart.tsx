@@ -1,11 +1,12 @@
-import React, { useMemo, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceDot } from 'recharts'
-import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
-import { useTheme } from '../context/ThemeContext'
 
-// TanStack Query Hooks
+import { useTheme } from '../context/ThemeContext'
 import { usePortfolioAnalytics, usePerformanceSummary } from '../hooks/queries/useAnalyticsQuery'
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
+import { performanceChartCopy, DEFAULT_LOCALE } from '../content/uiCopy'
+import { formatUsdCompact, formatPercent } from '../utils/localeFormat'
+
+// Export utilities
+import { downloadCSV, toCSV } from '../utils/export'
 
 interface PerformanceChartProps {
     portfolioId: string | null
@@ -39,7 +40,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
             const date = new Date(snapshot.timestamp)
             return {
                 date: Number.isFinite(date.getTime())
-                    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    ? date.toLocaleDateString(DEFAULT_LOCALE, { month: 'short', day: 'numeric' })
                     : 'Unknown',
                 value: Number.isFinite(value) ? Number(value.toFixed(2)) : 0,
                 timestamp: snapshot.timestamp,
@@ -47,17 +48,21 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
         })
     }, [analyticsData])
 
-    const formatCurrency = (value: number) => {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD',
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0
-        }).format(value)
-    }
+    const formatCurrency = (value: number) => formatUsdCompact(value)
+    const formatPercentage = (value: number) => formatPercent(value)
 
-    const formatPercentage = (value: number) => {
-        return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+    // Export chart data as CSV
+    const exportChartDataCSV = () => {
+        const chartData = formatChartData()
+        const rows = chartData.map((dataPoint) => ({
+            timestamp: dataPoint.timestamp,
+            date: dataPoint.date,
+            portfolioValue: dataPoint.value
+        }))
+
+        const csv = toCSV(rows, ['timestamp', 'date', 'portfolioValue'])
+        const filename = `portfolio_performance_${portfolioId}_${days}days_${new Date().toISOString()}.csv`
+        downloadCSV(filename, csv)
     }
 
     if (!portfolioId || portfolioId === 'demo') {
@@ -66,7 +71,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                 <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
                     <div className="text-center">
                         <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
-                        <p>Connect a wallet and create a portfolio to view performance analytics</p>
+                        <p>{performanceChartCopy.demoHint}</p>
                     </div>
                 </div>
             </div>
@@ -77,7 +82,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     if (loading) {
         return (
             <div className="space-y-6">
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse motion-safe:animate-pulse" role="status" aria-busy="true">
                     <div className="flex items-center justify-between mb-6">
                         <div className="w-48 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                         <div className="w-32 h-8 bg-gray-300 dark:bg-gray-700 rounded" />
@@ -89,7 +94,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                 {/* Skeleton metrics grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                        <div key={i} className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm animate-pulse">
+                        <div key={i} className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm animate-pulse motion-safe:animate-pulse">
                             <div className="flex items-center justify-between mb-2">
                                 <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
                                 <div className="w-4 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
@@ -109,7 +114,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                 <div className="flex items-center justify-center h-64 text-red-500">
                     <div className="text-center">
                         <AlertCircle className="w-12 h-12 mx-auto mb-2" />
-                        <p>{error}</p>
+                        <p role="alert">{performanceChartCopy.loadError}</p>
                     </div>
                 </div>
             </div>
@@ -123,26 +128,24 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     const compareUnavailable = compareMode && previousPeriodData.length < days
 
     return (
-        <div className="space-y-6">
+        <section className="space-y-6" aria-labelledby="performance-chart-heading">
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-6">
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Portfolio Performance</h2>
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-3 gap-3">
+
                         <select
                             value={days}
                             onChange={(e) => setDays(Number(e.target.value))}
                             className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         >
-                            <option value={7}>7 days</option>
-                            <option value={30}>30 days</option>
-                            <option value={90}>90 days</option>
+                            <option value={7}>{performanceChartCopy.days7}</option>
+                            <option value={30}>{performanceChartCopy.days30}</option>
+                            <option value={90}>{performanceChartCopy.days90}</option>
                         </select>
                         <button
                             type="button"
                             onClick={() => setCompareMode((current) => !current)}
                             className={`px-3 py-1 text-sm rounded-lg border ${compareMode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600'} hover:shadow-sm transition-colors`}
                         >
-                            {compareMode ? 'Comparing previous period' : 'Compare previous period'}
+                            {compareMode ? performanceChartCopy.compareEnabled : performanceChartCopy.compareDisabled}
                         </button>
                     </div>
                 </div>
@@ -151,8 +154,8 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                     <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
                         <div className="text-center">
                             <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
-                            <p>No performance data available yet</p>
-                            <p className="text-sm mt-1">Data will appear as your portfolio value changes</p>
+                            <p>{performanceChartCopy.emptyTitle}</p>
+                            <p className="text-sm mt-1">{performanceChartCopy.emptyDetail}</p>
                         </div>
                     </div>
                 ) : (
@@ -241,7 +244,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                         </div>
                         {compareUnavailable && (
                             <div className="mt-4 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
-                                Compare mode is enabled, but there is not enough previous period data available for this timeframe.
+                                {performanceChartCopy.compareUnavailable}
                             </div>
                         )}
                     </div>
@@ -351,7 +354,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                     </div>
                 </div>
             )}
-        </div>
+        </section>
     )
 }
 
