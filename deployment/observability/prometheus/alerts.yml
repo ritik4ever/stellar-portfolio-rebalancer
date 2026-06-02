@@ -1,61 +1,224 @@
 groups:
   - name: portfolio-observability
     rules:
+      # --- API GATEWAY SUBSYSTEM ---
       - alert: BackendDown
         expr: up{job="portfolio-backend"} == 0
         for: 2m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: backend
         annotations:
           summary: Backend metrics endpoint is unavailable
-          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes.
+          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes. The API gateway is likely offline.
 
       - alert: BackendReadinessFailed
         expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/readiness"} == 0
         for: 2m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: backend
         annotations:
           summary: Backend readiness probe is failing
-          description: The backend /readiness endpoint is returning a non-2xx response.
+          description: The backend /readiness endpoint is returning a non-2xx response. The API gateway is reporting unhealthy status.
 
       - alert: FrontendUptimeProbeFailed
         expr: probe_success{job="portfolio-readiness", instance="http://frontend:80/"} == 0
         for: 5m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: frontend
         annotations:
           summary: Frontend uptime probe failed
           description: The frontend root endpoint has been unavailable for 5 minutes.
+
+      - alert: BackendApiRootFailed
+        expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: Backend public API root probe failed
+          description: The backend root API endpoint is unavailable from the external probe.
+
+      - alert: ApiDocsProbeFailed
+        expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/api-docs"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: API documentation endpoint is unavailable
+          description: The backend OpenAPI docs page is unavailable from the external probe.
+
+      - alert: WebSocketHandshakeFailed
+        expr: probe_success{job="portfolio-websocket", instance="http://backend:3001/"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: websocket
+        annotations:
+          summary: Backend WebSocket handshake is failing
+          description: The external WebSocket probe is unable to complete a handshake to the backend.
 
       - alert: Elevated5xxRate
         expr: sum(rate(stellar_portfolio_http_requests_total{status_code=~"5.."}[5m])) / clamp_min(sum(rate(stellar_portfolio_http_requests_total[5m])), 1) > 0.05
         for: 10m
         labels:
           severity: warning
+          subsystem: api-gateway
           service: backend
         annotations:
           summary: Elevated backend 5xx rate
           description: More than 5% of backend requests have been failing with 5xx responses for 10 minutes.
+
+      - alert: APILatencySpike
+        expr: histogram_quantile(0.95, sum(rate(stellar_portfolio_http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: api-gateway
+          service: backend
+        annotations:
+          summary: API Gateway response latency spike detected
+          description: The 95th percentile of HTTP request duration is greater than 2 seconds for 5 minutes.
+
+      # --- PORTFOLIO ENGINE SUBSYSTEM ---
+      - alert: PortfolioRebalanceFailed
+        expr: stellar_portfolio_queue_jobs{queue="rebalance", state="failed"} >= 5
+        for: 2m
+        labels:
+          severity: critical
+          subsystem: portfolio-engine
+          service: queue
+        annotations:
+          summary: Portfolio rebalancing has failed completely
+          description: The rebalance queue has accumulated 5 or more failed jobs in the last 2 minutes. Automated rebalancing is failing completely.
 
       - alert: RebalanceQueueFailures
         expr: stellar_portfolio_queue_jobs{queue="rebalance", state="failed"} > 0
         for: 5m
         labels:
           severity: warning
+          subsystem: portfolio-engine
           service: queue
         annotations:
           summary: Failed rebalance jobs detected
           description: The rebalance queue has failed jobs that need investigation.
+
+  - name: queue-operations
+    interval: 30s
+    rules:
+      - alert: QueueCriticalBacklog
+        expr: (stellar_portfolio_queue_jobs{state="waiting"} + stellar_portfolio_queue_jobs{state="delayed"} + stellar_portfolio_queue_jobs{state="failed"}) > 100
+        for: 10m
+        labels:
+          severity: critical
+          service: queue
+        annotations:
+          summary: "Critical queue backlog detected: {{ $labels.queue }}"
+          description: "Queue {{ $labels.queue }} has accumulated {{ $value | humanize }} unprocessed jobs. Workers may be stuck or scaled down. Check queue-operations dashboard for details."
+
+      - alert: QueueWarningBacklog
+        expr: (stellar_portfolio_queue_jobs{state="waiting"} + stellar_portfolio_queue_jobs{state="delayed"} + stellar_portfolio_queue_jobs{state="failed"}) > 50
+        for: 15m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "High queue backlog: {{ $labels.queue }}"
+          description: "Queue {{ $labels.queue }} has {{ $value | humanize }} unprocessed jobs. Consider scaling workers or investigating failures."
+
+      - alert: QueueHighWorkerLag
+        expr: stellar_portfolio_queue_worker_lag > 10
+        for: 5m
+        labels:
+          severity: critical
+          service: queue
+        annotations:
+          summary: "Critical worker lag in {{ $labels.queue }}"
+          description: "Worker lag ratio is {{ $value | humanize }}. Workers cannot keep up with job arrival rate. Scale workers or investigate performance."
+
+      - alert: QueueWarningWorkerLag
+        expr: stellar_portfolio_queue_worker_lag > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Elevated worker lag: {{ $labels.queue }}"
+          description: "Worker lag ratio is {{ $value | humanize }}. Queue is accumulating backlog. Monitor drain rate."
+
+      - alert: QueueHighFailureRate
+        expr: stellar_portfolio_queue_failure_rate > 0.3
+        for: 5m
+        labels:
+          severity: critical
+          service: queue
+        annotations:
+          summary: "Critical failure rate in {{ $labels.queue }}"
+          description: "{{ $value | humanizePercentage }} of jobs are failing. Check error logs and Sentry for root cause."
+
+      - alert: QueueElevatedFailureRate
+        expr: stellar_portfolio_queue_failure_rate > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Elevated failure rate: {{ $labels.queue }}"
+          description: "{{ $value | humanizePercentage }} of jobs are failing. Investigate logs for transient or systematic issues."
+
+      - alert: QueueNoActiveWorkers
+        expr: (stellar_portfolio_queue_jobs{state="active"} == 0) and (stellar_portfolio_queue_jobs{state="waiting"} > 0)
+        for: 3m
+        labels:
+          severity: critical
+          service: queue
+        annotations:
+          summary: "No active workers in {{ $labels.queue }} but jobs waiting"
+          description: "Queue {{ $labels.queue }} has {{ $value | humanize }} waiting jobs but no workers are processing. Workers may have crashed. Restart worker processes."
+
+      - alert: QueueDrainRateDegraded
+        expr: stellar_portfolio_queue_drain_rate < 0.7
+        for: 15m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Queue drain rate degraded: {{ $labels.queue }}"
+          description: "Only {{ $value | humanizePercentage }} of jobs are completing successfully. Failure rate is high; check Sentry and logs."
+
+      - alert: AnalyticsQueueBacklog
+        expr: stellar_portfolio_queue_jobs{queue="analytics-snapshot", state="waiting"} > 10
+        for: 30m
+        labels:
+          severity: info
+          service: queue
+        annotations:
+          summary: "Analytics snapshot queue backlog"
+          description: "Analytics snapshot queue has {{ $value | humanize }} waiting jobs. This is non-critical but may affect reporting lag."
+
+      - alert: IdempotencyCleanupQueueIssues
+        expr: stellar_portfolio_queue_jobs{queue="idempotency-cleanup", state="failed"} > 5
+        for: 1h
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Idempotency cleanup queue has failed jobs"
+          description: "Cleanup jobs have failed {{ $value | humanize }} times. Old idempotency keys may not be pruned. Check logs."
 
       - alert: ReflectorStalePricesDetected
         expr: sum(increase(stellar_portfolio_reflector_stale_prices_total[15m])) > 0
         for: 5m
         labels:
           severity: warning
+          subsystem: portfolio-engine
           service: prices
         annotations:
           summary: Reflector has served stale prices
@@ -66,66 +229,10 @@ groups:
         for: 10m
         labels:
           severity: warning
+          subsystem: portfolio-engine
           service: prices
         annotations:
           summary: Reflector fallback usage is elevated
           description: The backend has relied on cached or synthetic price fallbacks at least five times in the last hour.
 
-  # ---------------------------------------------------------------------------
-  # Loki retention & compaction health
-  # ---------------------------------------------------------------------------
-  - name: loki-retention
-    rules:
-      - alert: LokiCompactorNotRunning
-        # loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds
-        # is updated every time the compactor finishes a cycle.  If it goes stale
-        # for more than 30 minutes the compactor has stopped or failed.
-        expr: |
-          (time() - loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds) > 1800
-        for: 5m
-        labels:
-          severity: warning
-          service: loki
-        annotations:
-          summary: Loki compactor has not run in the last 30 minutes
-          description: >
-            The Loki compactor last completed a cycle more than 30 minutes ago.
-            Retention deletion will fall behind and disk usage may grow unbounded.
-            Check the Loki container logs: `docker compose logs loki`.
 
-      - alert: LokiIngestionRateLimitReached
-        # loki_discarded_samples_total increments when per-stream rate limits fire.
-        expr: |
-          sum(rate(loki_discarded_samples_total[5m])) by (reason) > 0
-        for: 5m
-        labels:
-          severity: warning
-          service: loki
-        annotations:
-          summary: Loki is discarding samples due to rate limiting
-          description: >
-            Loki is dropping log samples because per-stream or global ingestion
-            rate limits have been reached (reason={{ $labels.reason }}).
-            Review per_stream_rate_limit in deployment/observability/loki/loki-config.yml
-            or reduce log verbosity in the emitting service.
-
-      - alert: LokiStorageVolumeHigh
-        # Fired when the loki_data docker volume exceeds 80 % of its soft limit.
-        # This is a best-effort check via node_filesystem metrics if the host
-        # node exporter is available; adjust the path to match your mount point.
-        expr: |
-          (
-            node_filesystem_avail_bytes{mountpoint=~".*/loki.*"} /
-            node_filesystem_size_bytes{mountpoint=~".*/loki.*"}
-          ) < 0.20
-        for: 10m
-        labels:
-          severity: warning
-          service: loki
-        annotations:
-          summary: Loki storage volume is above 80 % capacity
-          description: >
-            The Loki data volume has less than 20 % free space.
-            Current retention settings: global 30 d, error 90 d, warn 60 d,
-            debug 14 d.  Consider reducing retention periods or expanding the
-            volume before the disk fills and Loki stops accepting writes.
