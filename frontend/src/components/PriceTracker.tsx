@@ -1,8 +1,7 @@
-import React, { useMemo } from 'react'
-import { Wifi, WifiOff, TrendingUp, TrendingDown } from 'lucide-react'
-import { usePrices, formatPriceFeedSummary, type PriceFeedClientMeta } from '../hooks/queries/usePricesQuery'
+
 import { useAssets } from '../hooks/queries/useAssetsQuery'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
+import { calculateRelativeMovement } from '../utils/calculations'
 
 interface PriceTrackerProps {
     compact?: boolean
@@ -80,10 +79,116 @@ function qualityMessage(meta: PriceFeedClientMeta | undefined): string | null {
     return null
 }
 
+interface ComparePanelProps {
+    assets: string[]
+    prices: Record<string, PriceData>
+    assetA: string
+    assetB: string
+    onChangeA: (v: string) => void
+    onChangeB: (v: string) => void
+}
+
+function AssetCompareCard({ label, asset, data }: { label: string; asset: string; data: PriceData | undefined }) {
+    if (!data) {
+        return (
+            <div className="flex-1 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{label}</div>
+                <div className="text-sm text-gray-400 dark:text-gray-500">No data for {asset}</div>
+            </div>
+        )
+    }
+    return (
+        <div className="flex-1 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{label}</div>
+            <div className="font-semibold text-gray-900 dark:text-white text-lg">{asset}</div>
+            <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+                ${data.price < 1 ? data.price.toFixed(6) : data.price.toLocaleString()}
+            </div>
+            <div className={`flex items-center mt-1 text-sm font-medium ${data.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {data.change >= 0 ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
+                {data.change >= 0 ? '+' : ''}{data.change.toFixed(2)}% (24h)
+            </div>
+            <div className={`mt-1 text-xs px-2 py-0.5 rounded inline-block ${sourceBadgeClass(data.source)}`}>
+                {sourceBadgeLabel(data.source)}
+            </div>
+        </div>
+    )
+}
+
+function ComparePanel({ assets, prices, assetA, assetB, onChangeA, onChangeB }: ComparePanelProps) {
+    const dataA = prices[assetA]
+    const dataB = prices[assetB]
+
+    const relative = useMemo(() => {
+        if (!dataA || !dataB) return null
+        return calculateRelativeMovement(dataA.change, dataB.change)
+    }, [dataA, dataB])
+
+    const selectClass = 'text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500'
+
+    return (
+        <div className="mb-6 p-4 border border-indigo-200 dark:border-indigo-800 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20" role="region" aria-label="Asset comparison">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Compare</span>
+                <select
+                    aria-label="Asset A"
+                    value={assetA}
+                    onChange={(e) => onChangeA(e.target.value)}
+                    className={selectClass}
+                >
+                    {assets.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <ArrowLeftRight className="w-4 h-4 text-gray-400" aria-hidden="true" />
+                <select
+                    aria-label="Asset B"
+                    value={assetB}
+                    onChange={(e) => onChangeB(e.target.value)}
+                    className={selectClass}
+                >
+                    {assets.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4">
+                <AssetCompareCard label="Asset A" asset={assetA} data={dataA} />
+                <AssetCompareCard label="Asset B" asset={assetB} data={dataB} />
+            </div>
+
+            {relative && assetA !== assetB && (
+                <div className="mt-4 p-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">
+                    {relative.leader === 'equal' ? (
+                        <span className="text-gray-600 dark:text-gray-300">
+                            {assetA} and {assetB} moved identically over 24h.
+                        </span>
+                    ) : (
+                        <span className={relative.leader === 'a' ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                            <strong>{relative.leader === 'a' ? assetA : assetB}</strong> outperformed{' '}
+                            <strong>{relative.leader === 'a' ? assetB : assetA}</strong> by{' '}
+                            <strong>{Math.abs(relative.relativeChange).toFixed(2)} pp</strong> over 24h.
+                        </span>
+                    )}
+                </div>
+            )}
+
+            {assetA === assetB && (
+                <div className="mt-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300">
+                    Select two different assets to compare.
+                </div>
+            )}
+
+            {(!dataA || !dataB) && assetA !== assetB && (
+                <div className="mt-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-700 text-xs text-gray-500 dark:text-gray-400">
+                    Waiting for price data…
+                </div>
+            )}
+        </div>
+    )
+}
+
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const { data: assetList = ['XLM', 'BTC', 'ETH', 'USDC'] } = useAssets()
     const { data: priceBundle, isLoading, error: queryError, refetch } = usePrices()
-    const { state: realtimeState, statusDetail, reconnectInfo } = useRealtimeConnection()
+
 
     const prices = useMemo(() => normalizePrices(priceBundle?.prices), [priceBundle?.prices])
     const feedMeta = priceBundle?.feedMeta
@@ -146,7 +251,14 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         )
     }
 
-    const assets = assetList.length > 0 ? assetList : Object.keys(prices)
+    // useAssets returns AssetWithIssuer[] objects; extract symbol strings
+    const assets: string[] = assetList.length > 0
+        ? assetList.map((a) => (typeof a === 'string' ? a : (a as { symbol: string }).symbol))
+        : Object.keys(prices)
+
+    // Default compare selections once assets are known
+    const effectiveA = compareA || assets[0] || ''
+    const effectiveB = compareB || assets[1] || ''
 
     if (compact) {
         return (
@@ -198,6 +310,19 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
+                    <button
+                        type="button"
+                        onClick={() => setCompareMode((v) => !v)}
+                        aria-pressed={compareMode}
+                        className={`flex items-center space-x-1 text-xs px-3 py-1 rounded border transition-colors ${
+                            compareMode
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                        }`}
+                    >
+                        <ArrowLeftRight className="w-3 h-3" />
+                        <span>Compare</span>
+                    </button>
                     <div className="flex items-center space-x-1">
                         {isConnected ? (
                             <Wifi className="w-4 h-4 text-green-500" />
@@ -246,6 +371,17 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                 >
                     {qualityHint}
                 </div>
+            )}
+
+            {compareMode && (
+                <ComparePanel
+                    assets={assets}
+                    prices={prices}
+                    assetA={effectiveA}
+                    assetB={effectiveB}
+                    onChangeA={setCompareA}
+                    onChangeB={setCompareB}
+                />
             )}
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

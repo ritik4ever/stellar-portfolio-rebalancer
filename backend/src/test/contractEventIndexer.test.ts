@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createHash } from 'node:crypto'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { databaseService } from '../services/databaseService.js'
 import { SorobanRpc } from '@stellar/stellar-sdk'
@@ -11,6 +12,13 @@ vi.mock('../services/databaseService.js', () => ({
         setIndexerState: vi.fn(),
         ensurePortfolioExists: vi.fn(),
         recordRebalanceEvent: vi.fn(),
+        getRebalanceHistory: vi.fn(),
+        getReplayStatus: vi.fn(),
+        getReplayIntegrityHash: vi.fn(),
+        setReplayIntegrityHash: vi.fn(),
+        setLastReplayedLedger: vi.fn(),
+        setReplayEventCount: vi.fn(),
+        setReplayCheckpoint: vi.fn(),
     }
 }))
 
@@ -183,6 +191,122 @@ describe('contractEventIndexer', () => {
         expect(result.ingested).toBe(1)
         expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(1)
         
+        safeScValToNativeSpy.mockRestore()
+    })
+
+    it('detects duplicate event IDs during replay validation', async () => {
+        const safeScValToNativeSpy = vi.spyOn(contractEventIndexerService as any, 'safeScValToNative')
+
+        const mockEvent1 = {
+            contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEWCEUNYQZ2QZ2QZ2QZ2QZ2QZ2QZ2Q',
+            topic: ['topic1', 'topic2'],
+            value: 'mock-value',
+            ledgerClosedAt: '2023-01-01T00:00:00Z',
+            txHash: '0x123',
+            ledger: 1000,
+            pagingToken: 'token-1'
+        } as unknown as SorobanRpc.Api.EventResponse
+
+        const mockEvent2 = {
+            contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEWCEUNYQZ2QZ2QZ2QZ2QZ2QZ2QZ2Q',
+            topic: ['topic1', 'topic2'],
+            value: 'mock-value-2',
+            ledgerClosedAt: '2023-01-01T00:00:00Z',
+            txHash: '0x124',
+            ledger: 1001,
+            pagingToken: 'token-2'
+        } as unknown as SorobanRpc.Api.EventResponse
+
+        rpcServerMock.getEvents.mockResolvedValue({
+            events: [mockEvent1, mockEvent2],
+            latestLedger: 1001
+        })
+
+        safeScValToNativeSpy.mockImplementation((val) => {
+            if (val === 'topic1') return 'portfolio'
+            if (val === 'topic2') return 'rebalance_executed'
+            if (val === 'mock-value') return ['portfolio-123', 'user-abc']
+            if (val === 'mock-value-2') return ['portfolio-456', 'user-abc']
+            return undefined
+        })
+
+        const dbMock = (await import('../services/databaseService.js')).databaseService as any
+        const mockEvents = [
+            { id: 'dup-id', portfolioId: 'p1', timestamp: '2023-01-01T00:00:00Z', status: 'completed', eventSource: 'onchain', onChainLedger: 1000 },
+            { id: 'dup-id', portfolioId: 'p2', timestamp: '2023-01-01T00:00:01Z', status: 'completed', eventSource: 'onchain', onChainLedger: 1001 },
+        ]
+        dbMock.getRebalanceHistory.mockReturnValue(mockEvents)
+
+        const validation = await contractEventIndexerService.validateReplay()
+        expect(validation.valid).toBe(false)
+        expect(validation.errors.some((e: string) => e.includes('Duplicate'))).toBe(true)
+
+        safeScValToNativeSpy.mockRestore()
+    })
+
+    it('validates ledger ordering in replayed events', async () => {
+        const dbMock = (await import('../services/databaseService.js')).databaseService as any
+        dbMock.getRebalanceHistory.mockReturnValue([
+            { id: 'e1', portfolioId: 'p1', timestamp: '2023-01-01T00:00:00Z', status: 'completed', eventSource: 'onchain', onChainLedger: 1005 },
+            { id: 'e2', portfolioId: 'p1', timestamp: '2023-01-01T00:00:01Z', status: 'completed', eventSource: 'onchain', onChainLedger: 1002 },
+        ])
+
+        const validation = await contractEventIndexerService.validateReplay()
+        expect(validation.valid).toBe(false)
+        expect(validation.errors.some((e: string) => e.includes('Out-of-order'))).toBe(true)
+    })
+
+    it('produces deterministic integrity hash', async () => {
+        const dbMock = (await import('../services/databaseService.js')).databaseService as any
+        dbMock.getRebalanceHistory.mockReturnValue([
+            { id: 'e1', portfolioId: 'p1', timestamp: '2023-01-01T00:00:00Z', status: 'completed' },
+            { id: 'e2', portfolioId: 'p1', timestamp: '2023-01-01T00:00:01Z', status: 'completed' },
+        ])
+
+        const hash1 = contractEventIndexerService.computeIngestedEventsHash()
+        const hash2 = contractEventIndexerService.computeIngestedEventsHash()
+
+        expect(hash1).toBe(hash2)
+        expect(hash1.length).toBe(64)
+    })
+
+    it('persists replay checkpoint after successful replay', async () => {
+        const safeScValToNativeSpy = vi.spyOn(contractEventIndexerService as any, 'safeScValToNative')
+
+        const mockEvent = {
+            contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEWCEUNYQZ2QZ2QZ2QZ2QZ2QZ2QZ2Q',
+            topic: ['topic1', 'topic2'],
+            value: 'mock-value',
+            ledgerClosedAt: '2023-01-01T00:00:00Z',
+            txHash: '0x123',
+            ledger: 1000,
+            pagingToken: 'token-1'
+        } as unknown as SorobanRpc.Api.EventResponse
+
+        rpcServerMock.getEvents.mockResolvedValue({
+            events: [mockEvent],
+            latestLedger: 1000
+        })
+
+        safeScValToNativeSpy.mockImplementation((val) => {
+            if (val === 'topic1') return 'portfolio'
+            if (val === 'topic2') return 'rebalance_executed'
+            if (val === 'mock-value') return ['portfolio-123', 'user-abc']
+            return undefined
+        })
+
+        const dbMock = (await import('../services/databaseService.js')).databaseService as any
+        dbMock.getRebalanceHistory.mockReturnValue([
+            { id: 'e1', portfolioId: 'p1', timestamp: '2023-01-01T00:00:00Z', status: 'completed', eventSource: 'onchain', onChainLedger: 1000 },
+        ])
+
+        const result = await contractEventIndexerService.replayEvents({ start: 500, end: 1000 })
+
+        expect(dbMock.setReplayIntegrityHash).toHaveBeenCalled()
+        expect(dbMock.setLastReplayedLedger).toHaveBeenCalledWith(1000)
+        expect(dbMock.setReplayCheckpoint).toHaveBeenCalled()
+        expect(result.validation.valid).toBe(true)
+
         safeScValToNativeSpy.mockRestore()
     })
 

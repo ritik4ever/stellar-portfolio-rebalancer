@@ -3,8 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PortfolioSetup from './PortfolioSetup'
-import { api } from '../config/api'
-import { clearPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
+
 
 // Strip framer-motion animation props so they don't hit the real DOM
 const stripMotionProps = ({ initial, animate, exit, transition, variants, layout, layoutId, ...rest }: any) => rest
@@ -18,14 +17,37 @@ vi.mock('framer-motion', () => ({
 }))
 
 vi.mock('./ThemeToggle', () => ({ default: () => null }))
+vi.mock('./AssetSelector', () => ({
+    default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
+        React.createElement('select', {
+            value,
+            onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value),
+        }),
+}))
+
+const MOCK_ASSETS = [
+    { symbol: 'XLM', name: 'Stellar Lumens' },
+    { symbol: 'USDC', name: 'USD Coin' },
+    { symbol: 'BTC', name: 'Bitcoin' },
+    { symbol: 'ETH', name: 'Ethereum' },
+]
+
+vi.mock('../hooks/queries/useAssetsQuery', () => ({
+    useAssets: () => ({ data: MOCK_ASSETS, isLoading: false }),
+}))
 
 const mockMutateAsync = vi.fn()
-vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
-    useCreatePortfolioMutation: () => ({
-        mutateAsync: mockMutateAsync,
-        isPending: false,
-    }),
-}))
+vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
+  buildRollbackMessage: (error: unknown, action = "portfolio update") => {
+    const detail =
+      error instanceof Error ? error.message : "server rejected the update";
+    return `Your optimistic ${action} was rolled back because the server rejected it. ${detail} Please try again.`;
+  },
+  useCreatePortfolioMutation: () => ({
+    mutateAsync: mockMutateAsync,
+    isPending: false,
+  }),
+}));
 
 const mockAssets = [
     { symbol: 'XLM', displayName: 'XLM', searchText: 'xlm' },
@@ -70,7 +92,7 @@ describe('PortfolioSetup allocation validation', () => {
         vi.clearAllMocks()
         clearPortfolioCloneDraft()
         mockMutateAsync.mockResolvedValue({})
-        vi.spyOn(api, 'get').mockResolvedValue({ assets: [] } as any)
+
     })
 
     // ── Sum-to-100 boundary tests ─────────────────────────────────────────────
@@ -280,6 +302,23 @@ describe('PortfolioSetup allocation validation', () => {
             fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }))
             expect(mockMutateAsync).toHaveBeenCalledTimes(1)
         })
+        it("shows a clear rollback message when portfolio creation is rejected", async () => {
+          mockMutateAsync.mockRejectedValueOnce(
+            new Error("server rejected allocation update"),
+          );
+
+          renderSetup();
+
+          fireEvent.click(
+            screen.getByRole("button", { name: /create portfolio/i }),
+          );
+
+          const alert = await screen.findByRole("alert");
+
+          expect(alert).toHaveTextContent(/rolled back/i);
+          expect(alert).toHaveTextContent(/server rejected/i);
+          expect(alert).toHaveTextContent(/try again/i);
+        });
 
         it('does not call mutateAsync when total is not 100%', () => {
             renderSetup()
@@ -289,5 +328,74 @@ describe('PortfolioSetup allocation validation', () => {
             fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }))
             expect(mockMutateAsync).not.toHaveBeenCalled()
         })
+    })
+
+    // ── Remaining-allocation progress bar ─────────────────────────────────────
+
+    describe('remaining-allocation progress bar', () => {
+        it('renders a progressbar element', () => {
+            renderSetup()
+            expect(screen.getByRole('progressbar')).toBeTruthy()
+        })
+
+        it('sets aria-valuenow to the current total percentage', () => {
+            renderSetup()
+            // Balanced template starts at 100%
+            const bar = screen.getByRole('progressbar')
+            expect(bar.getAttribute('aria-valuenow')).toBe('100')
+        })
+
+        it('updates aria-valuenow when allocations change', () => {
+            renderSetup()
+            const inputs = screen.getAllByRole('spinbutton')
+            // ETH: 10 → 5, total becomes 95%
+            fireEvent.change(inputs[3], { target: { value: '5' } })
+            const bar = screen.getByRole('progressbar')
+            expect(bar.getAttribute('aria-valuenow')).toBe('95')
+        })
+
+        it('shows remaining label when total is under 100%', () => {
+            renderSetup()
+            const inputs = screen.getAllByRole('spinbutton')
+            fireEvent.change(inputs[3], { target: { value: '5' } })
+            expect(screen.getByText(/remaining:/i)).toBeTruthy()
+        })
+
+        it('hides remaining label when total equals 100%', () => {
+            renderSetup()
+            expect(screen.queryByText(/remaining:/i)).toBeNull()
+        })
+    })
+})
+
+// ── remainingAllocation unit tests ───────────────────────────────────────────
+
+import { remainingAllocation } from '../utils/calculations'
+
+describe('remainingAllocation', () => {
+    it('returns 0 when allocations sum to exactly 100', () => {
+        expect(remainingAllocation([{ percentage: 40 }, { percentage: 30 }, { percentage: 30 }])).toBe(0)
+    })
+
+    it('returns positive value when under-allocated', () => {
+        expect(remainingAllocation([{ percentage: 40 }, { percentage: 30 }])).toBe(30)
+    })
+
+    it('returns negative value when over-allocated', () => {
+        expect(remainingAllocation([{ percentage: 60 }, { percentage: 50 }])).toBe(-10)
+    })
+
+    it('returns 100 for an empty array', () => {
+        expect(remainingAllocation([])).toBe(100)
+    })
+
+    it('handles floating-point allocations without precision errors', () => {
+        // 33.3 + 33.3 + 33.4 = 100.0 exactly after rounding
+        const result = remainingAllocation([
+            { percentage: 33.3 },
+            { percentage: 33.3 },
+            { percentage: 33.4 },
+        ])
+        expect(Math.abs(result)).toBeLessThan(0.01)
     })
 })

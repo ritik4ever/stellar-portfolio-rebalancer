@@ -4,8 +4,10 @@ import {
     issueTokens,
     refreshTokens,
     logout,
+    revokeDeviceSession,
     issueChallenge,
-    verifyWalletSignature
+    verifyWalletSignature,
+    getRecentAuthAuditEvents
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { authRateLimiter } from '../middleware/rateLimit.js'
@@ -123,6 +125,12 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
         }
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
