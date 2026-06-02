@@ -385,6 +385,7 @@ export class ContractEventIndexerService {
                         portfolioId: indexed.portfolioId,
                         timestamp: indexed.timestamp,
                         trigger: indexed.trigger,
+                        reasonCode: 'ON_CHAIN_SYNC',
                         trades: indexed.trades,
                         gasUsed: 'on-chain',
                         status: 'completed',

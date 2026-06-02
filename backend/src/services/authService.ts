@@ -5,6 +5,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import {
   createRefreshToken,
   findRefreshToken,
+  findRefreshTokenById,
   deleteRefreshTokenById,
   deleteAllRefreshTokensForUser,
   generateRefreshTokenId,
@@ -164,6 +165,18 @@ export function verifyWalletSignature(
   }
 }
 
+
+export async function revokeDeviceSession(
+  userId: string,
+  tokenId: string,
+): Promise<{ success: boolean; reason?: string }> {
+  const row = await findRefreshTokenById(tokenId);
+  if (!row) return { success: false, reason: 'not_found' };
+  if (row.user_address !== userId) return { success: false, reason: 'forbidden' };
+  await deleteRefreshTokenById(tokenId);
+  logger.info('Device session revoked', { userId, tokenId });
+  return { success: true };
+}
 
 export async function logout(
   refreshToken: string | undefined,

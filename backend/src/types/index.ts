@@ -64,6 +64,18 @@ export interface Portfolio {
     version: number
 }
 
+export type RebalanceTrigger = 'auto' | 'manual' | 'system'
+
+export type RebalanceReasonCode =
+    | 'THRESHOLD_EXCEEDED'
+    | 'SCHEDULED_REBALANCE'
+    | 'VOLATILITY_CIRCUIT_BREAKER'
+    | 'MANUAL_USER_REQUEST'
+    | 'RISK_MITIGATION'
+    | 'ON_CHAIN_SYNC'
+    | 'SYSTEM_FORCED'
+    | 'OTHER'
+
 // Rebalance strategy types
 export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
 
@@ -110,6 +122,7 @@ export interface RebalanceEvent {
     portfolioId: string
     timestamp: string
     trigger: string
+    reasonCode?: RebalanceReasonCode
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
@@ -191,10 +204,22 @@ export interface ApiResponse<T = any> {
     meta?: Record<string, unknown>
 }
 
+export interface RiskHeatmapDiagnostic {
+    score: number
+    level: 'low' | 'medium' | 'high'
+}
+
+export interface RiskHeatmap {
+    concentration: RiskHeatmapDiagnostic
+    volatility: RiskHeatmapDiagnostic
+    drawdown: RiskHeatmapDiagnostic
+}
+
 export interface PortfolioApiResponse extends ApiResponse {
     portfolio?: Portfolio
     prices?: PricesMap
     riskMetrics?: RiskMetrics
+    riskHeatmap?: RiskHeatmap
 }
 
 export interface RebalanceHistoryResponse extends ApiResponse {
@@ -311,6 +336,7 @@ export interface RebalanceResult {
     failureReasons?: string[]
     rollback?: RebalanceRollback
     totalSlippageBps?: number
+    explanation?: ExecutionExplanation
 }
 
 export interface RebalanceExecutionTrade {
@@ -338,4 +364,12 @@ export interface RebalanceRollback {
     success: boolean
     rolledBackTrades: number
     failures: string[]
+}
+
+export interface ExecutionExplanation {
+    routeLength: number
+    estimatedSlippage: number
+    skippedAlternatives: string[]
+    rationale: string
+    failureReason?: string
 }
