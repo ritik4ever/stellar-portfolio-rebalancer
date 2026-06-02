@@ -91,7 +91,6 @@ impl PortfolioRebalancer {
             panic!("Amount must be positive");
         }
 
-        // Check for emergency stop
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             panic!("Emergency stop active");
         }
@@ -102,7 +101,12 @@ impl PortfolioRebalancer {
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
 
-        portfolio.user.require_auth();
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
 
         // Verify asset is in portfolio (optional based on requirements, but good practice)
         if !portfolio.target_allocations.contains_key(asset.clone()) {
@@ -137,14 +141,13 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
-        // Calculate total current value
         let total_value = match portfolio::calculate_portfolio_value(
             &env,
             &portfolio.current_balances,
             &reflector_client,
         ) {
-            Some(val) => val,
-            None => return false, // Cannot safely rebalance without all prices
+            Ok(val) => val,
+            Err(_) => return false,
         };
 
         if total_value == 0 {
@@ -186,7 +189,12 @@ impl PortfolioRebalancer {
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
 
-        portfolio.user.require_auth();
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
 
         let current_time = env.ledger().timestamp();
         if current_time < portfolio.last_rebalance + 3600 {
@@ -205,10 +213,13 @@ impl PortfolioRebalancer {
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
                 if price_data.is_stale(current_time, 3600) {
-                    panic!("Stale price data");
+                    return Err(Error::StalePrice);
+                }
+                if price_data.price <= 0 {
+                    return Err(Error::MalformedPrice);
                 }
             } else {
-                panic!("Missing price data");
+                return Err(Error::MissingPrice);
             }
         }
 
@@ -222,7 +233,7 @@ impl PortfolioRebalancer {
                 &env,
                 &portfolio.current_balances,
                 &reflector_client,
-            ).unwrap(); // Already verified prices above
+            ).map_err(|_| Error::StalePrice)?;
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client
@@ -263,5 +274,45 @@ impl PortfolioRebalancer {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().set(&DataKey::EmergencyStop, &stop);
+    }
+
+    pub fn transfer_stewardship(env: Env, portfolio_id: u64, new_steward: Address) -> Result<(), Error> {
+        let portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+            .unwrap();
+        let current_steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        current_steward.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Steward(portfolio_id), &new_steward);
+        env.events()
+            .publish(("portfolio", "steward_transferred"), (portfolio_id, current_steward, new_steward));
+        Ok(())
+    }
+
+    pub fn get_steward(env: Env, portfolio_id: u64) -> Address {
+        let portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+            .unwrap();
+        env.storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user)
+    }
+
+    pub fn capabilities(_env: Env) -> u32 {
+        let mut flags: u32 = 0;
+        flags |= CapabilityFlag::PerPortfolioSteward as u32;
+        flags |= CapabilityFlag::DifferentiatedPricing as u32;
+        flags |= CapabilityFlag::EmergencyStop as u32;
+        flags
     }
 }

@@ -609,29 +609,7 @@
                 "symbol": "lastprice"
               }
             ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "price"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 10000000000000000
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "timestamp"
-                  },
-                  "val": {
-                    "u64": 12800
-                  }
-                }
-              ]
-            }
+            "data": "void"
           }
         }
       },
@@ -654,7 +632,7 @@
             ],
             "data": {
               "error": {
-                "contract": 13
+                "contract": 14
               }
             }
           }
@@ -675,7 +653,7 @@
               },
               {
                 "error": {
-                  "contract": 13
+                  "contract": 14
                 }
               }
             ],
@@ -700,7 +678,7 @@
               },
               {
                 "error": {
-                  "contract": 13
+                  "contract": 14
                 }
               }
             ],

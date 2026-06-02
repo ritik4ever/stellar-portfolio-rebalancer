@@ -26,6 +26,16 @@ test:
 bench:
 	cargo test benchmark_
 
+# Run benchmarks and emit JSON output for CI diffing
+bench-json:
+	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	awk '/^BENCHMARK_RESULT\|/ {split($$0, a, "|"); printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", a[2], a[3], a[4], a[5], a[6]}' | \
+	jq -s '.' > bench_results.json 2>/dev/null || \
+	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	grep '^BENCHMARK_RESULT|' | \
+	sed 's/^BENCHMARK_RESULT|//' | \
+	awk -F'|' '{printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", $$1, $$2, $$3, $$4, $$5}' > bench_results.json
+
 # Clean build artifacts
 clean:
 	cargo clean

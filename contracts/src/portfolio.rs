@@ -23,7 +23,7 @@ pub fn calculate_portfolio_value(
     env: &Env,
     balances: &Map<Address, i128>,
     reflector_client: &crate::reflector::ReflectorClient,
-) -> Option<i128> {
+) -> Result<i128, ValuationError> {
     let mut total_value = 0i128;
     let current_time = env.ledger().timestamp();
 
@@ -31,19 +31,20 @@ pub fn calculate_portfolio_value(
         if let Some(price_data) =
             reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
         {
-            // Check for stale price (e.g., 1 hour)
             if price_data.timestamp + 3600 < current_time {
-                return None;
+                return Err(ValuationError::StaleData);
+            }
+            if price_data.price <= 0 {
+                return Err(ValuationError::MalformedData);
             }
             let value = (balance * price_data.price) / 10i128.pow(14);
             total_value += value;
         } else {
-            // If any asset price is missing, we can't calculate a reliable total value
-            return None;
+            return Err(ValuationError::MissingPrice);
         }
     }
 
-    Some(total_value)
+    Ok(total_value)
 }
 
 #[allow(dead_code)]

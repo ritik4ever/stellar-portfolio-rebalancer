@@ -1,3 +1,5 @@
+extern crate std;
+
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
@@ -375,29 +377,13 @@ fn test_emergency_stop() {
 }
 
 #[test]
-#[should_panic(expected = "Stale price data")]
 fn test_stale_data() {
     let env = Env::default();
     env.mock_all_auths();
 
-    // Initial time
     env.ledger().with_mut(|li| {
         li.timestamp = 10000;
     });
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-
-    // We can't easily mock "stale" data with just one mock impl unless we make it stateful or allow setting it.
-    // For this test, notice our mock uses `env.ledger().timestamp()` for price timestamp.
-    // So if we create the portfolio (and reflector checks env time), then advance time significantly
-    // without "updating" the reflector (reflector always returns current env time in simple mock),
-    // wait... in the simple mock `lastprice` returns `env.ledger().timestamp()`.
-    // So to simulate stale data, we need a MockReflector that returns OLD timestamps.
-    // Since we can't easily swap mocks or change logic dynamically in this simple setup without complex mocking,
-    // we can rely on verifying the *logic* in other ways or make the Mock configurable.
-    //
-    // Let's create a separate StaleMockReflector for this test.
 
     mod stale_reflector {
         use crate::reflector::{Asset, PriceData};
@@ -418,7 +404,6 @@ fn test_stale_data() {
                 14
             }
             pub fn lastprice(env: Env, _asset: Asset) -> Option<PriceData> {
-                // Return data from 2 hours ago (7200s)
                 let current = env.ledger().timestamp();
                 Some(PriceData {
                     price: 100_00000000000000,
@@ -431,6 +416,8 @@ fn test_stale_data() {
         }
     }
 
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let stale_reflector_id = env.register_contract(None, stale_reflector::StaleReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -441,13 +428,13 @@ fn test_stale_data() {
     allocations.set(asset, 100);
     let pid = client.create_portfolio(&user, &allocations, &5, &50);
 
-    // Advance time to pass cooldown so that's not the error
     env.ledger().with_mut(|li| {
         li.timestamp = 20000;
     });
 
     let actual_balances = Map::new(&env);
-    client.execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StalePrice)));
 }
 
 #[test]
@@ -1259,11 +1246,11 @@ fn test_calculate_portfolio_value_all_prices_available() {
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
-    assert_eq!(value, Some(15000));
+    assert_eq!(value, Ok(15000));
 }
 
 #[test]
-fn test_calculate_portfolio_value_missing_price_skips_asset() {
+fn test_calculate_portfolio_value_missing_price_returns_err() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1291,11 +1278,11 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
 
-    assert_eq!(value, None); // Should be None now that we don't skip
+    assert_eq!(value, Err(ValuationError::MissingPrice));
 }
 
 #[test]
-fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
+fn test_calculate_portfolio_value_all_prices_missing_returns_err() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1316,7 +1303,7 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
-    assert_eq!(value, None); // Should be None if all missing
+    assert_eq!(value, Err(ValuationError::MissingPrice));
 }
 
 #[test]
@@ -1344,6 +1331,152 @@ fn test_create_portfolio_max_assets_limit() {
     }
     let result = client.try_create_portfolio(&user, &too_many_allocations, &5, &50);
     assert_eq!(result, Err(Ok(Error::TooManyAssets)));
+}
+
+#[test]
+fn test_transfer_stewardship() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
+
+    let steward = client.get_steward(&pid);
+    assert_eq!(steward, new_steward);
+}
+
+#[test]
+fn test_transfer_stewardship_steward_can_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
+
+    client.mock_auths(&[MockAuth {
+        address: &new_steward,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "deposit",
+            args: (pid, asset.clone(), 500i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).deposit(&pid, &asset, &500);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 500);
+}
+
+#[test]
+#[should_panic]
+fn test_transfer_stewardship_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    let unauthorized = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    client.mock_auths(&[MockAuth {
+        address: &unauthorized,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "transfer_stewardship",
+            args: (pid, attacker.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).transfer_stewardship(&pid, &attacker);
+}
+
+#[test]
+fn test_get_steward_defaults_to_user() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    let steward = client.get_steward(&pid);
+    assert_eq!(steward, user);
+}
+
+#[test]
+fn test_capabilities() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let caps = client.capabilities();
+    assert!(caps & CapabilityFlag::PerPortfolioSteward as u32 != 0);
+    assert!(caps & CapabilityFlag::DifferentiatedPricing as u32 != 0);
+    assert!(caps & CapabilityFlag::EmergencyStop as u32 != 0);
+}
+
+#[test]
+fn test_missing_price_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let missing_reflector_id = env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &missing_reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::MissingPrice)));
 }
 
 #[test]

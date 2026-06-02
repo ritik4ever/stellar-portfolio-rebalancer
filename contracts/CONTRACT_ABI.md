@@ -92,7 +92,36 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
 
+### `transfer_stewardship(env: Env, portfolio_id: u64, new_steward: Address) -> Result<(), Error>`
+
+- **Purpose:** Transfers operational ownership of a single portfolio to a new address without changing the global contract admin.
+- **Parameters:**
+  - `portfolio_id`: Target portfolio.
+  - `new_steward`: Address that will become the new steward.
+- **Returns:** `Ok(())` on success.
+- **Preconditions:**
+  - Portfolio must exist.
+  - Current steward (or portfolio user if no steward set) must authorize the call.
+- **Events:** Publishes `("portfolio", "steward_transferred")` with `(portfolio_id, old_steward, new_steward)`.
+
+### `get_steward(env: Env, portfolio_id: u64) -> Address`
+
+- **Purpose:** Returns the steward address for a portfolio, falling back to the portfolio user if no steward has been set.
+- **Parameters:** `portfolio_id`.
+- **Returns:** `Address` of the current steward or portfolio user.
+
+### `capabilities(env: Env) -> u32`
+
+- **Purpose:** Returns a bitset of supported optional behaviors for frontend and backend compatibility checks.
+- **Returns:** `u32` bitmask. Test with `flags & CapabilityFlag::X != 0`.
+- **Defined flags:**
+  - `PerPortfolioSteward = 1` — per-portfolio steward transfer is supported.
+  - `DifferentiatedPricing = 2` — `calculate_portfolio_value` distinguishes stale, missing, and malformed prices.
+  - `EmergencyStop = 4` — global emergency stop is supported.
+
 ## Error Codes (`contracts/src/types.rs`)
+
+`Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
 
@@ -109,6 +138,30 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
+| `12` | `Unauthorized` | Reserved variant; unauthorized operation. |
+| `13` | `StalePrice` | `execute_rebalance` detected stale price data (>1 hour old). |
+| `14` | `MissingPrice` | `execute_rebalance` cannot find price for a portfolio asset. |
+| `15` | `MalformedPrice` | `execute_rebalance` received non-positive price value. |
+
+## Valuation Errors (`contracts/src/portfolio.rs`)
+
+`ValuationError` is a non-contract-internal enum returned by `calculate_portfolio_value`:
+
+| Code | Variant | Meaning |
+|---|---|---|
+| `1` | `StaleData` | Price data is older than 1-hour freshness window. |
+| `2` | `MissingPrice` | No price available for an asset from the Reflector oracle. |
+| `3` | `MalformedData` | Price value is zero or negative. |
+
+## Capability Flags
+
+`CapabilityFlag` is an enum whose values map to bit positions in the `u32` returned by `capabilities()`:
+
+| Bit | Flag | Description |
+|---|---|---|
+| `1` | `PerPortfolioSteward` | Per-portfolio steward transfer is supported (`transfer_stewardship`, `get_steward`). |
+| `2` | `DifferentiatedPricing` | Pricing errors distinguish stale/missing/malformed (`ValuationError`). |
+| `4` | `EmergencyStop` | Global emergency stop is supported (`set_emergency_stop`). |
 
 ## XDR/Contract Type References
 

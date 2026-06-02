@@ -36,6 +36,7 @@ pub enum DataKey {
     Initialized,
     Portfolio(u64),
     NextPortfolioId,
+    Steward(u64),
 }
 
 #[contracterror]
@@ -53,4 +54,25 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    Unauthorized = 12,
+    StalePrice = 13,
+    MissingPrice = 14,
+    MalformedPrice = 15,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ValuationError {
+    StaleData = 1,
+    MissingPrice = 2,
+    MalformedData = 3,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CapabilityFlag {
+    PerPortfolioSteward = 1,
+    DifferentiatedPricing = 2,
+    EmergencyStop = 4,
 }
