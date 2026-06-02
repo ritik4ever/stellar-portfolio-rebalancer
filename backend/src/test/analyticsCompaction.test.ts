@@ -168,7 +168,7 @@ describe('Analytics Compaction Service', () => {
             expect(vi.mocked(dbCompactAnalyticsSnapshots)).not.toHaveBeenCalled()
         })
 
-        it('should continue processing even if one portfolio fails', async () => {
+        it('should reject on first portfolio failure (fail-fast)', async () => {
             const { portfolioStorage } = await import('../services/portfolioStorage.js')
 
             vi.mocked(portfolioStorage.getAllPortfolios).mockReturnValue([

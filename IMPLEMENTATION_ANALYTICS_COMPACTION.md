@@ -4,7 +4,19 @@
 
 ### Overview
 
-Implemented a scheduled analytics snapshot compaction system that automatically reduces database storage costs by preserving recent high-frequency data while rolling up older snapshots into daily aggregates.
+Implemente| Retention Window  | Strategy                |
+| ----------------- | ---------------------- |
+| < 7 days (recent) | All snapshots (1/hour) |
+| 7-90 days         | Last snapshot per day  |
+| > 90 days         | Deleted                |
+
+**Example** (100 days of 1 snapshot/hour):
+
+- Before: 2,376 snapshots (7 days × 24 + 83 days × 24 + 10 days × 24)
+- After: ~251 snapshots (~89.4% storage reduction)
+- Recent 7 days: 168 snapshots retained (full resolution)
+- 7-90 days: 83 daily snapshots retained (1 per day)
+- 90+ days: Deleted (240 snapshots removed) analytics snapshot compaction system that automatically reduces database storage costs by preserving recent high-frequency data while rolling up older snapshots into daily aggregates.
 
 ### Implementation Details
 
@@ -108,7 +120,7 @@ Implemented a scheduled analytics snapshot compaction system that automatically 
 - Processes multiple portfolios
 - Aggregates statistics correctly
 - Handles empty portfolio lists
-- Continues on errors (with proper error propagation)
+- Fails fast on first portfolio error (with proper error propagation)
 
 #### Unit Tests: `backend/src/test/analyticsCompactionWorker.test.ts`
 

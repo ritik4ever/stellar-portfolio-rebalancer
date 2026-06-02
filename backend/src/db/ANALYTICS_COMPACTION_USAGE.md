@@ -91,8 +91,8 @@ import { analyticsService } from "./services/analyticsService.js";
 // Compact a single portfolio
 const stats = await analyticsService.compactAnalyticsForPortfolio(
   "portfolio-id",
-  (cutoffDays = 90), // Delete snapshots > 90 days old
-  (recentDays = 7), // Keep full resolution for last 7 days
+  90, // Delete snapshots > 90 days old
+  7, // Keep full resolution for last 7 days
 );
 
 // Compact all portfolios
@@ -149,20 +149,25 @@ WHERE portfolio_id = $1
 
 **Phase 2: Keep Last-Per-Day for Intermediate Range**
 
-```sql
-SELECT DISTINCT ON (DATE(timestamp)) id
-FROM analytics_snapshots
-WHERE portfolio_id = $1
-  AND timestamp >= NOW() - INTERVAL '1 day' * $2
-  AND timestamp < NOW() - INTERVAL '1 day' * $3
-ORDER BY DATE(timestamp), timestamp DESC;
+This uses a two-step SQL approach in implementation (the CTE is used internally):
 
+```sql
+WITH daily_snapshots AS (
+  SELECT DISTINCT ON (DATE(timestamp)) id
+  FROM analytics_snapshots
+  WHERE portfolio_id = $1
+    AND timestamp >= NOW() - INTERVAL '1 day' * $3
+    AND timestamp < NOW() - INTERVAL '1 day' * $2
+  ORDER BY DATE(timestamp), timestamp DESC
+)
 DELETE FROM analytics_snapshots
 WHERE portfolio_id = $1
-  AND timestamp >= NOW() - INTERVAL '1 day' * $2
-  AND timestamp < NOW() - INTERVAL '1 day' * $3
+  AND timestamp >= NOW() - INTERVAL '1 day' * $3
+  AND timestamp < NOW() - INTERVAL '1 day' * $2
   AND id NOT IN (SELECT id FROM daily_snapshots);
 ```
+
+**Note**: In the actual implementation (see `backend/src/db/analyticsDb.ts`), these are executed as separate parameterized queries for safety and compatibility.
 
 ### Service Methods
 
@@ -229,7 +234,7 @@ The `/readiness` endpoint includes analytics-compaction status:
 
 **Compaction Start** (INFO):
 
-```
+```text
 [WORKER:analytics-compaction] Starting analytics snapshot compaction
   jobId: job-123
   triggeredBy: scheduler
@@ -240,7 +245,7 @@ The `/readiness` endpoint includes analytics-compaction status:
 
 **Per-Portfolio** (INFO):
 
-```
+```text
 [ANALYTICSSERVICE] Analytics snapshots compacted for portfolio
   portfolioId: portfolio-1
   deletedCount: 100
@@ -251,7 +256,7 @@ The `/readiness` endpoint includes analytics-compaction status:
 
 **Completion** (INFO):
 
-```
+```text
 [WORKER:analytics-compaction] Compaction cycle complete
   jobId: job-123
   portfoliosProcessed: 5
@@ -261,7 +266,7 @@ The `/readiness` endpoint includes analytics-compaction status:
 
 **Errors** (ERROR):
 
-```
+```text
 [ANALYTICSSERVICE] Failed to compact analytics snapshots for portfolio
   portfolioId: portfolio-2
   error: "Database connection timeout"

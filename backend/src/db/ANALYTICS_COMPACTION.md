@@ -141,9 +141,23 @@ Test coverage:
 
 1. **Manual Trigger** (development):
 
-   ```bash
-   # Requires direct service call or API endpoint if added
-   curl -X POST http://localhost:3001/api/v1/admin/analytics/compact
+   ```typescript
+   // Direct service call from test or script
+   import { analyticsService } from './services/analyticsService.js';
+   
+   const stats = await analyticsService.compactAllPortfolios(90, 7);
+   console.log('Compaction complete:', stats);
+   ```
+
+   Or via queue injection (testing only):
+
+   ```typescript
+   const queue = getAnalyticsCompactionQueue();
+   await queue?.add('manual-compaction', { 
+       triggeredBy: 'manual',
+       cutoffDays: 90,
+       recentDays: 7 
+   });
    ```
 
 2. **Scheduler Test**:
@@ -193,16 +207,17 @@ All errors include:
 
 **Initial State**:
 
-- Portfolio `ABC-123` has 168 hourly snapshots (7 days)
-- Plus 2,400 hourly snapshots from 90 days prior (100 days old)
-- Total: 2,568 snapshots
+- Portfolio `ABC-123` has 168 hourly snapshots (7 days: 24 * 7)
+- Plus 1,968 hourly snapshots from days 8-90 (83 days: 24 * 83)
+- Plus 240 hourly snapshots from days 91-100 (10 days old, beyond cutoff)
+- Total: 2,376 snapshots
 
 **After Compaction** (cutoffDays=90, recentDays=7):
 
-- Delete 2,400 (100+ days old)
-- Keep 168 recent snapshots
-- In 7-90 range: Reduce to ~12 (1 per day)
-- Result: ~180 snapshots retained (93% storage reduction)
+- Delete 240 (beyond 90-day cutoff)
+- Keep 168 recent snapshots (days 1-7, full resolution)
+- In 7-90 range: Reduce to 83 daily snapshots (one per day)
+- Result: ~251 snapshots retained (~89.4% storage reduction)
 
 ## Future Enhancements
 
