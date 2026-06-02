@@ -519,3 +519,34 @@ Add to your project's `package.json`:
 - **Environment**: Update `baseUrl` for different environments (dev/staging/prod)
 
 For complete API documentation, see the [OpenAPI spec](http://localhost:3001/api-docs.json) and [Swagger UI](http://localhost:3001/api-docs).
+
+## API Error Glossary
+
+Integrators can use this glossary to map error codes returned by the API to example responses and typical remediation steps. All errors follow a standard JSON structure containing `status`, `code`, `message`, and optional `details`.
+
+### Error Codes
+
+| Code | HTTP Status | Description & Typical Remediation |
+|------|-------------|-----------------------------------|
+| `BAD_REQUEST` | 400 | The request was malformed or missing required parameters. **Remediation:** Check the request syntax and body payload. |
+| `VALIDATION_ERROR` | 400 | One or more fields failed validation. **Remediation:** Inspect the `details` field to find the specific invalid fields and correct them. |
+| `UNAUTHORIZED` | 401 | Authentication failed or missing JWT. **Remediation:** Ensure a valid Bearer token is provided in the `Authorization` header. |
+| `FORBIDDEN` | 403 | The authenticated user lacks permission for this action. **Remediation:** Verify the user's role and consent status. |
+| `NOT_FOUND` | 404 | The requested resource (e.g., portfolio or asset) does not exist. **Remediation:** Verify the resource ID or path parameters. |
+| `CONFLICT` | 409 | The request conflicts with the current state of the server. **Remediation:** Wait for the conflicting operation to finish or sync local state. |
+| `RATE_LIMITED` | 429 | Too many requests sent in a given timeframe. **Remediation:** Implement exponential backoff. |
+| `SERVICE_UNAVAILABLE`| 503 | A required downstream service is down. **Remediation:** Retry the request later. |
+| `INTERNAL_ERROR` | 500 | An unexpected backend error occurred. **Remediation:** Contact support if the issue persists. |
+
+### Example Response
+
+**Validation Error Example (`400 Bad Request`)**
+```json
+{
+  "status": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Invalid portfolio allocation",
+  "details": [
+    { "field": "allocations", "error": "Total allocation must equal 10000 BPS (100%)" }
+  ]
+}
