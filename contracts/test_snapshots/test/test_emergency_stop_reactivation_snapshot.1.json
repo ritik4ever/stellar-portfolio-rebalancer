@@ -30,10 +30,12 @@
                   ]
                 },
                 {
+
                   "u32": 5
                 },
                 {
                   "u32": 50
+
                 }
               ]
             }
@@ -100,6 +102,7 @@
                     "hi": 0,
                     "lo": 100
                   }
+
                 }
               ]
             }
@@ -198,6 +201,7 @@
                   "map": [
                     {
                       "key": {
+
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -234,6 +238,7 @@
                     },
                     {
                       "key": {
+
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
@@ -242,6 +247,7 @@
                     },
                     {
                       "key": {
+
                         "symbol": "slippage_tolerance"
                       },
                       "val": {
@@ -333,6 +339,7 @@
                           "vec": [
                             {
                               "symbol": "EmergencyStop"
+<                 "symbol": "EmergencyStop"
                             }
                           ]
                         },
@@ -652,10 +659,12 @@
                   ]
                 },
                 {
+
                   "u32": 5
                 },
                 {
                   "u32": 50
+
                 }
               ]
             }
@@ -677,6 +686,10 @@
               },
               {
                 "symbol": "created"
+                "string": "portfolio"
+              },
+              {
+                "string": "created"
               }
             ],
             "data": {
@@ -747,6 +760,7 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -794,6 +808,7 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -842,6 +857,7 @@
                     "hi": 0,
                     "lo": 100
                   }
+
                 }
               ]
             }
@@ -863,6 +879,10 @@
               },
               {
                 "symbol": "deposit"
+                "string": "portfolio"
+              },
+              {
+                "string": "deposit"
               }
             ],
             "data": {
@@ -878,6 +898,8 @@
                     "hi": 0,
                     "lo": 100
                   }
+                 }
+
                 }
               ]
             }
@@ -952,6 +974,7 @@
               "map": [
                 {
                   "key": {
+
                     "symbol": "current_balances"
                   },
                   "val": {
@@ -988,6 +1011,7 @@
                 },
                 {
                   "key": {
+
                     "symbol": "rebalance_threshold"
                   },
                   "val": {
@@ -996,6 +1020,7 @@
                 },
                 {
                   "key": {
+
                     "symbol": "slippage_tolerance"
                   },
                   "val": {
