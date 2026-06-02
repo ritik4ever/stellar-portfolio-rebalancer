@@ -1,6 +1,7 @@
 # Portfolio Rebalancer Contract ABI
 
 Contract source:
+
 - `contracts/src/lib.rs`
 - `contracts/src/types.rs`
 - `contracts/src/reflector.rs`
@@ -15,10 +16,23 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `env`: Soroban execution environment.
   - `admin`: Admin address stored for privileged actions (for example emergency stop).
+    - This may be a standard account or a contract-managed/governance address.
+    - Future multisig or governed deployments can provide an address that authorizes via Soroban auth rules.
   - `reflector_address`: Reflector oracle contract address used for price lookups.
 - **Returns:** `Ok(())` on success, `Err(Error::AlreadyInitialized)` if already initialized.
 - **Preconditions:**
   - Contract must not already be initialized.
+
+- **State:** `EmergencyStop` is initialized to `false` during contract initialization.
+
+### `get_admin(env: Env) -> Address`
+
+- **Purpose:** Reads the configured admin address from contract instance storage.
+- **Parameters:**
+  - `env`: Soroban execution environment.
+- **Returns:** Stored admin `Address`.
+- **Notes:**
+  - External clients can use this to confirm the configured governance/admin address before invoking privileged actions.
 
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32) -> Result<u64, Error>`
 
@@ -38,6 +52,19 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
 
+#### Portfolio ID derivation (deterministic)
+
+- **Strategy:** Portfolio IDs are allocated from a monotonically increasing
+  counter stored in persistent contract storage under `DataKey::NextPortfolioId`.
+  The counter starts at `1` and increments by one for each created portfolio.
+- **Behavioral guarantee:** Given the same contract persistent state, the
+  assigned portfolio id for a `create_portfolio` invocation is deterministic.
+  Off-chain systems may rely on this stable mapping to correlate portfolios
+  across sync operations.
+- **Notes:** The contract exposes `get_portfolio` to read portfolio contents by
+  id. Consumers should store the returned id along with the portfolio metadata
+  to maintain a canonical reference.
+
 ### `get_portfolio(env: Env, portfolio_id: u64) -> Portfolio`
 
 - **Purpose:** Reads a stored portfolio by ID.
@@ -46,14 +73,16 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Portfolio must exist; otherwise contract panics on `.unwrap()`.
 
-### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> ()`
+### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128, memo: String) -> ()`
 
 - **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")`.
 - **Parameters:**
   - `portfolio_id`: Target portfolio.
   - `asset`: Asset address key used in `current_balances`.
-  - `amount`: Amount to add.
+  - `amount`: Amount to add (must be positive).
+  - `memo`: Optional memo string for correlating deposits outside the contract (e.g., deposit reference IDs). Pass an empty string if unused.
 - **Returns:** No return value.
+- **Event payload:** `(portfolio_id: u64, asset: Address, amount: i128, memo: String)`
 - **Preconditions / failure behavior:**
   - `amount > 0` (otherwise panic `"Amount must be positive"`).
   - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
@@ -91,6 +120,32 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Returns:** No return value.
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
+  - The configured admin may be a multisig/governance contract address, as long as it authorizes via Soroban auth.
+
+### `set_fee_config(env: Env, config: FeeConfig) -> ()`
+
+- **Purpose:** Sets fee configuration for the contract. Disabled by default (`enabled: false`).
+- **Parameters:**
+  - `config`: `FeeConfig` struct with `fee_bps: u32`, `fee_recipient: Address`, `enabled: bool`.
+- **Returns:** No return value.
+- **Panics:** When `enabled` is `true` and `fee_bps > 1000` (10% max).
+- **Preconditions:**
+  - Admin address must authorize the call.
+
+### `get_fee_config(env: Env) -> FeeConfig`
+
+- **Purpose:** Returns the current fee configuration.
+- **Returns:** `FeeConfig` with `enabled: false` defaults when not yet set.
+
+### `upgrade(env: Env, new_wasm_hash: BytesN<32>) -> ()`
+
+- **Purpose:** Upgrades the contract WASM to a new version. Emits `("portfolio","upgraded")` event.
+- **Parameters:**
+  - `new_wasm_hash`: 32-byte WASM hash of the new contract code.
+- **Returns:** No return value.
+- **Event payload:** `UpgradeEvent { from_hash: Bytes, to_hash: Bytes, timestamp: u64 }`
+- **Preconditions:**
+  - Admin address must authorize the call.
 
 ### `min_rebalance_threshold(env: Env) -> u32`
 
@@ -117,23 +172,24 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Purpose:** Returns the maximum number of assets allowed in a portfolio.
 - **Returns:** `MAX_PORTFOLIO_ASSETS` (currently `10`).
 
+### `simulate_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<Map<Address, i128>, Error>`
+
+- **Purpose:** Non-mutating simulation path for backend dry-run APIs. Returns a map of planned trades where positive values indicate buys and negative values indicate sells. Surfaces policy failures (cooldown, stale/missing prices, slippage) as `Error` values instead of panics.
+- **Parameters:**
+  - `portfolio_id`: Portfolio to simulate rebalance for.
+  - `actual_balances`: Optional actual balances for slippage checks; pass an empty map to skip slippage validation.
+- **Returns:** `Ok(Map<Address, i128>)` with planned trades, or one of:
+  - `Err(Error::CooldownActive)` if the portfolio is still in cooldown.
+  - `Err(Error::StaleData)` if any price is missing or stale.
+  - `Err(Error::SlippageExceeded)` if provided `actual_balances` exceed the portfolio's slippage tolerance.
+- **Preconditions / failure behavior:**
+  - Does not require portfolio owner authorization and does not mutate persistent storage.
+
 ## Error Codes (`contracts/src/types.rs`)
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
 
-| Code | Variant | Returned when |
-|---|---|---|
-| `1` | `InvalidAllocation` | `create_portfolio` receives allocation map that fails validation. |
-| `2` | `RebalanceNotNeeded` | Reserved variant; currently not explicitly returned by `lib.rs`. |
-| `3` | `EmergencyStop` | Reserved variant; emergency-stop paths currently panic instead of returning this error. |
-| `4` | `CooldownActive` | Reserved variant; cooldown path currently panics instead of returning this error. |
-| `5` | `StaleData` | Reserved variant; stale-price path currently panics instead of returning this error. |
-| `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
-| `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
-| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD` (i.e., `1..=50`). |
-| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |
-| `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
-| `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
+
 
 ## XDR/Contract Type References
 
@@ -155,6 +211,10 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `last_rebalance: u64`
   - `total_value: i128`
   - `is_active: bool`
+- `FeeConfig` (`contracts/src/types.rs`)
+  - Struct: `fee_bps: u32` (fee in basis points, max 1000 when enabled), `fee_recipient: Address`, `enabled: bool`.
+- `UpgradeEvent` (`contracts/src/types.rs`)
+  - Struct: `from_hash: Bytes` (previous WASM hash, empty if first upgrade), `to_hash: Bytes` (new WASM hash), `timestamp: u64`.
 - `Asset` (`contracts/src/reflector.rs`)
   - Enum: `Stellar(Address)` or `Other(Symbol)`.
 - `PriceData` (`contracts/src/reflector.rs`)

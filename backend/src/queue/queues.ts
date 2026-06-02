@@ -3,11 +3,14 @@ import { getConnectionOptions } from "./connection.js";
 import { logger } from "../utils/logger.js";
 
 export const QUEUE_NAMES = {
-  PORTFOLIO_CHECK: "portfolio-check",
-  REBALANCE: "rebalance",
-  ANALYTICS_SNAPSHOT: "analytics-snapshot",
-  IDEMPOTENCY_CLEANUP: "idempotency-cleanup",
-} as const;
+    PORTFOLIO_CHECK: 'portfolio-check',
+    REBALANCE: 'rebalance',
+    ANALYTICS_SNAPSHOT: 'analytics-snapshot',
+    IDEMPOTENCY_CLEANUP: 'idempotency-cleanup',
+    PORTFOLIO_EXPORT: 'portfolio-export',
+} as const
+
+export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
 
 export interface PortfolioCheckJobData {
   triggeredBy?: "scheduler" | "manual" | "startup";
@@ -26,16 +29,30 @@ export interface AnalyticsSnapshotJobData {
 }
 
 export interface IdempotencyCleanupJobData {
-  triggeredBy?: "scheduler" | "manual" | "startup";
-  correlationId?: string;
+    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
+}
+
+export interface PortfolioExportJobData {
+    portfolioId: string
+    format: 'json' | 'csv' | 'pdf'
+    userId?: string
+}
+
+export interface PortfolioExportResult {
+    contentType: string
+    filename: string
+    bodyBase64?: string
+    bodyString?: string
 }
 
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
 
-let portfolioCheckQueue: Queue<PortfolioCheckJobData> | null = null;
-let rebalanceQueue: Queue<RebalanceJobData> | null = null;
-let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null;
-let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null;
+let portfolioCheckQueue: Queue<PortfolioCheckJobData> | null = null
+let rebalanceQueue: Queue<RebalanceJobData> | null = null
+let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null
+let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null
+let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null
 
 function getDefaultJobOptions() {
   return {
@@ -107,6 +124,21 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   } catch {
     return null;
   }
+}
+
+export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, PortfolioExportResult> | null {
+    try {
+        if (!portfolioExportQueue) {
+            portfolioExportQueue = new Queue<PortfolioExportJobData, PortfolioExportResult>(QUEUE_NAMES.PORTFOLIO_EXPORT, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PORTFOLIO_EXPORT}`)
+        }
+        return portfolioExportQueue
+    } catch {
+        return null
+    }
 }
 
 // ─── Graceful Close ───────────────────────────────────────────────────────────

@@ -5,11 +5,12 @@ import { Keypair } from "@stellar/stellar-sdk";
 import {
   createRefreshToken,
   findRefreshToken,
+  findRefreshTokenById,
   deleteRefreshTokenById,
   deleteAllRefreshTokensForUser,
   generateRefreshTokenId,
 } from "../db/refreshTokenDb.js";
-import { logger } from "../utils/logger.js";
+import { logger, logAudit } from "../utils/logger.js";
 
 const ACCESS_EXPIRY_SEC = parseInt(
   process.env.JWT_ACCESS_EXPIRY_SEC || "900",
@@ -47,6 +48,39 @@ export interface AuthTokens {
   refreshExpiresIn: number;
 }
 
+export type AuthAuditAction = "login" | "refresh" | "revocation";
+
+export interface AuthAuditEvent {
+  action: AuthAuditAction;
+  userAddress: string;
+  timestamp: string;
+  sessionId?: string;
+  previousSessionId?: string;
+  count?: number;
+  details?: Record<string, unknown>;
+}
+
+const MAX_AUTH_AUDIT_EVENTS = 100;
+const authAuditEvents: AuthAuditEvent[] = [];
+
+function recordAuthAuditEvent(event: AuthAuditEvent): void {
+  authAuditEvents.push(event);
+  while (authAuditEvents.length > MAX_AUTH_AUDIT_EVENTS) {
+    authAuditEvents.shift();
+  }
+  logAudit(`auth_${event.action}`, {
+    userAddress: event.userAddress,
+    sessionId: event.sessionId,
+    previousSessionId: event.previousSessionId,
+    count: event.count,
+    ...event.details,
+  });
+}
+
+export function getRecentAuthAuditEvents(limit = 50): AuthAuditEvent[] {
+  return authAuditEvents.slice(-limit).reverse();
+}
+
 export function getAuthConfig(): {
   enabled: boolean;
   accessExpirySec: number;
@@ -70,7 +104,11 @@ export function generateAccessToken(address: string): string {
   );
 }
 
-export async function issueTokens(address: string): Promise<AuthTokens> {
+interface TokenCreationResult extends AuthTokens {
+  refreshId: string;
+}
+
+async function createTokensForUser(address: string): Promise<TokenCreationResult> {
   const accessToken = generateAccessToken(address);
   const refreshId = generateRefreshTokenId();
   const refreshToken = jwt.sign(
@@ -87,7 +125,20 @@ export async function issueTokens(address: string): Promise<AuthTokens> {
     refreshToken,
     expiresIn: ACCESS_EXPIRY_SEC,
     refreshExpiresIn: REFRESH_EXPIRY_SEC,
+    refreshId,
   };
+}
+
+export async function issueTokens(address: string): Promise<AuthTokens> {
+  const result = await createTokensForUser(address);
+  recordAuthAuditEvent({
+    action: "login",
+    userAddress: address,
+    timestamp: new Date().toISOString(),
+    sessionId: result.refreshId,
+  });
+  const { refreshId, ...tokens } = result;
+  return tokens;
 }
 
 export function verifyAccessToken(token: string): TokenPayload | null {
@@ -117,7 +168,16 @@ export async function refreshTokens(
     return null;
   }
   await deleteRefreshTokenById(row.id);
-  return issueTokens(row.user_address);
+  const result = await createTokensForUser(row.user_address);
+  recordAuthAuditEvent({
+    action: "refresh",
+    userAddress: row.user_address,
+    timestamp: new Date().toISOString(),
+    sessionId: result.refreshId,
+    previousSessionId: row.id,
+  });
+  const { refreshId, ...tokens } = result;
+  return tokens;
 }
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────
@@ -165,6 +225,18 @@ export function verifyWalletSignature(
 }
 
 
+export async function revokeDeviceSession(
+  userId: string,
+  tokenId: string,
+): Promise<{ success: boolean; reason?: string }> {
+  const row = await findRefreshTokenById(tokenId);
+  if (!row) return { success: false, reason: 'not_found' };
+  if (row.user_address !== userId) return { success: false, reason: 'forbidden' };
+  await deleteRefreshTokenById(tokenId);
+  logger.info('Device session revoked', { userId, tokenId });
+  return { success: true };
+}
+
 export async function logout(
   refreshToken: string | undefined,
   address: string | undefined,
@@ -173,6 +245,13 @@ export async function logout(
     const row = await findRefreshToken(refreshToken);
     if (row) {
       await deleteRefreshTokenById(row.id).catch(() => {});
+      recordAuthAuditEvent({
+        action: "revocation",
+        userAddress: row.user_address,
+        timestamp: new Date().toISOString(),
+        sessionId: row.id,
+        details: { reason: "single_session" },
+      });
       return true;
     }
   }
@@ -182,6 +261,13 @@ export async function logout(
       logger.info("All refresh tokens invalidated for user", {
         userId: address,
         count,
+      });
+      recordAuthAuditEvent({
+        action: "revocation",
+        userAddress: address,
+        timestamp: new Date().toISOString(),
+        count,
+        details: { reason: "all_sessions" },
       });
       return true;
     }

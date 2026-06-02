@@ -34,6 +34,10 @@ export const createPortfolioSchema = z.object({
     }).optional(),
 }).strict();
 
+export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
+    version: z.number().int().min(1, "Version must be a positive integer")
+});
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({
@@ -125,7 +129,8 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional()
+    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
@@ -138,8 +143,12 @@ export const adminAddAssetSchema = z.object({
 }).strict();
 
 export const adminPatchAssetSchema = z.object({
-    enabled: z.boolean()
-}).strict();
+    enabled: z.boolean().optional(),
+    quarantined: z.boolean().optional()
+}).strict().refine(
+    (data) => data.enabled !== undefined || data.quarantined !== undefined,
+    { message: 'At least one of enabled or quarantined must be provided' }
+);
 
 // Query params for GET /assets — pagination, sorting, and issuer/symbol filters.
 export const assetsListQuerySchema = z.object({
@@ -161,6 +170,46 @@ export const assetsListQuerySchema = z.object({
         z.number().int().min(1).max(100).optional()
     )
 });
+
+// ─── Draft portfolio schemas ─────────────────────────────────────────────────
+export const createDraftSchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required"),
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ),
+    threshold: z.number().min(1).max(50),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
+
+export const updateDraftSchema = z.object({
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ).optional(),
+    threshold: z.number().min(1).max(50).optional(),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
 
 // ─── Export / query-param schemas ─────────────────────────────────────────────
 export const portfolioExportQuerySchema = z.object({

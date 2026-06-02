@@ -51,6 +51,17 @@ describe('RebalanceHistory', () => {
         expect(screen.getByText(/2 trades/i)).toBeTruthy()
     })
 
+    it('renders skeleton loading state', () => {
+        useHistoryMock.mockReturnValue({
+            data: undefined,
+            isLoading: true,
+            error: null
+        })
+
+        render(<RebalanceHistory portfolioId="p1" isLoading={true} />)
+        expect(screen.getByTestId('rebalance-history-skeleton')).toBeInTheDocument()
+    })
+
     it('shows fallback error state', async () => {
         useHistoryMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error('boom') })
 
@@ -103,7 +114,18 @@ describe('RebalanceHistory', () => {
     it('shows pagination controls only when total > limit', async () => {
         // limit is 10 in the component
         useHistoryMock.mockReturnValue({
-            data: { history: Array(10).fill({ id: '1', trigger: 'Test' }), total: 10 },
+            data: {
+                history: Array.from({ length: 10 }, (_, index) => ({
+                    id: `e-${index}`,
+                    timestamp: new Date().toISOString(),
+                    trigger: 'Test',
+                    trades: 1,
+                    gasUsed: '0.01 XLM',
+                    status: 'completed',
+                    portfolioId: 'p1',
+                })),
+                total: 10,
+            },
             isLoading: false,
             error: null
         })
@@ -115,7 +137,18 @@ describe('RebalanceHistory', () => {
 
         // Mock 11 items
         useHistoryMock.mockReturnValue({
-            data: { history: Array(10).fill({ id: '1', trigger: 'Test' }), total: 11 },
+            data: {
+                history: Array.from({ length: 10 }, (_, index) => ({
+                    id: `e-${index}`,
+                    timestamp: new Date().toISOString(),
+                    trigger: 'Test',
+                    trades: 1,
+                    gasUsed: '0.01 XLM',
+                    status: 'completed',
+                    portfolioId: 'p1',
+                })),
+                total: 11,
+            },
             isLoading: false,
             error: null
         })
@@ -128,7 +161,18 @@ describe('RebalanceHistory', () => {
 
     it('updates page when pagination buttons are clicked', async () => {
         useHistoryMock.mockReturnValue({
-            data: { history: Array(10).fill({ id: '1', trigger: 'Test' }), total: 25 },
+            data: {
+                history: Array.from({ length: 10 }, (_, index) => ({
+                    id: `e-${index}`,
+                    timestamp: new Date().toISOString(),
+                    trigger: 'Test',
+                    trades: 1,
+                    gasUsed: '0.01 XLM',
+                    status: 'completed',
+                    portfolioId: 'p1',
+                })),
+                total: 25,
+            },
             isLoading: false,
             error: null
         })

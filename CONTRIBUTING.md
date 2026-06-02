@@ -16,6 +16,8 @@ It covers:
 - Contract build and deploy steps
 - Common setup failures and fixes
 - Changelog workflow (`npm run changelog:update`)
+- Architecture Decision Records (ADRs) at [docs/adr/](docs/adr/README.md)
+
 
 For a quick overview of the API contract see [API.md](API.md). Background services and troubleshooting are covered in [docs/OPERATIONS.md](docs/OPERATIONS.md). Feature flags are summarized in [docs/FEATURE_FLAGS.md](docs/FEATURE_FLAGS.md), and Soroban event shapes for the indexer are in [docs/CONTRACT_EVENTS.md](docs/CONTRACT_EVENTS.md).
 
@@ -28,6 +30,8 @@ For a quick overview of the API contract see [API.md](API.md). Background servic
 3. Follow the setup guide in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 4. Make your changes and ensure all tests pass: `cd backend && npm test && cd ../frontend && npm test`
 5. Open a pull request targeting `main` (reference the issue with "Closes #123")
+
+> **Before you open a PR**, review the [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md) guide to understand which CI checks must pass before your PR can be merged.
 
 ## Issue Templates
 
