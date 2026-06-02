@@ -236,6 +236,52 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
     }
 })
 
+opsRouter.post('/queue/:queueName/pause', async (req: Request, res: Response) => {
+    try {
+        const { queueName } = req.params
+        const queue = getQueueByName(queueName)
+
+        if (!queue) {
+            return fail(res, 400, 'INVALID_QUEUE', 'Invalid queue name')
+        }
+
+        await queue.pause()
+
+        logger.info('[QUEUE] Paused queue', { queue: queueName })
+
+        return ok(res, {
+            message: 'Queue paused',
+            queue: queueName
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to pause queue', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/queue/:queueName/resume', async (req: Request, res: Response) => {
+    try {
+        const { queueName } = req.params
+        const queue = getQueueByName(queueName)
+
+        if (!queue) {
+            return fail(res, 400, 'INVALID_QUEUE', 'Invalid queue name')
+        }
+
+        await queue.resume()
+
+        logger.info('[QUEUE] Resumed queue', { queue: queueName })
+
+        return ok(res, {
+            message: 'Queue resumed',
+            queue: queueName
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to resume queue', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 opsRouter.get('/contract/diagnostics', async (_req: Request, res: Response) => {
     try {
         const diagnostics = await runContractDiagnostics()

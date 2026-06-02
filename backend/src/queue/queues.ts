@@ -10,6 +10,8 @@ export const QUEUE_NAMES = {
     PORTFOLIO_EXPORT: 'portfolio-export',
 } as const
 
+export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
+
 export interface PortfolioCheckJobData {
   triggeredBy?: "scheduler" | "manual" | "startup";
   correlationId?: string;
@@ -142,17 +144,15 @@ export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, Portfol
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
-    await Promise.all([
-        portfolioCheckQueue?.close(),
-        rebalanceQueue?.close(),
-        analyticsSnapshotQueue?.close(),
-        idempotencyCleanupQueue?.close(),
-        portfolioExportQueue?.close(),
-    ])
-    portfolioCheckQueue = null
-    rebalanceQueue = null
-    analyticsSnapshotQueue = null
-    idempotencyCleanupQueue = null
-    portfolioExportQueue = null
-    logger.info('[QUEUE] All queues closed')
+  await Promise.all([
+    portfolioCheckQueue?.close(),
+    rebalanceQueue?.close(),
+    analyticsSnapshotQueue?.close(),
+    idempotencyCleanupQueue?.close(),
+  ]);
+  portfolioCheckQueue = null;
+  rebalanceQueue = null;
+  analyticsSnapshotQueue = null;
+  idempotencyCleanupQueue = null;
+  logger.info("[QUEUE] All queues closed");
 }
