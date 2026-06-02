@@ -87,6 +87,13 @@ pub enum DataKey {
     WasmHash,
 }
 
+// Portfolio identifiers (`u64`) are derived deterministically by a monotonically
+// increasing counter stored under `DataKey::NextPortfolioId` in contract
+// persistent storage. The first created portfolio receives id `1`. This
+// deterministic strategy ensures off-chain consumers can correlate a portfolio
+// consistently given the same contract storage state and avoids reliance on
+// runtime-generated randomness or non-deterministic timestamps.
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]

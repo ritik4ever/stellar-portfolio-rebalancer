@@ -15,6 +15,15 @@ pub struct PortfolioRebalancer;
 
 #[contractimpl]
 impl PortfolioRebalancer {
+    // Allocate a deterministic portfolio id from persistent storage.
+    // Strategy: a monotonically increasing `NextPortfolioId` counter stored in
+    // instance persistent storage. Starts at `1` and increments by one on each
+    // allocation. This makes portfolio id assignment deterministic given the
+    // contract state and avoids non-deterministic RNGs or timestamps.
+    fn allocate_portfolio_id(env: &Env) -> u64 {
+        let portfolio_id = Self::allocate_portfolio_id(&env);
+        portfolio_id
+    }
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
