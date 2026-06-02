@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import jwt from "jsonwebtoken";
 
+vi.mock("../observability/metrics.js", () => ({
+  recordAuthSecurityEvent: vi.fn(),
+}));
+
+vi.mock("../utils/logger.js", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  logAudit: vi.fn(),
+}));
+
 vi.mock("../db/refreshTokenDb.js", () => ({
   createRefreshToken: vi.fn(() => Promise.resolve()),
   findRefreshToken: vi.fn(() => Promise.resolve(null)),
@@ -464,5 +473,102 @@ describe("validateStartupConfigOrThrow – JWT_SECRET validation", () => {
     });
     const summary = buildStartupSummary(cfg);
     expect(summary).toHaveProperty("jwtAuthEnabled", true);
+  });
+});
+
+describe("authService – suspicious login heuristics (Issue #423)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  describe("verifyWalletSignature – expired/missing challenge", () => {
+    it("returns false and records expired_challenge when no challenge exists", async () => {
+      const { verifyWalletSignature } = await import("../services/authService.js");
+      const { recordAuthSecurityEvent } = await import("../observability/metrics.js");
+      const { logAudit } = await import("../utils/logger.js");
+
+      const result = verifyWalletSignature("GNOCHALLENGE", "dummysig==");
+
+      expect(result).toBe(false);
+      expect(recordAuthSecurityEvent).toHaveBeenCalledWith("expired_challenge");
+      expect(logAudit).toHaveBeenCalledWith("auth_expired_challenge", expect.objectContaining({ address: "GNOCHALLENGE" }));
+    });
+
+    it("returns false and records expired_challenge when challenge has passed TTL", async () => {
+      vi.useFakeTimers();
+      const { issueChallenge, verifyWalletSignature } = await import("../services/authService.js");
+      const { recordAuthSecurityEvent } = await import("../observability/metrics.js");
+
+      issueChallenge("GEXPIRED");
+      vi.advanceTimersByTime(6 * 60 * 1000); // advance past 5-minute TTL
+
+      const result = verifyWalletSignature("GEXPIRED", "dummysig==");
+
+      expect(result).toBe(false);
+      expect(recordAuthSecurityEvent).toHaveBeenCalledWith("expired_challenge");
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("verifyWalletSignature – failed signature tracking", () => {
+    it("records failed_signature on bad signature", async () => {
+      const { issueChallenge, verifyWalletSignature } = await import("../services/authService.js");
+      const { recordAuthSecurityEvent } = await import("../observability/metrics.js");
+
+      issueChallenge("GBADSIG");
+      const result = verifyWalletSignature("GBADSIG", "bm90YXZhbGlkc2lnbmF0dXJl");
+
+      expect(result).toBe(false);
+      expect(recordAuthSecurityEvent).toHaveBeenCalledWith("failed_signature");
+    });
+
+    it("escalates to suspicious_login after threshold failures", async () => {
+      const { issueChallenge, verifyWalletSignature } = await import("../services/authService.js");
+      const { recordAuthSecurityEvent } = await import("../observability/metrics.js");
+      const { logAudit } = await import("../utils/logger.js");
+      const address = "GSUSPICIOUS";
+
+      for (let i = 0; i < 5; i++) {
+        issueChallenge(address);
+        verifyWalletSignature(address, "bm90YXZhbGlkc2lnbmF0dXJl");
+      }
+
+      expect(recordAuthSecurityEvent).toHaveBeenCalledWith("suspicious_login");
+      expect(logAudit).toHaveBeenCalledWith("suspicious_login_detected", expect.objectContaining({ address }));
+    });
+
+    it("getFailedSigAttempts returns 0 for unknown address", async () => {
+      const { getFailedSigAttempts } = await import("../services/authService.js");
+      expect(getFailedSigAttempts("GUNKNOWN")).toBe(0);
+    });
+
+    it("getFailedSigAttempts increments with failed verifications", async () => {
+      const { issueChallenge, verifyWalletSignature, getFailedSigAttempts } =
+        await import("../services/authService.js");
+      const address = "GCOUNTER";
+
+      issueChallenge(address);
+      verifyWalletSignature(address, "bm90YXZhbGlkc2lnbmF0dXJl");
+
+      expect(getFailedSigAttempts(address)).toBe(1);
+    });
+
+    it("resets failed attempt count after window expires", async () => {
+      vi.useFakeTimers();
+      const { issueChallenge, verifyWalletSignature, getFailedSigAttempts } =
+        await import("../services/authService.js");
+      const address = "GWINDOW";
+
+      issueChallenge(address);
+      verifyWalletSignature(address, "bm90YXZhbGlkc2lnbmF0dXJl");
+      expect(getFailedSigAttempts(address)).toBe(1);
+
+      vi.advanceTimersByTime(11 * 60 * 1000); // past 10-minute window
+      expect(getFailedSigAttempts(address)).toBe(0);
+
+      vi.useRealTimers();
+    });
   });
 });

@@ -234,3 +234,16 @@ export function recordCacheTtl(ttlSeconds: number): void {
 export function recordCacheExpiration(asset: string): void {
   cacheExpirationCounterTotal.inc({ asset });
 }
+
+// ── Auth security event metrics (Issue #423) ─────────────────────────────────
+
+const authSecurityEventsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}auth_security_events_total`,
+    help: 'Total authentication security events by type',
+    labelNames: ['event_type'] as const,
+    registers: [register],
+})
+
+export function recordAuthSecurityEvent(eventType: string): void {
+    authSecurityEventsTotal.inc({ event_type: eventType })
+}

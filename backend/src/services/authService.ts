@@ -191,6 +191,50 @@ interface ChallengeEntry {
 
 const challengeStore = new Map<string, ChallengeEntry>();
 
+// ── Issue #423: suspicious login heuristics ───────────────────────────────────
+
+const FAILED_SIG_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const FAILED_SIG_THRESHOLD = 5;
+
+interface FailedAttemptRecord {
+  count: number;
+  windowStart: number;
+}
+
+const failedSigAttempts = new Map<string, FailedAttemptRecord>();
+
+function recordFailedSignature(address: string): void {
+  const now = Date.now();
+  const record = failedSigAttempts.get(address);
+
+  if (!record || now - record.windowStart > FAILED_SIG_WINDOW_MS) {
+    failedSigAttempts.set(address, { count: 1, windowStart: now });
+    return;
+  }
+
+  record.count += 1;
+
+  if (record.count >= FAILED_SIG_THRESHOLD) {
+    recordAuthSecurityEvent("suspicious_login");
+    logAudit("suspicious_login_detected", {
+      address,
+      failedAttempts: record.count,
+      windowMs: FAILED_SIG_WINDOW_MS,
+    });
+    logger.warn("Suspicious login: repeated signature failures", {
+      address,
+      failedAttempts: record.count,
+    });
+  }
+}
+
+export function getFailedSigAttempts(address: string): number {
+  const now = Date.now();
+  const record = failedSigAttempts.get(address);
+  if (!record || now - record.windowStart > FAILED_SIG_WINDOW_MS) return 0;
+  return record.count;
+}
+
 export function issueChallenge(address: string): string {
   challengeStore.delete(address);
   const nonce = randomBytes(32).toString("hex");
@@ -208,9 +252,17 @@ export function verifyWalletSignature(
   signatureB64: string,
 ): boolean {
   const entry = challengeStore.get(address);
-  if (!entry) return false;
+  if (!entry) {
+    recordAuthSecurityEvent("expired_challenge");
+    logAudit("auth_expired_challenge", { address });
+    logger.warn("Auth attempt with no active challenge", { address });
+    return false;
+  }
   if (Date.now() > entry.expiresAt) {
     challengeStore.delete(address);
+    recordAuthSecurityEvent("expired_challenge");
+    logAudit("auth_expired_challenge", { address });
+    logger.warn("Auth attempt with expired challenge", { address });
     return false;
   }
   challengeStore.delete(address);
@@ -218,8 +270,17 @@ export function verifyWalletSignature(
     const keypair = Keypair.fromPublicKey(address);
     const messageBuffer = Buffer.from(entry.nonce, "utf8");
     const sigBuffer = Buffer.from(signatureB64, "base64");
-    return keypair.verify(messageBuffer, sigBuffer);
+    const valid = keypair.verify(messageBuffer, sigBuffer);
+    if (!valid) {
+      recordAuthSecurityEvent("failed_signature");
+      logAudit("auth_failed_signature", { address });
+      recordFailedSignature(address);
+    }
+    return valid;
   } catch {
+    recordAuthSecurityEvent("failed_signature");
+    logAudit("auth_failed_signature", { address });
+    recordFailedSignature(address);
     return false;
   }
 }
