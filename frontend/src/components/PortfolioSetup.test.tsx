@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PortfolioSetup from './PortfolioSetup'
 import "@testing-library/jest-dom/vitest";
 import { api } from '../config/api'
+import { clearPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 
 // Strip framer-motion animation props so they don't hit the real DOM
 const stripMotionProps = ({ initial, animate, exit, transition, variants, layout, layoutId, ...rest }: any) => rest
@@ -31,6 +32,20 @@ vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
     isPending: false,
   }),
 }));
+
+const mockAssets = [
+    { symbol: 'XLM', displayName: 'XLM', searchText: 'xlm' },
+    { symbol: 'USDC', displayName: 'USDC', searchText: 'usdc' },
+    { symbol: 'BTC', displayName: 'BTC', searchText: 'btc' },
+    { symbol: 'ETH', displayName: 'ETH', searchText: 'eth' },
+]
+
+vi.mock('../hooks/queries/useAssetsQuery', () => ({
+    useAssets: () => ({
+        data: mockAssets,
+        isLoading: false,
+    }),
+}))
 
 function renderSetup(publicKey: string | null = null) {
     const client = new QueryClient({
@@ -59,8 +74,8 @@ describe('PortfolioSetup allocation validation', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        clearPortfolioCloneDraft()
         mockMutateAsync.mockResolvedValue({})
-        // Return empty assets so the component falls back to DEFAULT_ASSET_OPTIONS
         vi.spyOn(api, 'get').mockResolvedValue({ assets: [] } as any)
     })
 
@@ -232,6 +247,38 @@ describe('PortfolioSetup allocation validation', () => {
     })
 
     // ── Submit button state ───────────────────────────────────────────────────
+
+    describe('portfolio clone draft', () => {
+        it('prefills setup from a saved clone draft and saves as a new portfolio', async () => {
+            savePortfolioCloneDraft({
+                sourcePortfolioId: 'p-source',
+                sourceLabel: 'Source',
+                allocations: [
+                    { asset: 'BTC', percentage: 70 },
+                    { asset: 'ETH', percentage: 30 },
+                ],
+                threshold: 8,
+                slippageTolerance: 2,
+                strategy: 'volatility',
+                strategyConfig: { volatilityThresholdPct: 12 },
+                createdAt: new Date().toISOString(),
+            })
+
+            renderSetup('GTESTCLONE')
+            expect(screen.getByText(/cloning portfolio source/i)).toBeTruthy()
+            expect(screen.getByRole('button', { name: /save as new portfolio/i })).toBeTruthy()
+
+            fireEvent.click(screen.getByRole('button', { name: /save as new portfolio/i }))
+            expect(mockMutateAsync).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    threshold: 8,
+                    slippageTolerance: 2,
+                    strategy: 'volatility',
+                    allocations: { BTC: 70, ETH: 30 },
+                }),
+            )
+        })
+    })
 
     describe('submit button state', () => {
         it('calls mutateAsync when form is valid and submit is clicked', async () => {

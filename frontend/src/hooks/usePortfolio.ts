@@ -19,8 +19,7 @@
  * ```
  */
 
-import { useState, useEffect } from "react";
-import { api, ENDPOINTS } from "../config/api";
+
 
 interface PortfolioData {
   id: string;
@@ -114,5 +113,4 @@ export const usePortfolio = (portfolioId?: string) => {
     }
   };
 
-  return { portfolio, loading, error, executeRebalance };
-};
+

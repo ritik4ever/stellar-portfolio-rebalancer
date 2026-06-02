@@ -4,6 +4,14 @@ import { portfolioKeys } from "../queries/usePortfolioQuery";
 import { historyKeys } from "../queries/useHistoryQuery";
 import { analyticsKeys } from "../queries/useAnalyticsQuery";
 
+export {
+    buildPortfolioCloneDraft,
+    savePortfolioCloneDraft,
+    loadPortfolioCloneDraft,
+    clearPortfolioCloneDraft,
+} from '../../utils/portfolioCloneDraft'
+export type { PortfolioCloneDraft } from '../../utils/portfolioCloneDraft'
+
 export interface MutationFailureInfo {
   message: string;
   retryable: boolean;

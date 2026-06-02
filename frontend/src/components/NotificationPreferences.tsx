@@ -8,6 +8,7 @@ import {
     useUnsubscribeNotificationsMutation,
 } from '../hooks/mutations/useNotificationMutations'
 import type { NotificationPreferencesModel as Preferences } from '../hooks/queries/useNotificationPreferencesQuery'
+import { NotificationTest } from './NotificationTest'
 
 interface NotificationPreferencesProps {
     userId: string
@@ -40,6 +41,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const [emailError, setEmailError] = useState<string | null>(null)
     const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
 
+
     const saving = saveMutation.isPending || unsubscribeMutation.isPending
 
     useEffect(() => {
@@ -47,9 +49,13 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         if (prefData.preferences) {
             setPreferences(prefData.preferences)
             setOriginalPreferences(prefData.preferences)
+            setSavedProviderActive(
+                prefData.preferences.emailEnabled || prefData.preferences.webhookEnabled
+            )
         } else {
             setPreferences(defaultPreferences)
             setOriginalPreferences(defaultPreferences)
+            setSavedProviderActive(false)
         }
     }, [prefData])
 
@@ -122,6 +128,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
 
             setOriginalPreferences(preferences)
             setSaveSuccess(true)
+            setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled)
 
             setTimeout(() => setSaveSuccess(false), 3000)
         } catch (err) {
@@ -129,15 +136,30 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         }
     }
 
-    const handleUnsubscribe = async () => {
-        if (!confirm('Are you sure you want to unsubscribe from all notifications?')) {
+    const handleUnsubscribeClick = () => {
+        setShowUnsubscribeReason(true)
+        setError(null)
+        setSaveSuccess(false)
+    }
+
+    const handleCancelUnsubscribe = () => {
+        setShowUnsubscribeReason(false)
+        setUnsubscribeReason('')
+        setError(null)
+    }
+
+    const handleUnsubscribe = async (includeReason: boolean) => {
+        if (saving) {
             return
         }
 
         setError(null)
+        setSaveSuccess(false)
+
+        const reason = includeReason ? unsubscribeReason.trim() : undefined
 
         try {
-            await unsubscribeMutation.mutateAsync()
+            await unsubscribeMutation.mutateAsync(reason)
 
             setPreferences(prev => ({
                 ...prev,
@@ -153,6 +175,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                       }
                     : null
             )
+
 
             setSaveSuccess(true)
             setTimeout(() => setSaveSuccess(false), 3000)
@@ -484,11 +507,79 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         
             </div>
 
+            {/* Inline notification test delivery */}
+            <NotificationTest
+                userId={userId}
+                hasConfiguredProvider={savedProviderActive}
+            />
+
             {/* Action Buttons */}
-            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+            {showUnsubscribeReason && (
+                <div
+                    role="dialog"
+                    aria-labelledby="unsubscribe-reason-title"
+                    className="mb-4 p-4 border border-red-200 rounded-lg bg-red-50"
+                >
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                            <h3 id="unsubscribe-reason-title" className="text-sm font-semibold text-red-900">
+                                Before you unsubscribe
+                            </h3>
+                            <p className="mt-1 text-sm text-red-800">
+                                Sharing why is optional and helps us improve notifications.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleCancelUnsubscribe}
+                            disabled={saving}
+                            className="text-sm font-medium text-red-700 hover:text-red-900 disabled:text-gray-400"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+
+                    <label htmlFor="unsubscribe-reason" className="block text-sm font-medium text-red-900 mb-1">
+                        Reason (optional)
+                    </label>
+                    <textarea
+                        id="unsubscribe-reason"
+                        value={unsubscribeReason}
+                        onChange={(e) => setUnsubscribeReason(e.target.value.slice(0, 280))}
+                        rows={3}
+                        maxLength={280}
+                        disabled={saving}
+                        placeholder="Too many notifications, not relevant, or another reason"
+                        className="w-full px-3 py-2 border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-100"
+                    />
+                    <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <span className="text-xs text-red-700">{unsubscribeReason.length}/280</span>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <button
+                                type="button"
+                                onClick={() => handleUnsubscribe(false)}
+                                disabled={saving}
+                                className="px-4 py-2 text-sm font-medium border border-red-200 rounded-lg text-red-700 hover:bg-red-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                            >
+                                Skip and unsubscribe
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleUnsubscribe(true)}
+                                disabled={saving}
+                                className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg"
+                            >
+                                {saving ? 'Unsubscribing...' : 'Unsubscribe'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-200">
                 <button
-                    onClick={handleUnsubscribe}
-                    disabled={saving || (!preferences.emailEnabled && !preferences.webhookEnabled)}
+                    onClick={handleUnsubscribeClick}
+                    disabled={saving || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled)}
                     className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                     Unsubscribe from all

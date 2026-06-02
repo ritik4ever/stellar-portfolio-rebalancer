@@ -30,7 +30,7 @@ import {
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 
-import { useAssets } from "../hooks/queries/useAssetsQuery"; // NEW: Use enhanced assets query
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -174,21 +174,28 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(
     () => loadSavedTemplates(publicKey || ""),
   );
+  const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
+    loadPortfolioCloneDraft(),
+  );
 
-  // NEW: Use enhanced assets query
-    const { data: queriedAssets = [] } = useAssets();
 
-    const assets =
-      queriedAssets.length > 0
-        ? queriedAssets
-        : DEFAULT_ASSET_OPTIONS.map((asset) => ({
-            symbol: asset.value,
-            name: asset.label,
-          }));
 
   useEffect(() => {
     setSavedTemplates(loadSavedTemplates(publicKey || ""));
   }, [publicKey]);
+
+  useEffect(() => {
+    const draft = loadPortfolioCloneDraft();
+    if (!draft) return
+
+    setCloneDraft(draft);
+    setAllocations(draft.allocations.map((row) => ({ ...row })));
+    setThreshold(draft.threshold);
+    setSlippageTolerance(draft.slippageTolerance);
+    setStrategy(draft.strategy || "threshold");
+    setStrategyConfig(draft.strategyConfig ?? {});
+    setSelectedTemplateId("custom");
+  }, []);
 
   const getRiskLevelLabel = (level: RiskLevel): string => {
     switch (level) {
@@ -400,6 +407,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
       });
 
+      clearPortfolioCloneDraft();
+      setCloneDraft(null);
       setSuccess(true);
       setTimeout(() => onNavigate("dashboard"), 2000);
     } catch (err) {
@@ -458,6 +467,31 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           )}
         </div>
 
+        {cloneDraft ? (
+          <div className="bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-indigo-900 dark:text-indigo-200 font-medium">
+                  Cloning portfolio {cloneDraft.sourceLabel ?? cloneDraft.sourcePortfolioId}
+                </h4>
+                <p className="text-indigo-800 dark:text-indigo-300 text-sm mt-1">
+                  Allocations and rebalance settings are pre-filled. Saving creates a new portfolio and does not change the original.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  clearPortfolioCloneDraft();
+                  setCloneDraft(null);
+                }}
+                className="self-start rounded-lg border border-indigo-300 dark:border-indigo-700 px-3 py-2 text-sm text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+              >
+                Discard clone
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {/* ── Demo mode information banner ── */}
         {isDemoMode && (
           <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
@@ -508,6 +542,45 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <span>{error}</span>
             </div>
           </motion.div>
+        )}
+
+        {/* ── First-time user quick-start / empty state ── */}
+        {savedTemplates.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm mb-6">
+            <div className="flex items-start">
+              <div className="flex-1">
+                <h4 className="text-md font-semibold text-gray-900 dark:text-white">Quick start</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  New here? Try a template to populate allocations, or learn how to set up a portfolio.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate(PORTFOLIO_TEMPLATES.find(t => t.id === 'balanced')!)}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+                  >
+                    Try Balanced Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
+                    className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                  >
+                    Read setup guide
+                  </button>
+                  {!publicKey && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('landing')}
+                      className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                    >
+                      Connect wallet
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ── Main two-column layout ── */}
@@ -1043,36 +1116,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
-            <button
-              onClick={createPortfolio}
-              disabled={
-                !isValidTotal ||
-                hasAnyFieldError ||
-                createPortfolioMutation.isPending
-              }
-              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-            >
-              {createPortfolioMutation.isPending ? (
-                <>
-                  <Zap className="w-4 h-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                "Create Portfolio"
-              )}
-            </button>
 
-            {/*
-             * Helper hint shown beneath the disabled button.
-             * Explains why the button is inactive so users aren't left guessing.
-             * Hidden once the API call starts (createPortfolioMutation.isPending) to avoid mixed messaging.
-             */}
-            {(hasAnyFieldError || !isValidTotal) &&
-              !createPortfolioMutation.isPending && (
-                <p className="text-xs text-gray-400 text-center mt-2">
-                  Fix validation errors above to continue
-                </p>
-              )}
           </div>
         </div>
 
@@ -1112,11 +1156,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               {/* Create Portfolio Button */}
               <button
                 onClick={createPortfolio}
-                disabled={
-                  hasAnyFieldError ||
-                  !isValidTotal ||
-                  createPortfolioMutation.isPending
-                }
+
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (

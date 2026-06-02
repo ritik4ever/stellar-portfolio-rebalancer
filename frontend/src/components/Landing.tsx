@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { TrendingUp, Shield, Zap, ArrowRight, X } from 'lucide-react'
+import { TrendingUp, Shield, Zap, ArrowRight, X, Layers, Activity, Lock } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { WalletSelector } from './WalletSelector'
 import { api, ENDPOINTS } from '../config/api'
@@ -185,6 +185,77 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
                         </motion.div>
                     </div>
                 </motion.div>
+
+                <section
+                    className="mt-32 max-w-4xl mx-auto"
+                    aria-labelledby="how-it-works-heading"
+                >
+                    <h2
+                        id="how-it-works-heading"
+                        className="text-3xl font-bold text-gray-900 dark:text-white text-center mb-4"
+                    >
+                        How it works
+                    </h2>
+                    <p className="text-center text-gray-600 dark:text-gray-300 mb-10">
+                        Wallet, API, and on-chain layers stay separate so you can see what runs where.
+                    </p>
+                    <ol className="grid gap-6 md:grid-cols-3 text-left">
+                        <li className="bg-white/80 dark:bg-gray-800/80 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                            <Layers className="w-6 h-6 text-blue-600 dark:text-blue-400 mb-3" aria-hidden />
+                            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">1. Connect & configure</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Link your Stellar wallet, set target allocations, and choose rebalance thresholds in the React app.
+                            </p>
+                        </li>
+                        <li className="bg-white/80 dark:bg-gray-800/80 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                            <Activity className="w-6 h-6 text-green-600 dark:text-green-400 mb-3" aria-hidden />
+                            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">2. Monitor drift</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                The Node.js API tracks prices from Reflector oracles, evaluates drift, and queues work when limits are exceeded.
+                            </p>
+                        </li>
+                        <li className="bg-white/80 dark:bg-gray-800/80 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                            <Shield className="w-6 h-6 text-purple-600 dark:text-purple-400 mb-3" aria-hidden />
+                            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">3. Rebalance safely</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Soroban contracts and the Stellar DEX execute trades only after circuit breakers and cooldown checks pass.
+                            </p>
+                        </li>
+                    </ol>
+                </section>
+
+                <section
+                    className="mt-20 max-w-4xl mx-auto"
+                    aria-labelledby="trust-heading"
+                >
+                    <h2
+                        id="trust-heading"
+                        className="text-3xl font-bold text-gray-900 dark:text-white text-center mb-4"
+                    >
+                        Built for transparency
+                    </h2>
+                    <ul className="grid gap-4 md:grid-cols-2 text-sm text-gray-600 dark:text-gray-300">
+                        <li className="flex gap-3 rounded-xl bg-white dark:bg-gray-800 p-5 border border-gray-200 dark:border-gray-700">
+                            <Lock className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" aria-hidden />
+                            <span>
+                                Consent, export, and delete flows align with published legal documents that show a fixed version and effective date.
+                            </span>
+                        </li>
+                        <li className="flex gap-3 rounded-xl bg-white dark:bg-gray-800 p-5 border border-gray-200 dark:border-gray-700">
+                            <Shield className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" aria-hidden />
+                            <span>
+                                Risk controls include concentration limits, volatility pauses, and cooldowns before any rebalance is submitted.
+                            </span>
+                        </li>
+                        <li className="flex gap-3 rounded-xl bg-white dark:bg-gray-800 p-5 border border-gray-200 dark:border-gray-700 md:col-span-2">
+                            <Activity className="w-5 h-5 text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" aria-hidden />
+                            <span>
+                                Optional Sentry, Prometheus, and structured logging help operators detect price-feed degradation and failed jobs—see{' '}
+                                <span className="font-medium text-gray-800 dark:text-gray-200">docs/OBSERVABILITY.md</span> for the full stack.
+                            </span>
+                        </li>
+                    </ul>
+                </section>
             </div>
 
             {/* Footer with legal links */}
