@@ -132,13 +132,24 @@ Once categorized, prioritized, and responded to, remove the `needs-triage` label
 
 When a new PR arrives:
 
-1. **Check PR quality**
-   - Does it reference an issue? (Prefer issue-first workflow)
+1. **Check CI status**
+   - The `pr-issue-trail` check **automatically enforces** that every PR either
+     links a GitHub issue or provides an explicit `No issue: <rationale>`.
+   - If this check failed, ask the author to edit the PR description in the
+     GitHub UI (no new commit required). The check re-runs automatically on save.
+   - If a maintainer override is needed for a hotfix or exceptional case,
+     apply the **`skip-issue-check`** label. The check will be skipped on the
+     next run. Only contributors with write access can apply labels.
+   - If the `No issue:` path was used, **review the quality of the rationale**.
+     The CI check validates the keyword's *presence*, not its *adequacy* — this
+     judgment remains a human responsibility.
+
+2. **Check PR quality**
    - Is the description clear and complete?
    - Are tests included?
-   - Does CI pass?
+   - Does CI pass (build, lint, tests)?
 
-2. **Add labels**
+3. **Add labels**
    - Type: `bug`, `enhancement`, `documentation`, etc.
    - Component: `frontend`, `backend`, `contract`, etc.
    - Size: `size/XS`, `size/S`, `size/M`, `size/L`, `size/XL`
