@@ -32,7 +32,7 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, ...p
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
-        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress } = req.body
+        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress, digestMode } = req.body
 
         notificationService.subscribe({
             userId,
@@ -40,6 +40,7 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, ...p
             emailAddress,
             webhookEnabled,
             webhookUrl,
+            digestMode,
             events
         })
 
@@ -103,9 +104,11 @@ notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, 
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
+        const unsubscribeReason = typeof req.query.reason === 'string' ? req.query.reason.trim() : undefined
+
         notificationService.unsubscribe(userId)
 
-        logger.info('User unsubscribed from notifications', { userId })
+        logger.info('User unsubscribed from notifications', { userId, reason: unsubscribeReason || undefined })
 
         return ok(res, { message: 'Successfully unsubscribed from all notifications' })
     } catch (error) {
