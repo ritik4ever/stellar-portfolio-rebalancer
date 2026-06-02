@@ -152,109 +152,150 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
-## Alerting and observability routing
+## Database Backups and Restores
 
-To ensure high reliability, alerts in the system are explicitly labeled with `severity` and `subsystem` and routed to dedicated target receivers with varying timing profiles.
+The application supports two database backends: SQLite (for development) and PostgreSQL (for production). Both have automated backup and restore capabilities.
 
-### Alert routing matrix
+### Backup Operations
 
-| Severity | Subsystem | Alert Name | Trigger Threshold | Primary Receiver | Notification Timing & Policy |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **critical** | `portfolio-engine` | `PortfolioRebalanceFailed` | Rebalance failed jobs >= 5 in queue | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
-| **critical** | `api-gateway` | `BackendDown` | Scrape job `up == 0` for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
-| **critical** | `api-gateway` | `BackendReadinessFailed` | `/readiness` returning non-2xx for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
-| **critical** | `api-gateway` | `FrontendUptimeProbeFailed` | Frontend probe unavailable for 5m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
-| **critical** | `system` | `SystemReadinessDegraded` | Readiness report reports unhealthy for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
-| **warning** | `api-gateway` | `Elevated5xxRate` | HTTP 5xx rate > 5% for 10m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
-| **warning** | `api-gateway` | `APILatencySpike` | 95th percentile request latency > 2.0s for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
-| **warning** | `portfolio-engine` | `RebalanceQueueFailures` | Failed rebalance jobs > 0 for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
-| **warning** | `portfolio-engine` | `ReflectorStalePricesDetected` | Price staleness detected in last 15m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
-| **warning** | `portfolio-engine` | `ReflectorFallbackUsageSpike` | Fallback price usage >= 5 in last 1h | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
-| **info** | `api-gateway` | `ConfigurationReloaded` | Prometheus config reload success detected | `diagnostic-logs` | Logs only. `group_wait: 1m`, `group_interval: 10m`, `repeat_interval: 24h` |
+#### SQLite Backups
 
----
-
-### Configuration and routing validation
-
-Operators can test the alert rule configurations and check routing tree compliance locally or in Docker.
-
-#### 1. Validating file syntax locally
-Use `promtool` and `amtool` to verify that both Prometheus rules and Alertmanager configurations are perfectly syntax-valid:
-
+Create a backup of the SQLite database:
 ```bash
-# Verify Prometheus Alert rules
-docker run --rm -v "${PWD}/deployment/observability/prometheus:/etc/prometheus" prom/promtool check rules /etc/prometheus/alerts.yml
-
-# Verify Alertmanager routing configuration
-docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" prom/alertmanager check-config /etc/alertmanager/alertmanager.yml
+cd backend
+npm run db:backup
 ```
 
-#### 2. Testing routing path via `amtool`
-You can trace how an alert will be routed using `amtool`:
+By default, backups are stored in `backend/data/backups/` with a timestamped filename:
+`portfolio-backup-YYYY-MM-DDTHH-MM-SS-SSS.db`
 
+You can specify a custom backup path:
 ```bash
-# Match a critical alert
-docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" --entrypoint amtool prom/alertmanager config routes show --alertname=PortfolioRebalanceFailed --severity=critical --subsystem=portfolio-engine
-
-# Match a warning alert
-docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" --entrypoint amtool prom/alertmanager config routes show --alertname=APILatencySpike --severity=warning --subsystem=api-gateway
+npm run db:backup -- --path ./custom/path/my-backup.db
 ```
 
-#### 3. Triggering mock alert payloads via `curl`
-You can inject simulated alerts into Alertmanager's API to test the alert receivers in your development or staging environment:
+#### PostgreSQL Backups
 
-**Trigger a critical portfolio engine alert:**
+Create a PostgreSQL backup (requires `pg_dump`):
 ```bash
-curl -H "Content-Type: application/json" -d '[
-  {
-    "labels": {
-      "alertname": "PortfolioRebalanceFailed",
-      "severity": "critical",
-      "subsystem": "portfolio-engine",
-      "service": "queue"
-    },
-    "annotations": {
-      "summary": "Portfolio rebalancing has failed completely",
-      "description": "Mocked validation payload for critical alert routing verification."
-    }
-  }
-]' http://localhost:9093/api/v2/alerts
+cd backend
+npm run db:backup
 ```
 
-**Trigger a warning API latency alert:**
+Backups are stored in `backend/data/backups/` as SQL dumps. Custom output path:
 ```bash
-curl -H "Content-Type: application/json" -d '[
-  {
-    "labels": {
-      "alertname": "APILatencySpike",
-      "severity": "warning",
-      "subsystem": "api-gateway",
-      "service": "backend"
-    },
-    "annotations": {
-      "summary": "API Gateway response latency spike detected",
-      "description": "Mocked validation payload for warning alert routing verification."
-    }
-  }
-]' http://localhost:9093/api/v2/alerts
+npm run db:backup -- --output ./custom/path/backup.sql
 ```
 
-**Trigger an info configuration reload alert:**
+PostgreSQL backup uses `DATABASE_URL` or `PG*` environment variables (PGHOST, PGPORT, PGUSER, PGDATABASE, PGPASSWORD) to connect.
+
+### Restore Operations
+
+#### SQLite Restores
+
+Restore from a SQLite backup:
 ```bash
-curl -H "Content-Type: application/json" -d '[
-  {
-    "labels": {
-      "alertname": "ConfigurationReloaded",
-      "severity": "info",
-      "subsystem": "api-gateway",
-      "service": "prometheus"
-    },
-    "annotations": {
-      "summary": "Configuration reload successful",
-      "description": "Mocked validation payload for info alert routing verification."
-    }
-  }
-]' http://localhost:9093/api/v2/alerts
+cd backend
+npm run db:restore ./path/to/your-backup.db
+```
+
+**Important**: Stop the backend server before restoring. The restore process will close and reopen the database connection.
+
+#### PostgreSQL Restores
+
+Restore from a PostgreSQL backup (requires `psql`):
+```bash
+cd backend
+npm run db:restore ./path/to/your-backup.sql
+```
+
+### Backup Drills
+
+Practice these restore drills to ensure your backup process is reliable:
+
+#### Drill 1: Local SQLite Backup & Restore
+
+1. **Create test data**:
+   ```bash
+   cd backend
+   # Start the backend and create a test portfolio
+   npm run dev
+   # Create a portfolio via API or UI
+   ```
+
+2. **Create backup**:
+   ```bash
+   npm run db:backup
+   ```
+   Note the backup file path.
+
+3. **Modify data**:
+   - Delete or modify the test portfolio
+   - Verify the change is in the database
+
+4. **Restore backup**:
+   ```bash
+   npm run db:restore ./path/to/your-backup.db
+   ```
+
+5. **Verify restore**:
+   - Check that the original portfolio is restored correctly
+
+#### Drill 2: PostgreSQL Backup & Restore (Production-like)
+
+1. **Set up PostgreSQL locally**:
+   ```bash
+   # Using Docker
+   docker run --name stellar-pg -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=stellar -p 5432:5432 -d postgres
+   ```
+
+2. **Configure environment**:
+   ```bash
+   export DATABASE_URL="postgresql://postgres:secret@localhost:5432/stellar"
+   ```
+
+3. **Run migrations**:
+   ```bash
+   cd backend
+   npm run db:migrate
+   ```
+
+4. **Create test data**:
+   - Use the API to create test portfolios and events
+
+5. **Backup**:
+   ```bash
+   npm run db:backup
+   ```
+
+6. **Modify data**:
+   - Make changes to the database
+
+7. **Restore**:
+   ```bash
+   npm run db:restore ./path/to/pg-backup.sql
+   ```
+
+8. **Verify**:
+   - Confirm the original data is restored
+
+### Failure Handling
+
+- The scripts exit with non-zero code on failure, making them suitable for CI/CD pipelines
+- SQLite restore includes safety checks and attempts to reopen the original database if restore fails
+- PostgreSQL restore requires proper permissions and `psql`/`pg_dump` in PATH
+
+### CI/CD Integration
+
+Add backup verification to your CI pipeline:
+```yaml
+# Example GitHub Actions step
+- name: Test backup/restore
+  run: |
+    cd backend
+    npm run db:backup
+    # Verify backup file exists
+    ls -la data/backups/
 ```
 
 ## Related docs
