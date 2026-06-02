@@ -1,16 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { walletManager } from '../utils/walletManager'
 import { WalletAdapter } from '../utils/walletAdapters'
+import { getConfiguredNetwork, detectWalletNetwork } from '../utils/networkDetection'
+import { NetworkMismatchBanner } from './NetworkMismatchBanner'
 
 interface WalletSelectorProps {
     onConnect: (publicKey: string) => void
     onError: (error: string) => void
 }
 
+interface NetworkMismatchState {
+    configured: string
+    detected: string
+    walletType: string
+}
+
 export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onError }) => {
     const [connecting, setConnecting] = useState<string | null>(null)
     const [availableWallets, setAvailableWallets] = useState<WalletAdapter[]>([])
     const [autoReconnect, setAutoReconnect] = useState<boolean>(walletManager.getAutoReconnect())
+    const [networkMismatch, setNetworkMismatch] = useState<NetworkMismatchState | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -26,6 +35,20 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
     }, [availableWallets])
 
     const handleConnect = async (walletType: string) => {
+        setNetworkMismatch(null)
+        const configuredNetwork = getConfiguredNetwork()
+
+        const detected = await detectWalletNetwork(walletType)
+        if (detected && configuredNetwork !== 'unknown' && detected !== configuredNetwork) {
+            setNetworkMismatch({
+                configured: configuredNetwork,
+                detected,
+                walletType,
+            })
+            onError(`Network mismatch: wallet on ${detected}, app expects ${configuredNetwork}`)
+            return
+        }
+
         setConnecting(walletType)
         try {
             const publicKey = await walletManager.connect(walletType as any)
@@ -67,6 +90,13 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
 
     return (
         <div className="space-y-3" ref={containerRef} role="group" aria-label="Available wallets">
+            {networkMismatch && (
+                <NetworkMismatchBanner
+                    configuredNetwork={networkMismatch.configured as any}
+                    walletNetwork={networkMismatch.detected as any}
+                    onDismiss={() => setNetworkMismatch(null)}
+                />
+            )}
             <p className="text-sm text-gray-600 dark:text-gray-400" id="wallet-selector-label">
                 Select a wallet to connect
             </p>

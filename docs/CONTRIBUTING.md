@@ -392,6 +392,43 @@ STELLAR_CONTRACT_ADDRESS=C...YOUR_CONTRACT_ADDRESS
 STELLAR_REBALANCE_SECRET=S...YOUR_SIGNING_SECRET
 ```
 
+### Rebalance simulation snapshot tests
+
+Rebalance allocation snapshots provide deterministic validation of the rebalance logic:
+
+```bash
+cd backend
+npm test -- src/test/snapshots/rebalanceSnapshots.test.ts
+```
+
+After intentionally changing rebalance allocation logic, regenerate the snapshots:
+
+```bash
+cd backend
+npm run snapshots:regenerate
+```
+
+Commit the updated `src/test/snapshots/fixtures/rebalance-snapshots.json` alongside the logic change. The snapshot test will fail on unexpected allocation drift.
+
+### Event replay validation
+
+The contract event indexer supports replay validation for detecting duplicate, missing, or out-of-order events:
+
+```bash
+cd backend
+
+# Validate current event integrity
+npm run replay:verify
+
+# Replay events and persist checkpoints
+npm run replay:run
+
+# View replay status
+npx tsx scripts/verify-replay.ts status
+```
+
+Replay checkpoints are persisted to the database key-value store. The integrity hash is computed from ingested event IDs, portfolio IDs, timestamps, and statuses to detect state divergence.
+
 ### Contract tests
 
 ```bash
