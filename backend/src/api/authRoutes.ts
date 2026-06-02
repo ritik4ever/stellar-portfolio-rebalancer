@@ -5,7 +5,8 @@ import {
     refreshTokens,
     logout,
     issueChallenge,
-    verifyWalletSignature
+    verifyWalletSignature,
+    getRecentAuthAuditEvents
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { authRateLimiter } from '../middleware/rateLimit.js'
@@ -123,6 +124,19 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
         }
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * Return a compact view of recent auth events: sign-ins, refreshes, and revocations.
+ * GET /api/auth/audit
+ */
+router.get('/audit', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const events = getRecentAuthAuditEvents()
+        return ok(res, { events })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
