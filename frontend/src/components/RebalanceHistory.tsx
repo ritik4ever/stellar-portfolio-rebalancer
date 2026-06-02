@@ -1,5 +1,5 @@
 import React from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search } from 'lucide-react'
 
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { downloadCSV, toCSV } from '../utils/export'
@@ -49,9 +49,13 @@ interface RebalanceHistoryProps {
 const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
     const [page, setPage] = React.useState(1)
     const limit = 10
+    const [search, setSearch] = React.useState('')
+    const [statusFilter, setStatusFilter] = React.useState('')
+    const [triggerFilter, setTriggerFilter] = React.useState('')
+    const [dateFilter, setDateFilter] = React.useState('')
 
     // Query for rebalance history
-    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit)
+    const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit, search, statusFilter, triggerFilter, dateFilter)
 
     // Demo history generator
     const getDemoHistory = (): RebalanceEvent[] => {
@@ -133,7 +137,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
     }
 
     // Determine finalized data
-    const history: RebalanceEvent[] = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : [])
+    let filtered = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : []); if(search) filtered = filtered.filter((e:any) => e.trigger.toLowerCase().includes(search.toLowerCase()) || e.details?.reason?.toLowerCase().includes(search.toLowerCase())); if(statusFilter) filtered = filtered.filter((e:any) => e.status === statusFilter); if(triggerFilter) filtered = filtered.filter((e:any) => e.trigger.includes(triggerFilter)); if(dateFilter) filtered = filtered.filter((e:any) => e.timestamp.startsWith(dateFilter)); const history: RebalanceEvent[] = filtered
     const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
     const totalPages = Math.ceil(totalCount / limit)
     const error = queryError ? rebalanceHistoryCopy.loadError : null
@@ -320,9 +324,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId }) => {
                         )}
                     </div>
                 </div>
-            </header>
 
-            <div className="divide-y divide-gray-100 dark:divide-gray-700" role="list" aria-label="Rebalance events">
                 {history.length === 0 ? (
                     <div className="p-6 text-center text-gray-500 dark:text-gray-400" role="status">
                         <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" aria-hidden />

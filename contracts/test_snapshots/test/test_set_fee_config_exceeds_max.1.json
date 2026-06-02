@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 6,
+    "address": 4,
     "nonce": 0
   },
   "auth": [
@@ -211,39 +211,34 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "create_portfolio"
+                "symbol": "set_fee_config"
               }
             ],
             "data": {
-              "vec": [
+              "map": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "key": {
+                    "symbol": "enabled"
+                  },
+                  "val": {
+                    "bool": true
+                  }
                 },
                 {
-                  "map": [
-                    {
-                      "key": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                      },
-                      "val": {
-                        "u32": 60
-                      }
-                    },
-                    {
-                      "key": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                      },
-                      "val": {
-                        "u32": 30
-                      }
-                    }
-                  ]
+                  "key": {
+                    "symbol": "fee_bps"
+                  },
+                  "val": {
+                    "u32": 2000
+                  }
                 },
                 {
-                  "u32": 1
-                },
-                {
-                  "u32": 10
+                  "key": {
+                    "symbol": "fee_recipient"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  }
                 }
               ]
             }
@@ -261,16 +256,43 @@
           "v0": {
             "topics": [
               {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "create_portfolio"
+                "symbol": "log"
               }
             ],
             "data": {
-              "error": {
-                "contract": 1
-              }
+              "vec": [
+                {
+                  "string": "caught panic 'Fee exceeds maximum allowed (1000 bps = 10%)' from contract function 'Symbol(obj#33)'"
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "enabled"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "fee_bps"
+                      },
+                      "val": {
+                        "u32": 2000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "fee_recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    }
+                  ]
+                }
+              ]
             }
           }
         }
@@ -290,12 +312,12 @@
               },
               {
                 "error": {
-                  "contract": 1
+                  "wasm_vm": "invalid_action"
                 }
               }
             ],
             "data": {
-              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+              "string": "caught error from function"
             }
           }
         }
@@ -315,7 +337,7 @@
               },
               {
                 "error": {
-                  "contract": 1
+                  "wasm_vm": "invalid_action"
                 }
               }
             ],
@@ -325,38 +347,37 @@
                   "string": "contract call failed"
                 },
                 {
-                  "symbol": "create_portfolio"
+                  "symbol": "set_fee_config"
                 },
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
                       "map": [
                         {
                           "key": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            "symbol": "enabled"
                           },
                           "val": {
-                            "u32": 60
+                            "bool": true
                           }
                         },
                         {
                           "key": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                            "symbol": "fee_bps"
                           },
                           "val": {
-                            "u32": 30
+                            "u32": 2000
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "fee_recipient"
+                          },
+                          "val": {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                           }
                         }
                       ]
-                    },
-                    {
-                      "u32": 1
-                    },
-                    {
-                      "u32": 10
                     }
                   ]
                 }
@@ -380,7 +401,7 @@
               },
               {
                 "error": {
-                  "contract": 1
+                  "wasm_vm": "invalid_action"
                 }
               }
             ],
