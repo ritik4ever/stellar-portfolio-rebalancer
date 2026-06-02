@@ -1,11 +1,12 @@
-import React, { useMemo, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceDot } from 'recharts'
-import { TrendingUp, TrendingDown, BarChart3, AlertCircle } from 'lucide-react'
+
 import { useTheme } from '../context/ThemeContext'
 import { usePortfolioAnalytics, usePerformanceSummary } from '../hooks/queries/useAnalyticsQuery'
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { performanceChartCopy, DEFAULT_LOCALE } from '../content/uiCopy'
 import { formatUsdCompact, formatPercent } from '../utils/localeFormat'
+
+// Export utilities
+import { downloadCSV, toCSV } from '../utils/export'
 
 interface PerformanceChartProps {
     portfolioId: string | null
@@ -49,6 +50,20 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
 
     const formatCurrency = (value: number) => formatUsdCompact(value)
     const formatPercentage = (value: number) => formatPercent(value)
+
+    // Export chart data as CSV
+    const exportChartDataCSV = () => {
+        const chartData = formatChartData()
+        const rows = chartData.map((dataPoint) => ({
+            timestamp: dataPoint.timestamp,
+            date: dataPoint.date,
+            portfolioValue: dataPoint.value
+        }))
+
+        const csv = toCSV(rows, ['timestamp', 'date', 'portfolioValue'])
+        const filename = `portfolio_performance_${portfolioId}_${days}days_${new Date().toISOString()}.csv`
+        downloadCSV(filename, csv)
+    }
 
     if (!portfolioId || portfolioId === 'demo') {
         return (
@@ -115,9 +130,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
     return (
         <section className="space-y-6" aria-labelledby="performance-chart-heading">
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-6">
-                    <h2 id="performance-chart-heading" className="text-xl font-semibold text-gray-900 dark:text-white">{performanceChartCopy.title}</h2>
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-3 gap-3">
+
                         <select
                             value={days}
                             onChange={(e) => setDays(Number(e.target.value))}

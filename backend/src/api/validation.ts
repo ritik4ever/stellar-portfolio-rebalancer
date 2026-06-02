@@ -122,7 +122,8 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional()
+    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
