@@ -1,5 +1,6 @@
 
 
+
 const register = new Registry();
 
 register.setDefaultLabels({
