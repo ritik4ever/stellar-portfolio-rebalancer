@@ -30,12 +30,16 @@
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "quick:pre-commit": "node scripts/run-local-checks.mjs pre-commit",
     "quick:pre-push": "node scripts/run-local-checks.mjs pre-push",
+    "observability:up": "bash scripts/bootstrap-observability.sh",
+    "observability:down": "docker compose -f deployment/docker-compose.yml --profile monitoring down -v",
+    "observability:status": "docker compose -f deployment/docker-compose.yml --profile monitoring ps",
     "smoke": "bash scripts/health-smoke.sh",
     "lint": "npm run lint:backend && npm run lint:frontend",
     "lint:backend": "cd backend && npm run lint",
     "lint:frontend": "cd frontend && npm run lint",
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
+
     "clean": "npm run clean:all",
     "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
   },
