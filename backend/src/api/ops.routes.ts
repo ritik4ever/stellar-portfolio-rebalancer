@@ -13,7 +13,7 @@ import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWorker.js'
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
-import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
+import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -21,8 +21,9 @@ import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
-import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue } from '../queue/queues.js'
+
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
+import { buildReadinessReport } from '../monitoring/readiness.js'
 
 export const opsRouter = Router()
 
@@ -63,7 +64,6 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
             priceSourcesHealthy = false
         }
 
-        // Auto-rebalancer status
         const autoRebalancerStatus = autoRebalancer ? autoRebalancer.getStatus() : { isRunning: false }
         const autoRebalancerStats = autoRebalancer ? await autoRebalancer.getStatistics() : null
         const onChainIndexerStatus = contractEventIndexerService.getStatus()
@@ -108,6 +108,18 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
     }
 })
 
+// GET /api/system/readiness - Detailed readiness with per-dependency latency
+opsRouter.get('/system/readiness', async (_req: Request, res: Response) => {
+    try {
+        const report = await buildReadinessReport()
+        const statusCode = report.status === 'ready' ? 200 : 503
+        return res.status(statusCode).json(report)
+    } catch (error) {
+        logger.error('[ERROR] Failed to build readiness report', { error })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to build readiness report')
+    }
+})
+
 opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
     try {
         const cursorInfo = contractEventIndexerService.getCursorInfo()
@@ -126,11 +138,6 @@ opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
 // QUEUE HEALTH ROUTE
 // ================================
 
-/**
- * GET /api/queue/health
- * Returns BullMQ queue depths and Redis connectivity status.
- * Used for worker health monitoring and alerting (issue #38).
- */
 opsRouter.get('/queue/health', async (req: Request, res: Response) => {
     try {
         const metrics = await getQueueMetrics()
@@ -138,6 +145,7 @@ opsRouter.get('/queue/health', async (req: Request, res: Response) => {
             portfolioCheck: getPortfolioCheckWorkerStatus(),
             rebalance: getRebalanceWorkerStatus(),
             analyticsSnapshot: getAnalyticsSnapshotWorkerStatus(),
+            portfolioExport: getPortfolioExportWorkerStatus(),
         }
         const payload = { ...metrics, workers }
         if (metrics.redisConnected) {
@@ -151,12 +159,6 @@ opsRouter.get('/queue/health', async (req: Request, res: Response) => {
     }
 })
 
-/**
- * GET /api/workers/health
- * Returns persisted worker health summary and detailed status
- * Issue #450: Persist worker heartbeat and status for ops visibility
- * Allows operators to see which workers are alive, idle, lagging, or unhealthy
- */
 opsRouter.get('/workers/health', async (_req: Request, res: Response) => {
     try {
         const summary = await getWorkerHealthSummary()
@@ -178,11 +180,6 @@ opsRouter.get('/workers/health', async (_req: Request, res: Response) => {
     }
 })
 
-/**
- * GET /api/workers/status
- * Returns detailed persisted status for all workers
- * For dashboards and monitoring systems
- */
 opsRouter.get('/workers/status', async (_req: Request, res: Response) => {
     try {
         const statuses = await getAllPersistedWorkerStatuses()
@@ -215,6 +212,7 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
             [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue(),
             [QUEUE_NAMES.REBALANCE]: getRebalanceQueue(),
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue(),
+            [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue(),
         }
 
         const queue = queueMap[queueName]
@@ -229,6 +227,167 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
 
         await job.retry()
         return ok(res, { message: 'Job retried', jobId, queue: queueName })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * GET /api/queue/dlq
+ * Lists all jobs that have exhausted their retries and were moved to the DLQ.
+ */
+opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
+    try {
+        const dlq = getDLQQueue()
+        if (!dlq) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
+        }
+
+        const jobs = await dlq.getJobs(['waiting', 'active', 'completed', 'failed'])
+        const payload = jobs.map(job => ({
+            jobId: job?.id,
+            ...job?.data
+        }))
+
+        return ok(res, {
+            total: payload.length,
+            jobs: payload
+        })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * POST /api/queue/dlq/:jobId/replay
+ * Re-enqueues a dead-lettered job back into its original operational queue.
+ */
+opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) => {
+    try {
+        const { jobId } = req.params
+        const dlq = getDLQQueue()
+        if (!dlq) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
+        }
+
+        const job = await dlq.getJob(jobId)
+        if (!job) {
+            return fail(res, 404, 'JOB_NOT_FOUND', 'Dead letter job not found')
+        }
+
+        const { originalQueue, payload } = job.data
+
+        const queueMap: Record<string, any> = {
+            [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue(),
+            [QUEUE_NAMES.REBALANCE]: getRebalanceQueue(),
+            [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue(),
+        }
+
+        const targetQueue = queueMap[originalQueue]
+        if (!targetQueue) {
+            return fail(res, 400, 'INVALID_QUEUE', `Original queue ${originalQueue} is not supported for replay`)
+        }
+
+        await targetQueue.add(`replay-${jobId}`, payload, {
+            removeOnComplete: true,
+        })
+
+        await job.remove()
+
+        return ok(res, {
+            message: 'Job successfully replayed to original queue',
+            jobId,
+            targetQueue: originalQueue
+        })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/queue/:queueName/pause', async (req: Request, res: Response) => {
+    try {
+        const { queueName } = req.params
+        const queue = getQueueByName(queueName)
+
+        if (!queue) {
+            return fail(res, 400, 'INVALID_QUEUE', 'Invalid queue name')
+        }
+
+        await queue.pause()
+
+        return ok(res, { message: `Queue ${queueName} paused` })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * GET /api/queue/dlq
+ * Lists all jobs that have exhausted their retries and were moved to the DLQ.
+ */
+opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
+    try {
+        const dlq = getDLQQueue()
+        if (!dlq) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
+        }
+
+        const jobs = await dlq.getJobs(['waiting', 'active', 'completed', 'failed'])
+        const payload = jobs.map(job => ({
+            jobId: job?.id,
+            ...job?.data
+        }))
+
+        return ok(res, {
+            total: payload.length,
+            jobs: payload
+        })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * POST /api/queue/dlq/:jobId/replay
+ * Re-enqueues a dead-lettered job back into its original operational queue.
+ */
+opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) => {
+    try {
+        const { jobId } = req.params
+        const dlq = getDLQQueue()
+        if (!dlq) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
+        }
+
+        const job = await dlq.getJob(jobId)
+        if (!job) {
+            return fail(res, 404, 'JOB_NOT_FOUND', 'Dead letter job not found')
+        }
+
+        const { originalQueue, payload } = job.data
+
+        const queueMap: Record<string, any> = {
+            [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue(),
+            [QUEUE_NAMES.REBALANCE]: getRebalanceQueue(),
+            [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue(),
+        }
+
+        const targetQueue = queueMap[originalQueue]
+        if (!targetQueue) {
+            return fail(res, 400, 'INVALID_QUEUE', `Original queue ${originalQueue} is not supported for replay`)
+        }
+
+        await targetQueue.add(`replay-${jobId}`, payload, {
+            removeOnComplete: true,
+        })
+
+        await job.remove()
+
+        return ok(res, {
+            message: 'Job successfully replayed to original queue',
+            jobId,
+            targetQueue: originalQueue
+        })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
@@ -249,7 +408,6 @@ opsRouter.get('/contract/diagnostics', async (_req: Request, res: Response) => {
 // RISK MANAGEMENT ROUTES
 // ================================
 
-// Get risk metrics for a portfolio
 opsRouter.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) => {
     try {
         const { portfolioId } = req.params
@@ -259,7 +417,6 @@ opsRouter.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) 
         const portfolio = await stellarService.getPortfolio(portfolioId)
         const prices = await reflectorService.getCurrentPrices()
 
-        // Calculate risk metrics with proper type conversion
         const allocationsRecord: Record<string, number> = {}
         if (Array.isArray(portfolio.allocations)) {
             portfolio.allocations.forEach((a: any) => {
@@ -284,7 +441,6 @@ opsRouter.get('/risk/metrics/:portfolioId', async (req: Request, res: Response) 
     }
 })
 
-// Check if rebalancing should be allowed based on risk conditions
 opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) => {
     try {
         const { portfolioId } = req.params
@@ -310,7 +466,6 @@ opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) =>
 // PRICE DATA ROUTES
 // ================================
 
-// Get current prices
 opsRouter.get('/prices', async (req: Request, res: Response) => {
     try {
         logger.info('[DEBUG] Fetching prices for frontend...')
@@ -374,7 +529,6 @@ opsRouter.get('/prices', async (req: Request, res: Response) => {
     }
 })
 
-// Enhanced prices endpoint with risk analysis
 opsRouter.get('/prices/enhanced', async (req: Request, res: Response) => {
     try {
         logger.info('[INFO] Fetching enhanced prices with risk analysis')
@@ -407,7 +561,6 @@ opsRouter.get('/prices/enhanced', async (req: Request, res: Response) => {
     }
 })
 
-// Get detailed market data for specific asset
 opsRouter.get('/market/:asset/details', async (req: Request, res: Response) => {
     try {
         const asset = req.params.asset.toUpperCase()
@@ -420,7 +573,6 @@ opsRouter.get('/market/:asset/details', async (req: Request, res: Response) => {
     }
 })
 
-// Get price charts for frontend
 opsRouter.get('/market/:asset/chart', async (req: Request, res: Response) => {
     try {
         const asset = req.params.asset.toUpperCase()

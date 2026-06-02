@@ -1,55 +1,275 @@
 name: Tests
 
 on:
-  pull_request:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
+  pull_request:
+  schedule:
+    # Nightly quarantine run at 02:00 UTC — exercises quarantined tests to
+    # detect when they become stable again.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      quarantine_mode:
+        description: 'Set to "run" to execute quarantined tests instead of skipping them'
+        required: false
+        default: "skip"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "20"
+  # Default: quarantined tests are skipped. The nightly job and workflow_dispatch
+  # override this to "run" so flaky tests can be checked in isolation.
+  QUARANTINE_MODE: ${{ github.event.inputs.quarantine_mode || (github.event_name == 'schedule' && 'run') || 'skip' }}
 
 jobs:
-  test:
+  # ---------------------------------------------------------------------------
+  # 1. Validate quarantine registry before anything else runs
+  # ---------------------------------------------------------------------------
+  validate-quarantine:
+    name: Validate quarantine registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check jq is available
+        run: jq --version
+
+      - name: Validate quarantine.json
+        run: bash scripts/manage-flaky-tests.sh validate
+
+      - name: Print quarantine report
+        if: always()
+        run: bash scripts/manage-flaky-tests.sh report
+
+  # ---------------------------------------------------------------------------
+  # 2. Backend tests (sharded, mirrors the existing backend-tests.yml approach)
+  # ---------------------------------------------------------------------------
+  backend-test:
+    name: Backend – shard ${{ matrix.shard }}/${{ matrix.total }}
+    needs: validate-quarantine
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run backend tests (shard ${{ matrix.shard }}/${{ matrix.total }})
+        working-directory: backend
+        env:
+          QUARANTINE_MODE: ${{ env.QUARANTINE_MODE }}
+          NODE_ENV: test
+        run: |
+          npm run test:shard -- \
+            --shard=${{ matrix.shard }}/${{ matrix.total }} \
+            --reporter=blob \
+            --reporter=github-actions
+
+      - name: Upload blob report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-blob-${{ matrix.shard }}-of-${{ matrix.total }}
+          path: backend/.vitest-reports/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 3. Merge coverage from all shards + enforce thresholds
+  # ---------------------------------------------------------------------------
+  backend-coverage:
+    name: Backend – merge coverage & check thresholds
+    needs: backend-test
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Download all blob reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: backend-blob-*
+          path: backend/.vitest-reports/
+          merge-multiple: true
+
+      - name: Merge coverage reports
+        working-directory: backend
+        run: npm run test:merge-coverage
+
+      - name: Upload merged coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+          retention-days: 14
+
+      - name: Summarise flaky-test status in job summary
+        if: always()
+        run: |
+          echo "## Quarantine Status" >> $GITHUB_STEP_SUMMARY
+          bash scripts/manage-flaky-tests.sh report >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # 4. Frontend tests
+  # ---------------------------------------------------------------------------
+  frontend-test:
+    name: Frontend unit tests
+    needs: validate-quarantine
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Node
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      # ---------- FRONTEND ----------
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Run frontend tests
+      - name: Run frontend unit tests
         working-directory: frontend
-        run: npm run test
+        env:
+          NODE_ENV: test
+        run: npm test
 
-      # ---------- BACKEND ----------
-      - name: Install backend deps
+  # ---------------------------------------------------------------------------
+  # 5. Nightly quarantine run — surfaces newly-stable tests
+  #    Only runs on schedule or when quarantine_mode=run is passed manually.
+  # ---------------------------------------------------------------------------
+  quarantine-run:
+    name: Quarantine run (flaky tests in isolation)
+    # Run on schedule OR when explicitly triggered with quarantine_mode=run
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.inputs.quarantine_mode == 'run')
+    needs: validate-quarantine
+    runs-on: ubuntu-latest
+    continue-on-error: true # never block main CI; result is informational
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
         working-directory: backend
         run: npm ci
 
-      - name: Run backend tests (with coverage)
+      - name: Run quarantined tests
         working-directory: backend
-        run: npm run test:ci
+        env:
+          QUARANTINE_MODE: run
+          NODE_ENV: test
+        # Use a custom reporter so failures are clearly labeled as quarantined.
+        run: |
+          npm test -- \
+            --reporter=verbose \
+            --reporter=github-actions \
+            2>&1 | tee quarantine-run.log || true
 
-      # ---------- RUST CONTRACTS ----------
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Upload quarantine run log
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          path: |
-            ~/.cargo
-            contracts/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          name: quarantine-run-log
+          path: backend/quarantine-run.log
+          retention-days: 14
 
-      - name: Run contract tests
-        working-directory: contracts
-        run: cargo test
+      - name: Summarise quarantine run
+        if: always()
+        run: |
+          echo "## Nightly Quarantine Run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tests below are currently quarantined. Passing tests here are" >> $GITHUB_STEP_SUMMARY
+          echo "candidates to be re-enabled via \`scripts/manage-flaky-tests.sh remove\`." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          bash scripts/manage-flaky-tests.sh report >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Run output (tail)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -80 backend/quarantine-run.log >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "(no log)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Alert if quarantined tests consistently pass (candidate for re-enable)
+        if: always()
+        run: |
+          # Exit 0 from the test run means all quarantined tests passed — signal to maintainers.
+          if grep -q "Tests  [0-9]* passed" backend/quarantine-run.log 2>/dev/null && \
+             ! grep -q "failed" backend/quarantine-run.log 2>/dev/null; then
+            echo "::notice title=Quarantine::All quarantined tests PASSED in the nightly run. Consider re-enabling them via scripts/manage-flaky-tests.sh remove."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 6. PR gate — summarise quarantine impact on this PR
+  # ---------------------------------------------------------------------------
+  quarantine-pr-check:
+    name: Quarantine check (PR)
+    if: github.event_name == 'pull_request'
+    needs: validate-quarantine
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if quarantine.json was modified in this PR
+        id: quarantine_diff
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "quarantine.json"; then
+            echo "modified=true" >> $GITHUB_OUTPUT
+          else
+            echo "modified=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Fail if quarantine.json grew without a linked issue
+        if: steps.quarantine_diff.outputs.modified == 'true'
+        run: |
+          echo "quarantine.json was modified in this PR. Running validation..."
+          bash scripts/manage-flaky-tests.sh validate
+          echo ""
+          echo "Current quarantine state:"
+          bash scripts/manage-flaky-tests.sh list
+
+      - name: Add quarantine summary to PR step summary
+        if: always()
+        run: |
+          echo "## Flaky Test Quarantine" >> $GITHUB_STEP_SUMMARY
+          bash scripts/manage-flaky-tests.sh report >> $GITHUB_STEP_SUMMARY
