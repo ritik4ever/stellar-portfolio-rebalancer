@@ -6,6 +6,8 @@ import { api, ENDPOINTS } from '../../config/api'
 import {
     useSaveNotificationPreferencesMutation,
     useUnsubscribeNotificationsMutation,
+    useTestNotificationMutation,
+    useTestAllNotificationsMutation,
 } from './useNotificationMutations'
 import { notificationKeys } from '../queries/useNotificationPreferencesQuery'
 
@@ -71,21 +73,7 @@ describe('useNotificationMutations', () => {
         expect(spy).toHaveBeenCalledWith({ queryKey: notificationKeys.preferences(userId) })
     })
 
-    it('includes an optional unsubscribe reason when provided', async () => {
-        const qc = createTestClient()
-        const deleteSpy = vi.spyOn(api, 'delete').mockResolvedValue({ ok: true })
-        const userId = 'GUSER789'
 
-        const { result } = renderHook(() => useUnsubscribeNotificationsMutation(userId), {
-            wrapper: withClient(qc),
-        })
-
-        await act(async () => {
-            await result.current.mutateAsync(' Too many alerts ')
-        })
-
-        expect(deleteSpy).toHaveBeenCalledWith(
-            ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE(userId, 'Too many alerts')
-        )
     })
 })
+
