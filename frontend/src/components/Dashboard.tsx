@@ -17,16 +17,20 @@ import {
     useUserPortfolios,
     usePortfolioDetails,
     useRebalanceEstimate,
+    useRebalancePlan,
     buildRebalanceConfirmationSummary,
+    buildRebalancePreconditions,
     portfolioKeys,
 } from '../hooks/queries/usePortfolioQuery'
+import { dashboardCopy } from '../content/uiCopy'
+import { buildPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
 import RouteErrorState from './RouteErrorState'
-
+import { usePortfolioExport } from '../hooks/usePortfolio'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -36,8 +40,7 @@ interface DashboardProps {
 type DashboardPriceRow = { price?: number; change?: number; [key: string]: unknown }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
-    const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
     const { isDark } = useTheme()
 
     // Query for user portfolios
@@ -70,6 +73,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         refetch: refetchPrices,
     } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
+
+    const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
+    const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
+        latestPortfolioId,
+        showRebalanceConfirm,
+    )
 
     // Mutation for rebalancing
     const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
@@ -110,6 +119,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     )
     const feedMeta = priceBundle?.feedMeta
 
+
     const disconnectWallet = async () => {
         if (publicKey) {
             await authLogout(publicKey)
@@ -117,6 +127,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         StellarWallet.disconnect()
         onNavigate('landing')
     }
+
 
     const performanceData = [
         { date: '1/1', value: 10000 },
@@ -127,214 +138,62 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         { date: '1/6', value: portfolioData?.totalValue || 10000 }
     ]
 
-    // Derive computed values
-    const allocationData = portfolioData?.allocations?.map((a: any) => ({
-        name: a.asset,
-        value: a.target || 0,
-        color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'][
-            (portfolioData?.allocations?.indexOf(a) || 0) % 5
-        ]
-    })) || []
 
-    const pricedAssets = allocationData.filter((item: any) => prices[item.name]?.price !== undefined).length
-    const missingPriceAssets = allocationData
-        .filter((item: any) => !prices[item.name]?.price)
-        .map((item: any) => item.name)
-    const hasPartialPriceData = pricedAssets > 0 && missingPriceAssets.length > 0
-    const effectivePriceSource = hasPartialPriceData ? 'Partial price data' : (hasLivePriceRows ? 'Live prices' : 'Demo data')
-    const partialPriceMessage = hasPartialPriceData
-        ? `Some asset quotes are unavailable or fallback-based. ${missingPriceAssets.length} asset${missingPriceAssets.length !== 1 ? 's are' : ' is'} missing fresh market data.`
-        : null
-    const showPriceQualityNote = !!(feedMeta?.degraded || feedMeta?.staleOrLimited || hasPartialPriceData)
-
-    const estimateXlm = rebalanceEstimate?.gasEstimateXlm ?? 0
-    const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
-    const hasHighGasWarning = estimateXlm > 0.5
-
-    const priceCard = prices[allocationData[0]?.name] || null
-
-    const queryClient = useQueryClient()
-
-    const refreshData = useCallback(async () => {
-        await Promise.all([
-            refetchPortfolios(),
-            refetchPortfolioDetails(),
-            refetchPrices(),
-        ])
-    }, [refetchPortfolios, refetchPortfolioDetails, refetchPrices])
-
-    const retryPortfolioLoad = useCallback(async () => {
-        await refreshData()
-    }, [refreshData])
-
-    const executeRebalance = useCallback(async () => {
-        try {
-            const result = await executeRebalanceMutation.mutateAsync()
-            setRebalanceNotice({
-                type: 'success',
-                message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}`,
-            })
-        } catch (error: any) {
-            console.error('Rebalance failed:', error)
-            const msg = error.message ?? 'Rebalance failed. Please try again.'
-            const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-            setRebalanceNotice({
-                type: 'error',
-                message: isSlippage ? `Slippage too high: ${msg}` : msg,
-            })
-        }
-    }, [executeRebalanceMutation])
-
-    const dismissRebalanceNotice = useCallback(() => {
-        setRebalanceNotice(null)
-    }, [])
-
-    React.useEffect(() => {
-        if (!rebalanceNotice) return
-        const timer = setTimeout(() => setRebalanceNotice(null), 5000)
-        return () => clearTimeout(timer)
-    }, [rebalanceNotice])
-
-    // Demo reset functionality for local testing
-    const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
-    const [resettingDemo, setResettingDemo] = useState(false)
-
-    const resetDemo = async () => {
-        setResettingDemo(true)
-        try {
-            await api.delete(`${ENDPOINTS.PORTFOLIO_RESET}`)
-            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
-            setShowDemoResetConfirm(false)
-        } catch (error) {
-            console.error('Failed to reset demo portfolio:', error)
-        } finally {
-            setResettingDemo(false)
-        }
-    }
-
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-    const [deletingAccount, setDeletingAccount] = useState(false)
-
-    const deleteMyData = async () => {
-        setDeletingAccount(true)
-        try {
-            await api.delete(ENDPOINTS.USER_DELETE)
-            await authLogout(publicKey || '')
-            onNavigate('landing')
-        } catch (error) {
-            console.error('Failed to delete account:', error)
-            setDeletingAccount(false)
-        }
-    }
-
-    const [showCloneConfirm, setShowCloneConfirm] = useState(false)
-    const [cloningPortfolio, setCloningPortfolio] = useState(false)
-
-    const startClonePortfolio = () => {
-        setShowCloneConfirm(true)
-    }
-
-    const confirmClonePortfolio = async () => {
-        setCloningPortfolio(true)
-        try {
-            const allocations = portfolioData?.allocations?.map((a: any) => ({
-                asset: a.asset,
-                target: a.target || 0
-            })) || []
-
-            const response = await api.post(ENDPOINTS.PORTFOLIO_CREATE, {
-                allocations,
-                slippageTolerance: portfolioData?.slippageTolerance ?? 1,
-                threshold: portfolioData?.threshold ?? 5,
-                strategy: portfolioData?.strategy ?? 'threshold'
-            })
-
-            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
-            setShowCloneConfirm(false)
-            onNavigate('dashboard')
-        } catch (error) {
-            console.error('Failed to clone portfolio:', error)
-        } finally {
-            setCloningPortfolio(false)
-        }
-    }
-
-    if (routeDataUnavailable) {
-        return (
-            <RouteErrorState onRetry={retryPortfolioLoad} />
-        )
-    }
-
-    return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-            {rebalanceNotice && (
-                <div className="fixed right-4 top-4 z-50 max-w-md rounded-lg border bg-white dark:bg-gray-800 shadow-lg p-3">
-                    <div className={`text-sm ${rebalanceNotice.type === 'success' ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
-                        {rebalanceNotice.message}
-                    </div>
-                    <button
-                        onClick={dismissRebalanceNotice}
-                        className="mt-2 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                    >
-                        Dismiss
-                    </button>
-                </div>
-            )}
-            {/* Header */}
-            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center">
                         <button
+                            type="button"
                             onClick={() => onNavigate('landing')}
                             className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                            aria-label={dashboardCopy.goToLanding}
                         >
-                            <ArrowLeft className="w-5 h-5" />
+                            <ArrowLeft className="w-5 h-5" aria-hidden />
                         </button>
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Portfolio Dashboard</h1>
+                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{dashboardCopy.title}</h1>
                             {publicKey ? (
                                 <div className="flex items-center space-x-4 mt-1">
                                     <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">
-                                            {StellarWallet.getWalletType()} Wallet
-                                        </span>
-                                        <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
-                                    </div>
+
                                 </div>
                             ) : (
                                 <span className="text-sm bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 px-2 py-1 rounded mt-1 inline-block">
-                                    Demo Mode - Connect wallet for full functionality
+                                    {dashboardCopy.demoMode}
                                 </span>
                             )}
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+
                         {publicKey ? (
                             <>
                                 <button
+                                    type="button"
                                     onClick={() => setShowDeleteConfirm(true)}
                                     className="text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 px-3 py-2 text-sm transition-colors flex items-center gap-1"
                                     title="Delete my data (GDPR)"
                                 >
-                                    <Trash2 className="w-4 h-4" />
-                                    Delete my data
+                                    <Trash2 className="w-4 h-4" aria-hidden />
+                                    {dashboardCopy.deleteMyData}
                                 </button>
                                 {portfolioData?.id && portfolioData.id !== 'demo' ? (
                                     <button
+                                        type="button"
                                         onClick={startClonePortfolio}
                                         className="border border-blue-200 dark:border-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-300 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
                                         title="Copy allocations into a new portfolio"
                                     >
-                                        <Copy className="w-4 h-4" />
-                                        Clone as new
+                                        <Copy className="w-4 h-4" aria-hidden />
+                                        {dashboardCopy.cloneAsNew}
                                     </button>
                                 ) : null}
                                 <button
+                                    type="button"
                                     onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
                                 >
-                                    Create Portfolio
+                                    {dashboardCopy.createPortfolio}
                                 </button>
                                 <button
                                     onClick={disconnectWallet}
@@ -352,6 +211,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     Connect Wallet
                                 </button>
                                 <button
+
                                     onClick={() => setShowDemoResetConfirm(true)}
                                     className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
                                     title="Reset demo portfolio to default state"
@@ -366,36 +226,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             disabled={loading}
                             className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
                         >
-                            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                            <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
                 </div>
-            </div>
 
-            {showDemoResetConfirm ? (
-                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <RefreshCw className="w-6 h-6 text-blue-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Reset Demo Portfolio</h2>
-                        </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            This resets the demo portfolio to its default $10,000 allocation (40% XLM / 60% USDC).
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowDemoResetConfirm(false)}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={resetDemo}
-                                disabled={resettingDemo}
-                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-                            >
-                                {resettingDemo && <RefreshCw className="w-4 h-4 animate-spin" />}
-                                Reset
                             </button>
                         </div>
                     </div>
@@ -414,58 +249,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </p>
                         <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => setShowDeleteConfirm(false)}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition-colors"
+
                             >
                                 Cancel
                             </button>
                             <button
-                                onClick={deleteMyData}
-                                disabled={deletingAccount}
-                                className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                             >
-                                {deletingAccount && <RefreshCw className="w-4 h-4 animate-spin" />}
-                                Delete
+                                Cancel
+                            </button>
+                            <button
+
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {showCloneConfirm ? (
-                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Copy className="w-6 h-6 text-blue-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Clone Portfolio</h2>
-                        </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            Create a new portfolio with the same allocations as the current one.
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowCloneConfirm(false)}
-                                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmClonePortfolio}
-                                disabled={cloningPortfolio}
-                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-                            >
-                                {cloningPortfolio && <RefreshCw className="w-4 h-4 animate-spin" />}
-                                Clone
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
-            <div className="px-6 py-8">
-                {/* Tab Navigation */}
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-                    <nav className="flex space-x-8">
+                    <nav className="flex space-x-8" aria-label="Dashboard sections">
                         <button
                             onClick={() => setActiveTab('overview')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
@@ -473,28 +281,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
-                            Overview
-                        </button>
-                        <button
+
                             onClick={() => setActiveTab('analytics')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'analytics'
                                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
-                            Analytics
-                        </button>
-                        <button
+
                             onClick={() => setActiveTab('notifications')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
                                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
-                            Notifications
-                        </button>
-                    </nav>
-                </div>
+
 
                 {activeTab === 'analytics' ? (
                     <PerformanceChart portfolioId={portfolioData?.id || null} />
@@ -503,7 +304,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 ) : (
                     <>
                         {/* Portfolio Overview */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+
                             <div className="lg:col-span-2">
                                 {/* NEW: Portfolio Value Skeleton Loading State */}
                                 {loading ? (
@@ -543,15 +344,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             </div>
                                         </div>
 
-                                        {showPriceQualityNote && (
-                                            <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded p-3">
                                                 {feedMeta?.degraded
                                                     ? 'Displayed prices are synthetic or fallback — not primary market data.'
                                                     : hasPartialPriceData
                                                       ? partialPriceMessage
                                                       : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
                                             </p>
-                                        )}
 
                                         <div className="mb-4">
                                             <div className="text-3xl font-bold text-gray-900 dark:text-white">
@@ -589,16 +387,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 {/* Rebalance Alert */}
                                 {portfolioData?.needsRebalance && (
                                     <motion.div
-                                        initial={{ opacity: 0, scale: 0.95 }}
+                                        initial={false}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
+                                        transition={{ duration: 0.2 }}
+                                        className="motion-safe:transition-transform bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
+                                        role="status"
+                                        aria-live="polite"
                                     >
                                         <div className="flex items-center mb-3">
                                             <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
-                                            <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
+                                            <span className="font-medium text-orange-800 dark:text-orange-300">{dashboardCopy.rebalanceNeeded}</span>
                                         </div>
                                         <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">
-                                            Your portfolio has drifted from target allocation
+                                            {dashboardCopy.driftMessage}
                                         </p>
                                         <p className="text-sm text-orange-700 dark:text-orange-400 mb-2 font-medium">
                                             Estimated gas: {estimateXlm.toFixed(2)} XLM (~${estimateUsd.toFixed(3)})
@@ -627,17 +428,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             </p>
                                         )}
                                         <button
-                                            onClick={executeRebalance}
+
                                             disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
                                             className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                                         >
                                             {executeRebalanceMutation.isPending ? (
                                                 <>
-                                                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                                    Rebalancing...
+                                                    <RefreshCw className="w-4 h-4 mr-2 motion-safe:animate-spin" aria-hidden />
+                                                    {dashboardCopy.rebalancing}
                                                 </>
                                             ) : (
-                                                'Execute Rebalance'
+                                                dashboardCopy.executeRebalance
                                             )}
                                         </button>
                                         {(portfolioData as any)?.slippageTolerance != null && (
@@ -716,7 +517,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </div>
 
                         {/* NEW: Asset Cards Skeleton Loading State */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+
                             {loading ? (
                                 // Show skeleton cards while loading
                                 [1, 2, 3].map((i) => (
@@ -727,7 +528,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 allocationData.map((asset: any, index: number) => {
                                     const row = prices[asset.name]
 
-                                    return <AssetCard key={index} asset={asset} price={row} />
                                 })
                             )}
                         </div>
@@ -736,7 +536,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         <RebalanceHistory portfolioId={portfolioData?.id || null} isLoading={loading} />
                     </>
                 )}
-            </div>
+            </main>
+
 
         </div>
     )

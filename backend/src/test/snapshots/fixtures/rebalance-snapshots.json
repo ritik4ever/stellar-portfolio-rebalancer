@@ -1,0 +1,168 @@
+[
+  {
+    "name": "successful-rebalance",
+    "input": {
+      "allocations": {
+        "XLM": 40,
+        "BTC": 30,
+        "ETH": 20,
+        "USDC": 10
+      },
+      "balances": {
+        "XLM": 50000,
+        "BTC": 0.02,
+        "ETH": 0.5,
+        "USDC": 500
+      },
+      "prices": {
+        "XLM": 0.12,
+        "BTC": 65000,
+        "ETH": 3500,
+        "USDC": 1,
+        "SOL": 140
+      },
+      "threshold": 5
+    },
+    "expectedTrades": [
+      {
+        "fromAsset": "XLM",
+        "toAsset": "USDC",
+        "amount": 18166.6667,
+        "reason": "Drift 22.8% > threshold 5%"
+      },
+      {
+        "fromAsset": "USDC",
+        "toAsset": "BTC",
+        "amount": 0.0241,
+        "reason": "Drift 16.4% > threshold 5%"
+      }
+    ],
+    "expectedTotalValue": 9550
+  },
+  {
+    "name": "partial-rebalance-no-trades-needed",
+    "input": {
+      "allocations": {
+        "XLM": 50,
+        "BTC": 50
+      },
+      "balances": {
+        "XLM": 4166.67,
+        "BTC": 0.003846,
+        "USDC": 0
+      },
+      "prices": {
+        "XLM": 0.12,
+        "BTC": 65000,
+        "USDC": 1
+      },
+      "threshold": 10
+    },
+    "expectedTrades": [
+      {
+        "fromAsset": "XLM",
+        "toAsset": "USDC",
+        "amount": 1041.71,
+        "reason": "Drift 16.7% > threshold 10%"
+      },
+      {
+        "fromAsset": "USDC",
+        "toAsset": "BTC",
+        "amount": 0.0019,
+        "reason": "Drift 16.7% > threshold 10%"
+      }
+    ],
+    "expectedTotalValue": 749.99
+  },
+  {
+    "name": "failed-rebalance-no-balances",
+    "input": {
+      "allocations": {
+        "XLM": 40,
+        "BTC": 30,
+        "ETH": 20,
+        "USDC": 10
+      },
+      "balances": {},
+      "prices": {
+        "XLM": 0.12,
+        "BTC": 65000,
+        "ETH": 3500,
+        "USDC": 1,
+        "SOL": 140
+      },
+      "threshold": 5
+    },
+    "expectedTrades": [],
+    "expectedTotalValue": 0
+  },
+  {
+    "name": "edge-case-zero-prices",
+    "input": {
+      "allocations": {
+        "XLM": 100
+      },
+      "balances": {
+        "XLM": 1000
+      },
+      "prices": {
+        "XLM": 0
+      },
+      "threshold": 5
+    },
+    "expectedTrades": [],
+    "expectedTotalValue": 0
+  },
+  {
+    "name": "edge-case-high-drift",
+    "input": {
+      "allocations": {
+        "XLM": 30,
+        "BTC": 30,
+        "ETH": 30,
+        "USDC": 10
+      },
+      "balances": {
+        "XLM": 100000,
+        "BTC": 0.01,
+        "ETH": 0.1,
+        "USDC": 100
+      },
+      "prices": {
+        "XLM": 0.12,
+        "BTC": 65000,
+        "ETH": 3500,
+        "USDC": 1,
+        "SOL": 140
+      },
+      "threshold": 2
+    },
+    "expectedTrades": [
+      {
+        "fromAsset": "XLM",
+        "toAsset": "USDC",
+        "amount": 67250,
+        "reason": "Drift 61.6% > threshold 2%"
+      },
+      {
+        "fromAsset": "USDC",
+        "toAsset": "BTC",
+        "amount": 0.0505,
+        "reason": "Drift 25.0% > threshold 2%"
+      },
+      {
+        "fromAsset": "USDC",
+        "toAsset": "ETH",
+        "amount": 1.0229,
+        "reason": "Drift 27.3% > threshold 2%"
+      },
+      {
+        "fromAsset": "USDC",
+        "toAsset": "USDC",
+        "amount": 1210,
+        "reason": "Drift 9.2% > threshold 2%"
+      }
+    ],
+    "expectedTotalValue": 13100
+  }
+]
