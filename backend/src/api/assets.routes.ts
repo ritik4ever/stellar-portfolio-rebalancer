@@ -9,36 +9,41 @@ import { requireAdmin } from '../middleware/auth.js'
 import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest } from '../middleware/validate.js'
-import { adminAddAssetSchema, adminPatchAssetSchema } from './validation.js'
+import { adminAddAssetSchema, adminPatchAssetSchema, assetsListQuerySchema } from './validation.js'
 import { logger, logAudit } from '../utils/logger.js'
-import { getErrorObject, getErrorMessage, parseOptionalBoolean } from '../utils/helpers.js'
+import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 
 export const assetsRouter = Router()
 
-/** Public: list enabled assets for portfolio setup and frontend */
+/**
+ * Public: browse the asset catalog with pagination, sorting, and
+ * issuer/symbol filtering. Defaults to enabled assets only, sorted by symbol.
+ */
 assetsRouter.get('/assets', (req: Request, res: Response) => {
     try {
-        const enabledOnly = parseOptionalBoolean(req.query.enabledOnly) !== false
-        const queryCode = typeof req.query.code === 'string' ? req.query.code.trim().toUpperCase() : ''
-        const querySearch = typeof req.query.search === 'string' ? req.query.search.trim().toUpperCase() : ''
-        const queryQ = typeof req.query.q === 'string' ? req.query.q.trim().toUpperCase() : ''
-        const term = queryCode || querySearch || queryQ
-        const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1)
-        const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '20'), 10) || 20))
-
-        let assets = assetRegistryService.list(enabledOnly)
-        if (term) {
-            assets = assets.filter(asset =>
-                asset.symbol.includes(term) || asset.name.toUpperCase().includes(term)
-            )
+        const parsed = assetsListQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+            const message = parsed.error.issues
+                .map(issue => `${issue.path.join('.') || 'query'}: ${issue.message}`)
+                .join('; ')
+            logger.warn('[WARN] List assets rejected invalid query', { query: req.query, message })
+            return fail(res, 400, 'VALIDATION_ERROR', message)
         }
 
-        const total = assets.length
-        const start = (page - 1) * limit
-        const pagedAssets = assets.slice(start, start + limit)
+        const { enabledOnly, code, search, q, issuer, sortBy, order, page, limit } = parsed.data
 
-        return ok(res, { assets: pagedAssets, page, limit, total })
+        const result = assetRegistryService.query({
+            enabledOnly: enabledOnly !== false,
+            search: code || search || q,
+            issuer,
+            sortBy,
+            order,
+            page,
+            limit
+        })
+
+        return ok(res, result)
     } catch (error) {
         logger.error('[ERROR] List assets failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -163,16 +168,16 @@ assetsRouter.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, asy
     }
 })
 
-/** Admin: enable/disable asset */
+/** Admin: enable/disable/quarantine asset */
 assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
-        const { enabled } = req.body
+        const { enabled, quarantined } = req.body
         const prior = assetRegistryService.getBySymbol(symbol)
-        const updated = assetRegistryService.setEnabled(symbol, enabled)
-        if (!updated) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
-        const asset = assetRegistryService.getBySymbol(symbol)
-        if (prior) {
+        if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        if (enabled !== undefined) {
+            assetRegistryService.setEnabled(symbol, enabled)
             logAudit('asset_registry_asset_updated', {
                 domain: 'asset_registry',
                 actorPublicKey: req.adminPublicKey,
@@ -182,9 +187,65 @@ assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idem
                 newValue: enabled
             })
         }
+
+        if (quarantined !== undefined) {
+            assetRegistryService.setQuarantined(symbol, quarantined)
+            logAudit('asset_registry_asset_updated', {
+                domain: 'asset_registry',
+                actorPublicKey: req.adminPublicKey,
+                symbol: prior.symbol,
+                field: 'quarantined',
+                previousValue: prior.isQuarantined,
+                newValue: quarantined
+            })
+        }
+
+        const asset = assetRegistryService.getBySymbol(symbol)
         return ok(res, { asset })
     } catch (error) {
-        logger.error('[ERROR] Admin set asset enabled failed', { error: getErrorObject(error) })
+        logger.error('[ERROR] Admin set asset attributes failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: refresh specific asset source */
+assetsRouter.post('/admin/assets/:symbol/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol
+        const prior = assetRegistryService.getBySymbol(symbol)
+        if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        const success = await assetRegistryService.refreshAssetSource(symbol)
+        const asset = assetRegistryService.getBySymbol(symbol)
+
+        logAudit('asset_registry_source_refreshed', {
+            domain: 'asset_registry',
+            actorPublicKey: req.adminPublicKey,
+            symbol,
+            success
+        })
+
+        return ok(res, { symbol, success, asset })
+    } catch (error) {
+        logger.error('[ERROR] Admin refresh asset failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: batch refresh all asset sources */
+assetsRouter.post('/admin/assets/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const results = await assetRegistryService.refreshAllAssetSources()
+
+        logAudit('asset_registry_batch_refreshed', {
+            domain: 'asset_registry',
+            actorPublicKey: req.adminPublicKey,
+            count: Object.keys(results).length
+        })
+
+        return ok(res, { results })
+    } catch (error) {
+        logger.error('[ERROR] Admin batch refresh failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

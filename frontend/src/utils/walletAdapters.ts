@@ -1,3 +1,16 @@
+/**
+ * Wallet adapter implementations for Stellar Portfolio Rebalancer.
+ * 
+ * Supported wallets: Freighter, Rabet, xBull, Mock (E2E)
+ * 
+ * For user-facing troubleshooting, see: docs/WALLET_TROUBLESHOOTING.md
+ * For error codes and their meanings, see the "Error codes reference" table in that doc.
+ * 
+ * When adding a new wallet:
+ * 1. Implement the WalletAdapter interface
+ * 2. Add to walletAdapters array
+ * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
+ */
 export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
 
 export interface WalletAdapter {
