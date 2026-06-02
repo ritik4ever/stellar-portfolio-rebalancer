@@ -131,6 +131,16 @@ Use GitHub's attestation tooling to verify a downloaded artifact against the rep
 
 This repository does not yet sign the live Docker images created by `deployment/docker-compose.yml`. The current control point is the CI build bundle and its SBOMs. If you move deployment to immutable image publishing later, add image-level attestations at that stage rather than trying to infer provenance from the compose file alone.
 
+## Sentry release tagging
+
+The deploy workflow now derives Sentry metadata automatically from the current git SHA and target environment before any image build starts.
+
+- `scripts/sentry-metadata.mjs` is the single source of truth for the release/environment values.
+- `npm run sentry:metadata -- --deployment production` prints the exact env lines that CI injects.
+- `npm run validate:sentry-metadata` fails fast if the backend and frontend Sentry values drift apart or if the release no longer matches the current commit.
+
+In practice, this means the backend and frontend Sentry events can be traced back to one immutable build identifier and one deployment tier without manual bookkeeping.
+
 ### Release checklist
 
 The release checklist template lives in [docs/RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Use it before cutting a release that touches contract, backend, or frontend delivery.

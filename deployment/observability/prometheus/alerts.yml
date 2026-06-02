@@ -11,7 +11,7 @@ groups:
           service: backend
         annotations:
           summary: Backend metrics endpoint is unavailable
-          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes. The API gateway is likely offline.
+          description: Prometheus cannot scrape the backend /metrics endpoint for 2 minutes. The API gateway is likely offline. Cross-check the matching Sentry release and environment before investigating the failure path.
 
       - alert: BackendReadinessFailed
         expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/readiness"} == 0
@@ -22,7 +22,7 @@ groups:
           service: backend
         annotations:
           summary: Backend readiness probe is failing
-          description: The backend /readiness endpoint is returning a non-2xx response. The API gateway is reporting unhealthy status.
+          description: The backend /readiness endpoint is returning a non-2xx response. The API gateway is reporting unhealthy status. Cross-check the matching Sentry release and environment before investigating the failure path.
 
       - alert: FrontendUptimeProbeFailed
         expr: probe_success{job="portfolio-readiness", instance="http://frontend:80/"} == 0
@@ -33,7 +33,7 @@ groups:
           service: frontend
         annotations:
           summary: Frontend uptime probe failed
-          description: The frontend root endpoint has been unavailable for 5 minutes.
+          description: The frontend root endpoint has been unavailable for 5 minutes. Cross-check the matching Sentry release and environment before investigating the browser bundle.
 
       - alert: BackendApiRootFailed
         expr: probe_success{job="portfolio-readiness", instance="http://backend:3001/"} == 0
@@ -74,7 +74,7 @@ groups:
           service: backend
         annotations:
           summary: Elevated backend 5xx rate
-          description: More than 5% of backend requests have been failing with 5xx responses for 10 minutes.
+          description: More than 5% of backend requests have been failing with 5xx responses for 10 minutes. Cross-check the matching Sentry release and environment before diving into the request path.
 
       - alert: APILatencySpike
         expr: histogram_quantile(0.95, sum(rate(stellar_portfolio_http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
@@ -97,7 +97,7 @@ groups:
           service: queue
         annotations:
           summary: Portfolio rebalancing has failed completely
-          description: The rebalance queue has accumulated 5 or more failed jobs in the last 2 minutes. Automated rebalancing is failing completely.
+          description: The rebalance queue has accumulated 5 or more failed jobs in the last 2 minutes. Automated rebalancing is failing completely. Cross-check the matching Sentry release and environment before investigating the worker.
 
       - alert: RebalanceQueueFailures
         expr: stellar_portfolio_queue_jobs{queue="rebalance", state="failed"} > 0
@@ -108,7 +108,7 @@ groups:
           service: queue
         annotations:
           summary: Failed rebalance jobs detected
-          description: The rebalance queue has failed jobs that need investigation.
+          description: The rebalance queue has failed jobs that need investigation. Cross-check the matching Sentry release and environment before investigating the worker.
 
   - name: queue-operations
     interval: 30s
@@ -234,5 +234,6 @@ groups:
         annotations:
           summary: Reflector fallback usage is elevated
           description: The backend has relied on cached or synthetic price fallbacks at least five times in the last hour.
+
 
 
