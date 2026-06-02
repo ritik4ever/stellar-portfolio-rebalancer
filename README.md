@@ -1,5 +1,31 @@
 # Stellar Portfolio Rebalancer
 
+---
+
+## 2. README.md Updates
+
+Add a link in the README's "Further reading" or "Troubleshooting" section:
+
+**`README.md`** (add after "## Contributing" or in a new section)
+
+```markdown
+## Troubleshooting
+
+### Wallet Issues
+
+Having trouble connecting your Stellar wallet? See the **[Wallet Troubleshooting FAQ](docs/WALLET_TROUBLESHOOTING.md)** for step-by-step fixes for:
+
+- "Wallet is not installed" errors
+- Connection timeouts and declines
+- Transaction signing failures
+- Network mismatch between wallet and app
+- Wallet-specific quirks (Freighter, Rabet, xBull)
+
+### Common Setup Issues
+
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md) §10 "Common setup failures" for backend, database, and environment issues.
+
+
 [![GitHub Repo](https://img.shields.io/badge/repo-Stellar%20Portfolio%20Rebalancer-blue?style=flat-square)](https://github.com/ritik4ever/stellar-portfolio-rebalancer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -25,6 +51,22 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 
 ---
 
+## Project Roadmap
+
+See where the Stellar Portfolio Rebalancer is headed!
+
+| **Now** (Current Sprint) | **Next** (1-2 months) | **Later** (3-6+ months) |
+|-------------------------|------------------------|-------------------------|
+| Core rebalancing algorithm | Portfolio dashboard | Mobile app |
+| Reflector oracle integration | Historical reports | Custom strategies |
+| Wallet connection stability | Notification system | DeFi integration |
+| Bug fixes | Multi-asset support | Tax optimization |
+
+**[View detailed roadmap →](docs/ROADMAP.md)**
+
+---
+
+
 ## Architecture
 ```text
 stellar-portfolio-rebalancer/
@@ -32,7 +74,7 @@ stellar-portfolio-rebalancer/
 ├── frontend/      # React + TypeScript frontend
 ├── backend/       # Node.js + Express API
 ├── deployment/    # Docker deployment files
-└── docs/          # Documentation
+└── docs/          # Documentation (including [ADRs](docs/adr/README.md))
 ```
 
 ### Tech Stack
@@ -162,6 +204,17 @@ soroban contract invoke \
 ```
 Contract address example: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I`
 
+### WASM Hash Verification
+
+Before deploying, you can compute and audit the canonical SHA-256 hash of the compiled WASM contract to ensure reproducibility and security:
+
+```bash
+cd contracts
+make hash
+```
+
+This target outputs the hash of both the release WASM and the optimized WASM (if available). The same hash calculation runs automatically on release/PR builds to simplify deployment audits.
+
 Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
 Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
 
@@ -182,7 +235,7 @@ Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/s
 - History: Track past rebalances
 
 ### Portfolio Asset Limit
-Each portfolio supports a maximum of **10 assets** (). This limit exists because Soroban persistent storage entries are bounded by ledger entry size constraints, and each asset adds allocation and balance map entries plus oracle lookup overhead during rebalance. Attempting to create a portfolio with more than 10 assets returns a  error.
+Each portfolio supports a maximum of **10 assets** (`MAX_PORTFOLIO_ASSETS`). This limit exists because Soroban persistent storage entries are bounded by ledger entry size constraints, and each asset adds allocation and balance map entries plus oracle lookup overhead during rebalance. Attempting to create a portfolio with more than 10 assets returns a `TooManyAssets` error.
 
 ## Safety Features
 - Cooldown Periods: Minimum 1 hour between rebalances
@@ -264,8 +317,11 @@ docker compose -f deployment/docker-compose.yml up --build -d
 ## Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+For branch protection rules and which CI checks must pass before merging, see [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md).
 For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
-For issue management, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
+For issue management and PR requirements, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
+
+**PRs must link to an issue** or provide a rationale when no issue exists. A CI check enforces this.
 
 Quick steps:
 1. Fork the repository

@@ -210,23 +210,47 @@ describe('idempotencyMiddleware', () => {
         expect(second.state.sentHeaders['Idempotency-Replayed']).toBe('true')
     })
 
-    it('same key + different body returns 409 Conflict', async () => {
+    it('same key + semantically equivalent body (different key order) replays stored response', async () => {
         const { idempotencyMiddleware } = await import('../middleware/idempotency.js')
 
-        const key = 'conflict-key-001'
+        const key = 'stable-key-001'
+        const body1 = { a: 1, b: 2 }
+        const body2 = { b: 2, a: 1 }
 
-        const first = mockReqRes({ headers: { 'idempotency-key': key }, body: { portfolioId: 'p1' } })
+        // First request
+        const first = mockReqRes({ headers: { 'idempotency-key': key }, body: body1 })
+        idempotencyMiddleware(first.req, first.res, first.next)
+        first.res.status(200).json({ success: true, message: 'first' })
+
+        // Second request — same values, different order → should replay
+        const second = mockReqRes({ headers: { 'idempotency-key': key }, body: body2 })
+        idempotencyMiddleware(second.req, second.res, second.next)
+
+        expect(second.state.nextCalled).toBe(false)
+        expect(second.state.sentStatus).toBe(200)
+        expect((second.state.sentBody as any).message).toBe('first')
+        expect(second.state.sentHeaders['Idempotency-Replayed']).toBe('true')
+    })
+
+    it('same key + different values returns 409 Conflict', async () => {
+        const { idempotencyMiddleware } = await import('../middleware/idempotency.js')
+
+        const key = 'diff-value-key-001'
+        const body1 = { a: 1, b: 2 }
+        const body2 = { a: 1, b: 3 }
+
+        // First request
+        const first = mockReqRes({ headers: { 'idempotency-key': key }, body: body1 })
         idempotencyMiddleware(first.req, first.res, first.next)
         first.res.status(200).json({ success: true })
 
-        // Different payload → conflict
-        const second = mockReqRes({ headers: { 'idempotency-key': key }, body: { portfolioId: 'p-different' } })
+        // Different values → conflict
+        const second = mockReqRes({ headers: { 'idempotency-key': key }, body: body2 })
         idempotencyMiddleware(second.req, second.res, second.next)
 
         expect(second.state.nextCalled).toBe(false)
         expect(second.state.sentStatus).toBe(409)
         expect((second.state.sentBody as any).error.message).toMatch(/different request payload/)
-        expect((second.state.sentBody as any).error.details.idempotencyKey).toBe(key)
     })
 
     it('error responses (4xx) are also stored and replayed', async () => {

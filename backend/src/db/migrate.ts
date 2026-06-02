@@ -8,13 +8,15 @@
  *   npm run db:migrate -- --status     - List applied and pending migrations
  */
 import 'dotenv/config'
-import { readFileSync, readdirSync } from 'fs'
+import { createHash } from 'crypto'
+import { readFileSync, readdirSync, writeFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { getPool, closePool, isDbConfigured } from './client.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const MIGRATIONS_DIR = join(__dirname, 'migrations')
+const MANIFEST_PATH = join(MIGRATIONS_DIR, 'manifest.json')
 
 const MIGRATION_TABLE = `CREATE TABLE IF NOT EXISTS schema_migrations (
     version VARCHAR(64) PRIMARY KEY,
@@ -27,6 +29,54 @@ interface MigrationFile {
     name: string
     upPath: string
     downPath: string
+}
+
+interface MigrationManifestEntry {
+    file: string
+    sha256: string
+}
+
+function checksumFile(path: string): string {
+    return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function validateMigrationManifest(migrations: MigrationFile[]): void {
+    const expectedFiles = migrations.flatMap((m) => [
+        { file: `${m.version}_${m.name}.up.sql`, path: m.upPath },
+        { file: `${m.version}_${m.name}.down.sql`, path: m.downPath }
+    ])
+
+    let manifest: MigrationManifestEntry[]
+
+    try {
+        manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as MigrationManifestEntry[]
+    } catch {
+        manifest = expectedFiles.map((entry) => ({
+            file: entry.file,
+            sha256: checksumFile(entry.path)
+        }))
+
+        writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`)
+        console.log('Created migration checksum manifest:', MANIFEST_PATH)
+        return
+    }
+
+    for (const entry of expectedFiles) {
+        const manifestEntry = manifest.find((item) => item.file === entry.file)
+
+        if (!manifestEntry) {
+            throw new Error(`Migration checksum missing from manifest: ${entry.file}`)
+        }
+
+        const actual = checksumFile(entry.path)
+
+        if (manifestEntry.sha256 !== actual) {
+            throw new Error(
+                `Migration checksum mismatch for ${entry.file}. ` +
+                    'Committed migration file content changed after manifest generation.'
+            )
+        }
+    }
 }
 
 function parseArgs(): { dryRun: boolean; rollback: number | null; status: boolean } {
@@ -82,6 +132,8 @@ async function getAppliedVersions(): Promise<string[]> {
 async function run() {
     const { dryRun, rollback, status } = parseArgs()
     const migrations = discoverMigrations()
+    validateMigrationManifest(migrations)
+
     if (migrations.length === 0) {
         console.log('No migration files found in', MIGRATIONS_DIR)
         process.exit(0)
@@ -178,7 +230,14 @@ async function run() {
             console.log('[DRY RUN] Pending migrations (not applied):')
             for (const m of pending) {
                 const sql = readFileSync(m.upPath, 'utf8')
-                console.log('---', m.version, m.name, '---\n', sql.substring(0, 500) + (sql.length > 500 ? '...' : ''), '\n')
+                console.log(
+                    '---',
+                    m.version,
+                    m.name,
+                    '---\n',
+                    sql.substring(0, 500) + (sql.length > 500 ? '...' : ''),
+                    '\n'
+                )
             }
             console.log('Total:', pending.length, 'migration(s). Run without --dry-run to apply.')
             await closePool()

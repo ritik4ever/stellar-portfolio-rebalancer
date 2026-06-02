@@ -13,6 +13,7 @@ Single reference for backend and frontend switches that change runtime behavior.
 | `ENABLE_DEMO_DB_SEED` | follows `DEMO_MODE` | follows `DEMO_MODE` | Seed demo rows when DB is empty (`databaseService`). |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | `false` | `false` | Allow unauthenticated listing of user portfolios in demo contexts. |
 | `ENABLE_DEBUG_ROUTES` | `false` | `false` | Mount `/api/v1/debug/*` (and legacy `/api/debug/*`). Keep off in shared/staging unless you trust the network. |
+| `ENABLE_ISSUER_METADATA` | `true` | `true` | When true, resolves and caches issuer metadata (e.g. org_name, org_url) from the home domain's stellar.toml. |
 
 **Indexer / contract alignment**
 
