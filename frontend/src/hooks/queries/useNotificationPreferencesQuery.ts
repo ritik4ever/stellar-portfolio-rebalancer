@@ -8,12 +8,16 @@ export interface NotificationEventPreferences {
     riskChange: boolean
 }
 
+export type DigestFrequency = 'realtime' | 'daily' | 'weekly'
+
 export interface NotificationPreferencesModel {
     emailEnabled: boolean
     emailAddress: string
     webhookEnabled: boolean
     webhookUrl: string
     events: NotificationEventPreferences
+    digestEnabled: boolean
+    digestFrequency: DigestFrequency
 }
 
 export const notificationKeys = {
