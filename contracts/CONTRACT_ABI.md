@@ -89,7 +89,8 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Returns:** `true` when any tracked asset drift exceeds `rebalance_threshold`, else `false`.
 - **Preconditions / failure behavior:**
   - Portfolio and `ReflectorAddress` must exist in storage (panics on missing values).
-  - Missing price for an asset is skipped in drift comparison for that asset.
+  - Reflector timeout/unavailability semantics: if any held asset has missing or stale price data, the function returns `false` because a deterministic rebalance decision cannot be made.
+  - Price data is stale when `ledger.timestamp - price.timestamp > 3600` seconds.
 
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
@@ -97,16 +98,10 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.
-- **Returns:** `Ok(())` on success, or one of:
-  - `Err(Error::EmergencyStop)` — contract is in emergency stop.
-  - `Err(Error::CooldownActive)` — less than 3600 seconds since last rebalance.
-  - `Err(Error::SlippageExceeded)` — computed slippage above portfolio tolerance.
-  - `Err(Error::StaleData)` — a target asset has stale Reflector price data.
-  - `Err(Error::MissingPriceData)` — Reflector returned no price for a target asset.
-  - `Err(Error::TimestampDrift)` — ledger timestamp drift exceeds acceptable range.
+
 - **Preconditions / failure behavior:**
   - Portfolio must exist and owner must authorize call.
-  - Portfolio owner authorization required (`portfolio.user.require_auth()`).
+
 
 ### `set_emergency_stop(env: Env, stop: bool) -> ()`
 
@@ -187,11 +182,7 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | Code | Variant | Returned when |
 |---|---|---|
 | `1` | `InvalidAllocation` | `create_portfolio` receives allocation map that fails validation. |
-| `2` | `RebalanceNotNeeded` | Reserved — not currently emitted. |
-| `3` | `EmergencyStop` | `deposit` or `execute_rebalance` called while emergency stop is active. |
-| `4` | `CooldownActive` | `execute_rebalance` called before cooldown (3600 s) elapses. |
-| `5` | `StaleData` | `execute_rebalance` receives stale price data from the Reflector oracle. |
-| `6` | `ExcessiveDrift` | Reserved — not currently emitted. |
+
 | `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
 | `8` | `InvalidThreshold` | `create_portfolio` threshold outside `MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD` (i.e., `1..=50`). |
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |

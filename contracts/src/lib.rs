@@ -1,4 +1,7 @@
 #![no_std]
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String};
 
 mod portfolio;
@@ -240,20 +243,7 @@ impl PortfolioRebalancer {
             return false;
         }
 
-        for (asset, target_percent) in portfolio.target_allocations.iter() {
-            let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
 
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
-            {
-                let current_asset_value =
-                    portfolio::balance_to_value(current_balance, price_data.price);
-                let current_percent = (current_asset_value * 100) / total_value;
-
-                let drift = (current_percent - target_percent as i128).abs();
-                if drift > portfolio.rebalance_threshold as i128 {
-                    return true;
-                }
             }
         }
 
@@ -265,8 +255,7 @@ impl PortfolioRebalancer {
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
-    }
+
 
     pub fn admin_force_rebalance(
         env: Env,
@@ -297,7 +286,7 @@ impl PortfolioRebalancer {
             .persistent()
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
-        let current_steward: Address = env
+
             .storage()
             .persistent()
             .get(&DataKey::Steward(portfolio_id))
