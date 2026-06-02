@@ -10,6 +10,8 @@ export const QUEUE_NAMES = {
     PORTFOLIO_EXPORT: 'portfolio-export',
 } as const
 
+export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
+
 export interface PortfolioCheckJobData {
   triggeredBy?: "scheduler" | "manual" | "startup";
   correlationId?: string;

@@ -219,7 +219,7 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
     }
 })
 
-opsRouter.post('/queue/:queueName/drain', async (req: Request, res: Response) => {
+
     try {
         const { queueName } = req.params
         const queue = getQueueByName(queueName)
@@ -230,32 +230,7 @@ opsRouter.post('/queue/:queueName/drain', async (req: Request, res: Response) =>
 
         await queue.pause()
 
-        const counts = await queue.getJobCounts(
-            'active',
-            'waiting',
-            'delayed',
-            'paused',
-            'failed',
-            'completed'
-        )
 
-        logger.info('[QUEUE] Drain requested', {
-            queue: queueName,
-            active: counts.active,
-            waiting: counts.waiting,
-            delayed: counts.delayed,
-            paused: counts.paused
-        })
-
-        return ok(res, {
-            message: 'Queue drain started',
-            queue: queueName,
-            paused: true,
-            drained: counts.active === 0,
-            counts
-        })
-    } catch (error) {
-        logger.error('[ERROR] Failed to drain queue', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

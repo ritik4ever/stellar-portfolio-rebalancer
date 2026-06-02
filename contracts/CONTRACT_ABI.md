@@ -15,10 +15,23 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `env`: Soroban execution environment.
   - `admin`: Admin address stored for privileged actions (for example emergency stop).
+    - This may be a standard account or a contract-managed/governance address.
+    - Future multisig or governed deployments can provide an address that authorizes via Soroban auth rules.
   - `reflector_address`: Reflector oracle contract address used for price lookups.
 - **Returns:** `Ok(())` on success, `Err(Error::AlreadyInitialized)` if already initialized.
 - **Preconditions:**
   - Contract must not already be initialized.
+
+- **State:** `EmergencyStop` is initialized to `false` during contract initialization.
+
+### `get_admin(env: Env) -> Address`
+
+- **Purpose:** Reads the configured admin address from contract instance storage.
+- **Parameters:**
+  - `env`: Soroban execution environment.
+- **Returns:** Stored admin `Address`.
+- **Notes:**
+  - External clients can use this to confirm the configured governance/admin address before invoking privileged actions.
 
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32) -> Result<u64, Error>`
 
@@ -93,6 +106,7 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Returns:** No return value.
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
+  - The configured admin may be a multisig/governance contract address, as long as it authorizes via Soroban auth.
 
 ### `set_fee_config(env: Env, config: FeeConfig) -> ()`
 
