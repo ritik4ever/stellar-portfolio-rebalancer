@@ -4,15 +4,7 @@ interface Trade {
     amount: number
 }
 
-/**
- * Returns how many percentage points remain to reach 100%.
- * Positive  → under-allocated (e.g. 30 means 30% still to assign)
- * Negative  → over-allocated  (e.g. -5 means 5% too many)
- * Zero      → exactly 100%
- */
-export const remainingAllocation = (allocations: { percentage: number }[]): number => {
-    const total = allocations.reduce((sum, a) => sum + a.percentage, 0)
-    return parseFloat((100 - total).toFixed(10))
+
 }
 
 export const calculateRebalanceTrades = (portfolio: any): Trade[] => {

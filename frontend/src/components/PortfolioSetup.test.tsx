@@ -4,6 +4,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PortfolioSetup from './PortfolioSetup'
 
+
 // Strip framer-motion animation props so they don't hit the real DOM
 const stripMotionProps = ({ initial, animate, exit, transition, variants, layout, layoutId, ...rest }: any) => rest
 
@@ -36,10 +37,29 @@ vi.mock('../hooks/queries/useAssetsQuery', () => ({
 }))
 
 const mockMutateAsync = vi.fn()
-vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
-    useCreatePortfolioMutation: () => ({
-        mutateAsync: mockMutateAsync,
-        isPending: false,
+vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
+  buildRollbackMessage: (error: unknown, action = "portfolio update") => {
+    const detail =
+      error instanceof Error ? error.message : "server rejected the update";
+    return `Your optimistic ${action} was rolled back because the server rejected it. ${detail} Please try again.`;
+  },
+  useCreatePortfolioMutation: () => ({
+    mutateAsync: mockMutateAsync,
+    isPending: false,
+  }),
+}));
+
+const mockAssets = [
+    { symbol: 'XLM', displayName: 'XLM', searchText: 'xlm' },
+    { symbol: 'USDC', displayName: 'USDC', searchText: 'usdc' },
+    { symbol: 'BTC', displayName: 'BTC', searchText: 'btc' },
+    { symbol: 'ETH', displayName: 'ETH', searchText: 'eth' },
+]
+
+vi.mock('../hooks/queries/useAssetsQuery', () => ({
+    useAssets: () => ({
+        data: mockAssets,
+        isLoading: false,
     }),
 }))
 
@@ -70,7 +90,9 @@ describe('PortfolioSetup allocation validation', () => {
     beforeEach(() => {
         cleanup()
         vi.clearAllMocks()
+        clearPortfolioCloneDraft()
         mockMutateAsync.mockResolvedValue({})
+
     })
 
     // ── Sum-to-100 boundary tests ─────────────────────────────────────────────
@@ -242,12 +264,61 @@ describe('PortfolioSetup allocation validation', () => {
 
     // ── Submit button state ───────────────────────────────────────────────────
 
+    describe('portfolio clone draft', () => {
+        it('prefills setup from a saved clone draft and saves as a new portfolio', async () => {
+            savePortfolioCloneDraft({
+                sourcePortfolioId: 'p-source',
+                sourceLabel: 'Source',
+                allocations: [
+                    { asset: 'BTC', percentage: 70 },
+                    { asset: 'ETH', percentage: 30 },
+                ],
+                threshold: 8,
+                slippageTolerance: 2,
+                strategy: 'volatility',
+                strategyConfig: { volatilityThresholdPct: 12 },
+                createdAt: new Date().toISOString(),
+            })
+
+            renderSetup('GTESTCLONE')
+            expect(screen.getByText(/cloning portfolio source/i)).toBeTruthy()
+            expect(screen.getByRole('button', { name: /save as new portfolio/i })).toBeTruthy()
+
+            fireEvent.click(screen.getByRole('button', { name: /save as new portfolio/i }))
+            expect(mockMutateAsync).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    threshold: 8,
+                    slippageTolerance: 2,
+                    strategy: 'volatility',
+                    allocations: { BTC: 70, ETH: 30 },
+                }),
+            )
+        })
+    })
+
     describe('submit button state', () => {
         it('calls mutateAsync when form is valid and submit is clicked', async () => {
             renderSetup()
             fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }))
             expect(mockMutateAsync).toHaveBeenCalledTimes(1)
         })
+        it("shows a clear rollback message when portfolio creation is rejected", async () => {
+          mockMutateAsync.mockRejectedValueOnce(
+            new Error("server rejected allocation update"),
+          );
+
+          renderSetup();
+
+          fireEvent.click(
+            screen.getByRole("button", { name: /create portfolio/i }),
+          );
+
+          const alert = await screen.findByRole("alert");
+
+          expect(alert).toHaveTextContent(/rolled back/i);
+          expect(alert).toHaveTextContent(/server rejected/i);
+          expect(alert).toHaveTextContent(/try again/i);
+        });
 
         it('does not call mutateAsync when total is not 100%', () => {
             renderSetup()
