@@ -97,11 +97,12 @@ impl PortfolioRebalancer {
             pause_reason: PauseReason::None,
         };
 
+        portfolio::check_portfolio_invariants(&portfolio)?;
+
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
-        env.events()
-            .publish(("portfolio", "created"), (portfolio_id, user));
+        portfolio::emit_portfolio_created(&env, portfolio_id, user);
         Ok(portfolio_id)
     }
 
@@ -112,15 +113,24 @@ impl PortfolioRebalancer {
             .unwrap()
     }
 
+    pub fn check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio::check_portfolio_invariants(&portfolio)
+    }
+
+    pub fn deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> Result<(), Error> {
 
         if amount <= 0 {
-            panic!("Amount must be positive");
+            return Err(Error::InvalidWithdrawAmount);
         }
 
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
-            panic!("Emergency stop active");
+            return Err(Error::EmergencyStop);
         }
 
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+        portfolio::check_portfolio_invariants(&portfolio)?;
         let mut portfolio: Portfolio = env
             .storage()
             .persistent()
@@ -138,6 +148,49 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        portfolio::emit_portfolio_deposit(&env, portfolio_id, asset, amount);
+        Ok(())
+    }
+
+    pub fn withdraw(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+        amount: i128,
+    ) -> Result<(), Error> {
+        if amount <= 0 {
+            return Err(Error::InvalidWithdrawAmount);
+        }
+
+        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
+            return Err(Error::EmergencyStop);
+        }
+
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+        portfolio::check_portfolio_invariants(&portfolio)?;
+
+        let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
+        if current_balance < amount {
+            return Err(Error::InsufficientBalance);
+        }
+
+        let new_balance = current_balance - amount;
+        if new_balance == 0 {
+            portfolio.current_balances.remove(asset.clone());
+        } else {
+            portfolio.current_balances.set(asset.clone(), new_balance);
+        }
+
+        if !portfolio::portfolio_has_positive_balance(&portfolio) {
+            portfolio.is_active = false;
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        portfolio::emit_portfolio_withdraw(&env, portfolio_id, asset, amount);
+        Ok(())
         env.events().publish(
             ("portfolio", "deposit"),
             (portfolio_id, asset, amount, memo),
@@ -197,16 +250,65 @@ impl PortfolioRebalancer {
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
+    }
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             return Err(Error::EmergencyStop);
         }
 
-        let mut portfolio: Portfolio = env
-            .storage()
+    pub fn admin_force_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+    ) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        Self::execute_rebalance_internal(
+            &env,
+            portfolio_id,
+            actual_balances,
+            true,
+            Some(admin),
+        )
+    }
+
+    pub fn set_emergency_stop(env: Env, stop: bool) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::EmergencyStop, &stop);
+    }
+
+    fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
+        env.storage()
             .persistent()
             .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
+            .ok_or(Error::PortfolioNotFound)
+    }
 
+    fn execute_rebalance_internal(
+        env: &Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+        bypass_cooldown: bool,
+        override_admin: Option<Address>,
+    ) -> Result<(), Error> {
+        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
+            return Err(Error::EmergencyStop);
+        }
+
+        let mut portfolio = Self::load_portfolio(env, portfolio_id)?;
+
+        if !bypass_cooldown {
+            portfolio.user.require_auth();
+        }
+
+        portfolio::check_portfolio_invariants(&portfolio)?;
+
+        let current_time = env.ledger().timestamp();
+        if !bypass_cooldown
+            && current_time < portfolio.last_rebalance + REBALANCE_COOLDOWN_SECONDS
+        {
+            return Err(Error::CooldownActive);
         if !portfolio.is_active {
             return Err(Error::PortfolioPaused);
         }
@@ -224,7 +326,7 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::ReflectorAddress)
             .unwrap();
-        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+        let reflector_client = ReflectorClient::new(env, &reflector_address);
 
         // Gather current prices and validate freshness. Any missing/stale price is surfaced.
         let mut current_prices = Map::new(&env);
@@ -232,6 +334,7 @@ impl PortfolioRebalancer {
             if let Some(price_data) =
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
+                if price_data.is_stale(current_time, PRICE_MAX_AGE_SECONDS) {
                 if price_data.is_stale(current_time, 3600) {
                     return Err(Error::StaleData);
                 }
@@ -260,6 +363,18 @@ impl PortfolioRebalancer {
             break;
         }
         if has_actual_balances {
+            let total_value = portfolio::calculate_portfolio_value(
+                env,
+                &portfolio.current_balances,
+                &reflector_client,
+            )
+            .ok_or(Error::StaleData)?;
+            if total_value > 0 {
+                for (asset, target_pct) in portfolio.target_allocations.iter() {
+                    let price_data = reflector_client
+                        .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+                        .unwrap();
+                    let price = price_data.price;
 
                     let expected_value = (total_value * target_pct as i128) / 100;
                     let expected_balance =
@@ -278,6 +393,17 @@ impl PortfolioRebalancer {
             }
         }
 
+        portfolio.last_rebalance = current_time;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+
+        if let Some(admin) = override_admin {
+            portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
+        }
+        portfolio::emit_portfolio_rebalanced(env, portfolio_id, current_time);
+        Ok(())
+    }
         Ok(trades)
     }
 

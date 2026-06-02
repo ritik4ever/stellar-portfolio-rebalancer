@@ -338,6 +338,7 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
 <                 "symbol": "EmergencyStop"
                             }
                           ]
@@ -681,6 +682,10 @@
           "v0": {
             "topics": [
               {
+                "symbol": "portfolio"
+              },
+              {
+                "symbol": "created"
                 "string": "portfolio"
               },
               {
@@ -870,6 +875,10 @@
           "v0": {
             "topics": [
               {
+                "symbol": "portfolio"
+              },
+              {
+                "symbol": "deposit"
                 "string": "portfolio"
               },
               {
@@ -888,6 +897,7 @@
                   "i128": {
                     "hi": 0,
                     "lo": 100
+                  }
                  }
 
                 }
