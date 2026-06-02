@@ -64,43 +64,21 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Portfolio must exist; otherwise contract panics on `.unwrap()`.
 
-### `check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error>`
+### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128, memo: String) -> Result<(), Error>`
 
-
-- **Purpose:** On-demand validation of core portfolio assumptions (allocations, thresholds, non-negative balances, active state).
-- **Parameters:** `portfolio_id`.
-- **Returns:** `Ok(())` when invariants hold, or `Err(Error::InvariantViolation)`, `Err(Error::PortfolioInactive)`, or `Err(Error::PortfolioNotFound)`.
-
-### `deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> Result<(), Error>`
-
-- **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")` with payload `(portfolio_id, asset, amount)`.
+- **Purpose:** Deposits an amount into `current_balances` for a portfolio and emits `("portfolio","deposit")`.
 - **Parameters:**
   - `portfolio_id`: Target portfolio.
   - `asset`: Asset address key used in `current_balances`.
   - `amount`: Amount to add.
-- **Returns:** `Ok(())` or an error variant.
-- **Preconditions / failure behavior:**
-  - `amount > 0` or `Err(Error::InvalidWithdrawAmount)`.
-  - Emergency stop must be off or `Err(Error::EmergencyStop)`.
-  - Portfolio must exist or `Err(Error::PortfolioNotFound)`.
-
-- **Returns:** No return value.
+  - `memo`: Caller-supplied deposit memo included in the emitted event.
+- **Returns:** `Ok(())` on success, or one of:
+  - `Err(Error::InvalidAmount)` — amount is zero or negative.
+  - `Err(Error::EmergencyStop)` — contract is in emergency stop.
 - **Event payload:** `(portfolio_id: u64, asset: Address, amount: i128, memo: String)`
 - **Preconditions / failure behavior:**
-  - `amount > 0` (otherwise panic `"Amount must be positive"`).
-  - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
-  - Portfolio must be active (otherwise panic `"Portfolio paused"`).
-  - Portfolio must exist (otherwise panic on `.unwrap()`).
+  - Portfolio must exist (otherwise panics on `.unwrap()`).
   - Portfolio owner authorization required (`portfolio.user.require_auth()`).
-
-### `withdraw(env: Env, portfolio_id: u64, asset: Address, amount: i128) -> Result<(), Error>`
-
-- **Purpose:** Withdraws an amount from `current_balances`, deactivates the portfolio when all balances reach zero, and emits `("portfolio","withdraw")` with payload `(portfolio_id, asset, amount)`.
-- **Parameters:** Same shape as `deposit`.
-- **Returns:** `Ok(())` or `Err(Error::InsufficientBalance)`, `Err(Error::InvalidWithdrawAmount)`, `Err(Error::EmergencyStop)`, `Err(Error::PortfolioNotFound)`, or invariant errors.
-- **Preconditions:**
-  - `amount > 0` and `current_balance >= amount`.
-  - Portfolio owner authorization required.
 
 ### `check_rebalance_needed(env: Env, portfolio_id: u64) -> bool`
 
@@ -113,36 +91,20 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
-- **Purpose:** Validates post-trade balances against slippage tolerance, updates `last_rebalance`, and emits `("portfolio","rebalanced")` with payload `(portfolio_id, timestamp)`.
-- **Parameters:**
-  - `portfolio_id`: Portfolio to rebalance.
-  - `actual_balances`: Actual balances used for slippage checks.
-- **Returns:** `Ok(())` or `Err(Error::SlippageExceeded)`, `Err(Error::CooldownActive)`, `Err(Error::StaleData)`, `Err(Error::EmergencyStop)`.
-- **Preconditions / failure behavior:**
-  - Emergency stop must be off.
-  - Portfolio must exist and owner must authorize call.
-  - Cooldown must be elapsed (`>= REBALANCE_COOLDOWN_SECONDS`, 3600) or `Err(Error::CooldownActive)`.
-  - Every target asset must have non-stale Reflector price data or `Err(Error::StaleData)`.
-
-### `admin_force_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
-
-- **Purpose:** Admin-only rebalance that bypasses the user cooldown, emits `("portfolio","cooldown_override")` with `(portfolio_id, admin, timestamp)`, then emits the standard rebalanced event.
-- **Parameters:** Same as `execute_rebalance`.
-- **Returns:** Same error set as `execute_rebalance` except cooldown is not enforced.
-- **Preconditions:** Admin address in `DataKey::Admin` must authorize the call.
 - **Purpose:** Validates post-trade balances against slippage tolerance (per `slippage_policy_version` on the portfolio), updates `last_rebalance`, and emits `("portfolio","rebalanced")`.
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.
-- **Returns:** `Ok(())` or one of:
-
-  - `Err(Error::CooldownActive)`
-  - `Err(Error::StaleData)`
-  - `Err(Error::SlippageExceeded)`
+- **Returns:** `Ok(())` on success, or one of:
+  - `Err(Error::EmergencyStop)` — contract is in emergency stop.
+  - `Err(Error::CooldownActive)` — less than 3600 seconds since last rebalance.
+  - `Err(Error::SlippageExceeded)` — computed slippage above portfolio tolerance.
+  - `Err(Error::StaleData)` — a target asset has stale Reflector price data.
+  - `Err(Error::MissingPriceData)` — Reflector returned no price for a target asset.
+  - `Err(Error::TimestampDrift)` — ledger timestamp drift exceeds acceptable range.
 - **Preconditions / failure behavior:**
-  - Emergency stop must be off (otherwise returns `Err(Error::EmergencyStop)`).
   - Portfolio must exist and owner must authorize call.
-
+  - Portfolio owner authorization required (`portfolio.user.require_auth()`).
 
 ### `set_emergency_stop(env: Env, stop: bool) -> ()`
 
@@ -203,37 +165,18 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Purpose:** Returns the maximum number of assets allowed in a portfolio.
 - **Returns:** `MAX_PORTFOLIO_ASSETS` (currently `10`).
 
-### `preview_rebalance(env: Env, portfolio_id: u64) -> RebalancePreview`
+### `simulate_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<Map<Address, i128>, Error>`
 
-- **Purpose:** Non-mutating preview that computes planned trades, skipped assets, and threshold decisions for a portfolio without executing the rebalance.
-- **Returns:** `RebalancePreview` with trade details.
-### `transfer_stewardship(env: Env, portfolio_id: u64, new_steward: Address) -> Result<(), Error>`
-
-- **Purpose:** Transfers operational ownership of a single portfolio to a new address without changing the global contract admin.
+- **Purpose:** Non-mutating simulation path for backend dry-run APIs. Returns a map of planned trades where positive values indicate buys and negative values indicate sells. Surfaces policy failures (cooldown, stale/missing prices, slippage) as `Error` values instead of panics.
 - **Parameters:**
-  - `portfolio_id`: Target portfolio.
-  - `new_steward`: Address that will become the new steward.
-- **Returns:** `Ok(())` on success.
-- **Preconditions:**
-  - Portfolio must exist.
-  - Current steward (or portfolio user if no steward set) must authorize the call.
-- **Events:** Publishes `("portfolio", "steward_transferred")` with `(portfolio_id, old_steward, new_steward)`.
-
-### `get_steward(env: Env, portfolio_id: u64) -> Address`
-
-- **Purpose:** Returns the steward address for a portfolio, falling back to the portfolio user if no steward has been set.
-- **Parameters:** `portfolio_id`.
-- **Returns:** `Address` of the current steward or portfolio user.
-
-### `capabilities(env: Env) -> u32`
-
-- **Purpose:** Returns a bitset of supported optional behaviors for frontend and backend compatibility checks.
-- **Returns:** `u32` bitmask. Test with `flags & CapabilityFlag::X != 0`.
-- **Defined flags:**
-  - `PerPortfolioSteward = 1` — per-portfolio steward transfer is supported.
-  - `DifferentiatedPricing = 2` — `calculate_portfolio_value` distinguishes stale, missing, and malformed prices.
-  - `EmergencyStop = 4` — global emergency stop is supported.
-
+  - `portfolio_id`: Portfolio to simulate rebalance for.
+  - `actual_balances`: Optional actual balances for slippage checks; pass an empty map to skip slippage validation.
+- **Returns:** `Ok(Map<Address, i128>)` with planned trades, or one of:
+  - `Err(Error::CooldownActive)` if the portfolio is still in cooldown.
+  - `Err(Error::StaleData)` if any price is missing or stale.
+  - `Err(Error::SlippageExceeded)` if provided `actual_balances` exceed the portfolio's slippage tolerance.
+- **Preconditions / failure behavior:**
+  - Does not require portfolio owner authorization and does not mutate persistent storage.
 
 ## Error Codes (`contracts/src/types.rs`)
 
@@ -242,50 +185,67 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | Code | Variant | Returned when |
 |---|---|---|
 | `1` | `InvalidAllocation` | `create_portfolio` receives allocation map that fails validation. |
-| `2` | `RebalanceNotNeeded` | Reserved variant; currently not explicitly returned by `lib.rs`. |
-| `3` | `EmergencyStop` | `deposit`, `withdraw`, or rebalance while emergency stop is active. |
-| `4` | `CooldownActive` | `execute_rebalance` called before cooldown elapses. |
-| `5` | `StaleData` | Rebalance when Reflector price data is missing or stale. |
-| `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
+| `2` | `RebalanceNotNeeded` | Reserved — not currently emitted. |
+| `3` | `EmergencyStop` | `deposit` or `execute_rebalance` called while emergency stop is active. |
+| `4` | `CooldownActive` | `execute_rebalance` called before cooldown (3600 s) elapses. |
+| `5` | `StaleData` | `execute_rebalance` receives stale price data from the Reflector oracle. |
+| `6` | `ExcessiveDrift` | Reserved — not currently emitted. |
 | `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
-| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `1..=50`. |
-| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
+| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD` (i.e., `1..=50`). |
+| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
-| `12` | `Unauthorized` | Unauthorized operation. |
-| `13` | `StalePrice` | `execute_rebalance` detected stale price data (>1 hour old). |
-| `14` | `MissingPrice` | `execute_rebalance` cannot find price for a portfolio asset. |
-| `15` | `MalformedPrice` | `execute_rebalance` received non-positive price value. |
-| `16` | `PortfolioPaused` | Operation on a portfolio that has been paused. |
-| `17` | `PreviewUnavailable` | Price data unavailable for rebalance preview. |
-| `18` | `InvalidAssetDecimals` | `create_portfolio` asset decimals invalid. |
-| `19` | `UnsupportedSlippagePolicyVersion` | `create_portfolio` with unsupported slippage version. |
-| `20` | `AssetDecimalsMismatch` | Asset decimals mismatch in portfolio operations. |
-| `21` | `InsufficientBalance` | `withdraw` amount exceeds `current_balances` for the asset. |
-| `22` | `InvariantViolation` | `check_invariants` or pre-mutation invariant validation failed. |
-| `23` | `PortfolioNotFound` | Unknown `portfolio_id`. |
-| `24` | `PortfolioInactive` | Operation requires an active portfolio (`is_active == true`). |
-| `25` | `InvalidWithdrawAmount` | `withdraw` or `deposit` with non-positive `amount`. |
+| `12` | `TimestampDrift` | `guard_ledger_timestamp` detects backward or excessive forward drift. |
+| `13` | `InvalidAmount` | `deposit` receives a zero or negative amount. |
+| `14` | `MissingPriceData` | `execute_rebalance` cannot find a Reflector price for a target asset. |
+| `15` | `InvalidAssetDecimals` | `create_portfolio` receives missing or unsupported asset decimal metadata. |
+| `16` | `UnsupportedSlippagePolicyVersion` | `create_portfolio` receives a slippage policy version other than the current version. |
+| `17` | `PortfolioPaused` | `execute_rebalance` is called for an inactive portfolio. |
+| `18` | `PreviewUnavailable` | Rebalance preview cannot be computed from available price data. |
 
-## Valuation Errors (`contracts/src/portfolio.rs`)
+## Timestamp Drift Guard
 
-`ValuationError` is a non-contract-internal enum returned by `calculate_portfolio_value`:
+The contract maintains a **last observed ledger timestamp** (`DataKey::LastTimestamp`) in instance
+storage to defend against surprising or malicious ledger time assumptions.
 
-| Code | Variant | Meaning |
-|---|---|---|
-| `1` | `StaleData` | Price data is older than 1-hour freshness window. |
-| `2` | `MissingPrice` | No price available for an asset from the Reflector oracle. |
-| `3` | `MalformedData` | Price value is zero or negative. |
+**Guard logic (`guard_ledger_timestamp`):**
+1. On every time-sensitive mutation (`create_portfolio`, `execute_rebalance`), read the current
+   `env.ledger().timestamp()`.
+2. If a `LastTimestamp` is already stored:
+   - **Backward drift:** `current < last_ts` → returns `Err(Error::TimestampDrift)`.
+   - **Excessive forward drift:** `current > last_ts + MAX_TIMESTAMP_DRIFT_SECONDS` → returns
+     `Err(Error::TimestampDrift)`.
+3. Update the stored `LastTimestamp` to the validated value and return `Ok(current)`.
 
-## Capability Flags
+**Constants:**
+- `MAX_TIMESTAMP_DRIFT_SECONDS = 7200` (2 hours). Any jump larger than this is treated as
+  invalid, preventing cooldown bypass and price staleness miscalculation from extreme timestamps.
 
-`CapabilityFlag` is an enum whose values map to bit positions in the `u32` returned by `capabilities()`:
+**Non-mutating calls** (`check_rebalance_needed`) read `env.ledger().timestamp()` directly
+without updating `LastTimestamp`, since view functions must not have storage side-effects.
 
-| Bit | Flag | Description |
-|---|---|---|
-| `1` | `PerPortfolioSteward` | Per-portfolio steward transfer is supported (`transfer_stewardship`, `get_steward`). |
-| `2` | `DifferentiatedPricing` | Pricing errors distinguish stale/missing/malformed (`ValuationError`). |
-| `4` | `EmergencyStop` | Global emergency stop is supported (`set_emergency_stop`). |
+## Canonical Error Mapping: Contract → API
+
+This table maps each contract error to the higher-level semantics that users and
+backend/frontend layers observe. Consumers of the contract should use these numeric
+codes for cross-layer correlation.
+
+| Code | Contract Variant | Backend HTTP Status | Backend Error Code | User-Facing Meaning |
+|---|---|---|---|---|
+| `1` | `InvalidAllocation` | `400` | `VALIDATION_ERROR` | Target allocations must sum to 100%. |
+| `2` | `RebalanceNotNeeded` | — | — | _Reserved; not currently emitted._ |
+| `3` | `EmergencyStop` | `503` | `SERVICE_UNAVAILABLE` | Contract is paused by admin; no mutations allowed. |
+| `4` | `CooldownActive` | `429` | `RATE_LIMITED` | Must wait 3600 s since last rebalance. |
+| `5` | `StaleData` | `502` | `SERVICE_UNAVAILABLE` | Reflector oracle price data is stale. |
+| `6` | `ExcessiveDrift` | — | — | _Reserved; not currently emitted._ |
+| `7` | `AlreadyInitialized` | `409` | `CONFLICT` | Contract already initialized. |
+| `8` | `InvalidThreshold` | `400` | `VALIDATION_ERROR` | Rebalance threshold must be 1–50. |
+| `9` | `InvalidSlippageTolerance` | `400` | `VALIDATION_ERROR` | Slippage tolerance must be 10–500 bps. |
+| `10` | `SlippageExceeded` | `400` | `VALIDATION_ERROR` | Post-trade execution exceeds the portfolio's slippage tolerance. |
+| `11` | `TooManyAssets` | `400` | `VALIDATION_ERROR` | Portfolio exceeds maximum of 10 assets. |
+| `12` | `TimestampDrift` | `400` | `VALIDATION_ERROR` | Ledger timestamp moved backward or jumped more than 7200 s. |
+| `13` | `InvalidAmount` | `400` | `VALIDATION_ERROR` | Deposit amount must be positive. |
+| `14` | `MissingPriceData` | `502` | `SERVICE_UNAVAILABLE` | Reflector oracle returned no price for an asset. |
 
 ## XDR/Contract Type References
 
