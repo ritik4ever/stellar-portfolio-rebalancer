@@ -406,7 +406,6 @@ impl PortfolioRebalancer {
             },
         );
     }
-
     /// Returns the minimum allowed rebalance threshold percentage.
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD

@@ -164,19 +164,10 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Purpose:** Returns the maximum number of assets allowed in a portfolio.
 - **Returns:** `MAX_PORTFOLIO_ASSETS` (currently `10`).
 
-### `simulate_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<Map<Address, i128>, Error>`
+### `preview_rebalance(env: Env, portfolio_id: u64) -> RebalancePreview`
 
-- **Purpose:** Non-mutating simulation path for backend dry-run APIs. Returns a map of planned trades where positive values indicate buys and negative values indicate sells. Surfaces policy failures (cooldown, stale/missing prices, slippage) as `Error` values instead of panics.
-- **Parameters:**
-  - `portfolio_id`: Portfolio to simulate rebalance for.
-  - `actual_balances`: Optional actual balances for slippage checks; pass an empty map to skip slippage validation.
-- **Returns:** `Ok(Map<Address, i128>)` with planned trades, or one of:
-  - `Err(Error::CooldownActive)` if the portfolio is still in cooldown.
-  - `Err(Error::StaleData)` if any price is missing or stale.
-  - `Err(Error::SlippageExceeded)` if provided `actual_balances` exceed the portfolio's slippage tolerance.
-- **Preconditions / failure behavior:**
-  - Does not require portfolio owner authorization and does not mutate persistent storage.
-
+- **Purpose:** Non-mutating preview that computes planned trades, skipped assets, and threshold decisions for a portfolio without executing the rebalance.
+- **Returns:** `RebalancePreview` with trade details.
 ### `transfer_stewardship(env: Env, portfolio_id: u64, new_steward: Address) -> Result<(), Error>`
 
 - **Purpose:** Transfers operational ownership of a single portfolio to a new address without changing the global contract admin.
@@ -203,6 +194,7 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
   - `PerPortfolioSteward = 1` — per-portfolio steward transfer is supported.
   - `DifferentiatedPricing = 2` — `calculate_portfolio_value` distinguishes stale, missing, and malformed prices.
   - `EmergencyStop = 4` — global emergency stop is supported.
+
 
 ## Error Codes (`contracts/src/types.rs`)
 
