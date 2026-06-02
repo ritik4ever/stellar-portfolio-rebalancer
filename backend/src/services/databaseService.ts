@@ -361,6 +361,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
 }
 
 function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
+  const details = safeJsonParse(row.details, undefined, `event(${row.id}).details`);
   return {
     id: row.id,
     portfolioId: row.portfolio_id,
@@ -376,7 +377,10 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
       `event(${row.id}).risk_alerts`,
     ),
     error: row.error ?? undefined,
-    details: safeJsonParse(row.details, undefined, `event(${row.id}).details`),
+    actor: details?.actor,
+    source: details?.source,
+    triggerMetadata: details?.triggerMetadata,
+    details,
   };
 }
 
@@ -1041,6 +1045,22 @@ export class DatabaseService {
       );
   }
 
+  /**
+   * Purge consent audit events older than the specified number of days.
+   * Returns the number of deleted rows.
+   */
+  purgeOldConsentAuditEvents(retentionDays: number): number {
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const result = this.db
+      .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")
+      .run(cutoff);
+    const count = result.changes;
+    if (count > 0) {
+      logger.info(`[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`);
+    }
+    return count;
+  }
+
   deleteUserData(userId: string): void {
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
     this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
@@ -1085,6 +1105,9 @@ export class DatabaseService {
     details?: any;
     timestamp?: string;
     eventSource?: "offchain" | "simulated" | "onchain";
+    actor?: "user" | "system" | "admin" | "scheduler";
+    source?: "dashboard" | "api" | "contract" | "scheduler" | "auto_rebalance";
+    triggerMetadata?: Record<string, unknown>;
     onChainConfirmed?: boolean;
     onChainEventType?: string;
     onChainTxHash?: string;
@@ -1094,6 +1117,13 @@ export class DatabaseService {
     isSimulated?: boolean;
   }): RebalanceEvent {
     try {
+      const mergedDetails = {
+        ...(eventData.details ?? {}),
+        ...(eventData.actor !== undefined && { actor: eventData.actor }),
+        ...(eventData.source !== undefined && { source: eventData.source }),
+        ...(eventData.triggerMetadata !== undefined && { triggerMetadata: eventData.triggerMetadata }),
+      };
+
       const event: RebalanceEvent = {
         id: generateId(),
         portfolioId: eventData.portfolioId,
@@ -1105,7 +1135,10 @@ export class DatabaseService {
         isAutomatic: eventData.isAutomatic ?? false,
         riskAlerts: eventData.riskAlerts ?? [],
         error: eventData.error,
-        details: eventData.details,
+        actor: eventData.actor,
+        source: eventData.source,
+        triggerMetadata: eventData.triggerMetadata,
+        details: mergedDetails,
         eventSource: eventData.eventSource,
         onChainConfirmed: eventData.onChainConfirmed,
         onChainEventType: eventData.onChainEventType,

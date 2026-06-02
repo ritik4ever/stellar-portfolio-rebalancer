@@ -21,6 +21,7 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 - **Risk Management** – Circuit breakers, concentration limits, volatility detection  
 - **Professional UI** – Responsive interface with real-time portfolio visualization  
 - **Demo Mode** – $10,000 simulated portfolio for testing  
+- **Trust & transparency** – Landing page summarizes architecture, risk controls, and observability; legal documents show a fixed version and effective date
 
 ---
 

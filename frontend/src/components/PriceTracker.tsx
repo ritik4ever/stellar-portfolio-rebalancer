@@ -83,7 +83,7 @@ function qualityMessage(meta: PriceFeedClientMeta | undefined): string | null {
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const { data: assetList = ['XLM', 'BTC', 'ETH', 'USDC'] } = useAssets()
     const { data: priceBundle, isLoading, error: queryError, refetch } = usePrices()
-    const { state: realtimeState } = useRealtimeConnection()
+    const { state: realtimeState, statusDetail, reconnectInfo } = useRealtimeConnection()
 
     const prices = useMemo(() => normalizePrices(priceBundle?.prices), [priceBundle?.prices])
     const feedMeta = priceBundle?.feedMeta
@@ -92,6 +92,17 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const qualityHint = useMemo(() => qualityMessage(feedMeta), [feedMeta])
     const loading = isLoading
     const isConnected = realtimeState === 'connected'
+    const isPaused = realtimeState === 'paused'
+    const isReconnecting = realtimeState === 'reconnecting' || realtimeState === 'connecting'
+    const connectionLabel = isConnected
+        ? 'Connected'
+        : isPaused
+          ? 'Paused'
+          : isReconnecting
+            ? reconnectInfo
+                ? `Reconnecting (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})`
+                : 'Reconnecting'
+            : 'Disconnected'
     const error =
         queryError instanceof Error ? queryError.message : queryError ? String(queryError) : null
 
@@ -193,10 +204,25 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         ) : (
                             <WifiOff className="w-4 h-4 text-red-500" />
                         )}
-                        <span className={`text-xs ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
-                            {isConnected ? 'Connected' : 'Disconnected'}
+                        <span
+                            className={`text-xs ${
+                                isConnected
+                                    ? 'text-green-600'
+                                    : isPaused
+                                      ? 'text-slate-600 dark:text-slate-400'
+                                      : isReconnecting
+                                        ? 'text-amber-600'
+                                        : 'text-red-600'
+                            }`}
+                        >
+                            {connectionLabel}
                         </span>
                     </div>
+                    {statusDetail && !isConnected ? (
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-[12rem] truncate">
+                            {statusDetail}
+                        </span>
+                    ) : null}
                     {error && (
                         <div
                             className="text-xs text-red-500 bg-red-50 dark:bg-red-900/30 px-2 py-1 rounded cursor-pointer"
@@ -282,7 +308,11 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         <div className="flex items-center">
                             <WifiOff className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mr-2" />
                             <span className="text-sm text-yellow-800 dark:text-yellow-300">
-                                Connection lost. Showing last known prices.
+                                {isPaused
+                                    ? 'Live feed paused in the background. Showing last known prices.'
+                                    : isReconnecting
+                                      ? 'Reconnecting to live prices. Showing last known quotes until the socket is back.'
+                                      : 'Connection lost. Showing last known prices.'}
                             </span>
                         </div>
                         <button
