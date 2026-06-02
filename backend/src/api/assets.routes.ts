@@ -102,7 +102,7 @@ assetsRouter.get('/admin/rate-limits/metrics', requireAdmin, (req: Request, res:
 assetsRouter.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
-        assetRegistryService.add(
+        await assetRegistryService.add(
             symbol,
             name,
             {

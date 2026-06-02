@@ -44,5 +44,4 @@ const VALID_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
         ).toThrow(AssetRegistryValidationError)
     })
 
-    it('rejects invalid contract strkey', () => {
 

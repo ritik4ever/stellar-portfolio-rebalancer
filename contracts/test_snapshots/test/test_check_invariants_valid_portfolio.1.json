@@ -60,11 +60,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -73,7 +70,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -175,7 +171,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 100
+                                "lo": 500
                               }
                             }
                           }
@@ -561,10 +557,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "created"
+                "symbol": "created"
               }
             ],
             "data": {
@@ -634,11 +630,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -656,10 +649,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "deposit"
+                "symbol": "deposit"
               }
             ],
             "data": {
@@ -673,11 +666,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -722,7 +712,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_portfolio"
+                "symbol": "check_invariants"
               }
             ],
             "data": {
@@ -745,152 +735,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_portfolio"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "current_balances"
-                  },
-                  "val": {
-                    "map": [
-                      {
-                        "key": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 100
-                          }
-                        }
-                      }
-                    ]
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "is_active"
-                  },
-                  "val": {
-                    "bool": true
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "last_rebalance"
-                  },
-                  "val": {
-                    "u64": 0
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "rebalance_threshold"
-                  },
-                  "val": {
-                    "u32": 5
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "slippage_tolerance"
-                  },
-                  "val": {
-                    "u32": 50
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "target_allocations"
-                  },
-                  "val": {
-                    "map": [
-                      {
-                        "key": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                        },
-                        "val": {
-                          "u32": 100
-                        }
-                      }
-                    ]
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_value"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 0
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "user"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
-              },
-              {
-                "symbol": "lastprice"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "Stellar"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "lastprice"
+                "symbol": "check_invariants"
               }
             ],
             "data": "void"

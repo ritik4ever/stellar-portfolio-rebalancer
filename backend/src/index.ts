@@ -38,7 +38,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     initializeSentry()
     setupProcessErrorHandlers()
 
-    const redisAvailable = await probeRedis()
+    const redisAvailable = await probeRedis(config)
     const { mountApiRoutes, mountLegacyNonApiRedirects } = await import('./http/mountApiRoutes.js')
     const { initRobustWebSocket } = await import('./services/websocket.service.js')
     const { startQueueScheduler } = await import('./queue/scheduler.js')
@@ -112,10 +112,12 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     const wss = new WebSocketServer({ server })
     initRobustWebSocket(wss)
 
+    const rateLimitStore = getRateLimitStoreType()
+    logger.info('[STARTUP] Config fingerprint', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)
+    logStartupSubsystems(config, redisAvailable, rateLimitStore)
+
     server.listen(config.port, () => {
-        const rateLimitStore = getRateLimitStoreType()
-        logger.info('[SERVER] Listening', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)
-        logStartupSubsystems(config, redisAvailable, rateLimitStore)
+        logger.info('[SERVER] Listening on port ' + config.port)
         logger.info('[SERVER] WebSocket robust mode active (heartbeat, protocol validation, inactive cleanup)')
 
         if (redisAvailable) {

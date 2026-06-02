@@ -41,6 +41,13 @@ const readinessGauge = new Gauge({
   registers: [register],
 });
 
+const readinessDependencyLatency = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}readiness_dependency_latency_ms`,
+    help: 'Measured latency (ms) for readiness dependency checks',
+    labelNames: ['dependency'] as const,
+    registers: [register],
+})
+
 const queueDepthGauge = new Gauge({
   name: `${observabilityConfig.metrics.prefix}queue_jobs`,
   help: "Current queue depth by state",
@@ -73,6 +80,54 @@ const reflectorFallbackUsageTotal = new Counter({
   name: `${observabilityConfig.metrics.prefix}reflector_fallback_usage_total`,
   help: "Total fallback price resolutions used by the backend",
   labelNames: ["reason"] as const,
+  registers: [register],
+});
+
+// TTL and cache metrics
+const cacheHitRatioGauge = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}cache_hit_ratio`,
+  help: "Cache hit ratio by asset (0.0 to 1.0)",
+  labelNames: ["asset"] as const,
+  registers: [register],
+});
+
+const cacheAgeHistogram = new Histogram({
+  name: `${observabilityConfig.metrics.prefix}cache_age_milliseconds`,
+  help: "Age of cached price entries in milliseconds",
+  labelNames: ["asset"] as const,
+  buckets: [100, 500, 1000, 5000, 10000, 30000, 60000, 300000, 600000],
+  registers: [register],
+});
+
+const cacheSizeGauge = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}cache_size_bytes`,
+  help: "Approximate size of price cache in bytes",
+  registers: [register],
+});
+
+const cacheEntriesGauge = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}cache_entries_total`,
+  help: "Total number of entries in price cache",
+  registers: [register],
+});
+
+const cacheOperationsTotal = new Counter({
+  name: `${observabilityConfig.metrics.prefix}cache_operations_total`,
+  help: "Cache operations (hit, miss, eviction, update)",
+  labelNames: ["operation", "asset"] as const,
+  registers: [register],
+});
+
+const cacheTtlSecondsGauge = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}cache_ttl_seconds`,
+  help: "Current TTL configuration for price cache in seconds",
+  registers: [register],
+});
+
+const cacheExpirationCounterTotal = new Counter({
+  name: `${observabilityConfig.metrics.prefix}cache_expirations_total`,
+  help: "Total number of cache entries that expired",
+  labelNames: ["asset"] as const,
   registers: [register],
 });
 
@@ -164,24 +219,31 @@ export async function getMetricsPayload(): Promise<string> {
 
 }
 
-export function getMetricsContentType(): string {
-  return register.contentType;
+export function recordCacheEntries(count: number): void {
+  cacheEntriesGauge.set(count);
 }
 
-export function recordPriceFeedResolution(
-  meta: Pick<PriceFeedMeta, "resolutionHint" | "degraded" | "staleOrLimited">,
-): void {
-  priceFeedResolutionsTotal.inc({
-    resolution_hint: meta.resolutionHint,
-    degraded: String(meta.degraded),
-    stale_or_limited: String(meta.staleOrLimited),
-  });
+export function recordCacheOperation(operation: "hit" | "miss" | "eviction" | "update", asset: string): void {
+  cacheOperationsTotal.inc({ operation, asset });
 }
 
-export function recordReflectorStalePrice(asset: string): void {
-  reflectorStalePricesTotal.inc({ asset });
+export function recordCacheTtl(ttlSeconds: number): void {
+  cacheTtlSecondsGauge.set(ttlSeconds);
 }
 
-export function recordReflectorFallbackUsage(reason: string): void {
-  reflectorFallbackUsageTotal.inc({ reason });
+export function recordCacheExpiration(asset: string): void {
+  cacheExpirationCounterTotal.inc({ asset });
+}
+
+// ── Auth security event metrics (Issue #423) ─────────────────────────────────
+
+const authSecurityEventsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}auth_security_events_total`,
+    help: 'Total authentication security events by type',
+    labelNames: ['event_type'] as const,
+    registers: [register],
+})
+
+export function recordAuthSecurityEvent(eventType: string): void {
+    authSecurityEventsTotal.inc({ event_type: eventType })
 }

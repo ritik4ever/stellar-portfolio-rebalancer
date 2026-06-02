@@ -141,6 +141,17 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     let filtered = data?.history || (portfolioId === 'demo' || !portfolioId ? getDemoHistory() : []); if(search) filtered = filtered.filter((e:any) => e.trigger.toLowerCase().includes(search.toLowerCase()) || e.details?.reason?.toLowerCase().includes(search.toLowerCase())); if(statusFilter) filtered = filtered.filter((e:any) => e.status === statusFilter); if(triggerFilter) filtered = filtered.filter((e:any) => e.trigger.includes(triggerFilter)); if(dateFilter) filtered = filtered.filter((e:any) => e.timestamp.startsWith(dateFilter)); const history: RebalanceEvent[] = filtered
     const totalCount = data?.total || (portfolioId === 'demo' || !portfolioId ? 2 : 0)
     const totalPages = Math.ceil(totalCount / limit)
+    const error = queryError ? 'Failed to load rebalance history' : null
+    const loading = forcedLoading || (isLoading && !data)
+
+    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
+        const date = new Date(timestamp)
+
+        const dateFormatted = date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        })
 
 
     const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => ({
@@ -284,6 +295,8 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
 
     if (loading) {
         return (
+            <div data-testid="rebalance-history-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+                <div className="animate-pulse">
 
                     <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
                     <div className="space-y-3">

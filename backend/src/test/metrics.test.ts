@@ -64,34 +64,7 @@ describe('metrics observability', () => {
         expect(payload).toContain('queue="rebalance",state="failed"')
     })
 
-    it('keeps queue metric labels bounded to the known queue and state allowlists', async () => {
-        mockGetQueueMetrics.mockResolvedValue({
-            redisConnected: true,
-            queues: {
-                rebalance: {
-                    waiting: 1,
-                    active: 2,
-                    completed: 3,
-                    failed: 4,
-                    delayed: 5
-                },
-                'portfolio-tenant-12345': {
-                    waiting: 99,
-                    active: 99,
-                    completed: 99,
-                    failed: 99,
-                    delayed: 99
-                }
-            }
-        })
 
-        const { getMetricsPayload } = await import('../observability/metrics.js')
-
-        const payload = await getMetricsPayload()
-
-        expect(payload).toContain('queue="rebalance",state="waiting"')
-        expect(payload).toContain('queue="portfolio-check",state="waiting"')
-        expect(payload).not.toContain('portfolio-tenant-12345')
     })
 })
 

@@ -51,6 +51,16 @@ test:
 bench:
 	cargo test benchmark_
 
+# Run benchmarks and emit JSON output for CI diffing
+bench-json:
+	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	awk '/^BENCHMARK_RESULT\|/ {split($$0, a, "|"); printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", a[2], a[3], a[4], a[5], a[6]}' | \
+	jq -s '.' > bench_results.json 2>/dev/null || \
+	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	grep '^BENCHMARK_RESULT|' | \
+	sed 's/^BENCHMARK_RESULT|//' | \
+	awk -F'|' '{printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", $$1, $$2, $$3, $$4, $$5}' > bench_results.json
+
 # Clean build artifacts
 clean:
 	cargo clean
@@ -157,6 +167,15 @@ setup-testnet:
 	@echo "  3) Deploy: soroban contract deploy --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm --source deployer --network testnet"
 	@echo "  For more commands, see docs/soroban-cookbook.md"
 
+# Snapshot diff: compare two snapshot directories or files
+# Usage: make snapshot-diff BEFORE=<path> AFTER=<path> [ARGS=--json]
+snapshot-diff:
+	@if [ -z "$(BEFORE)" ] || [ -z "$(AFTER)" ]; then \
+		echo "Usage: make snapshot-diff BEFORE=<before-dir-or-file> AFTER=<after-dir-or-file> [ARGS=--json]"; \
+		exit 1; \
+	fi
+	node ../scripts/snapshot-diff.mjs $(BEFORE) $(AFTER) $(ARGS)
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -170,42 +189,6 @@ help:
 	@echo "  init-contract   - Initialize deployed contract"
 	@echo "  install-tools   - Install required tools"
 	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
-	@echo "  release-checklist - Print the release checklist location and contract release steps"
-	@echo "  help            - Show this help message"
-
-# Contract upgrade workflow
-upgrade-check:
-	@echo "=== Upgrade Pre-flight Checklist ==="
-	@echo "1) Compute current WASM hash:"
-	@echo "   soroban contract wasm hash --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm"
-	@echo "2) Verify storage shape compatibility (see docs/MIGRATION.md)"
-	@echo "3) Confirm rollback path:"
-	@echo "   - Keep previous WASM artifact: cp target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm previous.wasm"
-	@echo "   - Record current WASM hash for downgrade capability"
-	@echo "4) Deploy new WASM:"
-	@echo "   soroban contract install \\"
-	@echo "     --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \\"
-	@echo "     --source \$$(STELLAR_SECRET_KEY) \\"
-	@echo "     --network \$$(STELLAR_NETWORK)"
-	@echo "5) Upgrade contract instance:"
-	@echo "   soroban contract invoke \\"
-	@echo "     --id \$$(CONTRACT_ID) \\"
-	@echo "     --source \$$(STELLAR_SECRET_KEY) \\"
-	@echo "     --network \$$(STELLAR_NETWORK) \\"
-	@echo "     -- upgrade \\"
-	@echo "     --new_wasm_hash <hash-from-step-4>"
-	@echo "6) Verify upgrade event was emitted"
-	@echo "7) Run post-upgrade health checks"
-	@echo ""
-	@echo "Rollback:"
-	@echo "  soroban contract invoke \\"
-	@echo "    --id \$$(CONTRACT_ID) \\"
-	@echo "    --source \$$(STELLAR_SECRET_KEY) \\"
-	@echo "    --network \$$(STELLAR_NETWORK) \\"
-	@echo "    -- upgrade \\"
-	@echo "    --new_wasm_hash <previous-wasm-hash>"
-	@echo ""
-	@echo "See docs/MIGRATION.md for storage compatibility notes."
 
 # Contract release checklist
 release-checklist:

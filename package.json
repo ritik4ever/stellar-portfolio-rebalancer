@@ -39,8 +39,7 @@
     "lint:frontend": "cd frontend && npm run lint",
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
-    "sentry:metadata": "node scripts/sentry-metadata.mjs",
-    "validate:sentry-metadata": "node scripts/sentry-metadata.mjs --validate",
+
     "clean": "npm run clean:all",
     "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
   },

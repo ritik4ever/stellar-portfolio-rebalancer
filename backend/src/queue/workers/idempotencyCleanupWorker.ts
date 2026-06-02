@@ -14,6 +14,7 @@ import {
   markWorkerStarting,
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 
@@ -99,6 +100,7 @@ export function startIdempotencyCleanupWorker(): Worker | null {
       error: err.message,
       attemptsMade: job?.attemptsMade,
     });
+    void handleFinalFailure(job, err);
   });
 
   logger.info("[WORKER:idempotency-cleanup] Worker started");
