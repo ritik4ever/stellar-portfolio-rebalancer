@@ -6,6 +6,8 @@ The full contributor setup guide is at **[docs/CONTRIBUTING.md](docs/CONTRIBUTIN
 
 It covers:
 
+- Wallet-focused issue reporting via [.github/ISSUE_TEMPLATE/wallet-bug-report.md](.github/ISSUE_TEMPLATE/wallet-bug-report.md) for Freighter, Rabet, xBull, and signing-related failures
+
 - Minimum local setup (backend + frontend)
 - Optional services: PostgreSQL, Redis, SMTP
 - Database migrations (PostgreSQL and SQLite paths)
