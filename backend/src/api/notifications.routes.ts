@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import { notificationService } from '../services/notificationService.js'
+import { notificationService, NotificationService } from '../services/notificationService.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { writeRateLimiter, protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
@@ -141,6 +141,36 @@ notificationsRouter.get('/notifications/logs', requireJwtWhenEnabled, validateQu
         return ok(res, { logs })
     } catch (error) {
         logger.error('Failed to get notification logs', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Verify inbound webhook callback signature
+notificationsRouter.post('/notifications/webhook/callback', async (req: Request, res: Response) => {
+    try {
+        const signatureHeader = req.headers['x-signature-256'] as string | undefined
+        const body = JSON.stringify(req.body)
+        const secret = process.env.WEBHOOK_SIGNING_SECRET
+
+        if (!secret) {
+            logger.warn('Webhook callback received but no WEBHOOK_SIGNING_SECRET configured')
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Webhook verification not configured')
+        }
+
+        const valid = NotificationService.verifyCallbackSignature(body, signatureHeader, secret)
+
+        if (!valid) {
+            logger.warn('Webhook callback rejected: invalid signature', {
+                ip: req.ip,
+                signature: signatureHeader ? `${signatureHeader.slice(0, 20)}...` : undefined,
+            })
+            return fail(res, 401, 'UNAUTHORIZED', 'Invalid webhook signature')
+        }
+
+        logger.info('Webhook callback verified successfully')
+        return ok(res, { status: 'verified' })
+    } catch (error) {
+        logger.error('Webhook callback verification error', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

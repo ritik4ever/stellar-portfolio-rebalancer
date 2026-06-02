@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import {
   dbSaveNotificationPreferences,
@@ -50,7 +51,6 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
-      // Log as 'skipped' since the webhook preconditions were not met
       dbLogNotificationOutcome(payload.userId, 'webhook', payload.eventType, 'skipped', 'Webhook disabled or no URL provided');
       return;
     }
@@ -67,6 +67,14 @@ class WebhookProvider implements NotificationProvider {
     await this.sendWithRetry(preferences.webhookUrl, webhookPayload, 0);
   }
 
+  private computeSignature(body: string): string | undefined {
+    const secret = process.env.WEBHOOK_SIGNING_SECRET;
+    if (!secret) return undefined;
+    const hmac = createHmac("sha256", secret);
+    hmac.update(body, "utf8");
+    return `sha256=${hmac.digest("hex")}`;
+  }
+
   private async sendWithRetry(
     url: string,
     payload: any,
@@ -76,13 +84,20 @@ class WebhookProvider implements NotificationProvider {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
 
+      const body = JSON.stringify(payload);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "User-Agent": "StellarPortfolioRebalancer/1.0",
+      };
+      const signature = this.computeSignature(body);
+      if (signature) {
+        headers["X-Signature-256"] = signature;
+      }
+
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "StellarPortfolioRebalancer/1.0",
-        },
-        body: JSON.stringify(payload),
+        headers,
+        body,
         signal: controller.signal,
       });
 
@@ -97,7 +112,6 @@ class WebhookProvider implements NotificationProvider {
         event: payload.event,
         userId: payload.userId,
       });
-      // Capture successful delivery outcome payload
       dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'sent');
     } catch (error) {
       const errorMessage =
@@ -108,14 +122,11 @@ class WebhookProvider implements NotificationProvider {
         error: errorMessage,
       });
 
-      // Retry once prior to total failure assertion
       if (attempt < this.MAX_RETRIES) {
-        // Track the intermittent failure state as 'retried'
         dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'retried', errorMessage);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         await this.sendWithRetry(url, payload, attempt + 1);
       } else {
-        // Log final failure out to the DB if the max retries parameter is exceeded
         dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'failed', errorMessage);
         throw error;
       }
@@ -444,6 +455,47 @@ export class NotificationService {
       } catch (error) {
         logger.error('Error processing digest for user', { userId, error: error instanceof Error ? error.message : String(error) })
       }
+    }
+  }
+
+  /**
+   * Verify an incoming webhook callback signature.
+   * Expects the X-Signature-256 header in the format `sha256=<hex>`.
+   * Uses timing-safe comparison to prevent timing attacks.
+   */
+  static verifyCallbackSignature(
+    rawBody: string,
+    signatureHeader: string | undefined,
+    secret: string | undefined,
+  ): boolean {
+    if (!signatureHeader || !secret) {
+      logger.warn("Webhook callback verification skipped: missing signature or secret");
+      return false;
+    }
+
+    const prefix = "sha256=";
+    if (!signatureHeader.startsWith(prefix)) {
+      logger.warn("Webhook callback verification failed: invalid signature format");
+      return false;
+    }
+
+    const receivedSig = signatureHeader.slice(prefix.length);
+    if (!/^[a-f0-9]{64}$/i.test(receivedSig)) {
+      logger.warn("Webhook callback verification failed: malformed signature hex");
+      return false;
+    }
+
+    const hmac = createHmac("sha256", secret);
+    hmac.update(rawBody, "utf8");
+    const expectedSig = hmac.digest("hex");
+
+    try {
+      return timingSafeEqual(
+        Buffer.from(receivedSig, "hex"),
+        Buffer.from(expectedSig, "hex"),
+      );
+    } catch {
+      return false;
     }
   }
 

@@ -3,6 +3,7 @@ import { NotificationService, type NotificationPayload } from "../services/notif
 import { buildNotificationPayload, buildTestNotificationPayload } from "../services/notificationTemplates.js";
 import * as notificationDb from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
+import { createHmac } from "node:crypto";
 
 vi.mock("nodemailer");
 
@@ -269,6 +270,50 @@ describe("NotificationService", () => {
           webhookEnabled: false,
         })
       );
+    });
+  });
+
+  describe("verifyCallbackSignature", () => {
+    const TEST_SECRET = "test-webhook-secret-at-least-32-chars!!";
+    const TEST_BODY = JSON.stringify({ event: "test", userId: "user-1" });
+
+    function signBody(body: string, secret: string): string {
+      const hmac = createHmac("sha256", secret);
+      hmac.update(body, "utf8");
+      return `sha256=${hmac.digest("hex")}`;
+    }
+
+    it("returns true for a valid signature", () => {
+      const sig = signBody(TEST_BODY, TEST_SECRET);
+      expect(NotificationService.verifyCallbackSignature(TEST_BODY, sig, TEST_SECRET)).toBe(true);
+    });
+
+    it("returns false when signature header is missing", () => {
+      expect(NotificationService.verifyCallbackSignature(TEST_BODY, undefined, TEST_SECRET)).toBe(false);
+    });
+
+    it("returns false when secret is missing", () => {
+      const sig = signBody(TEST_BODY, TEST_SECRET);
+      expect(NotificationService.verifyCallbackSignature(TEST_BODY, sig, undefined)).toBe(false);
+    });
+
+    it("returns false for an invalid signature (wrong secret)", () => {
+      const sig = signBody(TEST_BODY, "wrong-secret-that-is-at-least-32-chars-long!!!");
+      expect(NotificationService.verifyCallbackSignature(TEST_BODY, sig, TEST_SECRET)).toBe(false);
+    });
+
+    it("returns false when body has been tampered with", () => {
+      const sig = signBody(TEST_BODY, TEST_SECRET);
+      const tamperedBody = JSON.stringify({ event: "tampered", userId: "user-1" });
+      expect(NotificationService.verifyCallbackSignature(tamperedBody, sig, TEST_SECRET)).toBe(false);
+    });
+
+    it("returns false for malformed signature header", () => {
+      expect(NotificationService.verifyCallbackSignature(TEST_BODY, "invalid-format", TEST_SECRET)).toBe(false);
+    });
+
+    it("returns false for non-hex signature value", () => {
+      expect(NotificationService.verifyCallbackSignature(TEST_BODY, "sha256=nothex!!", TEST_SECRET)).toBe(false);
     });
   });
 });
