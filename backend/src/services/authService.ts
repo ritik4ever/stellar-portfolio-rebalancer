@@ -13,6 +13,7 @@ import {
 } from "../db/refreshTokenDb.js";
 import { logger } from "../utils/logger.js";
 import type { RefreshTokenMetadata } from "../types/index.js";
+import { logger, logAudit } from "../utils/logger.js";
 
 const ACCESS_EXPIRY_SEC = parseInt(
   process.env.JWT_ACCESS_EXPIRY_SEC || "900",
@@ -50,6 +51,39 @@ export interface AuthTokens {
   refreshExpiresIn: number;
 }
 
+export type AuthAuditAction = "login" | "refresh" | "revocation";
+
+export interface AuthAuditEvent {
+  action: AuthAuditAction;
+  userAddress: string;
+  timestamp: string;
+  sessionId?: string;
+  previousSessionId?: string;
+  count?: number;
+  details?: Record<string, unknown>;
+}
+
+const MAX_AUTH_AUDIT_EVENTS = 100;
+const authAuditEvents: AuthAuditEvent[] = [];
+
+function recordAuthAuditEvent(event: AuthAuditEvent): void {
+  authAuditEvents.push(event);
+  while (authAuditEvents.length > MAX_AUTH_AUDIT_EVENTS) {
+    authAuditEvents.shift();
+  }
+  logAudit(`auth_${event.action}`, {
+    userAddress: event.userAddress,
+    sessionId: event.sessionId,
+    previousSessionId: event.previousSessionId,
+    count: event.count,
+    ...event.details,
+  });
+}
+
+export function getRecentAuthAuditEvents(limit = 50): AuthAuditEvent[] {
+  return authAuditEvents.slice(-limit).reverse();
+}
+
 export function getAuthConfig(): {
   enabled: boolean;
   accessExpirySec: number;
@@ -77,6 +111,11 @@ export async function issueTokens(
   address: string,
   metadata?: RefreshTokenMetadata | null,
 ): Promise<AuthTokens> {
+interface TokenCreationResult extends AuthTokens {
+  refreshId: string;
+}
+
+async function createTokensForUser(address: string): Promise<TokenCreationResult> {
   const accessToken = generateAccessToken(address);
   const refreshId = generateRefreshTokenId();
   const refreshToken = jwt.sign(
@@ -93,7 +132,20 @@ export async function issueTokens(
     refreshToken,
     expiresIn: ACCESS_EXPIRY_SEC,
     refreshExpiresIn: REFRESH_EXPIRY_SEC,
+    refreshId,
   };
+}
+
+export async function issueTokens(address: string): Promise<AuthTokens> {
+  const result = await createTokensForUser(address);
+  recordAuthAuditEvent({
+    action: "login",
+    userAddress: address,
+    timestamp: new Date().toISOString(),
+    sessionId: result.refreshId,
+  });
+  const { refreshId, ...tokens } = result;
+  return tokens;
 }
 
 export function verifyAccessToken(token: string): TokenPayload | null {
@@ -128,6 +180,16 @@ export async function refreshTokens(
     lastUsedAt: new Date().toISOString(),
   };
   return issueTokens(row.user_address, metadata);
+  const result = await createTokensForUser(row.user_address);
+  recordAuthAuditEvent({
+    action: "refresh",
+    userAddress: row.user_address,
+    timestamp: new Date().toISOString(),
+    sessionId: result.refreshId,
+    previousSessionId: row.id,
+  });
+  const { refreshId, ...tokens } = result;
+  return tokens;
 }
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────
@@ -140,6 +202,50 @@ interface ChallengeEntry {
 }
 
 const challengeStore = new Map<string, ChallengeEntry>();
+
+// ── Issue #423: suspicious login heuristics ───────────────────────────────────
+
+const FAILED_SIG_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const FAILED_SIG_THRESHOLD = 5;
+
+interface FailedAttemptRecord {
+  count: number;
+  windowStart: number;
+}
+
+const failedSigAttempts = new Map<string, FailedAttemptRecord>();
+
+function recordFailedSignature(address: string): void {
+  const now = Date.now();
+  const record = failedSigAttempts.get(address);
+
+  if (!record || now - record.windowStart > FAILED_SIG_WINDOW_MS) {
+    failedSigAttempts.set(address, { count: 1, windowStart: now });
+    return;
+  }
+
+  record.count += 1;
+
+  if (record.count >= FAILED_SIG_THRESHOLD) {
+    recordAuthSecurityEvent("suspicious_login");
+    logAudit("suspicious_login_detected", {
+      address,
+      failedAttempts: record.count,
+      windowMs: FAILED_SIG_WINDOW_MS,
+    });
+    logger.warn("Suspicious login: repeated signature failures", {
+      address,
+      failedAttempts: record.count,
+    });
+  }
+}
+
+export function getFailedSigAttempts(address: string): number {
+  const now = Date.now();
+  const record = failedSigAttempts.get(address);
+  if (!record || now - record.windowStart > FAILED_SIG_WINDOW_MS) return 0;
+  return record.count;
+}
 
 export function issueChallenge(address: string): string {
   challengeStore.delete(address);
@@ -158,9 +264,17 @@ export function verifyWalletSignature(
   signatureB64: string,
 ): boolean {
   const entry = challengeStore.get(address);
-  if (!entry) return false;
+  if (!entry) {
+    recordAuthSecurityEvent("expired_challenge");
+    logAudit("auth_expired_challenge", { address });
+    logger.warn("Auth attempt with no active challenge", { address });
+    return false;
+  }
   if (Date.now() > entry.expiresAt) {
     challengeStore.delete(address);
+    recordAuthSecurityEvent("expired_challenge");
+    logAudit("auth_expired_challenge", { address });
+    logger.warn("Auth attempt with expired challenge", { address });
     return false;
   }
   challengeStore.delete(address);
@@ -168,8 +282,17 @@ export function verifyWalletSignature(
     const keypair = Keypair.fromPublicKey(address);
     const messageBuffer = Buffer.from(entry.nonce, "utf8");
     const sigBuffer = Buffer.from(signatureB64, "base64");
-    return keypair.verify(messageBuffer, sigBuffer);
+    const valid = keypair.verify(messageBuffer, sigBuffer);
+    if (!valid) {
+      recordAuthSecurityEvent("failed_signature");
+      logAudit("auth_failed_signature", { address });
+      recordFailedSignature(address);
+    }
+    return valid;
   } catch {
+    recordAuthSecurityEvent("failed_signature");
+    logAudit("auth_failed_signature", { address });
+    recordFailedSignature(address);
     return false;
   }
 }
@@ -195,6 +318,13 @@ export async function logout(
     const row = await findRefreshToken(refreshToken);
     if (row) {
       await deleteRefreshTokenById(row.id).catch(() => {});
+      recordAuthAuditEvent({
+        action: "revocation",
+        userAddress: row.user_address,
+        timestamp: new Date().toISOString(),
+        sessionId: row.id,
+        details: { reason: "single_session" },
+      });
       return true;
     }
   }
@@ -204,6 +334,13 @@ export async function logout(
       logger.info("All refresh tokens invalidated for user", {
         userId: address,
         count,
+      });
+      recordAuthAuditEvent({
+        action: "revocation",
+        userAddress: address,
+        timestamp: new Date().toISOString(),
+        count,
+        details: { reason: "all_sessions" },
       });
       return true;
     }

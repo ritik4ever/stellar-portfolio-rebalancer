@@ -99,21 +99,24 @@ export const recordConsentSchema = z.object({
     userId: z.string().min(1, 'userId is required'),
     terms: z.boolean().refine((v) => v === true, { message: 'You must accept Terms of Service' }),
     privacy: z.boolean().refine((v) => v === true, { message: 'You must accept Privacy Policy' }),
-    cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' })
+    cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' }),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict();
 
 export const consentGrantSchema = z.object({
     userId: z.string().min(1, 'userId is required').optional(),
     terms: z.boolean().default(true),
     privacy: z.boolean().default(true),
-    cookies: z.boolean().default(true)
+    cookies: z.boolean().default(true),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict().refine(
     (data) => data.terms && data.privacy && data.cookies,
     { message: 'All consent flags must be accepted', path: ['terms'] }
 );
 
 export const consentRevokeSchema = z.object({
-    userId: z.string().min(1, 'userId is required').optional()
+    userId: z.string().min(1, 'userId is required').optional(),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict();
 
 export const consentAuditQuerySchema = z.object({
