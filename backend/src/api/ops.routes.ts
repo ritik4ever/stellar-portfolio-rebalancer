@@ -21,7 +21,7 @@ import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
-import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue, getPortfolioExportQueue } from '../queue/queues.js'
+import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue, getDLQQueue, getPortfolioExportQueue, getQueueByName } from '../queue/queues.js'
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
 
@@ -232,7 +232,79 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
     }
 })
 
+/**
+ * GET /api/queue/dlq
+ * Lists all jobs that have exhausted their retries and were moved to the DLQ.
+ */
+opsRouter.get('/queue/dlq', async (req: Request, res: Response) => {
+    try {
+        const dlq = getDLQQueue()
+        if (!dlq) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
+        }
 
+        const jobs = await dlq.getJobs(['waiting', 'active', 'completed', 'failed'])
+        const payload = jobs.map(job => ({
+            jobId: job?.id,
+            ...job?.data
+        }))
+
+        return ok(res, {
+            total: payload.length,
+            jobs: payload
+        })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * POST /api/queue/dlq/:jobId/replay
+ * Re-enqueues a dead-lettered job back into its original operational queue.
+ */
+opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) => {
+    try {
+        const { jobId } = req.params
+        const dlq = getDLQQueue()
+        if (!dlq) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'DLQ unavailable')
+        }
+
+        const job = await dlq.getJob(jobId)
+        if (!job) {
+            return fail(res, 404, 'JOB_NOT_FOUND', 'Dead letter job not found')
+        }
+
+        const { originalQueue, payload } = job.data
+
+        const queueMap: Record<string, any> = {
+            [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue(),
+            [QUEUE_NAMES.REBALANCE]: getRebalanceQueue(),
+            [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue(),
+        }
+
+        const targetQueue = queueMap[originalQueue]
+        if (!targetQueue) {
+            return fail(res, 400, 'INVALID_QUEUE', `Original queue ${originalQueue} is not supported for replay`)
+        }
+
+        await targetQueue.add(`replay-${jobId}`, payload, {
+            removeOnComplete: true,
+        })
+
+        await job.remove()
+
+        return ok(res, {
+            message: 'Job successfully replayed to original queue',
+            jobId,
+            targetQueue: originalQueue
+        })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/queue/:queueName/pause', async (req: Request, res: Response) => {
     try {
         const { queueName } = req.params
         const queue = getQueueByName(queueName)
@@ -243,7 +315,8 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
 
         await queue.pause()
 
-
+        return ok(res, { message: `Queue ${queueName} paused` })
+    } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

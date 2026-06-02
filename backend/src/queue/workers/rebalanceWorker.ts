@@ -8,6 +8,7 @@ import {
   markWorkerStarting,
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 
@@ -176,12 +177,18 @@ export function startRebalanceWorker(): Worker | null {
   });
 
   worker.on("failed", (j: Job | undefined, err: Error) => {
+    if (j) {
+      markWorkerJobFailed(runtimeStatus, err);
+    }
     logger.error("[WORKER:rebalance] Job failed", {
       jobId: j?.id,
       portfolioId: j?.data.portfolioId,
       error: err.message,
       attemptsMade: j?.attemptsMade,
     });
+    if (j) {
+      void handleFinalFailure(j, err);
+    }
   });
 
   logger.info("[WORKER:rebalance] Worker started (concurrency=3)");

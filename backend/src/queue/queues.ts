@@ -8,7 +8,11 @@ export const QUEUE_NAMES = {
   ANALYTICS_SNAPSHOT: "analytics-snapshot",
   ANALYTICS_COMPACTION: "analytics-compaction",
   IDEMPOTENCY_CLEANUP: "idempotency-cleanup",
+  PORTFOLIO_EXPORT: "portfolio-export",
+  DLQ: "dead-letter-queue",
 } as const;
+
+export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
 
 export interface PortfolioCheckJobData {
   triggeredBy?: "scheduler" | "manual" | "startup";
@@ -51,6 +55,16 @@ export interface PortfolioExportResult {
     bodyString?: string
 }
 
+export interface DLQJobData {
+  originalQueue: string;
+  originalJobId: string;
+  attempts: number;
+  error: string;
+  stack: string;
+  failedAt: string;
+  payload: any;
+}
+
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
 
 let portfolioCheckQueue: Queue<PortfolioCheckJobData> | null = null;
@@ -58,6 +72,7 @@ let rebalanceQueue: Queue<RebalanceJobData> | null = null;
 let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null;
 let analyticsCompactionQueue: Queue<AnalyticsCompactionJobData> | null = null;
 let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null;
+let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null;
 
 function getDefaultJobOptions() {
   return {
@@ -146,6 +161,26 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   }
 }
 
+let dlqQueue: Queue<DLQJobData> | null = null;
+
+export function getDLQQueue(): Queue<DLQJobData> | null {
+  try {
+    if (!dlqQueue) {
+      dlqQueue = new Queue(QUEUE_NAMES.DLQ, {
+        connection: getConnectionOptions(),
+        defaultJobOptions: {
+          ...getDefaultJobOptions(),
+          attempts: 1, // DLQ jobs themselves should not be retried
+        },
+      });
+      logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.DLQ}`);
+    }
+    return dlqQueue;
+  } catch {
+    return null;
+  }
+}
+
 export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, PortfolioExportResult> | null {
     try {
         if (!portfolioExportQueue) {
@@ -161,6 +196,21 @@ export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, Portfol
     }
 }
 
+export function getQueueByName(name: string): Queue<any, any> | null {
+  const queueMap: Record<string, () => any> = {
+    [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
+    [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
+    [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
+    [QUEUE_NAMES.ANALYTICS_COMPACTION]: getAnalyticsCompactionQueue,
+    [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
+    [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
+    [QUEUE_NAMES.DLQ]: getDLQQueue,
+  };
+
+  const getter = queueMap[name];
+  return getter ? getter() : null;
+}
+
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
@@ -170,11 +220,15 @@ export async function closeAllQueues(): Promise<void> {
     analyticsSnapshotQueue?.close(),
     analyticsCompactionQueue?.close(),
     idempotencyCleanupQueue?.close(),
+    portfolioExportQueue?.close(),
+    dlqQueue?.close(),
   ]);
   portfolioCheckQueue = null;
   rebalanceQueue = null;
   analyticsSnapshotQueue = null;
   analyticsCompactionQueue = null;
   idempotencyCleanupQueue = null;
+  portfolioExportQueue = null;
+  dlqQueue = null;
   logger.info("[QUEUE] All queues closed");
 }

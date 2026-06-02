@@ -375,6 +375,17 @@ export interface RebalanceRollback {
     failures: string[]
 }
 
+export interface IdempotencyRecord {
+    key: string
+    requestHash: string
+    method: string
+    path: string
+    statusCode: number
+    responseBody: string
+    createdAt: string
+    expiresAt: string
+}
+
 export interface ExecutionExplanation {
     routeLength: number
     estimatedSlippage: number

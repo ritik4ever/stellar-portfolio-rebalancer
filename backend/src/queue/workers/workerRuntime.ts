@@ -1,4 +1,7 @@
+import { Job } from "bullmq";
 import { persistWorkerStatus } from './workerHeartbeat.js';
+import { getDLQQueue, DLQJobData } from '../queues.js';
+import { logger } from '../../utils/logger.js';
 import { query } from '../../db/client.js';
 
 export interface WorkerRuntimeStatus {
@@ -110,3 +113,34 @@ export function snapshotWorkerRuntimeStatus(status: WorkerRuntimeStatus): Worker
     return { ...status }
 }
 
+export async function handleFinalFailure(job: Job, error: unknown): Promise<void> {
+    const maxAttempts = job.opts.attempts || 5;
+    if (job.attemptsMade < maxAttempts) {
+        return;
+    }
+
+    logger.error(`[DLQ] Job ${job.id} exhausted all ${maxAttempts} retries. Moving to DLQ. Error: ${error instanceof Error ? error.message : String(error)}`);
+
+    const dlq = getDLQQueue();
+    if (!dlq) {
+        logger.error(`[DLQ] Failed to get DLQ queue instance. Job ${job.id} cannot be dead-lettered.`);
+        return;
+    }
+
+    const dlqJobData: DLQJobData = {
+        originalQueue: job.queueName,
+        originalJobId: job.id,
+        attempts: job.attemptsMade,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack || "" : "",
+        failedAt: new Date().toISOString(),
+        payload: job.data,
+    };
+
+    try {
+        await dlq.add("dead-letter", dlqJobData);
+        logger.info(`[DLQ] Successfully moved job ${job.id} to dead-letter-queue.`);
+    } catch (err) {
+        logger.error(`[DLQ] Error occurred while adding job ${job.id} to DLQ: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
