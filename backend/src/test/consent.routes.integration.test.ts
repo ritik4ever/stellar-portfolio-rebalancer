@@ -162,4 +162,43 @@ describe('consent routes integration', () => {
 
         expect(blocked.body.error?.code).toBe('FORBIDDEN')
     })
+
+    it('POST /api/v1/consent/audit/purge deletes old audit events', async () => {
+        const userId = testUser('PURGE')
+        const token = generateAccessToken(userId)
+
+        await request(app)
+            .post('/api/v1/consent/grant')
+            .set('Authorization', `Bearer ${token}`)
+            .send({})
+            .expect(200)
+
+        const auditBefore = await request(app)
+            .get('/api/v1/consent/audit')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+        expect(auditBefore.body.data.events.length).toBeGreaterThan(0)
+
+        const purge = await request(app)
+            .post('/api/v1/consent/audit/purge')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ retentionDays: 0 })
+            .expect(200)
+
+        expect(purge.body.data.deletedCount).toBeGreaterThan(0)
+        expect(purge.body.data.retentionDays).toBe(0)
+    })
+
+    it('POST /api/v1/consent/audit/purge returns 400 for invalid retentionDays', async () => {
+        const userId = testUser('PURGEINV')
+        const token = generateAccessToken(userId)
+
+        const purge = await request(app)
+            .post('/api/v1/consent/audit/purge')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ retentionDays: -1 })
+            .expect(400)
+
+        expect(purge.body.error?.code).toBe('VALIDATION_ERROR')
+    })
 })

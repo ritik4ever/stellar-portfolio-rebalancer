@@ -48,7 +48,19 @@ async function main() {
     app.get('/readiness', sendReadiness)
     app.get('/ready', sendReadiness)
 
-    app.get('/metrics', async (_req, res, next) => {
+    const isMetricsAllowed = (req: Request): boolean => {
+        if (config.nodeEnv === 'development' || config.nodeEnv === 'test') return true
+        const ip = req.ip ?? req.socket?.remoteAddress ?? ''
+        const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip === 'localhost'
+        if (isLocal) return true
+        return config.metricsAllowlist.some((entry) => ip.includes(entry))
+    }
+
+    app.get('/metrics', async (req, res, next) => {
+        if (!isMetricsAllowed(req)) {
+            logger.warn('[METRICS] Blocked /metrics access from IP', { ip: req.ip })
+            return res.status(403).json({ error: 'Forbidden', message: 'Metrics endpoint is restricted' })
+        }
         try {
             res.setHeader('Content-Type', getMetricsContentType())
             res.status(200).send(await getMetricsPayload())

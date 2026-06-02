@@ -8,7 +8,7 @@ This document is the canonical reference for `backend/.env.example`.
 2. Set all required values.
 3. Keep optional values at defaults unless you need different behavior.
 
-## Variable Reference
+## Backend Variable Reference
 
 | Variable | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -31,6 +31,7 @@ This document is the canonical reference for `backend/.env.example`.
 | `CI` | string | No | empty | CI marker used by scripts/runtime checks. |
 | `DB_PATH` | path | No | `./data/portfolio.db` | SQLite database path for local/test fallback. |
 | `COINGECKO_API_KEY` | string | No | empty | CoinGecko API key for higher rate limits. |
+| `REFLECTOR_API_URL` | URL | No | empty | Reflector API base URL for off-chain price/oracle fallback paths. |
 | `PRICE_CACHE_DURATION` | integer (ms) | No | `300000` | Price-cache TTL. |
 | `MIN_REQUEST_INTERVAL` | integer (ms) | No | `90000` | Minimum delay between upstream market-data requests. |
 | `ENABLE_AUTO_REBALANCER` | boolean | No | `false` | Enables automatic rebalance scheduling. |
@@ -86,7 +87,11 @@ This document is the canonical reference for `backend/.env.example`.
 | `RISK_LIQUIDITY_CRITICAL` | number | No | `500` | Critical-liquidity threshold. |
 | `ANALYTICS_SNAPSHOT_INTERVAL` | integer (ms) | No | `300000` | Interval for analytics snapshot jobs. |
 | `MAX_SNAPSHOTS_PER_PORTFOLIO` | integer | No | `1000` | Snapshot retention cap per portfolio. |
+| `READINESS_CACHE_TTL_MS` | integer (ms) | No | `2000` | Cache TTL for the readiness endpoint. |
+| `CONSENT_AUDIT_RETENTION_DAYS` | integer | No | `365` | Retention period for consent audit logs. |
 | `JWT_SECRET` | string | Conditionally | empty | Enables auth when set and length is at least 32 chars. |
+| `JWT_PREVIOUS_SECRET` | string | No | empty | Previous JWT signing secret accepted during key rotation. |
+| `JWT_PREVIOUS_SECRET_GRACE_UNTIL` | ISO date string | No | empty | Timestamp until which the previous JWT secret remains valid. |
 | `JWT_ACCESS_EXPIRY_SEC` | integer (s) | No | `900` | Access token TTL. |
 | `JWT_REFRESH_EXPIRY_SEC` | integer (s) | No | `604800` | Refresh token TTL. |
 | `API_RATE_LIMIT_WINDOW` | integer (ms) | No | `900000` | Security middleware rate-limit window. |
@@ -96,11 +101,13 @@ This document is the canonical reference for `backend/.env.example`.
 | `DEMO_MODE` | boolean | No | `true` | Enables local demo portfolio flows. |
 | `ALLOW_FALLBACK_PRICES` | boolean | No | `true` | Uses fallback prices when providers fail. |
 | `ALLOW_MOCK_PRICE_HISTORY` | boolean | No | `true` | Allows generated historical price data. |
+| `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | boolean | No | `false` | Allows public portfolio listing by user address in demo mode. |
 | `ENABLE_DEBUG_ROUTES` | boolean | No | `true` | Enables debug/test routes. |
 | `ALLOW_DEMO_BALANCE_FALLBACK` | boolean | No | `true` | Uses demo balances when on-chain fetch fails. |
 | `ENABLE_DEMO_DB_SEED` | boolean | No | `true` | Seeds demo DB records at startup. |
 | `DEMO_INITIAL_BALANCE` | number | No | `10000` | Starting demo portfolio value in USD. |
 | `MOCK_EXTERNAL_APIS` | boolean | No | `false` | Mocks outbound provider calls in test/dev flows. |
+| `FEATURE_FLAGS_FILE` | path | No | empty | Path to a local JSON file containing feature flag overrides for staging. |
 | `SOROBAN_RPC_URL` | URL | No | empty | Explicit Soroban RPC endpoint for contract indexer. |
 | `STELLAR_RPC_URL` | URL | No | empty | Backward-compatible alias of `SOROBAN_RPC_URL`. |
 | `SOROBAN_EVENT_INDEXER_INTERVAL_MS` | integer (ms) | No | `15000` | Poll interval for contract event indexing. |
@@ -123,3 +130,46 @@ This document is the canonical reference for `backend/.env.example`.
 | `METRICS_PREFIX` | string | No | `stellar_portfolio_` | Prefix applied to metric names. |
 | `METRICS_DEFAULT_LABELS_SERVICE` | string | No | `stellar-portfolio-backend` | Default service label for metrics. |
 | `ALERT_CONTACT` | string | No | `platform-oncall` | Alert-routing metadata label for operations. |
+
+## Frontend Variable Reference
+
+This table is the canonical reference for `frontend/.env.example`.
+
+| Variable | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `VITE_API_URL` | URL | Yes | `http://localhost:3001` | Backend API base URL used by browser requests. |
+| `VITE_WS_URL` | URL | No | `ws://localhost:3001` | WebSocket base URL when the frontend reads it from env. |
+| `VITE_API_VERSION` | string | No | `v1` | API version prefix appended under `/api`. Use an empty value for legacy `/api`. |
+| `VITE_USE_LEGACY_API` | boolean | No | `false` | Forces legacy `/api/*` routes and overrides `VITE_API_VERSION`. |
+| `VITE_WS_PATH` | path | No | `/socket.io` | WebSocket path appended to the resolved WebSocket base. |
+| `VITE_COINGECKO_API_KEY` | string | No | empty | Optional browser-side CoinGecko key for higher price-feed rate limits. |
+| `VITE_ENABLE_QUERY_DEVTOOLS` | boolean | No | `false` | Enables React Query Devtools outside the default development behavior. |
+| `VITE_ENABLE_BROWSER_PRICE_DEBUG` | boolean | No | `false` | Enables verbose browser price fallback logging and debug price behavior. |
+| `VITE_SENTRY_ENABLED` | boolean | No | `false` | Enables frontend Sentry integration. |
+| `VITE_SENTRY_DSN` | URL | No | empty | Sentry DSN for browser error reporting. |
+| `VITE_SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. |
+| `VITE_SENTRY_RELEASE` | string | No | empty | Sentry release identifier. |
+| `VITE_SENTRY_TRACES_SAMPLE_RATE` | number | No | `0.1` | Frontend Sentry traces sample rate. |
+| `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | number | No | `0` | Sentry replay sample rate for normal sessions. |
+| `VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | number | No | `1` | Sentry replay sample rate after errors. |
+| `VITE_E2E_MOCK_WALLET` | boolean | No | empty | Enables the deterministic mock wallet used by Playwright. |
+| `VITE_STELLAR_NETWORK` | enum | No | `testnet` | Legacy compatibility Stellar network selector. |
+| `VITE_CONTRACT_ADDRESS` | string | No | `CA...` | Legacy compatibility contract address. |
+| `VITE_REFLECTOR_ADDRESS` | string | No | sample testnet address | Legacy compatibility Reflector contract address. |
+| `VITE_DEMO_MODE` | boolean | No | `true` | Legacy compatibility demo-mode flag. |
+| `VITE_DEBUG_API` | boolean | No | `false` | Legacy compatibility API debug flag. |
+
+## Validation Workflow
+
+Run the same check used by CI whenever you change env examples, runtime env usage, or this document:
+
+```bash
+npm run validate:env-examples
+```
+
+The validator fails when:
+
+- required startup keys are missing from either example file;
+- runtime code references an env key that is absent from its example file;
+- either example file defines a key more than once;
+- `backend/.env.example`, `frontend/.env.example`, and the tables in this document drift apart.

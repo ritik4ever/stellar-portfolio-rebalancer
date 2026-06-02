@@ -13,7 +13,7 @@ How background jobs, queues, the contract indexer, and health checks fit togethe
 
 - Worker implementations live under `backend/src/queue/workers/` (`portfolioCheckWorker`, `rebalanceWorker`, `analyticsSnapshotWorker`, `idempotencyCleanupWorker`). Each exposes `start*Worker` / `stop*Worker` and runtime status used by readiness and ops routes.
 - **Important:** The default `npm run dev` / `npm start` entrypoint (`backend/src/index.ts`) registers the **scheduler** when Redis is available; it does **not** automatically spawn BullMQ worker processes. For full queue processing in development you need a process that calls the worker starters (or a dedicated worker entrypoint your deployment provides). Until workers run, jobs accumulate in Redis and `/ready` may report workers as not ready.
-- **Docker Compose:** The `backend` service runs `npm start` only. Ensure `REDIS_URL` points at the `redis` service (e.g. `redis://redis:6379`) if you expect queues to function. The optional `monitoring` profile runs another Node process on a separate port for observability stacks—see `deployment/docker-compose.yml`. Note that the Docker Compose configuration includes predefined resource limits (CPU and memory) for each service to guarantee reproducibility in local and preview environments. You can adjust these in a `docker-compose.override.yml` if necessary.
+- **Docker Compose:** The `backend` service runs `npm start` only. Ensure `REDIS_URL` points at the `redis` service (e.g. `redis://redis:6379`) if you expect queues to function. The optional `observability` profile runs another Node process on a separate port for observability stacks—see `deployment/docker-compose.yml`. Note that the Docker Compose configuration includes predefined resource limits (CPU and memory) for each service to guarantee reproducibility in local and preview environments. You can adjust these in a `docker-compose.override.yml` if necessary.
 
 ## Contract event indexer
 
@@ -108,6 +108,24 @@ The script exits `0` when all required checks pass and `1` otherwise, so it can 
 - **Redis restart:** Queues and repeatable job metadata live in Redis. After Redis comes back, restart the API so `probeRedis()` and `startQueueScheduler()` run again; workers must reconnect via `getConnectionOptions()`.
 - **Database:** SQLite (`DB_PATH`) or PostgreSQL (`DATABASE_URL`) holds application data and indexer cursors. Deleting the DB resets consent and portfolios; indexer cursors reset to bootstrap behavior on next start.
 
+## Supply chain artifacts
+
+- The PR build workflow now emits three SBOM files: one each for `frontend`, `backend`, and `contracts`.
+- The same workflow packages the frontend and backend bundles as tarballs and creates GitHub artifact attestations for those release outputs.
+- Download the `build-and-supply-chain-artifacts` artifact from the workflow run when you need to inspect the exact files that were built.
+
+### Verification
+
+Use GitHub's attestation tooling to verify a downloaded artifact against the repository's published attestations. The workflow stores the attestation on the run; verification is a maintainer task, not a manual build step.
+
+### Practical limits
+
+This repository does not yet sign the live Docker images created by `deployment/docker-compose.yml`. The current control point is the CI build bundle and its SBOMs. If you move deployment to immutable image publishing later, add image-level attestations at that stage rather than trying to infer provenance from the compose file alone.
+
+### Release checklist
+
+The release checklist template lives in [docs/RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Use it before cutting a release that touches contract, backend, or frontend delivery.
+
 ## JWT signing secret rotation
 
 The backend supports a dual-secret validation window so access tokens signed with the previous secret remain valid for a controlled grace period.
@@ -133,6 +151,111 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_SECRET` always validate normally.
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
+
+## Alerting and observability routing
+
+To ensure high reliability, alerts in the system are explicitly labeled with `severity` and `subsystem` and routed to dedicated target receivers with varying timing profiles.
+
+### Alert routing matrix
+
+| Severity | Subsystem | Alert Name | Trigger Threshold | Primary Receiver | Notification Timing & Policy |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **critical** | `portfolio-engine` | `PortfolioRebalanceFailed` | Rebalance failed jobs >= 5 in queue | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `api-gateway` | `BackendDown` | Scrape job `up == 0` for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `api-gateway` | `BackendReadinessFailed` | `/readiness` returning non-2xx for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `api-gateway` | `FrontendUptimeProbeFailed` | Frontend probe unavailable for 5m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `system` | `SystemReadinessDegraded` | Readiness report reports unhealthy for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **warning** | `api-gateway` | `Elevated5xxRate` | HTTP 5xx rate > 5% for 10m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `api-gateway` | `APILatencySpike` | 95th percentile request latency > 2.0s for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `portfolio-engine` | `RebalanceQueueFailures` | Failed rebalance jobs > 0 for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `portfolio-engine` | `ReflectorStalePricesDetected` | Price staleness detected in last 15m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `portfolio-engine` | `ReflectorFallbackUsageSpike` | Fallback price usage >= 5 in last 1h | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **info** | `api-gateway` | `ConfigurationReloaded` | Prometheus config reload success detected | `diagnostic-logs` | Logs only. `group_wait: 1m`, `group_interval: 10m`, `repeat_interval: 24h` |
+
+---
+
+### Configuration and routing validation
+
+Operators can test the alert rule configurations and check routing tree compliance locally or in Docker.
+
+#### 1. Validating file syntax locally
+Use `promtool` and `amtool` to verify that both Prometheus rules and Alertmanager configurations are perfectly syntax-valid:
+
+```bash
+# Verify Prometheus Alert rules
+docker run --rm -v "${PWD}/deployment/observability/prometheus:/etc/prometheus" prom/promtool check rules /etc/prometheus/alerts.yml
+
+# Verify Alertmanager routing configuration
+docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" prom/alertmanager check-config /etc/alertmanager/alertmanager.yml
+```
+
+#### 2. Testing routing path via `amtool`
+You can trace how an alert will be routed using `amtool`:
+
+```bash
+# Match a critical alert
+docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" --entrypoint amtool prom/alertmanager config routes show --alertname=PortfolioRebalanceFailed --severity=critical --subsystem=portfolio-engine
+
+# Match a warning alert
+docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" --entrypoint amtool prom/alertmanager config routes show --alertname=APILatencySpike --severity=warning --subsystem=api-gateway
+```
+
+#### 3. Triggering mock alert payloads via `curl`
+You can inject simulated alerts into Alertmanager's API to test the alert receivers in your development or staging environment:
+
+**Trigger a critical portfolio engine alert:**
+```bash
+curl -H "Content-Type: application/json" -d '[
+  {
+    "labels": {
+      "alertname": "PortfolioRebalanceFailed",
+      "severity": "critical",
+      "subsystem": "portfolio-engine",
+      "service": "queue"
+    },
+    "annotations": {
+      "summary": "Portfolio rebalancing has failed completely",
+      "description": "Mocked validation payload for critical alert routing verification."
+    }
+  }
+]' http://localhost:9093/api/v2/alerts
+```
+
+**Trigger a warning API latency alert:**
+```bash
+curl -H "Content-Type: application/json" -d '[
+  {
+    "labels": {
+      "alertname": "APILatencySpike",
+      "severity": "warning",
+      "subsystem": "api-gateway",
+      "service": "backend"
+    },
+    "annotations": {
+      "summary": "API Gateway response latency spike detected",
+      "description": "Mocked validation payload for warning alert routing verification."
+    }
+  }
+]' http://localhost:9093/api/v2/alerts
+```
+
+**Trigger an info configuration reload alert:**
+```bash
+curl -H "Content-Type: application/json" -d '[
+  {
+    "labels": {
+      "alertname": "ConfigurationReloaded",
+      "severity": "info",
+      "subsystem": "api-gateway",
+      "service": "prometheus"
+    },
+    "annotations": {
+      "summary": "Configuration reload successful",
+      "description": "Mocked validation payload for info alert routing verification."
+    }
+  }
+]' http://localhost:9093/api/v2/alerts
+```
 
 ## Related docs
 
