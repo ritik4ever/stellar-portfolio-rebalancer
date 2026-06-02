@@ -13,6 +13,7 @@ export type WalletReconnectBootDeps = {
     reconnect: () => Promise<string | null>
     checkConsent: (userId: string) => Promise<boolean>
     authLogin: (pk: string) => Promise<unknown>
+    getAutoReconnect: () => boolean
 }
 
 export type WalletReconnectBootResult =
@@ -89,6 +90,10 @@ export async function runWalletConnectBoot(
 export async function runWalletReconnectBoot(
     deps: WalletReconnectBootDeps,
 ): Promise<WalletReconnectBootResult> {
+    if (!deps.getAutoReconnect()) {
+        return { outcome: 'no_wallet' }
+    }
+
     try {
         const pk = await deps.reconnect()
         if (!pk) {

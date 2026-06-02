@@ -7,7 +7,11 @@ const mockReconnect = vi.fn();
 vi.mock("../context/RealtimeConnectionContext", () => ({
   useRealtimeConnection: () => ({
     state: mockStatus,
-    statusDetail: null,
+    statusDetail: mockStatus === "reconnecting" ? "Next retry in 2s (1/12)" : null,
+    reconnectInfo:
+      mockStatus === "reconnecting"
+        ? { attempt: 1, maxAttempts: 12, nextRetryMs: 2000 }
+        : null,
     reconnect: mockReconnect,
   }),
 }));
@@ -31,7 +35,16 @@ describe("RealtimeStatusBanner", () => {
     mockStatus = "reconnecting";
 
     render(<RealtimeStatusBanner />);
-    expect(screen.getByText(/reconnecting/i)).toBeInTheDocument();
+    expect(screen.getByText(/reconnecting \(1\/12\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/retrying in about 2s/i)).toBeInTheDocument();
+  });
+
+  it("shows paused state with resume action", () => {
+    mockStatus = "paused";
+
+    render(<RealtimeStatusBanner />);
+    expect(screen.getByText(/paused/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
   });
 
   it("shows disconnected state and retry button", () => {

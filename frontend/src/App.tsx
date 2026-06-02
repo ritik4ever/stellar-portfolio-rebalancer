@@ -20,11 +20,14 @@ import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
 import BackendCapabilitiesBanner from './components/BackendCapabilitiesBanner'
+import StartupSplash from './components/StartupSplash'
 import { useReadinessReport } from './hooks/useReadinessReport'
 import {
     onAuthSessionExpired,
     onAuthSessionRestored,
 } from './services/authService'
+import DeveloperDrawer from './components/DeveloperDrawer'
+import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
 
 function App() {
     const queryClient = useQueryClient()
@@ -37,10 +40,18 @@ function App() {
     const [sessionRecovery, setSessionRecovery] = useState<string | null>(null)
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
-    const { notices, loadError, loading: readinessLoading } = useReadinessReport()
 
     const showBackendBanner = loadError || notices.length > 0
-    const contentTopPad = showBackendBanner ? 'pt-14' : 'pt-4'
+    const showApiCompatibilityBanner =
+        !apiCompatibilityDismissed &&
+        apiCompatibility !== null &&
+        apiCompatibility.severity !== 'ok'
+    const contentTopPad =
+        showBackendBanner && showApiCompatibilityBanner
+            ? 'pt-28'
+            : showBackendBanner || showApiCompatibilityBanner
+              ? 'pt-14'
+              : 'pt-4'
 
     const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
     const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
@@ -61,6 +72,16 @@ function App() {
                 }
             },
         }).then((result) => setBootChecks(result.checks))
+    }, [])
+
+    useEffect(() => {
+        const controller = new AbortController()
+        setApiCompatibilityLoading(true)
+        void checkApiCompatibility(controller.signal).then((result) => {
+            setApiCompatibility(result)
+            setApiCompatibilityLoading(false)
+        })
+        return () => controller.abort()
     }, [])
 
     useEffect(() => {
@@ -223,6 +244,10 @@ function App() {
 
     const errorTop = showBackendBanner ? 'top-[4.25rem]' : 'top-4'
 
+    if (!bootReady) {
+        return <StartupSplash loading={readinessLoading} loadError={loadError} />
+    }
+
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
             <RealtimeStatusBanner />
@@ -232,6 +257,42 @@ function App() {
                 loading={readinessLoading}
                 belowRealtimeBar={false}
             />
+            {showApiCompatibilityBanner && apiCompatibility ? (
+                <div
+                    className={`fixed left-0 right-0 z-40 border-b px-4 py-3 text-sm ${
+                        showBackendBanner ? 'top-14' : 'top-0'
+                    } ${
+                        apiCompatibility.severity === 'error'
+                            ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/80 dark:text-red-100'
+                            : 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-100'
+                    }`}
+                    role="alert"
+                >
+                    <div className="mx-auto flex max-w-7xl items-start justify-between gap-4">
+                        <div>
+                            <p className="font-semibold">{apiCompatibility.title}</p>
+                            <p className="mt-1 opacity-90">{apiCompatibility.message}</p>
+                            <p className="mt-1 text-xs opacity-75">
+                                Target: {apiCompatibility.configuredOrigin}
+                                {apiCompatibility.configuredApiRoot}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setApiCompatibilityDismissed(true)}
+                            className="shrink-0 rounded px-2 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
+                </div>
+            ) : null}
+            {apiCompatibilityLoading && !apiCompatibility ? (
+                <span className="sr-only" role="status">
+                    Checking API configuration
+                </span>
+            ) : null}
+            <DeveloperDrawer publicKey={publicKey} />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"

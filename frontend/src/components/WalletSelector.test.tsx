@@ -16,6 +16,8 @@ const mockWalletManager = vi.hoisted(() => ({
   getPublicKey: vi.fn(),
   getWalletType: vi.fn(),
   isConnected: vi.fn(),
+  getAutoReconnect: vi.fn(() => true),
+  setAutoReconnect: vi.fn(),
 }));
 
 // Mock runBootDiagnostics
@@ -554,6 +556,82 @@ describe("WalletSelector", () => {
       await waitFor(() => {
         expect(mockOnConnect).toHaveBeenCalledWith(null);
         expect(mockOnError).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("Auto-reconnect opt-out", () => {
+    it("should render auto-reconnect toggle", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      expect(
+        screen.getByLabelText("Auto-reconnect on page refresh"),
+      ).toBeTruthy();
+    });
+
+    it("should toggle auto-reconnect off and on", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const toggle = screen.getByLabelText("Auto-reconnect on page refresh");
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+
+      fireEvent.click(toggle);
+      expect(mockWalletManager.setAutoReconnect).toHaveBeenCalledWith(false);
+
+      fireEvent.click(toggle);
+      expect(mockWalletManager.setAutoReconnect).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("Keyboard accessibility", () => {
+    it("should have proper aria attributes on wallet buttons", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const freighterButton = screen.getByLabelText("Connect to Freighter");
+      expect(freighterButton).toBeTruthy();
+      expect(freighterButton).toHaveAttribute("aria-label", "Connect to Freighter");
+    });
+
+    it("should have a group role with accessible label", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const group = screen.getByRole("group");
+      expect(group).toHaveAttribute("aria-label", "Available wallets");
+    });
+
+    it("should have focus-visible classes on wallet buttons", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const freighterButton = screen.getByLabelText("Connect to Freighter");
+      expect(freighterButton.className).toContain("focus-visible:ring-2");
+      expect(freighterButton.className).toContain("focus-visible:ring-blue-500");
+    });
+
+    it("should render connecting description for active wallet", async () => {
+      mockWalletManager.connect.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, 100)),
+      );
+
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const freighterButton = screen.getByLabelText("Connect to Freighter");
+      fireEvent.click(freighterButton);
+
+      await waitFor(() => {
+        expect(screen.getByText("Connecting...")).toBeTruthy();
+        expect(freighterButton).toHaveAttribute("aria-describedby");
       });
     });
   });

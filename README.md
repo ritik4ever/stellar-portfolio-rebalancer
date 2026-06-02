@@ -21,8 +21,25 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 - **Risk Management** – Circuit breakers, concentration limits, volatility detection  
 - **Professional UI** – Responsive interface with real-time portfolio visualization  
 - **Demo Mode** – $10,000 simulated portfolio for testing  
+- **Trust & transparency** – Landing page summarizes architecture, risk controls, and observability; legal documents show a fixed version and effective date
 
 ---
+
+## Project Roadmap
+
+See where the Stellar Portfolio Rebalancer is headed!
+
+| **Now** (Current Sprint) | **Next** (1-2 months) | **Later** (3-6+ months) |
+|-------------------------|------------------------|-------------------------|
+| Core rebalancing algorithm | Portfolio dashboard | Mobile app |
+| Reflector oracle integration | Historical reports | Custom strategies |
+| Wallet connection stability | Notification system | DeFi integration |
+| Bug fixes | Multi-asset support | Tax optimization |
+
+**[View detailed roadmap →](docs/ROADMAP.md)**
+
+---
+
 
 ## Architecture
 ```text

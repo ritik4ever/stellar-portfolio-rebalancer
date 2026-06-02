@@ -152,6 +152,111 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
+## Alerting and observability routing
+
+To ensure high reliability, alerts in the system are explicitly labeled with `severity` and `subsystem` and routed to dedicated target receivers with varying timing profiles.
+
+### Alert routing matrix
+
+| Severity | Subsystem | Alert Name | Trigger Threshold | Primary Receiver | Notification Timing & Policy |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **critical** | `portfolio-engine` | `PortfolioRebalanceFailed` | Rebalance failed jobs >= 5 in queue | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `api-gateway` | `BackendDown` | Scrape job `up == 0` for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `api-gateway` | `BackendReadinessFailed` | `/readiness` returning non-2xx for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `api-gateway` | `FrontendUptimeProbeFailed` | Frontend probe unavailable for 5m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **critical** | `system` | `SystemReadinessDegraded` | Readiness report reports unhealthy for 2m | `pagerduty-critical` | Paged immediately. `group_wait: 10s`, `group_interval: 1m`, `repeat_interval: 1h` |
+| **warning** | `api-gateway` | `Elevated5xxRate` | HTTP 5xx rate > 5% for 10m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `api-gateway` | `APILatencySpike` | 95th percentile request latency > 2.0s for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `portfolio-engine` | `RebalanceQueueFailures` | Failed rebalance jobs > 0 for 5m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `portfolio-engine` | `ReflectorStalePricesDetected` | Price staleness detected in last 15m | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **warning** | `portfolio-engine` | `ReflectorFallbackUsageSpike` | Fallback price usage >= 5 in last 1h | `slack-warnings` | Async alert. `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 12h` |
+| **info** | `api-gateway` | `ConfigurationReloaded` | Prometheus config reload success detected | `diagnostic-logs` | Logs only. `group_wait: 1m`, `group_interval: 10m`, `repeat_interval: 24h` |
+
+---
+
+### Configuration and routing validation
+
+Operators can test the alert rule configurations and check routing tree compliance locally or in Docker.
+
+#### 1. Validating file syntax locally
+Use `promtool` and `amtool` to verify that both Prometheus rules and Alertmanager configurations are perfectly syntax-valid:
+
+```bash
+# Verify Prometheus Alert rules
+docker run --rm -v "${PWD}/deployment/observability/prometheus:/etc/prometheus" prom/promtool check rules /etc/prometheus/alerts.yml
+
+# Verify Alertmanager routing configuration
+docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" prom/alertmanager check-config /etc/alertmanager/alertmanager.yml
+```
+
+#### 2. Testing routing path via `amtool`
+You can trace how an alert will be routed using `amtool`:
+
+```bash
+# Match a critical alert
+docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" --entrypoint amtool prom/alertmanager config routes show --alertname=PortfolioRebalanceFailed --severity=critical --subsystem=portfolio-engine
+
+# Match a warning alert
+docker run --rm -v "${PWD}/deployment/observability/alertmanager:/etc/alertmanager" --entrypoint amtool prom/alertmanager config routes show --alertname=APILatencySpike --severity=warning --subsystem=api-gateway
+```
+
+#### 3. Triggering mock alert payloads via `curl`
+You can inject simulated alerts into Alertmanager's API to test the alert receivers in your development or staging environment:
+
+**Trigger a critical portfolio engine alert:**
+```bash
+curl -H "Content-Type: application/json" -d '[
+  {
+    "labels": {
+      "alertname": "PortfolioRebalanceFailed",
+      "severity": "critical",
+      "subsystem": "portfolio-engine",
+      "service": "queue"
+    },
+    "annotations": {
+      "summary": "Portfolio rebalancing has failed completely",
+      "description": "Mocked validation payload for critical alert routing verification."
+    }
+  }
+]' http://localhost:9093/api/v2/alerts
+```
+
+**Trigger a warning API latency alert:**
+```bash
+curl -H "Content-Type: application/json" -d '[
+  {
+    "labels": {
+      "alertname": "APILatencySpike",
+      "severity": "warning",
+      "subsystem": "api-gateway",
+      "service": "backend"
+    },
+    "annotations": {
+      "summary": "API Gateway response latency spike detected",
+      "description": "Mocked validation payload for warning alert routing verification."
+    }
+  }
+]' http://localhost:9093/api/v2/alerts
+```
+
+**Trigger an info configuration reload alert:**
+```bash
+curl -H "Content-Type: application/json" -d '[
+  {
+    "labels": {
+      "alertname": "ConfigurationReloaded",
+      "severity": "info",
+      "subsystem": "api-gateway",
+      "service": "prometheus"
+    },
+    "annotations": {
+      "summary": "Configuration reload successful",
+      "description": "Mocked validation payload for info alert routing verification."
+    }
+  }
+]' http://localhost:9093/api/v2/alerts
+```
+
 ## Related docs
 
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
