@@ -11,7 +11,7 @@ import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRun
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { createPortfolioSchema, portfolioExportQuerySchema } from './validation.js'
+import { createPortfolioSchema, portfolioExportQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
@@ -98,6 +98,115 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         return ok(res, { portfolio })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
+// DRAFT PORTFOLIO ROUTES
+// ================================
+
+portfoliosRouter.post('/portfolio/draft', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const parsed = createDraftSchema.safeParse(req.body)
+        if (!parsed.success) {
+            const first = parsed.error.issues[0]
+            return fail(res, 400, 'VALIDATION_ERROR', first?.message ?? 'Validation failed')
+        }
+        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig, label } = parsed.data
+        const draftId = databaseService.createDraft({
+            userAddress,
+            label,
+            allocations,
+            threshold,
+            slippageTolerancePercent: slippageTolerance ?? 1,
+            strategy: strategy ?? 'threshold',
+            strategyConfig: strategyConfig ?? {},
+        })
+        logger.info('[DRAFT] Created portfolio draft', { draftId, userAddress })
+        return ok(res, { draftId, status: 'draft_created' }, { status: 201 })
+    } catch (error) {
+        logger.error('[DRAFT] Create draft failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/draft/:id', async (req: Request, res: Response) => {
+    try {
+        const draftId = req.params.id
+        if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
+        const draft = databaseService.getDraft(draftId)
+        if (!draft) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
+        return ok(res, { draft })
+    } catch (error) {
+        logger.error('[DRAFT] Get draft failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.patch('/portfolio/draft/:id', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const draftId = req.params.id
+        if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
+        const parsed = updateDraftSchema.safeParse(req.body)
+        if (!parsed.success) {
+            const first = parsed.error.issues[0]
+            return fail(res, 400, 'VALIDATION_ERROR', first?.message ?? 'Validation failed')
+        }
+        const { allocations, threshold, slippageTolerance, strategy, strategyConfig, label } = parsed.data
+        const updated = databaseService.updateDraft(draftId, {
+            label,
+            allocations,
+            threshold,
+            slippageTolerancePercent: slippageTolerance,
+            strategy,
+            strategyConfig,
+        })
+        if (!updated) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
+        logger.info('[DRAFT] Updated portfolio draft', { draftId })
+        return ok(res, { draftId, status: 'draft_updated' })
+    } catch (error) {
+        logger.error('[DRAFT] Update draft failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/draft/:id/publish', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const draftId = req.params.id
+        if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
+        const portfolioId = databaseService.publishDraft(draftId)
+        if (!portfolioId) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
+        logger.info('[DRAFT] Published draft to portfolio', { draftId, portfolioId })
+        return ok(res, { portfolioId, status: 'published' }, { status: 201 })
+    } catch (error) {
+        logger.error('[DRAFT] Publish draft failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.delete('/portfolio/draft/:id', ...protectedWriteLimiter, async (req: Request, res: Response) => {
+    try {
+        const draftId = req.params.id
+        if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
+        const deleted = databaseService.deleteDraft(draftId)
+        if (!deleted) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
+        logger.info('[DRAFT] Deleted portfolio draft', { draftId })
+        return ok(res, { draftId, status: 'draft_deleted' })
+    } catch (error) {
+        logger.error('[DRAFT] Delete draft failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/user/:address/drafts', async (req: Request, res: Response) => {
+    try {
+        const address = req.params.address
+        if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
+        const drafts = databaseService.listDrafts(address)
+        return ok(res, { drafts })
+    } catch (error) {
+        logger.error('[DRAFT] List drafts failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

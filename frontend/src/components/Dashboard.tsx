@@ -17,16 +17,20 @@ import {
     useUserPortfolios,
     usePortfolioDetails,
     useRebalanceEstimate,
+    useRebalancePlan,
     buildRebalanceConfirmationSummary,
+    buildRebalancePreconditions,
     portfolioKeys,
 } from '../hooks/queries/usePortfolioQuery'
+import { dashboardCopy } from '../content/uiCopy'
+import { buildPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
 import RouteErrorState from './RouteErrorState'
-
+import { usePortfolioExport } from '../hooks/usePortfolio'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -36,7 +40,7 @@ interface DashboardProps {
 type DashboardPriceRow = { price?: number; change?: number; [key: string]: unknown }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
+
     const { isDark } = useTheme()
 
     // Query for user portfolios
@@ -69,6 +73,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         refetch: refetchPrices,
     } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
+
+    const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
+    const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
+        latestPortfolioId,
+        showRebalanceConfirm,
+    )
 
     // Mutation for rebalancing
     const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
@@ -110,7 +120,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const feedMeta = priceBundle?.feedMeta
 
 
-
     const disconnectWallet = async () => {
         if (publicKey) {
             await authLogout(publicKey)
@@ -129,77 +138,62 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         { date: '1/6', value: portfolioData?.totalValue || 10000 }
     ]
 
-    return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-            {/* Header */}
-            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+
                 <div className="flex items-center justify-between">
                     <div className="flex items-center">
                         <button
+                            type="button"
                             onClick={() => onNavigate('landing')}
                             className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                            aria-label={dashboardCopy.goToLanding}
                         >
-                            <ArrowLeft className="w-5 h-5" />
+                            <ArrowLeft className="w-5 h-5" aria-hidden />
                         </button>
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Portfolio Dashboard</h1>
+                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{dashboardCopy.title}</h1>
                             {publicKey ? (
                                 <div className="flex items-center space-x-4 mt-1">
                                     <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">
-                                            {walletType} Wallet
-                                        </span>
-                                        <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
-                                    </div>
-                                    <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-500">
-                                        <span>Contract:</span>
-                                        <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
-                                        <a
-                                            href={`https://stellar.expert/explorer/testnet/contract/${contractAddress}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 hover:text-blue-700"
-                                        >
-                                            <ExternalLink className="w-3 h-3" />
-                                        </a>
-                                    </div>
+
                                 </div>
                             ) : (
                                 <span className="text-sm bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 px-2 py-1 rounded mt-1 inline-block">
-                                    Demo Mode - Connect wallet for full functionality
+                                    {dashboardCopy.demoMode}
                                 </span>
                             )}
                         </div>
                     </div>
 
 
-                        </div>
-
                         {publicKey ? (
                             <>
                                 <button
+                                    type="button"
                                     onClick={() => setShowDeleteConfirm(true)}
                                     className="text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 px-3 py-2 text-sm transition-colors flex items-center gap-1"
                                     title="Delete my data (GDPR)"
                                 >
-                                    <Trash2 className="w-4 h-4" />
-                                    Delete my data
+                                    <Trash2 className="w-4 h-4" aria-hidden />
+                                    {dashboardCopy.deleteMyData}
                                 </button>
                                 {portfolioData?.id && portfolioData.id !== 'demo' ? (
                                     <button
+                                        type="button"
                                         onClick={startClonePortfolio}
-                                        className="border border-blue-200 dark:border-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-200 px-4 py-2 rounded-lg transition-colors flex items-center gap-1"
+                                        className="border border-blue-200 dark:border-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-300 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
                                         title="Copy allocations into a new portfolio"
                                     >
-                                        <Copy className="w-4 h-4" />
-                                        Clone as new
+                                        <Copy className="w-4 h-4" aria-hidden />
+                                        {dashboardCopy.cloneAsNew}
                                     </button>
                                 ) : null}
                                 <button
+                                    type="button"
                                     onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
                                 >
-                                    Create Portfolio
+                                    {dashboardCopy.createPortfolio}
                                 </button>
                                 <button
                                     onClick={disconnectWallet}
@@ -216,7 +210,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 >
                                     Connect Wallet
                                 </button>
-                                {/* NEW: Demo reset button for local testing */}
                                 <button
 
                                     onClick={() => setShowDemoResetConfirm(true)}
@@ -233,44 +226,54 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             disabled={loading}
                             className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
                         >
-                            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                            <RefreshCw className={`w-5 h-5 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
                         </button>
                     </div>
                 </div>
-            </div>
 
-
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
-
-            {showDemoResetConfirm ? (
-                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <RefreshCw className="w-6 h-6 text-blue-500 flex-shrink-0" />
-                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Reset Demo Portfolio</h2>
-                        </div>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            This resets the demo portfolio to its default $10,000 allocation (40% XLM / 60% USDC).
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-
-                                    </>
-                                )}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-n
-                {/* Tab Navigation */}
+            {showDeleteConfirm ? (
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete Your Data</h2>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                            This will permanently delete your account and all associated data. This action cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+
+                            >
+                                Cancel
+                            </button>
+                            <button
+
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                            >
+                                Cancel
+                            </button>
+                            <button
+
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-                    <nav className="flex space-x-8">
+                    <nav className="flex space-x-8" aria-label="Dashboard sections">
                         <button
                             onClick={() => setActiveTab('overview')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
@@ -278,8 +281,16 @@ n
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
-                            Overview
 
+                            onClick={() => setActiveTab('analytics')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'analytics'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
+                                }`}
+                        >
+
+                            onClick={() => setActiveTab('notifications')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
                                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
@@ -290,14 +301,14 @@ n
                     <PerformanceChart portfolioId={portfolioData?.id || null} />
                 ) : activeTab === 'notifications' ? (
                     <NotificationPreferences userId={publicKey || 'demo'} portfolioId={portfolioData?.id || null} />
-                ) :  (
+                ) : (
                     <>
                         {/* Portfolio Overview */}
 
                             <div className="lg:col-span-2">
                                 {/* NEW: Portfolio Value Skeleton Loading State */}
                                 {loading ? (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
+                                    <div data-testid="dashboard-value-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                         <div className="flex items-center justify-between mb-6">
                                             <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                                             <div className="space-x-2 flex items-center">
@@ -333,7 +344,6 @@ n
                                             </div>
                                         </div>
 
-                                            <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg px-3 py-2">
                                                 {feedMeta?.degraded
                                                     ? 'Displayed prices are synthetic or fallback — not primary market data.'
                                                     : hasPartialPriceData
@@ -377,26 +387,29 @@ n
                                 {/* Rebalance Alert */}
                                 {portfolioData?.needsRebalance && (
                                     <motion.div
-                                        initial={{ opacity: 0, scale: 0.95 }}
+                                        initial={false}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
+                                        transition={{ duration: 0.2 }}
+                                        className="motion-safe:transition-transform bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/30 dark:to-red-900/30 border border-orange-200 dark:border-orange-800 rounded-xl p-6"
+                                        role="status"
+                                        aria-live="polite"
                                     >
                                         <div className="flex items-center mb-3">
                                             <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
-                                            <span className="font-medium text-orange-800 dark:text-orange-300">Rebalance Needed</span>
+                                            <span className="font-medium text-orange-800 dark:text-orange-300">{dashboardCopy.rebalanceNeeded}</span>
                                         </div>
                                         <p className="text-sm text-orange-700 dark:text-orange-400 mb-2">
-                                            Your portfolio has drifted from target allocation
+                                            {dashboardCopy.driftMessage}
                                         </p>
                                         <p className="text-sm text-orange-700 dark:text-orange-400 mb-2 font-medium">
                                             Estimated gas: {estimateXlm.toFixed(2)} XLM (~${estimateUsd.toFixed(3)})
                                         </p>
                                         <p className="text-xs text-orange-600 dark:text-orange-400 mb-3">
-                                            {rebalanceEstimate?.tradeCount ?? 0} estimated trade{(rebalanceEstimate?.tradeCount ?? 0) === 1 ? '' : 's'} @ {(rebalanceEstimate?.gasPerTradeXlm ?? 0).toFixed(4)} XLM each
+                                            {rebalanceEstimate?.tradeCount ?? 0} estimated trade{(rebalanceEstimate?.tradeCount ?? 0) === 1 ? '' : 's'} @ {(rebalanceEstimate?.gasPerTradeXlm ?? 0).toFixed(4)} XLM/trade
                                         </p>
                                         {hasHighGasWarning && (
                                             <p className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 rounded px-2 py-1 mb-3">
-                                                Warning: estimated gas is unusually high ({'>'} 0.5 XLM). Consider reducing trade count.
+                                                Warning: estimated gas is unusually high ({'>'}0.5 XLM). Consider reducing trade count.
                                             </p>
                                         )}
                                         {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 && (
@@ -417,15 +430,15 @@ n
                                         <button
 
                                             disabled={executeRebalanceMutation.isPending || !publicKey || portfolioData?.id === 'demo'}
-                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
+                                            className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                                         >
                                             {executeRebalanceMutation.isPending ? (
                                                 <>
-                                                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                                    Rebalancing...
+                                                    <RefreshCw className="w-4 h-4 mr-2 motion-safe:animate-spin" aria-hidden />
+                                                    {dashboardCopy.rebalancing}
                                                 </>
                                             ) : (
-                                                'Execute Rebalance'
+                                                dashboardCopy.executeRebalance
                                             )}
                                         </button>
                                         {(portfolioData as any)?.slippageTolerance != null && (
@@ -443,7 +456,7 @@ n
 
                                 {/* NEW: Allocation Chart Skeleton Loading State */}
                                 {loading ? (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                    <div data-testid="dashboard-allocation-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                                         <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-4 animate-pulse" />
                                         <div className="h-48 flex items-center justify-center mb-4">
                                             <div className="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
@@ -515,42 +528,16 @@ n
                                 allocationData.map((asset: any, index: number) => {
                                     const row = prices[asset.name]
 
-                                    return <AssetCard key={index} asset={asset} price={priceCard} />
                                 })
                             )}
                         </div>
 
                         {/* Rebalance History */}
-                        <RebalanceHistory portfolioId={portfolioData?.id || null} />
+                        <RebalanceHistory portfolioId={portfolioData?.id || null} isLoading={loading} />
                     </>
                 )}
-            </div>
+            </main>
 
-                                disabled={executeRebalanceMutation.isPending || portfolioData?.id === 'demo'}
-                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
-                            >
-                                {executeRebalanceMutation.isPending ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Zap className="w-4 h-4" />
-                                )}
-                                Rebalance
-                            </button>
-                        ) : (
-                            <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
-                                <CheckCircle className="w-4 h-4" />
-
-                                onClick={() => onNavigate('setup')}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
-                            >
-                                <Plus className="w-4 h-4" />
-
-                        >
-                            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                        </button>
-                    </div>
-                </div>
-            </div>
 
         </div>
     )
