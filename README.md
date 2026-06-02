@@ -1,5 +1,31 @@
 # Stellar Portfolio Rebalancer
 
+---
+
+## 2. README.md Updates
+
+Add a link in the README's "Further reading" or "Troubleshooting" section:
+
+**`README.md`** (add after "## Contributing" or in a new section)
+
+```markdown
+## Troubleshooting
+
+### Wallet Issues
+
+Having trouble connecting your Stellar wallet? See the **[Wallet Troubleshooting FAQ](docs/WALLET_TROUBLESHOOTING.md)** for step-by-step fixes for:
+
+- "Wallet is not installed" errors
+- Connection timeouts and declines
+- Transaction signing failures
+- Network mismatch between wallet and app
+- Wallet-specific quirks (Freighter, Rabet, xBull)
+
+### Common Setup Issues
+
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md) §10 "Common setup failures" for backend, database, and environment issues.
+
+
 [![GitHub Repo](https://img.shields.io/badge/repo-Stellar%20Portfolio%20Rebalancer-blue?style=flat-square)](https://github.com/ritik4ever/stellar-portfolio-rebalancer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
