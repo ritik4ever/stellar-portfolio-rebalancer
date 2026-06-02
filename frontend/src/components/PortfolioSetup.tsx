@@ -21,12 +21,20 @@ import {
   Save,
   User,
   Zap,
+  RefreshCw,
 } from "lucide-react";
 import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
+import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 
 // TanStack Query Mutations
 import { useCreatePortfolioMutation } from "../hooks/mutations/usePortfolioMutations";
+import { useAssets } from "../hooks/queries/useAssetsQuery";
+import {
+  clearPortfolioCloneDraft,
+  loadPortfolioCloneDraft,
+  type PortfolioCloneDraft,
+} from "../utils/portfolioCloneDraft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -153,34 +161,31 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
-  const [assetOptions, setAssetOptions] = useState<AssetOption[]>(DEFAULT_ASSET_OPTIONS);
-  const [assetSearch, setAssetSearch] = useState<Record<number, string>>({}); // per-row filter for asset dropdown
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("balanced");
   const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(() =>
     loadSavedTemplates(publicKey || "")
   );
+  const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
+    loadPortfolioCloneDraft(),
+  );
+
+  const { data: assets = [] } = useAssets()
 
   useEffect(() => {
     setSavedTemplates(loadSavedTemplates(publicKey || ""));
   }, [publicKey]);
 
-  // ── Fetch available assets from registry (dynamic, supports custom Stellar tokens) ──
   useEffect(() => {
-    let cancelled = false;
-    api.get<{ assets: Array<{ symbol: string; name: string }> }>(ENDPOINTS.ASSETS)
-      .then((res) => {
-        if (cancelled || !res?.assets?.length) return;
-        setAssetOptions(
-          res.assets.map((a) => ({
-            value: a.symbol,
-            label: `${a.symbol} (${a.name})`,
-          }))
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setAssetOptions(DEFAULT_ASSET_OPTIONS);
-      });
-    return () => { cancelled = true; };
+    const draft = loadPortfolioCloneDraft();
+    if (!draft) return
+
+    setCloneDraft(draft);
+    setAllocations(draft.allocations.map((row) => ({ ...row })));
+    setThreshold(draft.threshold);
+    setSlippageTolerance(draft.slippageTolerance);
+    setStrategy(draft.strategy || "threshold");
+    setStrategyConfig(draft.strategyConfig ?? {});
+    setSelectedTemplateId("custom");
   }, []);
 
   const getRiskLevelLabel = (level: RiskLevel): string => {
@@ -276,13 +281,13 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   /** Adds a new allocation row using the first asset not already in the list */
   const addAllocation = () => {
-    const unusedAssets = assetOptions.filter(
-      (option) => !allocations.some((alloc) => alloc.asset === option.value),
+    const unusedAssets = assets.filter(
+      (asset) => !allocations.some((alloc) => alloc.asset === asset.symbol),
     );
     if (unusedAssets.length > 0) {
       setAllocations([
         ...allocations,
-        { asset: unusedAssets[0].value, percentage: 0 },
+        { asset: unusedAssets[0].symbol, percentage: 0 },
       ]);
     }
   };
@@ -385,6 +390,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
       });
 
+      clearPortfolioCloneDraft();
+      setCloneDraft(null);
       setSuccess(true);
       setTimeout(() => onNavigate("dashboard"), 2000);
     } catch (err) {
@@ -446,6 +453,31 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
           )}
         </div>
+
+        {cloneDraft ? (
+          <div className="bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-indigo-900 dark:text-indigo-200 font-medium">
+                  Cloning portfolio {cloneDraft.sourceLabel ?? cloneDraft.sourcePortfolioId}
+                </h4>
+                <p className="text-indigo-800 dark:text-indigo-300 text-sm mt-1">
+                  Allocations and rebalance settings are pre-filled. Saving creates a new portfolio and does not change the original.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  clearPortfolioCloneDraft();
+                  setCloneDraft(null);
+                }}
+                className="self-start rounded-lg border border-indigo-300 dark:border-indigo-700 px-3 py-2 text-sm text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+              >
+                Discard clone
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {/* ── Demo mode information banner ── */}
         {isDemoMode && (
@@ -605,10 +637,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Asset Allocations
                 </h3>
-                {/* Disabled once all 4 supported assets have been added */}
+                {/* Disabled once all supported assets have been added */}
                 <button
                   onClick={addAllocation}
-                  disabled={allocations.length >= assetOptions.length}
+                  disabled={allocations.length >= assets.length}
                   className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white text-sm rounded-lg transition-colors"
                 >
                   <Plus className="w-4 h-4 mr-1" />
@@ -620,22 +652,6 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 {allocations.map((allocation, index) => {
                   // Evaluate per-row validation on every render so errors update instantly
                   const fieldError = getAllocationError(allocation.percentage);
-                  const searchTerm = (assetSearch[index] ?? "").toLowerCase();
-                  const filteredOptions = searchTerm
-                    ? assetOptions.filter(
-                        (o) =>
-                          o.value.toLowerCase().includes(searchTerm) ||
-                          o.label.toLowerCase().includes(searchTerm)
-                      )
-                    : assetOptions;
-                  const optionsWithSelected = filteredOptions.some((o) => o.value === allocation.asset)
-                    ? filteredOptions
-                    : (() => {
-                        const set = new Map(assetOptions.map((o) => [o.value, o]));
-                        const selected = set.get(allocation.asset);
-                        const rest = filteredOptions.filter((o) => o.value !== allocation.asset);
-                        return selected ? [selected, ...rest] : rest;
-                      })();
 
                   return (
                     /*
@@ -650,37 +666,17 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                        * message adds height below the inputs.
                        */}
                       <div className="flex items-start space-x-3">
-                        {/* Asset dropdown with search */}
+                        {/* Asset selector with enhanced search and issuer info */}
                         <div className="flex-1">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Asset
                           </label>
-                          <div className="relative">
-                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                            <input
-                              type="text"
-                              placeholder="Search assets..."
-                              value={assetSearch[index] ?? ""}
-                              onChange={(e) =>
-                                setAssetSearch((s) => ({ ...s, [index]: e.target.value }))
-                              }
-                              onFocus={(e) => e.target.select()}
-                              className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                            />
-                          </div>
-                          <select
+                          <AssetSelector
                             value={allocation.asset}
-                            onChange={(e) =>
-                              updateAllocation(index, "asset", e.target.value)
-                            }
-                            className="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                          >
-                            {optionsWithSelected.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(asset) => updateAllocation(index, "asset", asset)}
+                            placeholder="Select asset..."
+                            className="w-full"
+                          />
                         </div>
 
                         {/* Percentage input — border and background turn red when invalid */}
@@ -1037,6 +1033,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                    <Zap className="w-4 h-4 mr-2 animate-spin" />
                    Creating...
                  </>
+               ) : cloneDraft ? (
+                 "Save as new portfolio"
                ) : (
                  "Create Portfolio"
                )}
@@ -1054,6 +1052,60 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             )}
           </div>
         </div>
+
+        {/* NEW: Sticky Mobile Action Bar for Portfolio Setup */}
+        <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
+          <div className="flex items-center justify-between max-w-sm mx-auto">
+            {/* Allocation Summary */}
+            <div className="text-center">
+              <div className="text-xs text-gray-500 dark:text-gray-400">Total Allocation</div>
+              <div className={`text-lg font-bold ${
+                isValidTotal 
+                  ? 'text-green-600 dark:text-green-400' 
+                  : 'text-red-600 dark:text-red-400'
+              }`}>
+                {totalPercentage.toFixed(1)}%
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {allocations.length} asset{allocations.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              {/* Back Button */}
+              <button
+                onClick={() => onNavigate('dashboard')}
+                className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+
+              {/* Create Portfolio Button */}
+              <button
+                onClick={createPortfolio}
+                disabled={hasAnyFieldError || !isValidTotal || createPortfolioMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                {createPortfolioMutation.isPending ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Create
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Add bottom padding to prevent overlap with mobile action bar */}
+        <div className="h-20 md:hidden"></div>
       </div>
     </div>
   );

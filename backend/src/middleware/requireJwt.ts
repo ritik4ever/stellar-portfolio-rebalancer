@@ -103,3 +103,57 @@ function isPreviousSecretWithinGracePeriod(previousSecret: string | undefined): 
     if (Number.isNaN(graceUntilMs)) return false
     return Date.now() <= graceUntilMs
 }
+
+/**
+ * Verify access token for WebSocket connections
+ * Returns token payload with expiry info, or error details for hardened auth
+ * @param token JWT access token from Authorization header or WebSocket query param
+ * @returns verification result with payload (including exp) or error details
+ */
+export function verifyAccessTokenForWebSocket(token: string):
+    | { ok: true; payload: AccessJwtPayload; expiresAt: Date }
+    | { ok: false; reason: 'expired' | 'invalid' | 'missing_secret'; message: string } {
+    if (!token) {
+        return { ok: false, reason: 'invalid', message: 'Token is required' }
+    }
+
+    const currentSecret = process.env.JWT_SECRET
+    if (!currentSecret || currentSecret.length < 32) {
+        return { ok: false, reason: 'missing_secret', message: 'JWT secret not configured' }
+    }
+
+    const currentResult = verifyWithSecretAndExp(token, currentSecret)
+    if (currentResult.ok) return currentResult
+    if (currentResult.reason === 'expired') return currentResult
+
+    const previousSecret = process.env.JWT_PREVIOUS_SECRET
+    if (!isPreviousSecretWithinGracePeriod(previousSecret)) {
+        return currentResult
+    }
+
+    return verifyWithSecretAndExp(token, previousSecret as string)
+}
+
+function verifyWithSecretAndExp(token: string, secret: string):
+    | { ok: true; payload: AccessJwtPayload; expiresAt: Date }
+    | { ok: false; reason: 'expired' | 'invalid'; message: string } {
+    try {
+        const decoded = jwt.verify(token, secret) as jwt.JwtPayload
+        if (!isAccessPayload(decoded)) {
+            return { ok: false, reason: 'invalid', message: 'Invalid token payload' }
+        }
+
+        // Extract expiry from JWT
+        const expiryTimestamp = decoded.exp ? decoded.exp * 1000 : null
+        if (!expiryTimestamp) {
+            return { ok: false, reason: 'invalid', message: 'Token missing exp claim' }
+        }
+
+        return { ok: true, payload: decoded, expiresAt: new Date(expiryTimestamp) }
+    } catch (error) {
+        if (error instanceof jwt.TokenExpiredError) {
+            return { ok: false, reason: 'expired', message: 'Token has expired' }
+        }
+        return { ok: false, reason: 'invalid', message: error instanceof Error ? error.message : 'Token verification failed' }
+    }
+}

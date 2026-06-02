@@ -98,6 +98,25 @@ export const recordConsentSchema = z.object({
     cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' })
 }).strict();
 
+export const consentGrantSchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    terms: z.boolean().default(true),
+    privacy: z.boolean().default(true),
+    cookies: z.boolean().default(true)
+}).strict().refine(
+    (data) => data.terms && data.privacy && data.cookies,
+    { message: 'All consent flags must be accepted', path: ['terms'] }
+);
+
+export const consentRevokeSchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional()
+}).strict();
+
+export const consentAuditQuerySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional()
+});
+
 // ─── Notification schemas ─────────────────────────────────────────────────────
 export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;

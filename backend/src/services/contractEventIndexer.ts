@@ -81,6 +81,8 @@ export class ContractEventIndexerService {
         expectedEventSchemaVersion: BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
         contractEventSchemaOk: true
     }
+    
+    private readonly seenEventKeys = new Set<string>()
 
     constructor() {
         this.status.enabled = this.isEnabled()
@@ -232,8 +234,31 @@ export class ContractEventIndexerService {
                 if (!response.events.length) break
 
                 for (const event of response.events) {
-                    const indexed = this.toIndexedOnChainEvent(event)
+                    let indexed: ReturnType<typeof this.toIndexedOnChainEvent>
+                    try {
+                        indexed = this.toIndexedOnChainEvent(event)
+                    } catch (err) {
+                        logger.warn('[CHAIN-INDEXER] Skipping malformed event', { error: String(err), txHash: event.txHash })
+                        continue
+                    }
                     if (!indexed) continue
+
+                    const dedupKey = `${indexed.ledger}:${indexed.txHash}:${indexed.kind}:${indexed.portfolioId}`
+                    if (this.seenEventKeys.has(dedupKey)) {
+                        continue
+                    }
+                    this.seenEventKeys.add(dedupKey)
+                    
+                    // Prevent unbounded memory growth
+                    if (this.seenEventKeys.size > 10000) {
+                        const iterator = this.seenEventKeys.values()
+                        for (let i = 0; i < 1000; i++) {
+                            const val = iterator.next().value
+                            if (val !== undefined) {
+                                this.seenEventKeys.delete(val)
+                            }
+                        }
+                    }
 
                     databaseService.ensurePortfolioExists(indexed.portfolioId, indexed.userAddress || 'ONCHAIN-INDEXER')
                     databaseService.recordRebalanceEvent({

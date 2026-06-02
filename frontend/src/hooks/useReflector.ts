@@ -1,3 +1,23 @@
+/**
+ * @deprecated Use `usePrices` from `./queries/usePricesQuery` instead.
+ *
+ * This hook used a manual `useEffect` + `setInterval` polling pattern.
+ * It has been replaced by TanStack Query hooks that provide:
+ * - Automatic caching & deduplication
+ * - Background refetching via `refetchInterval`
+ * - Built-in loading/error states
+ *
+ * Migration:
+ * ```ts
+ * // Before:
+ * const { prices, loading, error } = useReflector()
+ *
+ * // After:
+ * const { data: priceBundle, isLoading, error } = usePrices()
+ * const prices = priceBundle?.prices ?? {}
+ * ```
+ */
+
 import { useState, useEffect } from 'react'
 import { api, ENDPOINTS } from '../config/api'
 import { unwrapPriceFeedPayload } from './queries/usePricesQuery'
@@ -26,6 +46,13 @@ async function fetchReflectorPrices(signal: AbortSignal): Promise<PriceData> {
 }
 
 export const useReflector = () => {
+    if (import.meta.env.DEV) {
+        console.warn(
+            '[useReflector] DEPRECATED: Use usePrices from ./queries/usePricesQuery instead. ' +
+            'This hook uses manual polling that duplicates TanStack Query functionality.',
+        )
+    }
+
     const [prices, setPrices] = useState<PriceData>({})
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
