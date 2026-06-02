@@ -8,6 +8,7 @@ const queryMocks = vi.hoisted(() => ({
     useUserPortfolios: vi.fn(),
     usePortfolioDetails: vi.fn(),
     useRebalanceEstimate: vi.fn(),
+    useRebalancePlan: vi.fn(),
     usePrices: vi.fn(),
     useExecuteRebalanceMutation: vi.fn(),
 }))
@@ -16,6 +17,17 @@ vi.mock('../hooks/queries/usePortfolioQuery', () => ({
     useUserPortfolios: queryMocks.useUserPortfolios,
     usePortfolioDetails: queryMocks.usePortfolioDetails,
     useRebalanceEstimate: queryMocks.useRebalanceEstimate,
+    useRebalancePlan: queryMocks.useRebalancePlan,
+    buildRebalanceConfirmationSummary: vi.fn(() => ({
+        slippage: ['Slippage note'],
+        prices: ['Price note'],
+        risks: ['Risk note'],
+    })),
+    buildRebalancePreconditions: vi.fn(() => [
+        { id: 'wallet', label: 'Wallet connected', ok: true },
+        { id: 'portfolio', label: 'Live portfolio selected', ok: true },
+    ]),
+    portfolioKeys: { all: ['portfolios'] },
 }))
 
 vi.mock('../hooks/queries/usePricesQuery', () => ({
@@ -118,9 +130,10 @@ describe('Dashboard', () => {
         cleanup()
         vi.restoreAllMocks()
 
-        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false })
-        queryMocks.usePortfolioDetails.mockReturnValue({ data: null, isLoading: false })
+        queryMocks.useUserPortfolios.mockReturnValue({ data: [], isLoading: false, isError: false })
+        queryMocks.usePortfolioDetails.mockReturnValue({ data: null, isLoading: false, isError: false })
         queryMocks.useRebalanceEstimate.mockReturnValue({ data: null, isLoading: false })
+        queryMocks.useRebalancePlan.mockReturnValue({ data: null, isLoading: false, isError: false })
         queryMocks.usePrices.mockReturnValue({ data: { prices: {}, feedMeta: null }, isLoading: false })
         queryMocks.useExecuteRebalanceMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
     })
@@ -145,7 +158,8 @@ describe('Dashboard', () => {
                     { asset: 'USDC', target: 40, amount: 2000 },
                 ]
             }],
-            isLoading: false
+            isLoading: false,
+            isError: false,
         })
         queryMocks.usePortfolioDetails.mockReturnValue({
             data: {
@@ -159,6 +173,7 @@ describe('Dashboard', () => {
                 ],
             },
             isLoading: false,
+            isError: false,
         })
         queryMocks.usePrices.mockReturnValue({
             data: {
@@ -186,14 +201,16 @@ describe('Dashboard', () => {
                     { asset: 'USDC', target: 40, amount: 2000 },
                 ]
             }],
-            isLoading: false
+            isLoading: false,
+            isError: false,
         })
         queryMocks.usePrices.mockReturnValue({
             data: {
                 prices: { XLM: { price: 0.12, change: 1.1 }, USDC: { price: 1, change: 0 } },
                 feedMeta: null
             },
-            isLoading: false
+            isLoading: false,
+            isError: false,
         })
 
         renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
@@ -209,6 +226,64 @@ describe('Dashboard', () => {
         renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
 
         expect(await screen.findByText(/loading portfolio data/i)).toBeTruthy()
+    })
+
+    it('opens rebalance preview before confirming manual rebalance', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({
+            data: [{
+                id: 'p-1',
+                totalValue: 5000,
+                needsRebalance: true,
+                allocations: [
+                    { asset: 'XLM', target: 60, amount: 3000 },
+                    { asset: 'USDC', target: 40, amount: 2000 },
+                ],
+            }],
+            isLoading: false,
+            isError: false,
+        })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: {
+                id: 'p-1',
+                needsRebalance: true,
+                slippageTolerancePercent: 2,
+                allocations: [
+                    { asset: 'XLM', target: 60, amount: 3000 },
+                    { asset: 'USDC', target: 40, amount: 2000 },
+                ],
+            },
+            isLoading: false,
+            isError: false,
+        })
+        queryMocks.useRebalanceEstimate.mockReturnValue({
+            data: {
+                tradeCount: 2,
+                gasEstimateXlm: 0.02,
+                gasEstimateUsd: 0.01,
+                breakdown: [{ tradeId: 'trade-1', estimateXlm: 0.01 }],
+            },
+            isLoading: false,
+        })
+        queryMocks.useRebalancePlan.mockReturnValue({
+            data: { maxSlippagePercent: 2, estimatedSlippageBps: 200 },
+            isLoading: false,
+            isError: false,
+        })
+        queryMocks.usePrices.mockReturnValue({
+            data: {
+                prices: { XLM: { price: 0.12, change: 1.1 }, USDC: { price: 1, change: 0 } },
+                feedMeta: null,
+            },
+            isLoading: false,
+        })
+
+        renderDashboard(<Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />)
+
+        fireEvent.click(await screen.findByRole('button', { name: /review rebalance/i }))
+        expect(await screen.findByRole('dialog')).toBeTruthy()
+        expect(screen.getByRole('heading', { name: /estimated trades/i })).toBeTruthy()
+        expect(screen.getByRole('heading', { name: /preconditions/i })).toBeTruthy()
+        expect(screen.getByRole('button', { name: /confirm rebalance/i })).toBeTruthy()
     })
 
     it('renders error fallback when portfolio fetching throws', async () => {

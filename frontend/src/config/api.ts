@@ -136,6 +136,7 @@ export const API_CONFIG = {
             `${API_RESOURCE_ROOT}/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
         PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-estimate`,
+        PORTFOLIO_REBALANCE_PLAN: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-plan`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
         PORTFOLIO_ANALYTICS: (id: string, days: number) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
