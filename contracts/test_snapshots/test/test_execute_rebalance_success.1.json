@@ -30,10 +30,25 @@
                   ]
                 },
                 {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
                   "u32": 5
                 },
                 {
                   "u32": 50
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -69,7 +84,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 0,
-    "timestamp": 20000,
+    "timestamp": 15000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -154,6 +169,23 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "asset_decimals"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            },
+                            "val": {
+                              "u32": 7
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -173,7 +205,15 @@
                         "symbol": "last_rebalance"
                       },
                       "val": {
-                        "u64": 20000
+                        "u64": 15000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "pause_reason"
+                      },
+                      "val": {
+                        "u32": 0
                       }
                     },
                     {
@@ -182,6 +222,14 @@
                       },
                       "val": {
                         "u32": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "slippage_policy_version"
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     },
                     {
@@ -276,12 +324,36 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Initialized"
                             }
                           ]
                         },
                         "val": {
                           "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 15000
                         }
                       },
                       {
@@ -518,10 +590,25 @@
                   ]
                 },
                 {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
                   "u32": 5
                 },
                 {
                   "u32": 50
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -539,10 +626,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "created"
+                "symbol": "created"
               }
             ],
             "data": {
@@ -682,7 +769,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 20000
+                    "u64": 15000
                   }
                 }
               ]
@@ -701,10 +788,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "rebalanced"
+                "symbol": "rebalanced"
               }
             ],
             "data": {
@@ -713,7 +800,7 @@
                   "u64": 1
                 },
                 {
-                  "u64": 20000
+                  "u64": 15000
                 }
               ]
             }
@@ -788,6 +875,23 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "asset_decimals"
+                  },
+                  "val": {
+                    "map": [
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        },
+                        "val": {
+                          "u32": 7
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "current_balances"
                   },
                   "val": {
@@ -807,7 +911,15 @@
                     "symbol": "last_rebalance"
                   },
                   "val": {
-                    "u64": 20000
+                    "u64": 15000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "pause_reason"
+                  },
+                  "val": {
+                    "u32": 0
                   }
                 },
                 {
@@ -816,6 +928,14 @@
                   },
                   "val": {
                     "u32": 5
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "slippage_policy_version"
+                  },
+                  "val": {
+                    "u32": 1
                   }
                 },
                 {

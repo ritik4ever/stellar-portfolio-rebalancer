@@ -3,6 +3,7 @@ import {
   getPortfolioCheckQueue,
   getRebalanceQueue,
   getAnalyticsSnapshotQueue,
+  getAnalyticsCompactionQueue,
   QUEUE_NAMES,
 } from "../queue/queues.js";
 import { isRedisAvailable } from "../queue/connection.js";
@@ -11,6 +12,7 @@ import { autoRebalancer } from "../services/runtimeServices.js";
 import { getPortfolioCheckWorkerStatus } from "../queue/workers/portfolioCheckWorker.js";
 import { getRebalanceWorkerStatus } from "../queue/workers/rebalanceWorker.js";
 import { getAnalyticsSnapshotWorkerStatus } from "../queue/workers/analyticsSnapshotWorker.js";
+import { getAnalyticsCompactionWorkerStatus } from "../queue/workers/analyticsCompactionWorker.js";
 import { logger } from "../utils/logger.js";
 
 type ReadinessState = "ready" | "not_ready" | "disabled";
@@ -72,16 +74,20 @@ async function checkQueueReady(
   }
 
   try {
+    const start = Date.now()
     await withTimeout(
       queue.waitUntilReady(),
       3000,
       `${name} queue readiness timed out`,
     );
-    return buildCheck("ready", true, `${name} queue is ready`);
+    const latencyMs = Date.now() - start
+    return buildCheck("ready", true, `${name} queue is ready`, { latencyMs });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return buildCheck("not_ready", true, `${name} queue is unavailable`, {
       error: message,
+      latencyMs: null,
+      degradedReason: message,
     });
   }
 }
@@ -92,15 +98,30 @@ export async function buildReadinessReport() {
     return cache.report
   }
 
-  const database = databaseService.getReadiness();
-  const databaseCheck = database.ready
-    ? buildCheck("ready", true, "Database connection is healthy", database)
-    : buildCheck(
-        "not_ready",
-        true,
-        "Database connection check failed",
-        database,
-      );
+  // Measure database readiness latency
+  let databaseCheck: ReadinessCheck
+  try {
+    const start = Date.now()
+    const db = databaseService.getReadiness()
+    const latencyMs = Date.now() - start
+    databaseCheck = db.ready
+      ? buildCheck("ready", true, "Database connection is healthy", {
+          ...db,
+          latencyMs,
+        })
+      : buildCheck("not_ready", true, "Database connection check failed", {
+          ...db,
+          latencyMs,
+          degradedReason: db.error,
+        })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    databaseCheck = buildCheck("not_ready", true, "Database readiness check threw", {
+      error: message,
+      latencyMs: null,
+      degradedReason: message,
+    })
+  }
 
   const redisConnected = await isRedisAvailable();
 
@@ -134,6 +155,17 @@ export async function buildReadinessReport() {
         "Queue subsystem disabled — Redis unavailable",
       );
 
+  const analyticsCompactionQueueCheck = redisConnected
+    ? await checkQueueReady(
+        QUEUE_NAMES.ANALYTICS_COMPACTION,
+        getAnalyticsCompactionQueue(),
+      )
+    : buildCheck(
+        "disabled",
+        false,
+        "Queue subsystem disabled — Redis unavailable",
+      );
+
   const queueCheck = !redisConnected
     ? buildCheck(
         "disabled",
@@ -145,18 +177,21 @@ export async function buildReadinessReport() {
             [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioQueueCheck,
             [QUEUE_NAMES.REBALANCE]: rebalanceQueueCheck,
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: analyticsQueueCheck,
+            [QUEUE_NAMES.ANALYTICS_COMPACTION]: analyticsCompactionQueueCheck,
           },
         },
       )
     : portfolioQueueCheck.status === "ready" &&
         rebalanceQueueCheck.status === "ready" &&
-        analyticsQueueCheck.status === "ready"
+        analyticsQueueCheck.status === "ready" &&
+        analyticsCompactionQueueCheck.status === "ready"
       ? buildCheck("ready", true, "Redis and BullMQ queues are ready", {
           redisConnected,
           queues: {
             [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioQueueCheck,
             [QUEUE_NAMES.REBALANCE]: rebalanceQueueCheck,
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: analyticsQueueCheck,
+            [QUEUE_NAMES.ANALYTICS_COMPACTION]: analyticsCompactionQueueCheck,
           },
         })
       : buildCheck("not_ready", true, "Queue subsystem is not ready", {
@@ -165,6 +200,7 @@ export async function buildReadinessReport() {
             [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioQueueCheck,
             [QUEUE_NAMES.REBALANCE]: rebalanceQueueCheck,
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: analyticsQueueCheck,
+            [QUEUE_NAMES.ANALYTICS_COMPACTION]: analyticsCompactionQueueCheck,
           },
         });
 
@@ -172,6 +208,7 @@ export async function buildReadinessReport() {
     portfolioCheck: getPortfolioCheckWorkerStatus(),
     rebalance: getRebalanceWorkerStatus(),
     analyticsSnapshot: getAnalyticsSnapshotWorkerStatus(),
+    analyticsCompaction: getAnalyticsCompactionWorkerStatus(),
   };
 
   const workersReady = Object.values(workerStatuses).every(
@@ -280,11 +317,20 @@ export async function buildReadinessReport() {
     (check) => !check.required || check.status === "ready",
   );
 
+  // Surface probe-bypass config for ops visibility (secret value is NEVER
+  // included — only whether one is configured).
+  const probeBypass = {
+    probePaths: ["/health", "/ready", "/readiness", "/metrics"],
+    loopbackBypassEnabled: true,
+    secretConfigured: Boolean(process.env.HEALTH_PROBE_SECRET),
+  };
+
   const report = {
     status: ready ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     checks,
+    probeBypass,
   };
 
   if (cacheTtlMs > 0) {
