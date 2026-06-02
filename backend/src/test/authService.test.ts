@@ -13,6 +13,7 @@ vi.mock("../utils/logger.js", () => ({
 vi.mock("../db/refreshTokenDb.js", () => ({
   createRefreshToken: vi.fn(() => Promise.resolve()),
   findRefreshToken: vi.fn(() => Promise.resolve(null)),
+  findRefreshTokenById: vi.fn(() => Promise.resolve(null)),
   deleteRefreshTokenById: vi.fn(() => Promise.resolve(true)),
   deleteAllRefreshTokensForUser: vi.fn(() => Promise.resolve(0)),
   generateRefreshTokenId: vi.fn(() => "mock-jti"),
@@ -323,6 +324,93 @@ describe("authService – JWT secret enforcement", () => {
 
       const success = await logout("not-found", "G-NO-TOKENS");
       expect(success).toBe(false);
+    });
+  });
+
+  describe("auth audit event recording", () => {
+    const address = "GADDRESS123";
+
+    beforeEach(() => {
+      vi.stubEnv("JWT_SECRET", "a".repeat(32));
+      vi.clearAllMocks();
+    });
+
+    it("records a login event when new tokens are issued", async () => {
+      const { issueTokens, getRecentAuthAuditEvents } = await import(
+        "../services/authService.js"
+      );
+      const { createRefreshToken } = await import("../db/refreshTokenDb.js");
+
+      vi.mocked(createRefreshToken).mockResolvedValueOnce();
+
+      await issueTokens(address);
+
+      const events = getRecentAuthAuditEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0].action).toBe("login");
+      expect(events[0].userAddress).toBe(address);
+      expect(events[0].sessionId).toBeDefined();
+      expect(events[0].timestamp).toBeTruthy();
+    });
+
+    it("records a refresh event when tokens are rotated", async () => {
+      const {
+        refreshTokens,
+        issueTokens,
+        getRecentAuthAuditEvents,
+      } = await import("../services/authService.js");
+      const {
+        createRefreshToken,
+        findRefreshToken,
+        deleteRefreshTokenById,
+      } = await import("../db/refreshTokenDb.js");
+
+      vi.mocked(createRefreshToken).mockResolvedValue();
+      vi.mocked(findRefreshToken).mockResolvedValueOnce({
+        id: "old-session",
+        user_address: address,
+        token_hash: "old-hash",
+        expires_at: new Date(Date.now() + 10000),
+        created_at: new Date(),
+      });
+      vi.mocked(deleteRefreshTokenById).mockResolvedValueOnce(true);
+
+      const refreshToken = jwt.sign(
+        { sub: address, type: "refresh", jti: "old-session" },
+        process.env.JWT_SECRET!
+      );
+
+      await refreshTokens(refreshToken);
+
+      const events = getRecentAuthAuditEvents();
+      expect(events[0].action).toBe("refresh");
+      expect(events[0].userAddress).toBe(address);
+      expect(events[0].sessionId).toBeDefined();
+      expect(events[0].previousSessionId).toBe("old-session");
+    });
+
+    it("records a revocation event on single-session logout", async () => {
+      const { logout, getRecentAuthAuditEvents } = await import(
+        "../services/authService.js"
+      );
+      const { findRefreshToken, deleteRefreshTokenById } = await import(
+        "../db/refreshTokenDb.js"
+      );
+
+      vi.mocked(findRefreshToken).mockResolvedValueOnce({
+        id: "revoked-session",
+        user_address: address,
+      } as any);
+      vi.mocked(deleteRefreshTokenById).mockResolvedValueOnce(true);
+
+      const success = await logout("some-refresh-token", undefined);
+      expect(success).toBe(true);
+
+      const events = getRecentAuthAuditEvents();
+      expect(events[0].action).toBe("revocation");
+      expect(events[0].userAddress).toBe(address);
+      expect(events[0].sessionId).toBe("revoked-session");
+      expect(events[0].details).toMatchObject({ reason: "single_session" });
     });
   });
 });

@@ -5,6 +5,8 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbSaveDigestEvent,
+  dbGetAndDeleteDigestEventsBefore,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
@@ -17,7 +19,7 @@ import { normalizeNotificationPreferences } from "./notificationPreferences.js";
 
 export interface NotificationPayload {
   userId: string;
-  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange";
+  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
   message: string;
   data?: any;
@@ -342,12 +344,23 @@ export class NotificationService {
       return;
     }
 
-    // Check if user wants this event type
-    if (!preferences.events[payload.eventType]) {
+    // Check if user wants this event type (skip for digest payloads)
+    if (payload.eventType !== 'digest' && !preferences.events[(payload.eventType as any)]) {
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,
       });
+      return;
+    }
+
+    // If the user has a digest preference other than immediate, queue the event
+    if ((preferences as any).digestMode && (preferences as any).digestMode !== 'immediate') {
+      try {
+        dbSaveDigestEvent(payload.userId, payload.eventType, payload.title, payload.message, payload.data);
+        dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'skipped', `Queued for ${(preferences as any).digestMode} digest`);
+      } catch (error) {
+        logger.error('Failed to queue digest event', { error: error instanceof Error ? error.message : String(error), userId: payload.userId })
+      }
       return;
     }
 
@@ -370,6 +383,68 @@ export class NotificationService {
 
     // Wait for all providers to complete (but don't block the main flow)
     await Promise.allSettled(promises);
+  }
+
+  /**
+   * Process queued digest events for a given mode ('daily'|'weekly').
+   * This will retrieve events up to now, group by user, and send a single digest per user
+   * if the user's preference matches the requested mode. Events for users who don't
+   * match are re-queued.
+   */
+  async processDigests(mode: 'daily' | 'weekly'): Promise<void> {
+    const cutoff = new Date().toISOString()
+    const events = dbGetAndDeleteDigestEventsBefore(cutoff)
+
+    const byUser: Record<string, typeof events> = {}
+    for (const ev of events) {
+      byUser[ev.user_id] = byUser[ev.user_id] || []
+      byUser[ev.user_id].push(ev)
+    }
+
+    for (const [userId, userEvents] of Object.entries(byUser)) {
+      try {
+        const prefs = this.getPreferences(userId)
+        if (!prefs) {
+          logger.info('Skipping digest for user without preferences', { userId })
+          continue
+        }
+
+        if ((prefs as any).digestMode !== mode) {
+          // Re-queue events (preserve them for the correct schedule)
+          for (const ev of userEvents) {
+            dbSaveDigestEvent(ev.user_id, ev.event_type, ev.title, ev.message, ev.data ? JSON.parse(ev.data) : undefined)
+          }
+          continue
+        }
+
+        // Build digest payload
+        const digestTitle = `${mode.charAt(0).toUpperCase() + mode.slice(1)} Digest (${userEvents.length} events)`
+        const digestMessage = userEvents
+          .map((e) => `- [${e.event_type}] ${e.title} (${e.created_at})\n${e.message}`)
+          .join('\n\n')
+
+        const payload: NotificationPayload = {
+          userId,
+          eventType: 'digest',
+          title: digestTitle,
+          message: digestMessage,
+          data: { events: userEvents.map((e) => ({ eventType: e.event_type, title: e.title, message: e.message, data: e.data ? JSON.parse(e.data) : undefined, timestamp: e.created_at })) },
+          timestamp: new Date().toISOString(),
+        }
+
+        // Send digest through providers
+        const promises = this.providers.map(async (provider) => {
+          try {
+            await provider.send(payload, prefs)
+          } catch (error) {
+            logger.error('Failed to send digest via provider', { provider: provider.constructor.name, userId, error: error instanceof Error ? error.message : String(error) })
+          }
+        })
+        await Promise.allSettled(promises)
+      } catch (error) {
+        logger.error('Error processing digest for user', { userId, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
   }
 
   getAllPreferences(): NotificationPreferences[] {
