@@ -419,6 +419,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Initialized"
                             }
                           ]
@@ -860,9 +872,6 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -962,9 +971,6 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }

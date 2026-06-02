@@ -1,4 +1,4 @@
-
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map, Vec};
 
 // Stellar assets use 7-decimal precision where 1 XLM = 10^7 stroops.
 // 1_000_000 stroops equals 0.1 XLM, which acts as the minimum executable trade size.
@@ -139,6 +139,7 @@ pub enum DataKey {
     Initialized,
     Portfolio(u64),
     NextPortfolioId,
+    Steward(u64),
     FeeConfig,
     UpgradeAuthority,
     WasmHash,
@@ -166,10 +167,39 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
-    InsufficientBalance = 12,
-    InvariantViolation = 13,
-    PortfolioNotFound = 14,
-    PortfolioInactive = 15,
-    InvalidWithdrawAmount = 16,
+    Unauthorized = 12,
+    StalePrice = 13,
+    MissingPrice = 14,
+    MalformedPrice = 15,
+    PortfolioPaused = 16,
+    PreviewUnavailable = 17,
+    InvalidAssetDecimals = 18,
+    UnsupportedSlippagePolicyVersion = 19,
+    AssetDecimalsMismatch = 20,
+    InsufficientBalance = 21,
+    InvariantViolation = 22,
+    PortfolioNotFound = 23,
+    PortfolioInactive = 24,
+    InvalidWithdrawAmount = 25,
+}
 
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ValuationError {
+    StaleData = 1,
+    MissingPrice = 2,
+    MalformedData = 3,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CapabilityFlag {
+    PerPortfolioSteward = 1,
+    DifferentiatedPricing = 2,
+    EmergencyStop = 4,
+}
+
+pub fn asset_decimals_for(portfolio: &Portfolio, asset: Address) -> u32 {
+    portfolio.asset_decimals.get(asset).unwrap_or(DEFAULT_ASSET_DECIMALS)
 }

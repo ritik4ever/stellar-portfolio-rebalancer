@@ -203,18 +203,37 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Purpose:** Returns the maximum number of assets allowed in a portfolio.
 - **Returns:** `MAX_PORTFOLIO_ASSETS` (currently `10`).
 
-### `simulate_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<Map<Address, i128>, Error>`
+### `preview_rebalance(env: Env, portfolio_id: u64) -> RebalancePreview`
 
-- **Purpose:** Non-mutating simulation path for backend dry-run APIs. Returns a map of planned trades where positive values indicate buys and negative values indicate sells. Surfaces policy failures (cooldown, stale/missing prices, slippage) as `Error` values instead of panics.
+- **Purpose:** Non-mutating preview that computes planned trades, skipped assets, and threshold decisions for a portfolio without executing the rebalance.
+- **Returns:** `RebalancePreview` with trade details.
+### `transfer_stewardship(env: Env, portfolio_id: u64, new_steward: Address) -> Result<(), Error>`
+
+- **Purpose:** Transfers operational ownership of a single portfolio to a new address without changing the global contract admin.
 - **Parameters:**
-  - `portfolio_id`: Portfolio to simulate rebalance for.
-  - `actual_balances`: Optional actual balances for slippage checks; pass an empty map to skip slippage validation.
-- **Returns:** `Ok(Map<Address, i128>)` with planned trades, or one of:
-  - `Err(Error::CooldownActive)` if the portfolio is still in cooldown.
-  - `Err(Error::StaleData)` if any price is missing or stale.
-  - `Err(Error::SlippageExceeded)` if provided `actual_balances` exceed the portfolio's slippage tolerance.
-- **Preconditions / failure behavior:**
-  - Does not require portfolio owner authorization and does not mutate persistent storage.
+  - `portfolio_id`: Target portfolio.
+  - `new_steward`: Address that will become the new steward.
+- **Returns:** `Ok(())` on success.
+- **Preconditions:**
+  - Portfolio must exist.
+  - Current steward (or portfolio user if no steward set) must authorize the call.
+- **Events:** Publishes `("portfolio", "steward_transferred")` with `(portfolio_id, old_steward, new_steward)`.
+
+### `get_steward(env: Env, portfolio_id: u64) -> Address`
+
+- **Purpose:** Returns the steward address for a portfolio, falling back to the portfolio user if no steward has been set.
+- **Parameters:** `portfolio_id`.
+- **Returns:** `Address` of the current steward or portfolio user.
+
+### `capabilities(env: Env) -> u32`
+
+- **Purpose:** Returns a bitset of supported optional behaviors for frontend and backend compatibility checks.
+- **Returns:** `u32` bitmask. Test with `flags & CapabilityFlag::X != 0`.
+- **Defined flags:**
+  - `PerPortfolioSteward = 1` — per-portfolio steward transfer is supported.
+  - `DifferentiatedPricing = 2` — `calculate_portfolio_value` distinguishes stale, missing, and malformed prices.
+  - `EmergencyStop = 4` — global emergency stop is supported.
+
 
 ## Error Codes (`contracts/src/types.rs`)
 
@@ -233,12 +252,40 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
-| `12` | `InsufficientBalance` | `withdraw` amount exceeds `current_balances` for the asset. |
-| `13` | `InvariantViolation` | `check_invariants` or pre-mutation invariant validation failed. |
-| `14` | `PortfolioNotFound` | Unknown `portfolio_id`. |
-| `15` | `PortfolioInactive` | Operation requires an active portfolio (`is_active == true`). |
-| `16` | `InvalidWithdrawAmount` | `withdraw` or `deposit` with non-positive `amount`. |
+| `12` | `Unauthorized` | Unauthorized operation. |
+| `13` | `StalePrice` | `execute_rebalance` detected stale price data (>1 hour old). |
+| `14` | `MissingPrice` | `execute_rebalance` cannot find price for a portfolio asset. |
+| `15` | `MalformedPrice` | `execute_rebalance` received non-positive price value. |
+| `16` | `PortfolioPaused` | Operation on a portfolio that has been paused. |
+| `17` | `PreviewUnavailable` | Price data unavailable for rebalance preview. |
+| `18` | `InvalidAssetDecimals` | `create_portfolio` asset decimals invalid. |
+| `19` | `UnsupportedSlippagePolicyVersion` | `create_portfolio` with unsupported slippage version. |
+| `20` | `AssetDecimalsMismatch` | Asset decimals mismatch in portfolio operations. |
+| `21` | `InsufficientBalance` | `withdraw` amount exceeds `current_balances` for the asset. |
+| `22` | `InvariantViolation` | `check_invariants` or pre-mutation invariant validation failed. |
+| `23` | `PortfolioNotFound` | Unknown `portfolio_id`. |
+| `24` | `PortfolioInactive` | Operation requires an active portfolio (`is_active == true`). |
+| `25` | `InvalidWithdrawAmount` | `withdraw` or `deposit` with non-positive `amount`. |
 
+## Valuation Errors (`contracts/src/portfolio.rs`)
+
+`ValuationError` is a non-contract-internal enum returned by `calculate_portfolio_value`:
+
+| Code | Variant | Meaning |
+|---|---|---|
+| `1` | `StaleData` | Price data is older than 1-hour freshness window. |
+| `2` | `MissingPrice` | No price available for an asset from the Reflector oracle. |
+| `3` | `MalformedData` | Price value is zero or negative. |
+
+## Capability Flags
+
+`CapabilityFlag` is an enum whose values map to bit positions in the `u32` returned by `capabilities()`:
+
+| Bit | Flag | Description |
+|---|---|---|
+| `1` | `PerPortfolioSteward` | Per-portfolio steward transfer is supported (`transfer_stewardship`, `get_steward`). |
+| `2` | `DifferentiatedPricing` | Pricing errors distinguish stale/missing/malformed (`ValuationError`). |
+| `4` | `EmergencyStop` | Global emergency stop is supported (`set_emergency_stop`). |
 
 ## XDR/Contract Type References
 

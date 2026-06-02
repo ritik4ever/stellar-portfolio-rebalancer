@@ -93,6 +93,9 @@
                     "hi": 0,
                     "lo": 20000000
                   }
+                },
+                {
+                  "string": ""
                 }
               ]
             }
@@ -121,6 +124,9 @@
                     "hi": 0,
                     "lo": 10000000
                   }
+                },
+                {
+                  "string": ""
                 }
               ]
             }
@@ -407,6 +413,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
                         }
                       },
                       {
@@ -740,10 +758,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "created"
+                "symbol": "created"
               }
             ],
             "data": {
@@ -815,6 +833,9 @@
                     "hi": 0,
                     "lo": 20000000
                   }
+                },
+                {
+                  "string": ""
                 }
               ]
             }
@@ -832,10 +853,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "deposit"
+                "symbol": "deposit"
               }
             ],
             "data": {
@@ -911,6 +932,9 @@
                     "hi": 0,
                     "lo": 10000000
                   }
+                },
+                {
+                  "string": ""
                 }
               ]
             }
@@ -928,10 +952,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "deposit"
+                "symbol": "deposit"
               }
             ],
             "data": {
