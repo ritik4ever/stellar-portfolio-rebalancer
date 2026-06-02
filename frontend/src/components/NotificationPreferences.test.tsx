@@ -12,18 +12,7 @@ function renderWithQuery(ui: React.ReactElement) {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
-const enabledPreferences = {
-    emailEnabled: true,
-    emailAddress: 'user@example.com',
-    webhookEnabled: true,
-    webhookUrl: 'https://example.com/webhook',
-    events: {
-        rebalance: true,
-        circuitBreaker: true,
-        priceMovement: true,
-        riskChange: true,
-    },
-}
+const getEmailSwitch = () => screen.getByRole('switch', { name: /email notifications/i })
 
 describe('NotificationPreferences', () => {
     beforeEach(() => {
@@ -38,8 +27,7 @@ describe('NotificationPreferences', () => {
 
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
-        const toggles = screen.getAllByRole('button')
-        fireEvent.click(toggles[0])
+        fireEvent.click(getEmailSwitch())
 
         const emailInput = await screen.findByPlaceholderText(/your-email@example.com/i)
         fireEvent.change(emailInput, { target: { value: 'bad-email' } })
@@ -56,11 +44,11 @@ describe('NotificationPreferences', () => {
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
         const saveBtn = screen.getByRole('button', { name: /Save Preferences/i })
-        const toggles = screen.getAllByRole('button')
-        fireEvent.click(toggles[0])
+        fireEvent.click(getEmailSwitch())
 
         const emailInput = await screen.findByPlaceholderText(/your-email@example.com/i)
         fireEvent.change(emailInput, { target: { value: 'user@example.com' } })
+        expect(screen.getByText(/Email notification changes are pending save/i)).toBeTruthy()
 
         expect((saveBtn as HTMLButtonElement).disabled).toBe(false)
         fireEvent.click(saveBtn)
@@ -75,8 +63,7 @@ describe('NotificationPreferences', () => {
         renderWithQuery(<NotificationPreferences userId="user-1" />)
 
         expect(await screen.findByText('Notifications')).toBeTruthy()
-        const toggles = screen.getAllByRole('button')
-        fireEvent.click(toggles[0])
+        fireEvent.click(getEmailSwitch())
         fireEvent.change(await screen.findByPlaceholderText(/your-email@example.com/i), {
             target: { value: 'user@example.com' },
         })
@@ -100,6 +87,27 @@ describe('NotificationPreferences', () => {
         })
     })
 
+    it('allows saving unrelated changes when a disabled email channel has a stale invalid address', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
+        const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ success: true } as any)
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+        fireEvent.click(getEmailSwitch())
+        fireEvent.change(await screen.findByPlaceholderText(/your-email@example.com/i), {
+            target: { value: 'bad-email' },
+        })
+        fireEvent.click(getEmailSwitch())
+        fireEvent.click(screen.getByRole('switch', { name: /risk level change alerts/i }))
+
+        const saveBtn = screen.getByRole('button', { name: /save preferences/i }) as HTMLButtonElement
+        expect(saveBtn.disabled).toBe(false)
+        fireEvent.click(saveBtn)
+
+        await waitFor(() => expect(postSpy).toHaveBeenCalled())
+    })
+
     it('shows loading state during save and success toast after completion', async () => {
         vi.spyOn(api, 'get').mockResolvedValue({ preferences: null } as any)
         let resolveSave!: (value: any) => void
@@ -113,14 +121,15 @@ describe('NotificationPreferences', () => {
         renderWithQuery(<NotificationPreferences userId="user-1" />)
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
-        const toggles = screen.getAllByRole('button')
-        fireEvent.click(toggles[0])
+        fireEvent.click(getEmailSwitch())
         fireEvent.change(await screen.findByPlaceholderText(/your-email@example.com/i), {
             target: { value: 'user@example.com' },
         })
 
         fireEvent.click(screen.getByRole('button', { name: /save preferences/i }))
-        expect(await screen.findByText(/saving\.\.\./i)).toBeTruthy()
+        expect(await screen.findByText(/saving preferences/i)).toBeTruthy()
+        expect(screen.getByText(/saving notification preferences/i)).toBeTruthy()
+        expect(screen.getByText(/saving email notification settings/i)).toBeTruthy()
 
         resolveSave({ success: true })
         expect(await screen.findByText(/preferences saved successfully/i)).toBeTruthy()
@@ -132,23 +141,50 @@ describe('NotificationPreferences', () => {
         renderWithQuery(<NotificationPreferences userId="user-1" />)
 
         expect(await screen.findByText('Notifications')).toBeTruthy()
-        const toggles = screen.getAllByRole('button')
         const saveBtn = screen.getByRole('button', { name: /save preferences/i }) as HTMLButtonElement
 
-        fireEvent.click(toggles[0])
-        fireEvent.click(toggles[0])
+        fireEvent.click(getEmailSwitch())
+        fireEvent.click(getEmailSwitch())
 
         expect(saveBtn.disabled).toBe(true)
         fireEvent.click(saveBtn)
         expect(postSpy).not.toHaveBeenCalled()
     })
 
-
+    it('shows a distinct unsubscribe pending and success state', async () => {
+        vi.spyOn(api, 'get').mockResolvedValue({
+            preferences: {
+                emailEnabled: true,
+                emailAddress: 'user@example.com',
+                webhookEnabled: false,
+                webhookUrl: '',
+                events: {
+                    rebalance: true,
+                    circuitBreaker: true,
+                    priceMovement: true,
+                    riskChange: true,
+                },
+            },
+        } as any)
+        let resolveUnsubscribe!: (value: any) => void
+        vi.spyOn(api, 'delete').mockImplementation(
+            () =>
+                new Promise(res => {
+                    resolveUnsubscribe = res
+                }) as any
+        )
 
         renderWithQuery(<NotificationPreferences userId="user-1" />)
         expect(await screen.findByText('Notifications')).toBeTruthy()
 
+        fireEvent.click(screen.getByRole('button', { name: /unsubscribe from all/i }))
+        fireEvent.click(screen.getByRole('button', { name: /skip and unsubscribe/i }))
 
+        expect(await screen.findByText(/unsubscribing from notifications/i)).toBeTruthy()
+        expect(screen.getByRole('button', { name: /unsubscribing/i })).toBeDisabled()
+
+        resolveUnsubscribe({ success: true })
+
+        expect(await screen.findByText(/unsubscribed from all notifications/i)).toBeTruthy()
     })
 })
-

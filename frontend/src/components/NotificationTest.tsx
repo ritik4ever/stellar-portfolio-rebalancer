@@ -66,10 +66,11 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
     const testOneMutation = useTestNotificationMutation(userId)
     const testAllMutation = useTestAllNotificationsMutation(userId)
 
-    const testingAll = testAllMutation.isPending
+    const testingAll = testAllMutation.microstate.phase === 'pending'
 
     const handleTestOne = async (eventType: EventType) => {
         setTestingEvent(eventType)
+        testOneMutation.reset()
         // Clear previous result for this event so the user sees fresh feedback
         setEventStates(prev => ({
             ...prev,
@@ -106,6 +107,8 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
 
     const handleTestAll = async () => {
         setTestAllError(null)
+        testOneMutation.reset()
+        testAllMutation.reset()
         setEventStates(buildEmptyStates())
 
         try {
@@ -113,14 +116,15 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
             const next = buildEmptyStates()
 
             data.results.forEach(r => {
+                const fallbackError = 'Test notification failed'
                 next[r.eventType] = {
                     result: {
                         success: r.success,
-                        message: r.success ? 'Test notification sent' : (r.error ?? 'Failed'),
+                        message: r.success ? 'Test notification sent' : (r.error ?? fallbackError),
                         sentTo: r.sentTo ?? { email: null, webhook: null },
                         timestamp: r.timestamp,
                     },
-                    error: r.success ? null : (r.error ?? 'Failed'),
+                    error: r.success ? null : (r.error ?? fallbackError),
                 }
             })
 
@@ -133,6 +137,9 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
     const handleClearAll = () => {
         setEventStates(buildEmptyStates())
         setTestAllError(null)
+        setTestingEvent(null)
+        testOneMutation.reset()
+        testAllMutation.reset()
     }
 
     // ── Empty state: no provider configured ──────────────────────────────────
@@ -152,6 +159,17 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
     }
 
     const anyResult = Object.values(eventStates).some(s => s.result !== null)
+    const activeEventLabel = EVENT_TYPES.find(event => event.type === testingEvent)?.label
+    const testStatus =
+        testingAll
+            ? testAllMutation.microstate.label
+            : testingEvent
+              ? `${testOneMutation.microstate.label}: ${activeEventLabel ?? testingEvent}`
+              : testAllMutation.microstate.phase === 'success'
+                ? testAllMutation.microstate.label
+                : testOneMutation.microstate.phase === 'success'
+                  ? testOneMutation.microstate.label
+                  : null
 
     return (
         <section aria-label="Test notifications" className="mt-6 border-t border-gray-200 pt-6">
@@ -171,6 +189,17 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
             <p className="text-sm text-gray-600 mb-4">
                 Send a test notification to verify your configured providers are working.
             </p>
+
+            {testStatus && (
+                <div
+                    className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 flex items-center"
+                    role="status"
+                    aria-live="polite"
+                >
+                    <Loader className={`w-4 h-4 mr-2 flex-shrink-0 ${testingAll || testingEvent ? 'animate-spin' : ''}`} />
+                    {testStatus}
+                </div>
+            )}
 
             {/* Test-all error banner */}
             <AnimatePresence>
