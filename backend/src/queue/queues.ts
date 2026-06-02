@@ -74,6 +74,7 @@ let analyticsCompactionQueue: Queue<AnalyticsCompactionJobData> | null = null;
 let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null;
 let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null;
 
+
 function getDefaultJobOptions() {
   return {
     removeOnComplete: { count: 100 },
@@ -196,12 +197,13 @@ export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, Portfol
     }
 }
 
+
 export function getQueueByName(name: string): Queue<any, any> | null {
   const queueMap: Record<string, () => any> = {
     [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
     [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
     [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
-    [QUEUE_NAMES.ANALYTICS_COMPACTION]: getAnalyticsCompactionQueue,
+
     [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
     [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
     [QUEUE_NAMES.DLQ]: getDLQQueue,

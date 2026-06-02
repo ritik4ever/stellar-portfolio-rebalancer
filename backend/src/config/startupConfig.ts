@@ -15,6 +15,9 @@ export interface StartupConfig {
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
+  queueStartupRetries: number;
+  queueStartupInitialDelayMs: number;
+  queueStartupMaxDelayMs: number;
   // Cache tuning configuration
   cacheDurationMs: number;
   priceDataMaxAgeSeconds: number;
@@ -197,6 +200,30 @@ export function validateStartupConfigOrThrow(
     );
   }
 
+  const queueStartupRetriesRaw = (env.QUEUE_STARTUP_RETRIES || "5").trim();
+  const queueStartupRetries = Number.parseInt(queueStartupRetriesRaw, 10);
+  if (!Number.isInteger(queueStartupRetries) || queueStartupRetries < 1) {
+    errors.push(
+      `QUEUE_STARTUP_RETRIES '${env.QUEUE_STARTUP_RETRIES}' is invalid. Provide a positive integer.`,
+    );
+  }
+
+  const queueStartupInitialDelayRaw = (env.QUEUE_STARTUP_INITIAL_DELAY_MS || "1000").trim();
+  const queueStartupInitialDelayMs = Number.parseInt(queueStartupInitialDelayRaw, 10);
+  if (!Number.isInteger(queueStartupInitialDelayMs) || queueStartupInitialDelayMs < 0) {
+    errors.push(
+      `QUEUE_STARTUP_INITIAL_DELAY_MS '${env.QUEUE_STARTUP_INITIAL_DELAY_MS}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
+  const queueStartupMaxDelayRaw = (env.QUEUE_STARTUP_MAX_DELAY_MS || "10000").trim();
+  const queueStartupMaxDelayMs = Number.parseInt(queueStartupMaxDelayRaw, 10);
+  if (!Number.isInteger(queueStartupMaxDelayMs) || queueStartupMaxDelayMs < 0) {
+    errors.push(
+      `QUEUE_STARTUP_MAX_DELAY_MS '${env.QUEUE_STARTUP_MAX_DELAY_MS}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
@@ -273,6 +300,9 @@ export function validateStartupConfigOrThrow(
     metricsAllowlist,
     readinessCacheTtlMs: Number.isInteger(readinessCacheTtlMs) ? readinessCacheTtlMs : 2000,
     consentAuditRetentionDays: Number.isInteger(consentAuditRetentionDays) ? consentAuditRetentionDays : 365,
+    queueStartupRetries: Number.isInteger(queueStartupRetries) ? queueStartupRetries : 5,
+    queueStartupInitialDelayMs: Number.isInteger(queueStartupInitialDelayMs) ? queueStartupInitialDelayMs : 1000,
+    queueStartupMaxDelayMs: Number.isInteger(queueStartupMaxDelayMs) ? queueStartupMaxDelayMs : 10000,
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
@@ -314,6 +344,9 @@ export function buildStartupSummary(
       disabledReason: !queueEnabled
         ? "Redis unreachable — set REDIS_URL to enable BullMQ workers"
         : undefined,
+      startupRetries: config.queueStartupRetries,
+      startupInitialDelayMs: config.queueStartupInitialDelayMs,
+      startupMaxDelayMs: config.queueStartupMaxDelayMs,
     },
     jwtAuthEnabled: config.jwtAuthEnabled,
     readinessCacheTtlMs: config.readinessCacheTtlMs,

@@ -38,7 +38,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     initializeSentry()
     setupProcessErrorHandlers()
 
-    const redisAvailable = await probeRedis()
+    const redisAvailable = await probeRedis(config)
     const { mountApiRoutes, mountLegacyNonApiRedirects } = await import('./http/mountApiRoutes.js')
     const { initRobustWebSocket } = await import('./services/websocket.service.js')
     const { startQueueScheduler } = await import('./queue/scheduler.js')
