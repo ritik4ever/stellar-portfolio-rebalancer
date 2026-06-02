@@ -160,6 +160,46 @@ export const assetsListQuerySchema = z.object({
     )
 });
 
+// ─── Draft portfolio schemas ─────────────────────────────────────────────────
+export const createDraftSchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required"),
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ),
+    threshold: z.number().min(1).max(50),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
+
+export const updateDraftSchema = z.object({
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ).optional(),
+    threshold: z.number().min(1).max(50).optional(),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
+
 // ─── Export / query-param schemas ─────────────────────────────────────────────
 export const portfolioExportQuerySchema = z.object({
     format: z.enum(['json', 'csv', 'pdf']).refine(
