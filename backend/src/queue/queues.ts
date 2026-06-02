@@ -73,7 +73,7 @@ let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null;
 let analyticsCompactionQueue: Queue<AnalyticsCompactionJobData> | null = null;
 let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null;
 let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null;
-let dlqQueue: Queue<DLQJobData> | null = null;
+
 
 function getDefaultJobOptions() {
   return {
@@ -162,20 +162,7 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   }
 }
 
-export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, PortfolioExportResult> | null {
-    try {
-        if (!portfolioExportQueue) {
-            portfolioExportQueue = new Queue<PortfolioExportJobData, PortfolioExportResult>(QUEUE_NAMES.PORTFOLIO_EXPORT, {
-                connection: getConnectionOptions(),
-                defaultJobOptions: getDefaultJobOptions(),
-            })
-            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PORTFOLIO_EXPORT}`)
-        }
-        return portfolioExportQueue
-    } catch {
-        return null
-    }
-}
+let dlqQueue: Queue<DLQJobData> | null = null;
 
 export function getDLQQueue(): Queue<DLQJobData> | null {
   try {
@@ -195,11 +182,28 @@ export function getDLQQueue(): Queue<DLQJobData> | null {
   }
 }
 
+export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, PortfolioExportResult> | null {
+    try {
+        if (!portfolioExportQueue) {
+            portfolioExportQueue = new Queue<PortfolioExportJobData, PortfolioExportResult>(QUEUE_NAMES.PORTFOLIO_EXPORT, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PORTFOLIO_EXPORT}`)
+        }
+        return portfolioExportQueue
+    } catch {
+        return null
+    }
+}
+
+
 export function getQueueByName(name: string): Queue<any, any> | null {
   const queueMap: Record<string, () => any> = {
     [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
     [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
     [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
+
     [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
     [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
     [QUEUE_NAMES.DLQ]: getDLQQueue,
