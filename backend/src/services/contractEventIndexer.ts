@@ -1,4 +1,5 @@
 import { Address, SorobanRpc, scValToNative } from '@stellar/stellar-sdk'
+import { createHash } from 'node:crypto'
 import { databaseService } from './databaseService.js'
 import { logger } from '../utils/logger.js'
 import {
@@ -39,6 +40,20 @@ interface ContractEventIndexerStatus {
     expectedEventSchemaVersion: number
     declaredEventSchemaVersion?: number
     contractEventSchemaOk: boolean
+    replayValidation?: {
+        lastReplayedLedger: number | undefined
+        eventCount: number
+        integrityHash: string | undefined
+    }
+}
+
+interface ReplayValidationResult {
+    valid: boolean
+    eventsReplayed: number
+    totalEvents: number
+    ledgerRange: { start: number; end: number }
+    integrityHash: string
+    errors: string[]
 }
 
 const INDEXER_CURSOR_KEY = 'soroban_event_indexer.cursor'
@@ -186,6 +201,111 @@ export class ContractEventIndexerService {
             await this.sleep(backoffMs)
         }
         await this.syncOnce()
+    }
+
+    computeIngestedEventsHash(): string {
+        const hash = createHash('sha256')
+        const events = databaseService.getRebalanceHistory(undefined, 1000)
+        for (const ev of events) {
+            hash.update(ev.id)
+            hash.update(ev.portfolioId)
+            hash.update(ev.timestamp)
+            hash.update(ev.status)
+        }
+        return hash.digest('hex')
+    }
+
+    async validateReplay(ledgerRange?: { start: number; end: number }): Promise<ReplayValidationResult> {
+        const errors: string[] = []
+        const checkpoint = databaseService.getReplayStatus()
+        const currentHash = this.computeIngestedEventsHash()
+
+        const storedHash = databaseService.getReplayIntegrityHash()
+        if (storedHash && storedHash !== currentHash) {
+            errors.push(`Integrity hash mismatch: stored=${storedHash}, current=${currentHash}`)
+        }
+
+        const events = databaseService.getRebalanceHistory(undefined, 5000)
+        const onChainEvents = events.filter((e) => e.eventSource === 'onchain')
+        const eventIds = new Set<string>()
+        for (const ev of onChainEvents) {
+            if (eventIds.has(ev.id)) {
+                errors.push(`Duplicate event ID detected: ${ev.id}`)
+            }
+            eventIds.add(ev.id)
+        }
+
+        let lastLedger = 0
+        for (const ev of onChainEvents) {
+            const ledger = ev.onChainLedger ?? 0
+            if (ledger > 0 && ledger < lastLedger) {
+                errors.push(`Out-of-order event: ${ev.id} ledger ${ledger} < previous ${lastLedger}`)
+            }
+            if (ledger > 0) lastLedger = ledger
+        }
+
+        if (ledgerRange) {
+            const inRange = onChainEvents.filter((ev) => {
+                const l = ev.onChainLedger ?? 0
+                return l >= ledgerRange.start && l <= ledgerRange.end
+            })
+            if (inRange.length === 0) {
+                errors.push(`No events found in ledger range ${ledgerRange.start}-${ledgerRange.end}`)
+            }
+        }
+
+        return {
+            valid: errors.length === 0,
+            eventsReplayed: onChainEvents.length,
+            totalEvents: events.length,
+            ledgerRange: ledgerRange ?? { start: 0, end: lastLedger },
+            integrityHash: currentHash,
+            errors,
+        }
+    }
+
+    async replayEvents(ledgerRange?: { start: number; end: number }): Promise<{
+        ingested: number
+        validation: ReplayValidationResult
+    }> {
+        if (!this.isEnabled()) {
+            return { ingested: 0, validation: await this.validateReplay(ledgerRange) }
+        }
+
+        if (!ledgerRange) {
+            const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+            ledgerRange = {
+                start: Math.max(1, latest.sequence - this.bootstrapWindowLedgers),
+                end: latest.sequence,
+            }
+        }
+
+        const result = await this.syncOnce()
+        const validation = await this.validateReplay(ledgerRange)
+
+        if (validation.valid) {
+            const hash = this.computeIngestedEventsHash()
+            databaseService.setReplayIntegrityHash(hash)
+            databaseService.setLastReplayedLedger(ledgerRange.end)
+            databaseService.setReplayEventCount(validation.eventsReplayed)
+
+            const replayId = `replay_${ledgerRange.start}_${ledgerRange.end}_${Date.now()}`
+            databaseService.setReplayCheckpoint(replayId, {
+                startLedger: ledgerRange.start,
+                endLedger: ledgerRange.end,
+                eventCount: validation.eventsReplayed,
+                integrityHash: hash,
+                timestamp: new Date().toISOString(),
+            })
+        }
+
+        this.status.replayValidation = {
+            lastReplayedLedger: ledgerRange.end,
+            eventCount: validation.eventsReplayed,
+            integrityHash: validation.integrityHash,
+        }
+
+        return { ingested: result.ingested, validation }
     }
 
     async syncOnce(): Promise<{ ingested: number; latestLedger?: number }> {

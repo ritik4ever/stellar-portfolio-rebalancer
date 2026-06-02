@@ -12,6 +12,19 @@ function renderWithQuery(ui: React.ReactElement) {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
+const enabledPreferences = {
+    emailEnabled: true,
+    emailAddress: 'user@example.com',
+    webhookEnabled: true,
+    webhookUrl: 'https://example.com/webhook',
+    events: {
+        rebalance: true,
+        circuitBreaker: true,
+        priceMovement: true,
+        riskChange: true,
+    },
+}
+
 describe('NotificationPreferences', () => {
     beforeEach(() => {
         cleanup()
@@ -129,4 +142,13 @@ describe('NotificationPreferences', () => {
         fireEvent.click(saveBtn)
         expect(postSpy).not.toHaveBeenCalled()
     })
+
+
+
+        renderWithQuery(<NotificationPreferences userId="user-1" />)
+        expect(await screen.findByText('Notifications')).toBeTruthy()
+
+
+    })
 })
+

@@ -107,6 +107,15 @@ export class ConflictError extends Error {
     }
 }
 
+// Thrown when a destructive database operation lacks a recent backup
+export class BackupVerificationError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'BackupVerificationError'
+    }
+}
+
+
 // Rebalance event interface
 export interface RebalanceEvent {
     id: string
@@ -195,10 +204,22 @@ export interface ApiResponse<T = any> {
     meta?: Record<string, unknown>
 }
 
+export interface RiskHeatmapDiagnostic {
+    score: number
+    level: 'low' | 'medium' | 'high'
+}
+
+export interface RiskHeatmap {
+    concentration: RiskHeatmapDiagnostic
+    volatility: RiskHeatmapDiagnostic
+    drawdown: RiskHeatmapDiagnostic
+}
+
 export interface PortfolioApiResponse extends ApiResponse {
     portfolio?: Portfolio
     prices?: PricesMap
     riskMetrics?: RiskMetrics
+    riskHeatmap?: RiskHeatmap
 }
 
 export interface RebalanceHistoryResponse extends ApiResponse {
@@ -272,6 +293,27 @@ export interface SystemStatus {
 // Additional utility types
 export type AssetCode = 'XLM' | 'BTC' | 'ETH' | 'USDC'
 
+// Metadata about an asset issuer retrieved from stellar.toml
+export interface IssuerMetadata {
+    org_name?: string
+    description?: string
+    homepage_url?: string
+    cert_url?: string
+    org_url?: string
+    org_logo?: string
+    org_description?: string
+    version?: string
+}
+
+export interface ParsedAssetCreatePayload {
+    symbol: string
+    name: string
+    contractAddress?: string
+    issuerAccount?: string
+    coingeckoId?: string
+    issuerMetadata?: IssuerMetadata
+}
+
 export interface RebalanceRequest {
     portfolioId: string
     userAddress: string
@@ -294,6 +336,7 @@ export interface RebalanceResult {
     failureReasons?: string[]
     rollback?: RebalanceRollback
     totalSlippageBps?: number
+    explanation?: ExecutionExplanation
 }
 
 export interface RebalanceExecutionTrade {
@@ -321,4 +364,12 @@ export interface RebalanceRollback {
     success: boolean
     rolledBackTrades: number
     failures: string[]
+}
+
+export interface ExecutionExplanation {
+    routeLength: number
+    estimatedSlippage: number
+    skippedAlternatives: string[]
+    rationale: string
+    failureReason?: string
 }
