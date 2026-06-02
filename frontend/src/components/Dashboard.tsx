@@ -42,6 +42,7 @@ type DashboardPriceRow = { price?: number; change?: number; [key: string]: unkno
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const { isDark } = useTheme()
+    const queryClient = useQueryClient()
 
     // Query for user portfolios
     const {
@@ -110,6 +111,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const prices: Record<string, DashboardPriceRow> = hasLivePriceRows
         ? (priceRows as Record<string, DashboardPriceRow>)
         : demoPrices
+
     const loading = publicKey ? (portfoliosLoading || (latestPortfolioId ? detailsLoading : false) || (API_CONFIG.USE_BROWSER_PRICES ? false : pricesLoading)) : false
     const routeDataUnavailable = Boolean(
         publicKey &&
@@ -117,8 +119,90 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         !portfoliosLoading &&
         (!portfolios || portfolios.length === 0),
     )
-    const feedMeta = priceBundle?.feedMeta
 
+    const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
+        name: alloc.asset,
+        value: alloc.target || alloc.percentage, // Handle both formats
+        amount: alloc.amount || 0,
+        color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] || '#6B7280'
+    })) || []
+
+    const missingPriceAssets = allocationData.filter((asset: any) => {
+        const row = prices[asset.name]
+        return !row || row.price === undefined || row.price === null
+    })
+    const pricedAssets = allocationData.length - missingPriceAssets.length
+    const hasPartialPriceData = pricedAssets > 0 && missingPriceAssets.length > 0
+    const partialPriceMessage = hasPartialPriceData
+        ? `Some asset quotes are unavailable or fallback-based. ${missingPriceAssets.length} asset${missingPriceAssets.length !== 1 ? 's are' : ' is'} missing fresh market data.`
+        : null
+
+    const priceSource = hasLivePriceRows
+        ? formatPriceFeedSummary(priceBundle?.feedMeta, true, false)
+        : publicKey
+            ? 'No price data'
+            : 'Demo data'
+    const effectivePriceSource = hasPartialPriceData
+        ? 'Partial price data'
+        : priceSource
+    const feedMeta = priceBundle?.feedMeta
+    const showPriceQualityNote = feedMeta?.degraded || hasPartialPriceData || feedMeta?.staleOrLimited
+
+    const executeRebalance = async () => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') {
+            alert('Rebalancing not available in demo mode. Please create a real portfolio.')
+            return
+        }
+
+        try {
+            const result = await executeRebalanceMutation.mutateAsync()
+            alert(`Rebalance executed successfully! Gas used: ${result.result?.gasUsed || 'N/A'}`)
+        } catch (error: any) {
+            console.error('Rebalance failed:', error)
+            const msg = error.message ?? 'Rebalance failed. Please try again.'
+            const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
+            alert(isSlippage ? `Slippage too high: ${msg}` : msg)
+        }
+    }
+
+    const estimateXlm = rebalanceEstimate?.gasEstimateXlm ?? 0
+    const estimateUsd = rebalanceEstimate?.gasEstimateUsd ?? 0
+    const hasHighGasWarning = rebalanceEstimate?.gasWarning || estimateXlm > 0.5
+
+    const refreshData = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+        ])
+    }, [queryClient])
+
+    const retryPortfolioLoad = useCallback(async () => {
+        await Promise.all([
+            refetchPortfolios(),
+            refetchPortfolioDetails(),
+            refetchPrices(),
+        ])
+        await refreshData()
+    }, [refetchPortfolioDetails, refetchPortfolios, refetchPrices, refreshData])
+
+    const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false)
+    const [resettingDemo, setResettingDemo] = useState(false)
+
+    const resetDemoPortfolio = useCallback(async () => {
+        if (publicKey) return
+        setResettingDemo(true)
+        try {
+            await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
+            await queryClient.invalidateQueries({ queryKey: priceKeys.all })
+            await new Promise(resolve => setTimeout(resolve, 500))
+            setShowDemoResetConfirm(false)
+        } catch (error) {
+            console.error('Demo reset failed:', error)
+            alert('Failed to reset demo portfolio. Please refresh the page.')
+        } finally {
+            setResettingDemo(false)
+        }
+    }, [publicKey, queryClient])
 
     const disconnectWallet = async () => {
         if (publicKey) {
@@ -128,6 +212,71 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         onNavigate('landing')
     }
 
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [deleting, setDeleting] = useState(false)
+    const deleteMyData = async () => {
+        if (!publicKey) return
+        setDeleting(true)
+        try {
+            await api.delete(ENDPOINTS.USER_DATA_DELETE(publicKey))
+            await authLogout(publicKey)
+            StellarWallet.disconnect()
+            setShowDeleteConfirm(false)
+            onNavigate('landing')
+        } catch (e) {
+            console.error('Delete data failed', e)
+            alert(e instanceof Error ? e.message : 'Failed to delete data. Please try again.')
+        } finally {
+            setDeleting(false)
+        }
+    }
+
+    const buildPortfolioExportRows = () => {
+        const rows = (allocationData || []).map((a: any) => {
+            const price = prices?.[a.name]?.price ?? ''
+            const change = prices?.[a.name]?.change ?? ''
+            return {
+                asset: a.name,
+                targetPct: a.value ?? '',
+                amount: a.amount ?? '',
+                priceUsd: price,
+                change24hPct: change
+            }
+        })
+        return rows
+    }
+
+    const exportPortfolioCSV = () => {
+        if (!portfolioData) return
+        const rows = buildPortfolioExportRows()
+        const csv = toCSV(rows, ['asset', 'targetPct', 'amount', 'priceUsd', 'change24hPct'])
+        const filename = `portfolio_${publicKey ? publicKey.slice(0, 6) : 'demo'}_${new Date().toISOString()}.csv`
+        downloadCSV(filename, csv)
+    }
+
+    const exportPortfolioJSON = () => {
+        if (!portfolioData) return
+        const filename = `portfolio_${publicKey ? publicKey.slice(0, 6) : 'demo'}_${new Date().toISOString()}.json`
+        downloadJSON(filename, {
+            exportedAt: new Date().toISOString(),
+            mode: publicKey ? 'wallet' : 'demo',
+            portfolio: portfolioData,
+            prices
+        })
+    }
+
+    const exportFromApi = async (format: 'json' | 'csv' | 'pdf') => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') {
+            alert('Connect your wallet and open a portfolio to export full data (JSON/CSV/PDF) from the server.')
+            return
+        }
+        try {
+            await downloadPortfolioExport(portfolioData.id, format)
+        } catch (e) {
+            console.error('Export failed', e)
+            alert(e instanceof Error ? e.message : 'Export failed. Please try again.')
+        }
+    }
 
     const performanceData = [
         { date: '1/1', value: 10000 },
@@ -138,6 +287,48 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         { date: '1/6', value: portfolioData?.totalValue || 10000 }
     ]
 
+    const walletType = StellarWallet.getWalletType()
+    const contractAddress = 'CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I'
+
+    if (routeDataUnavailable) {
+        return (
+            <RouteErrorState
+                title="Portfolio data is unavailable"
+                message={
+                    portfoliosError instanceof Error
+                        ? portfoliosError.message
+                        : 'We could not load the portfolio list for this wallet.'
+                }
+                detail={
+                    detailsLoadError && detailsError instanceof Error
+                        ? `Latest portfolio details also failed to load: ${detailsError.message}`
+                        : pricesLoadError
+                            ? 'Price data failed to refresh. The retry action will attempt a full refetch.'
+                            : 'Retrying will refetch portfolio data and the latest price feed.'
+                }
+                onRetry={retryPortfolioLoad}
+                onBack={() => onNavigate('landing')}
+                retryLabel="Retry loading"
+                backLabel="Go to landing"
+            />
+        )
+    }
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
+                    <p className="mt-4 text-gray-600 dark:text-gray-400">Loading portfolio data...</p>
+                </div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+            {/* Header */}
+            <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
 
                 <div className="flex items-center justify-between">
                     <div className="flex items-center">
@@ -155,6 +346,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 <div className="flex items-center space-x-4 mt-1">
                                     <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                         <span className="capitalize font-medium">
+                                            {walletType} Wallet
+                                        </span>
+                                        <span>{publicKey.slice(0, 4)}...{publicKey.slice(-4)}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-1 text-xs text-gray-600 dark:text-gray-400">
+                                        <span>Contract:</span>
+                                        <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{contractAddress.slice(0, 4)}...{contractAddress.slice(-4)}</code>
+                                        <a
+                                            href={`https://stellar.expert/explorer/testnet/contract/${contractAddress}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-700"
+                                        >
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    </div>
 
                                 </div>
                             ) : (
@@ -165,6 +372,49 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </div>
                     </div>
 
+                    <div className="flex items-center space-x-4">
+                        <ThemeToggle />
+                        <div className="flex items-center space-x-2">
+                            {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
+                                <>
+                                    <button
+                                        onClick={() => exportFromApi('json')}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        Export JSON
+                                    </button>
+                                    <button
+                                        onClick={() => exportFromApi('csv')}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        Export CSV
+                                    </button>
+                                    <button
+                                        onClick={() => exportFromApi('pdf')}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        Export PDF
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={exportPortfolioCSV}
+                                        disabled={!portfolioData}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                    >
+                                        Export CSV
+                                    </button>
+                                    <button
+                                        onClick={exportPortfolioJSON}
+                                        disabled={!portfolioData}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                    >
+                                        Export JSON
+                                    </button>
+                                </>
+                            )}
+                        </div>
 
                         {publicKey ? (
                             <>
@@ -211,10 +461,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     Connect Wallet
                                 </button>
                                 <button
-
                                     onClick={() => setShowDemoResetConfirm(true)}
                                     className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
-                                    title="Reset demo portfolio to default state"
                                 >
                                     <RefreshCw className="w-4 h-4" />
                                     Reset Demo
@@ -230,6 +478,43 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </button>
                     </div>
                 </div>
+            </div>
+
+            {/* GDPR: Delete all data confirmation modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete All Your Data?</h2>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                            This will permanently delete your portfolio configuration, rebalance history, and notification settings from our database. This action cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={deleting}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={deleteMyData}
+                                disabled={deleting}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                            >
+                                {deleting ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete all my data
+                                    </>
+                                )}
 
                             </button>
                         </div>
@@ -245,32 +530,40 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Delete Your Data</h2>
                         </div>
                         <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
-                            This will permanently delete your account and all associated data. This action cannot be undone.
+                            This will reset the demo portfolio to its default state with $10,000 total value and 40% XLM / 60% USDC allocation. Perfect for testing and screenshots.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button
-
+                                onClick={() => setShowDemoResetConfirm(false)}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
                             >
                                 Cancel
                             </button>
                             <button
-
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
+                                onClick={resetDemoPortfolio}
+                                disabled={resettingDemo}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                             >
-                                Cancel
-                            </button>
-                            <button
-
+                                {resettingDemo ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                        Resetting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCw className="w-4 h-4" />
+                                        Reset Demo
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
+            <div className="p-6 max-w-7xl mx-auto">
+                {/* Tab Navigation */}
 
                 <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
                     <nav className="flex space-x-8" aria-label="Dashboard sections">
@@ -295,7 +588,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                                 }`}
                         >
+                            Analytics
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('notifications')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
+                                }`}
+                        >
+                            Notifications
+                        </button>
+                    </nav>
+                </div>
 
+                {/* Tab Content */}
+                {activeTab === 'overview' && (
+                    <div className="grid lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* Portfolio Value Chart */}
+                            <div>
 
                 {activeTab === 'analytics' ? (
                     <PerformanceChart portfolioId={portfolioData?.id || null} />
@@ -311,7 +623,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <div data-testid="dashboard-value-skeleton" aria-busy="true" className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm animate-pulse">
                                         <div className="flex items-center justify-between mb-6">
                                             <div className="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
-                                            <div className="space-x-2 flex items-center">
+                                            <div className="flex items-center space-x-2">
                                                 <div className="w-32 h-4 bg-gray-300 dark:bg-gray-700 rounded" />
                                                 <div className="w-24 h-6 bg-gray-300 dark:bg-gray-700 rounded" />
                                             </div>
@@ -329,28 +641,29 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                             <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
                                                 <span>Last updated: just now</span>
                                                 <span
-                                                    className={`px-2 py-1 rounded text-xs ${
-                                                        feedMeta?.degraded || hasPartialPriceData
-                                                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
-                                                            : feedMeta?.staleOrLimited
-                                                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
-                                                              : hasLivePriceRows
+                                                    className={`px-2 py-1 rounded text-xs ${feedMeta?.degraded || hasPartialPriceData
+                                                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200'
+                                                        : feedMeta?.staleOrLimited
+                                                            ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                                                            : hasLivePriceRows
                                                                 ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
                                                                 : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'
-                                                    }`}
+                                                        }`}
                                                 >
                                                     {effectivePriceSource}
                                                 </span>
                                             </div>
                                         </div>
+                                        {showPriceQualityNote && (
+                                            <p className="mb-4 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg px-3 py-2">
 
                                                 {feedMeta?.degraded
                                                     ? 'Displayed prices are synthetic or fallback — not primary market data.'
                                                     : hasPartialPriceData
-                                                      ? partialPriceMessage
-                                                      : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
+                                                        ? partialPriceMessage
+                                                        : 'Price feed may be stale or rate-limited; confirm against an exchange if trading.'}
                                             </p>
-
+                                        )}
                                         <div className="mb-4">
                                             <div className="text-3xl font-bold text-gray-900 dark:text-white">
                                                 ${portfolioData?.totalValue?.toLocaleString() || '0'}
@@ -412,14 +725,39 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                                 Warning: estimated gas is unusually high ({'>'}0.5 XLM). Consider reducing trade count.
                                             </p>
                                         )}
-                                        {(rebalanceEstimate?.breakdown?.length ?? 0) > 0 && (
-                                            <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
-                                                {rebalanceEstimate.breakdown.map((item: any) => (
-                                                    <div key={item.tradeId} className="flex justify-between">
-                                                        <span>{item.tradeId}</span>
-                                                        <span>{Number(item.estimateXlm || 0).toFixed(4)} XLM</span>
-                                                    </div>
+                                    </button>
+                                </motion.div>
+                            )}
+
+                            {/* Allocation Chart */}
+                            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
+                                <div className="h-64 flex items-center justify-center">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie
+                                                data={allocationData}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={80}
+                                                paddingAngle={5}
+                                                dataKey="value"
+                                            >
+                                                {allocationData.map((entry: any, index: number) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
                                                 ))}
+                                            </Pie>
+                                            <Tooltip />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="mt-4 space-y-2">
+                                    {allocationData.map((asset: any, index: number) => (
+                                        <div key={index} className="flex items-center justify-between">
+                                            <div className="flex items-center">
+                                                <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
+                                                <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
                                             </div>
                                         )}
                                         {(portfolioData as any)?.slippageTolerancePercent != null && (
@@ -461,61 +799,25 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         <div className="h-48 flex items-center justify-center mb-4">
                                             <div className="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse" />
                                         </div>
-                                        <div className="space-y-3">
-                                            {[1, 2, 3].map((i) => (
-                                                <div key={i} className="flex items-center justify-between animate-pulse">
-                                                    <div className="flex items-center space-x-2">
-                                                        <div className="w-3 h-3 rounded-full bg-gray-300 dark:bg-gray-700" />
-                                                        <div className="w-20 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                                                    </div>
-                                                    <div className="w-12 h-3 bg-gray-300 dark:bg-gray-700 rounded" />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
-                                        <div className="h-48 flex items-center justify-center">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <PieChart>
-                                                    <Pie
-                                                        data={allocationData}
-                                                        cx="50%"
-                                                        cy="50%"
-                                                        innerRadius={40}
-                                                        outerRadius={80}
-                                                        paddingAngle={2}
-                                                        dataKey="value"
-                                                    >
-                                                        {allocationData.map((entry: any, index: number) => (
-                                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                                        ))}
-                                                    </Pie>
-                                                </PieChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                        <div className="mt-4 space-y-2">
-                                            {allocationData.map((asset: any, index: number) => (
-                                                <div key={index} className="flex items-center justify-between">
-                                                    <div className="flex items-center">
-                                                        <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: asset.color }}></div>
-                                                        <span className="text-sm text-gray-600 dark:text-gray-400">{asset.name}</span>
-                                                    </div>
-                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{asset.value.toFixed(1)}%</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
 
-                        {/* Price Tracker */}
-                        <div className="mb-8">
                             <PriceTracker />
                         </div>
+                    </div>
+                )}
 
+                {activeTab === 'analytics' && (
+                    <div className="space-y-6">
+                        <PerformanceChart portfolioId={portfolioData?.id || null} />
+                    </div>
+                )}
+
+                {activeTab === 'notifications' && (
+                    <div className="space-y-6">
+                        <NotificationPreferences publicKey={publicKey} />
+                    </div>
                         {/* NEW: Asset Cards Skeleton Loading State */}
 
                             {loading ? (
@@ -538,7 +840,56 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 )}
             </main>
 
+            {/* Sticky Mobile Action Bar */}
+            <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">
+                <div className="flex items-center justify-between max-w-sm mx-auto">
+                    <div className="text-center">
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
+                        <div className="text-lg font-bold text-gray-900 dark:text-white">
+                            ${portfolioData?.totalValue?.toLocaleString() || '10,000'}
+                        </div>
+                        <div className={`text-xs flex items-center justify-center gap-1 ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {(portfolioData?.dayChange || 0) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingUp className="w-3 h-3 rotate-180" />}
+                            {Math.abs(portfolioData?.dayChange || 0.85).toFixed(2)}%
+                        </div>
+                    </div>
 
+                    <div className="flex items-center gap-2">
+                        {portfolioData?.needsRebalance ? (
+                            <button
+                                onClick={executeRebalance}
+                                disabled={executeRebalanceMutation.isPending || portfolioData?.id === 'demo'}
+                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                            >
+                                {executeRebalanceMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                                Rebalance
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
+                                <CheckCircle className="w-4 h-4" />
+                                <span>Balanced</span>
+                            </div>
+                        )}
+
+                        {publicKey ? (
+                            <button onClick={() => onNavigate('setup')} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors">
+                                <Plus className="w-4 h-4" />
+                            </button>
+                        ) : (
+                            <button onClick={() => setShowDemoResetConfirm(true)} className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm">
+                                <RefreshCw className="w-4 h-4" />
+                            </button>
+                        )}
+
+                        <button onClick={refreshData} disabled={loading} className="p-2 text-gray-500 hover:text-gray-700 transition-colors">
+                            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Bottom padding for mobile bar */}
+            <div className="h-20 md:hidden"></div>
         </div>
     )
 }

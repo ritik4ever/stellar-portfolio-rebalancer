@@ -8,10 +8,36 @@
     box-sizing: border-box;
 }
 
+/*
+ * Contrast tokens — establish a legible floor for both themes so that
+ * cards, badges, and low-emphasis text never drop below WCAG AA.
+ * `color-scheme` also keeps native UI (scrollbars, form controls) readable.
+ */
+:root {
+    color-scheme: light;
+    --color-text-base: #111827;   /* gray-900 */
+    --color-text-muted: #4b5563;  /* gray-600 — ~7:1 on white */
+    --color-bg-base: #f9fafb;     /* gray-50 */
+}
+
+:root.dark {
+    color-scheme: dark;
+    --color-text-base: #f9fafb;   /* gray-50 */
+    --color-text-muted: #cbd5e1;  /* slate-300 — ~7:1 on gray-800/900 */
+    --color-bg-base: #111827;     /* gray-900 */
+}
+
 body {
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    color: var(--color-text-base);
+    background-color: var(--color-bg-base);
+}
+
+/* Low-emphasis helper text held to an AA-compliant muted token in both themes. */
+.text-muted-token {
+    color: var(--color-text-muted);
 }
 
 .recharts-tooltip-wrapper {
