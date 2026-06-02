@@ -11,30 +11,26 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
+// TanStack Query Mutations
+import {
+  buildRollbackMessage,
+  useCreatePortfolioMutation,
+} from "../hooks/mutations/usePortfolioMutations";
 import {
   Plus,
   Trash2,
   ArrowLeft,
   AlertCircle,
   CheckCircle,
-  Search,
   Save,
   User,
   Zap,
   RefreshCw,
 } from "lucide-react";
-import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 
-// TanStack Query Mutations
-import { useCreatePortfolioMutation } from "../hooks/mutations/usePortfolioMutations";
-import { useAssets } from "../hooks/queries/useAssetsQuery";
-import {
-  clearPortfolioCloneDraft,
-  loadPortfolioCloneDraft,
-  type PortfolioCloneDraft,
-} from "../utils/portfolioCloneDraft";
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,7 +70,8 @@ export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
   {
     id: "conservative",
     name: "Conservative",
-    description: "Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.",
+    description:
+      "Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.",
     riskLevel: "low",
     allocations: [
       { asset: "USDC", percentage: 60 },
@@ -85,7 +82,8 @@ export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
   {
     id: "balanced",
     name: "Balanced",
-    description: "Mix of stablecoins and crypto. Moderate risk with growth potential.",
+    description:
+      "Mix of stablecoins and crypto. Moderate risk with growth potential.",
     riskLevel: "medium",
     allocations: [
       { asset: "USDC", percentage: 40 },
@@ -108,7 +106,8 @@ export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
   {
     id: "stablecoin-focus",
     name: "Stablecoin Focus",
-    description: "Mostly USDC with some XLM. Minimal exposure to crypto volatility.",
+    description:
+      "Mostly USDC with some XLM. Minimal exposure to crypto volatility.",
     riskLevel: "low",
     allocations: [
       { asset: "USDC", percentage: 80 },
@@ -118,13 +117,15 @@ export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
   {
     id: "custom",
     name: "Custom",
-    description: "Define your own allocation. Start from scratch and add assets.",
+    description:
+      "Define your own allocation. Start from scratch and add assets.",
     riskLevel: "medium",
     allocations: [{ asset: "XLM", percentage: 100 }],
   },
 ];
 
-const SAVED_TEMPLATES_KEY = (userId: string) => `portfolio-templates-${userId || "anonymous"}`;
+const SAVED_TEMPLATES_KEY = (userId: string) =>
+  `portfolio-templates-${userId || "anonymous"}`;
 
 function loadSavedTemplates(userId: string): PortfolioTemplate[] {
   try {
@@ -137,7 +138,10 @@ function loadSavedTemplates(userId: string): PortfolioTemplate[] {
   }
 }
 
-function saveSavedTemplates(userId: string, templates: PortfolioTemplate[]): void {
+function saveSavedTemplates(
+  userId: string,
+  templates: PortfolioTemplate[],
+): void {
   localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates));
 }
 
@@ -151,25 +155,30 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   const [allocations, setAllocations] = useState<Allocation[]>(() => {
     const balanced = PORTFOLIO_TEMPLATES.find((t) => t.id === "balanced");
-    return balanced ? balanced.allocations.map((a) => ({ ...a })) : [{ asset: "XLM", percentage: 40 }];
+    return balanced
+      ? balanced.allocations.map((a) => ({ ...a }))
+      : [{ asset: "XLM", percentage: 40 }];
   });
   const [threshold, setThreshold] = useState(5);
   const [slippageTolerance, setSlippageTolerance] = useState(1);
   const [strategy, setStrategy] = useState<string>("threshold");
-  const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>({});
+  const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>(
+    {},
+  );
   const [autoRebalance, setAutoRebalance] = useState(true);
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("balanced");
-  const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(() =>
-    loadSavedTemplates(publicKey || "")
+  const [selectedTemplateId, setSelectedTemplateId] =
+    useState<string>("balanced");
+  const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(
+    () => loadSavedTemplates(publicKey || ""),
   );
   const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
     loadPortfolioCloneDraft(),
   );
 
-  const { data: assets = [] } = useAssets()
+
 
   useEffect(() => {
     setSavedTemplates(loadSavedTemplates(publicKey || ""));
@@ -190,19 +199,27 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   const getRiskLevelLabel = (level: RiskLevel): string => {
     switch (level) {
-      case "low": return "Low risk";
-      case "medium": return "Medium risk";
-      case "high": return "High risk";
-      default: return "Risk";
+      case "low":
+        return "Low risk";
+      case "medium":
+        return "Medium risk";
+      case "high":
+        return "High risk";
+      default:
+        return "Risk";
     }
   };
 
   const getRiskLevelClass = (level: RiskLevel): string => {
     switch (level) {
-      case "low": return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
-      case "medium": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
-      case "high": return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
-      default: return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+      case "low":
+        return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
+      case "medium":
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
+      case "high":
+        return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+      default:
+        return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
     }
   };
   // Mutation for portfolio creation
@@ -395,11 +412,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       setSuccess(true);
       setTimeout(() => onNavigate("dashboard"), 2000);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Network error. Please try again.",
-      );
+      setError(buildRollbackMessage(err, "portfolio creation"));
     }
   };
 
@@ -485,7 +498,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             <div className="flex items-center">
               <div className="text-blue-600 mr-2">ℹ️</div>
               <div>
-                <h4 className="text-blue-800 dark:text-blue-300 font-medium">Demo Mode</h4>
+                <h4 className="text-blue-800 dark:text-blue-300 font-medium">
+                  Demo Mode
+                </h4>
                 <p className="text-blue-700 dark:text-blue-400 text-sm">
                   Using simulated $10,000 portfolio with real price data.
                   Perfect for testing and demonstrations.
@@ -500,6 +515,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="status"
+            aria-live="polite"
             className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-green-800">
@@ -516,6 +533,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="alert"
+            aria-live="assertive"
             className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-red-800">
@@ -574,7 +593,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 Choose a template
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Start from a preset or custom. You can modify allocations below before creating.
+                Start from a preset or custom. You can modify allocations below
+                before creating.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {PORTFOLIO_TEMPLATES.map((template) => (
@@ -596,13 +616,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     </p>
                     <span
                       className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium ${getRiskLevelClass(
-                        template.riskLevel
+                        template.riskLevel,
                       )}`}
                     >
                       {getRiskLevelLabel(template.riskLevel)}
                     </span>
                     <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                      {template.allocations.length} asset{template.allocations.length !== 1 ? "s" : ""}
+                      {template.allocations.length} asset
+                      {template.allocations.length !== 1 ? "s" : ""}
                     </div>
                   </button>
                 ))}
@@ -636,7 +657,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                               {template.description}
                             </p>
                             <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                              {template.allocations.length} asset{template.allocations.length !== 1 ? "s" : ""}
+                              {template.allocations.length} asset
+                              {template.allocations.length !== 1 ? "s" : ""}
                             </div>
                           </button>
                           <button
@@ -712,7 +734,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           </label>
                           <AssetSelector
                             value={allocation.asset}
-                            onChange={(asset) => updateAllocation(index, "asset", asset)}
+                            onChange={(asset) =>
+                              updateAllocation(index, "asset", asset)
+                            }
                             placeholder="Select asset..."
                             className="w-full"
                           />
@@ -881,10 +905,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     <option value="custom">Custom rules</option>
                   </select>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {strategy === "threshold" && "Rebalance when allocation drift exceeds the threshold."}
-                    {strategy === "periodic" && "Rebalance on a fixed schedule (e.g. every 7 or 30 days)."}
-                    {strategy === "volatility" && "Rebalance when market volatility exceeds a percentage threshold."}
-                    {strategy === "custom" && "Minimum days between rebalances plus threshold check."}
+                    {strategy === "threshold" &&
+                      "Rebalance when allocation drift exceeds the threshold."}
+                    {strategy === "periodic" &&
+                      "Rebalance on a fixed schedule (e.g. every 7 or 30 days)."}
+                    {strategy === "volatility" &&
+                      "Rebalance when market volatility exceeds a percentage threshold."}
+                    {strategy === "custom" &&
+                      "Minimum days between rebalances plus threshold check."}
                   </p>
                 </div>
 
@@ -899,7 +927,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       max="365"
                       value={strategyConfig.intervalDays ?? 7}
                       onChange={(e) =>
-                        setStrategyConfig((c) => ({ ...c, intervalDays: parseInt(e.target.value) || 7 }))
+                        setStrategyConfig((c) => ({
+                          ...c,
+                          intervalDays: parseInt(e.target.value) || 7,
+                        }))
                       }
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
@@ -917,7 +948,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       max="100"
                       value={strategyConfig.volatilityThresholdPct ?? 10}
                       onChange={(e) =>
-                        setStrategyConfig((c) => ({ ...c, volatilityThresholdPct: parseInt(e.target.value) || 10 }))
+                        setStrategyConfig((c) => ({
+                          ...c,
+                          volatilityThresholdPct:
+                            parseInt(e.target.value) || 10,
+                        }))
                       }
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
@@ -935,7 +970,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       max="365"
                       value={strategyConfig.minDaysBetweenRebalance ?? 1}
                       onChange={(e) =>
-                        setStrategyConfig((c) => ({ ...c, minDaysBetweenRebalance: parseInt(e.target.value) || 1 }))
+                        setStrategyConfig((c) => ({
+                          ...c,
+                          minDaysBetweenRebalance:
+                            parseInt(e.target.value) || 1,
+                        }))
                       }
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
@@ -977,7 +1016,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Trades will be rejected if price moves beyond this (0.1% - 5%)
+                    Trades will be rejected if price moves beyond this (0.1% -
+                    5%)
                   </p>
                 </div>
                 <div className="flex items-center">
@@ -1021,7 +1061,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           "#6B7280",
                       }}
                     />
-                    <span className="font-medium dark:text-gray-200">{allocation.asset}</span>
+                    <span className="font-medium dark:text-gray-200">
+                      {allocation.asset}
+                    </span>
                   </div>
                   <span className="text-gray-600 dark:text-gray-400">
                     {allocation.percentage}%
@@ -1036,21 +1078,33 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 <span className="text-sm text-gray-600 dark:text-gray-400">
                   Rebalance Threshold:
                 </span>
-                <span className="text-sm font-medium dark:text-gray-200">{threshold}%</span>
+                <span className="text-sm font-medium dark:text-gray-200">
+                  {threshold}%
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Auto-Rebalance:</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Auto-Rebalance:
+                </span>
                 <span className="text-sm font-medium dark:text-gray-200">
                   {autoRebalance ? "Enabled" : "Disabled"}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Max Slippage:</span>
-                <span className="text-sm font-medium dark:text-gray-200">{slippageTolerance}%</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Max Slippage:
+                </span>
+                <span className="text-sm font-medium dark:text-gray-200">
+                  {slippageTolerance}%
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Portfolio Value:</span>
-                <span className="text-sm font-medium dark:text-gray-200">$10,000 (Demo)</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Portfolio Value:
+                </span>
+                <span className="text-sm font-medium dark:text-gray-200">
+                  $10,000 (Demo)
+                </span>
               </div>
             </div>
 
@@ -1062,33 +1116,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
-             <button
-               onClick={createPortfolio}
-               disabled={!isValidTotal || hasAnyFieldError || createPortfolioMutation.isPending}
-               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-             >
-               {createPortfolioMutation.isPending ? (
-                 <>
-                   <Zap className="w-4 h-4 mr-2 animate-spin" />
-                   Creating...
-                 </>
-               ) : cloneDraft ? (
-                 "Save as new portfolio"
-               ) : (
-                 "Create Portfolio"
-               )}
-             </button>
- 
-             {/*
-              * Helper hint shown beneath the disabled button.
-              * Explains why the button is inactive so users aren't left guessing.
-              * Hidden once the API call starts (createPortfolioMutation.isPending) to avoid mixed messaging.
-              */}
-             {(hasAnyFieldError || !isValidTotal) && !createPortfolioMutation.isPending && (
-              <p className="text-xs text-gray-400 text-center mt-2">
-                Fix validation errors above to continue
-              </p>
-            )}
+
           </div>
         </div>
 
@@ -1097,16 +1125,20 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <div className="flex items-center justify-between max-w-sm mx-auto">
             {/* Allocation Summary */}
             <div className="text-center">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Total Allocation</div>
-              <div className={`text-lg font-bold ${
-                isValidTotal 
-                  ? 'text-green-600 dark:text-green-400' 
-                  : 'text-red-600 dark:text-red-400'
-              }`}>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Total Allocation
+              </div>
+              <div
+                className={`text-lg font-bold ${
+                  isValidTotal
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
                 {totalPercentage.toFixed(1)}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                {allocations.length} asset{allocations.length !== 1 ? 's' : ''}
+                {allocations.length} asset{allocations.length !== 1 ? "s" : ""}
               </div>
             </div>
 
@@ -1114,7 +1146,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             <div className="flex items-center gap-2">
               {/* Back Button */}
               <button
-                onClick={() => onNavigate('dashboard')}
+                onClick={() => onNavigate("dashboard")}
                 className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -1124,7 +1156,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               {/* Create Portfolio Button */}
               <button
                 onClick={createPortfolio}
-                disabled={hasAnyFieldError || !isValidTotal || createPortfolioMutation.isPending}
+
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (
