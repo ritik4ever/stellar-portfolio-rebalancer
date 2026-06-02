@@ -4,9 +4,10 @@ import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
-import { rebalanceLockService } from '../services/rebalanceLock.js'
+
 import { riskManagementService } from '../services/serviceContainer.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
+import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js';
+import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
@@ -17,6 +18,8 @@ import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { ConflictError } from '../types/index.js'
+import { updatePortfolioSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 
 export const portfoliosRouter = Router()
@@ -64,6 +67,26 @@ portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddlew
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
+
+// Update portfolio with optimistic concurrency control
+portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(updatePortfolioSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
+        const { version, ...updates } = req.body;
+        if (version === undefined) return fail(res, 400, 'VALIDATION_ERROR', 'Version is required for update');
+        const okUpdate = await portfolioStorage.updatePortfolio(portfolioId, updates, version);
+        if (!okUpdate) return fail(res, 409, 'CONFLICT', 'Version conflict', { currentVersion: (await portfolioStorage.getPortfolio(portfolioId))?.version });
+        const updated = await portfolioStorage.getPortfolio(portfolioId);
+        return ok(res, { portfolio: updated }, { status: 200 });
+    } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message);
+        }
+        logger.error('[ERROR] Update portfolio failed', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
 
 portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
@@ -291,7 +314,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
         console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
 
         // Try to acquire lock
-        const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+        const lockAcquired = await acquireWorkerLock(portfolioId);
         if (!lockAcquired) {
             console.log(`[WARNING] Rebalance already in progress for portfolio: ${portfolioId}`);
             return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
@@ -317,12 +340,16 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
 
             return ok(res, { result });
         } finally {
-            await rebalanceLockService.releaseLock(portfolioId);
+            await releaseWorkerLock(portfolioId);
         }
     } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message);
+        }
         console.error('[ERROR] Manual rebalance failed:', error);
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
+
 });
 
 // ================================

@@ -148,24 +148,7 @@ await queue.add(
         }
     }> {
         try {
-            const redisConnected = await isRedisAvailable()
-            const queue = getPortfolioCheckQueue()
-            const queueAvailable = !!queue
 
-            const ready = this.isRunning && this.initialized && redisConnected && queueAvailable
-            
-            let reason: string | undefined
-            if (!this.isRunning) reason = 'Auto-rebalancer service is not running'
-            else if (!this.initialized) reason = 'Auto-rebalancer not initialized'
-            else if (!redisConnected) reason = 'Redis unavailable - queue operations disabled'
-            else if (!queueAvailable) reason = 'Portfolio check queue unavailable'
-
-            logger.info('[AUTO-REBALANCER] Manual readiness check', {
-                ready,
-                serviceRunning: this.isRunning,
-                initialized: this.initialized,
-                redisConnected,
-                queueAvailable
             })
 
             return {
