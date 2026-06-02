@@ -8,6 +8,8 @@ vi.mock('../monitoring/readiness.js', () => ({
 }))
 
 vi.mock('../queue/queueMetrics.js', () => ({
+    QUEUE_METRIC_NAMES: ['portfolio-check', 'rebalance', 'analytics-snapshot'],
+    QUEUE_METRIC_STATES: ['waiting', 'active', 'completed', 'failed', 'delayed'],
     getQueueMetrics: mockGetQueueMetrics
 }))
 
@@ -27,12 +29,26 @@ describe('metrics observability', () => {
         mockGetQueueMetrics.mockResolvedValue({
             redisConnected: true,
             queues: {
+                'portfolio-check': {
+                    waiting: 0,
+                    active: 0,
+                    completed: 0,
+                    failed: 0,
+                    delayed: 0
+                },
                 rebalance: {
                     waiting: 1,
                     active: 2,
                     completed: 3,
                     failed: 4,
                     delayed: 5
+                },
+                'analytics-snapshot': {
+                    waiting: 0,
+                    active: 0,
+                    completed: 0,
+                    failed: 0,
+                    delayed: 0
                 }
             }
         })
@@ -46,6 +62,36 @@ describe('metrics observability', () => {
         expect(payload).toContain('stellar_portfolio_readiness_status')
         expect(payload).toContain('stellar_portfolio_queue_jobs')
         expect(payload).toContain('queue="rebalance",state="failed"')
+    })
+
+    it('keeps queue metric labels bounded to the known queue and state allowlists', async () => {
+        mockGetQueueMetrics.mockResolvedValue({
+            redisConnected: true,
+            queues: {
+                rebalance: {
+                    waiting: 1,
+                    active: 2,
+                    completed: 3,
+                    failed: 4,
+                    delayed: 5
+                },
+                'portfolio-tenant-12345': {
+                    waiting: 99,
+                    active: 99,
+                    completed: 99,
+                    failed: 99,
+                    delayed: 99
+                }
+            }
+        })
+
+        const { getMetricsPayload } = await import('../observability/metrics.js')
+
+        const payload = await getMetricsPayload()
+
+        expect(payload).toContain('queue="rebalance",state="waiting"')
+        expect(payload).toContain('queue="portfolio-check",state="waiting"')
+        expect(payload).not.toContain('portfolio-tenant-12345')
     })
 })
 

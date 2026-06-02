@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, copyFileSync, existsSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
@@ -45,6 +45,21 @@ interface PortfolioRow {
   version: number;
   strategy?: string;
   strategy_config?: string;
+}
+
+interface PortfolioDraftRow {
+  id: string;
+  user_address: string;
+  label: string | null;
+  allocations: string;
+  threshold: number;
+  slippage_tolerance_percent: number;
+  strategy: string;
+  strategy_config: string;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  published_portfolio_id: string | null;
 }
 
 interface RebalanceHistoryRow {
@@ -151,6 +166,8 @@ CREATE TABLE IF NOT EXISTS assets (
     coingecko_id      TEXT,
     issuer_metadata   TEXT,
     enabled           INTEGER NOT NULL DEFAULT 1,
+    last_refreshed_at TEXT,
+    is_quarantined    INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -180,6 +197,27 @@ CREATE TABLE IF NOT EXISTS consent_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
     ON consent_audit_events (user_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS portfolio_drafts (
+    id            TEXT PRIMARY KEY,
+    user_address  TEXT NOT NULL,
+    label         TEXT,
+    allocations   TEXT NOT NULL,
+    threshold     REAL NOT NULL DEFAULT 5,
+    slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
+    strategy      TEXT NOT NULL DEFAULT 'threshold',
+    strategy_config TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    published_portfolio_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_user
+    ON portfolio_drafts (user_address, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_expires
+    ON portfolio_drafts (expires_at);
 `;
 
 // ─────────────────────────────────────────────
@@ -512,12 +550,7 @@ export class DatabaseService {
           ON consent_audit_events (user_id, timestamp);
     `);
 
-    const assetCols = this.db
-      .prepare("PRAGMA table_info(assets)")
-      .all() as Array<{ name: string }>;
-    if (!assetCols.some((c) => c.name === "issuer_metadata")) {
-      this.db.exec("ALTER TABLE assets ADD COLUMN issuer_metadata TEXT");
-      logger.info("[DB] Migration: added issuer_metadata column to assets");
+
     }
   }
 
@@ -550,10 +583,10 @@ export class DatabaseService {
       ["ETH", "Ethereum", null, null, "ethereum", 1],
     ];
     const stmt = this.db.prepare(
-      "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
     );
     for (const row of defaults) {
-      stmt.run(...row, now, now);
+      stmt.run(...row, now, now, now);
     }
     logger.info("[DB] Seeded default assets (XLM, USDC, BTC, ETH)");
   }
@@ -819,7 +852,8 @@ export class DatabaseService {
     issuerAccount?: string;
     coingeckoId?: string;
     enabled: boolean;
-    issuerMetadata?: IssuerMetadata;
+    lastRefreshedAt?: string;
+    isQuarantined: boolean;
   }> {
     try {
       const rows = this.db
@@ -833,8 +867,10 @@ export class DatabaseService {
             coingecko_id: string | null;
             issuer_metadata: string | null;
             enabled: number;
+            last_refreshed_at: string | null;
+            is_quarantined: number;
           }
-        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled FROM assets WHERE enabled = 1 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled FROM assets ORDER BY symbol")
+        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE enabled = 1 AND is_quarantined = 0 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets ORDER BY symbol")
         .all();
       return rows.map((r) => ({
         symbol: r.symbol,
@@ -843,7 +879,8 @@ export class DatabaseService {
         issuerAccount: r.issuer_account ?? undefined,
         coingeckoId: r.coingecko_id ?? undefined,
         enabled: r.enabled === 1,
-        issuerMetadata: r.issuer_metadata ? safeJsonParse(r.issuer_metadata, undefined, `asset(${r.symbol}).issuerMetadata`) : undefined,
+        lastRefreshedAt: r.last_refreshed_at ?? undefined,
+        isQuarantined: r.is_quarantined === 1,
       }));
     } catch (err) {
       throw new Error(`Failed to list assets: ${err}`);
@@ -860,7 +897,8 @@ export class DatabaseService {
         issuerAccount?: string;
         coingeckoId?: string;
         enabled: boolean;
-        issuerMetadata?: IssuerMetadata;
+        lastRefreshedAt?: string;
+        isQuarantined: boolean;
       }
     | undefined {
     try {
@@ -875,8 +913,10 @@ export class DatabaseService {
             coingecko_id: string | null;
             issuer_metadata: string | null;
             enabled: number;
+            last_refreshed_at: string | null;
+            is_quarantined: number;
           }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled FROM assets WHERE symbol = ?")
+        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
         .get(symbol.toUpperCase());
       if (!row) return undefined;
       return {
@@ -886,7 +926,8 @@ export class DatabaseService {
         issuerAccount: row.issuer_account ?? undefined,
         coingeckoId: row.coingecko_id ?? undefined,
         enabled: row.enabled === 1,
-        issuerMetadata: row.issuer_metadata ? safeJsonParse(row.issuer_metadata, undefined, `asset(${row.symbol}).issuerMetadata`) : undefined,
+        lastRefreshedAt: row.last_refreshed_at ?? undefined,
+        isQuarantined: row.is_quarantined === 1,
       };
     } catch (err) {
       throw new Error(`Failed to get asset '${symbol}': ${err}`);
@@ -908,7 +949,7 @@ export class DatabaseService {
       const now = new Date().toISOString();
       this.db
         .prepare(
-          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
         )
         .run(
           sym,
@@ -919,6 +960,7 @@ export class DatabaseService {
           options.issuerMetadata ? JSON.stringify(options.issuerMetadata) : null,
           now,
           now,
+          now,
         );
     } catch (err) {
       if (isSqliteAssetSymbolUniqueViolation(err)) {
@@ -927,6 +969,41 @@ export class DatabaseService {
         );
       }
       throw new Error(`Failed to add asset '${symbol}': ${err}`);
+    }
+  }
+
+  setAssetFreshness(
+    symbol: string,
+    lastRefreshedAt: string,
+    isQuarantined: boolean,
+  ): boolean {
+    try {
+      const result = this.db
+        .prepare(
+          "UPDATE assets SET last_refreshed_at = ?, is_quarantined = ?, updated_at = ? WHERE symbol = ?",
+        )
+        .run(
+          lastRefreshedAt,
+          isQuarantined ? 1 : 0,
+          new Date().toISOString(),
+          symbol.toUpperCase(),
+        );
+      return result.changes > 0;
+    } catch (err) {
+      throw new Error(`Failed to set asset freshness '${symbol}': ${err}`);
+    }
+  }
+
+  setAssetQuarantined(symbol: string, quarantined: boolean): boolean {
+    try {
+      const result = this.db
+        .prepare(
+          "UPDATE assets SET is_quarantined = ?, updated_at = ? WHERE symbol = ?",
+        )
+        .run(quarantined ? 1 : 0, new Date().toISOString(), symbol.toUpperCase());
+      return result.changes > 0;
+    } catch (err) {
+      throw new Error(`Failed to set asset quarantined '${symbol}': ${err}`);
     }
   }
 
@@ -1552,8 +1629,274 @@ export class DatabaseService {
     }
   }
 
+  // ──────────────────────────────────────────
+  // Portfolio draft methods
+  // ──────────────────────────────────────────
+
+  createDraft(data: {
+    userAddress: string;
+    label?: string;
+    allocations: Record<string, number>;
+    threshold: number;
+    slippageTolerancePercent?: number;
+    strategy?: string;
+    strategyConfig?: Record<string, unknown>;
+    expiresInDays?: number;
+  }): string {
+    const id = generateId();
+    const now = new Date().toISOString();
+    const expiresAt = new Date(
+      Date.now() + (data.expiresInDays ?? 7) * 24 * 60 * 60 * 1000
+    ).toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO portfolio_drafts (id, user_address, label, allocations, threshold, slippage_tolerance_percent, strategy, strategy_config, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        data.userAddress,
+        data.label ?? null,
+        JSON.stringify(data.allocations),
+        data.threshold,
+        data.slippageTolerancePercent ?? 1,
+        data.strategy ?? 'threshold',
+        JSON.stringify(data.strategyConfig ?? {}),
+        now,
+        now,
+        expiresAt,
+      );
+    return id;
+  }
+
+  getDraft(id: string): Record<string, unknown> | undefined {
+    const row = this.db
+      .prepare<[string], PortfolioDraftRow>(
+        "SELECT * FROM portfolio_drafts WHERE id = ?"
+      )
+      .get(id);
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      userAddress: row.user_address,
+      label: row.label,
+      allocations: safeJsonParse(row.allocations, {}, `draft(${row.id}).allocations`),
+      threshold: row.threshold,
+      slippageTolerancePercent: row.slippage_tolerance_percent,
+      strategy: row.strategy,
+      strategyConfig: safeJsonParse(row.strategy_config, {}, `draft(${row.id}).strategy_config`),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      expiresAt: row.expires_at,
+      publishedPortfolioId: row.published_portfolio_id,
+    };
+  }
+
+  updateDraft(id: string, updates: {
+    label?: string;
+    allocations?: Record<string, number>;
+    threshold?: number;
+    slippageTolerancePercent?: number;
+    strategy?: string;
+    strategyConfig?: Record<string, unknown>;
+  }): boolean {
+    const existing = this.db
+      .prepare<[string], PortfolioDraftRow>("SELECT * FROM portfolio_drafts WHERE id = ?")
+      .get(id);
+    if (!existing) return false;
+    const now = new Date().toISOString();
+    const allocations = updates.allocations
+      ? JSON.stringify(updates.allocations)
+      : existing.allocations;
+    const strategyConfig = updates.strategyConfig
+      ? JSON.stringify(updates.strategyConfig)
+      : existing.strategy_config;
+    this.db
+      .prepare(
+        `UPDATE portfolio_drafts SET
+           label = ?, allocations = ?, threshold = ?, slippage_tolerance_percent = ?,
+           strategy = ?, strategy_config = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        updates.label ?? existing.label,
+        allocations,
+        updates.threshold ?? existing.threshold,
+        updates.slippageTolerancePercent ?? existing.slippage_tolerance_percent,
+        updates.strategy ?? existing.strategy,
+        strategyConfig,
+        now,
+        id,
+      );
+    return true;
+  }
+
+  publishDraft(draftId: string): string | undefined {
+    const draft = this.getDraft(draftId);
+    if (!draft) return undefined;
+    const portfolioId = this.createPortfolio(
+      draft.userAddress as string,
+      draft.allocations as Record<string, number>,
+      draft.threshold as number,
+      draft.slippageTolerancePercent as number,
+      draft.strategy as string,
+      draft.strategyConfig as Record<string, unknown>,
+    );
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE portfolio_drafts SET published_portfolio_id = ?, updated_at = ? WHERE id = ?")
+      .run(portfolioId, now, draftId);
+    return portfolioId;
+  }
+
+  listDrafts(userAddress: string): Array<Record<string, unknown>> {
+    const rows = this.db
+      .prepare<[string], PortfolioDraftRow>(
+        "SELECT * FROM portfolio_drafts WHERE user_address = ? AND expires_at > datetime('now') ORDER BY updated_at DESC"
+      )
+      .all(userAddress);
+    return rows.map((row) => ({
+      id: row.id,
+      userAddress: row.user_address,
+      label: row.label,
+      allocations: safeJsonParse(row.allocations, {}, `draft(${row.id}).allocations`),
+      threshold: row.threshold,
+      slippageTolerancePercent: row.slippage_tolerance_percent,
+      strategy: row.strategy,
+      strategyConfig: safeJsonParse(row.strategy_config, {}, `draft(${row.id}).strategy_config`),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      expiresAt: row.expires_at,
+      publishedPortfolioId: row.published_portfolio_id,
+    }));
+  }
+
+  deleteDraft(id: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM portfolio_drafts WHERE id = ?")
+      .run(id);
+    return result.changes > 0;
+  }
+
+  cleanupExpiredDrafts(): number {
+    const result = this.db
+      .prepare("DELETE FROM portfolio_drafts WHERE expires_at <= datetime('now')")
+      .run();
+    return result.changes;
+  backup(backupPath?: string): string {
+    try {
+      const dbPath = process.env.DB_PATH || "./data/portfolio.db";
+      const defaultBackupDir = join(dirname(dbPath), "backups");
+      mkdirSync(defaultBackupDir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const defaultBackupPath = join(defaultBackupDir, `portfolio-backup-${timestamp}.db`);
+      const finalBackupPath = backupPath || defaultBackupPath;
+
+      this.db.backup(finalBackupPath);
+      logger.info(`[DB] Backup created successfully at ${finalBackupPath}`);
+      return finalBackupPath;
+    } catch (err) {
+      throw new Error(`Failed to create backup: ${err}`);
+    }
+  }
+
+  restore(backupPath: string): void {
+    try {
+      if (!existsSync(backupPath)) {
+        throw new Error(`Backup file not found: ${backupPath}`);
+      }
+
+      const dbPath = process.env.DB_PATH || "./data/portfolio.db";
+      
+      // First close current connection
+      this.db.close();
+
+      try {
+        // Copy backup to current DB path
+        copyFileSync(backupPath, dbPath);
+        logger.info(`[DB] Restored from backup: ${backupPath}`);
+
+        // Reopen the database connection
+        this.db = new Database(dbPath);
+        this.db.exec(SCHEMA_SQL);
+        this._migrateSchema();
+        this._seedDefaultAssets();
+      } catch (copyErr) {
+        // If copy failed, try to reopen original DB if possible
+        try {
+          this.db = new Database(dbPath);
+          this.db.exec(SCHEMA_SQL);
+          this._migrateSchema();
+          this._seedDefaultAssets();
+        } catch (reopenErr) {
+          // Ignore
+        }
+        throw copyErr;
+      }
+    } catch (err) {
+      throw new Error(`Failed to restore backup: ${err}`);
+    }
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  // ──────────────────────────────────────────
+  // Replay checkpoint methods
+  // ──────────────────────────────────────────
+
+  getReplayCheckpoint(replayId: string): Record<string, unknown> | undefined {
+    const raw = this.getIndexerState(`replay_checkpoint.${replayId}`);
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+
+  setReplayCheckpoint(replayId: string, data: Record<string, unknown>): void {
+    this.setIndexerState(`replay_checkpoint.${replayId}`, JSON.stringify(data));
+  }
+
+  getReplayIntegrityHash(): string | undefined {
+    return this.getIndexerState('replay_integrity_hash');
+  }
+
+  setReplayIntegrityHash(hash: string): void {
+    this.setIndexerState('replay_integrity_hash', hash);
+  }
+
+  getLastReplayedLedger(): number | undefined {
+    const val = this.getIndexerState('replay_last_ledger');
+    return val ? parseInt(val, 10) : undefined;
+  }
+
+  setLastReplayedLedger(ledger: number): void {
+    this.setIndexerState('replay_last_ledger', String(ledger));
+  }
+
+  getReplayEventCount(): number {
+    const val = this.getIndexerState('replay_event_count');
+    return val ? parseInt(val, 10) : 0;
+  }
+
+  setReplayEventCount(count: number): void {
+    this.setIndexerState('replay_event_count', String(count));
+  }
+
+  getReplayStatus(): {
+    lastReplayedLedger: number | undefined;
+    eventCount: number;
+    integrityHash: string | undefined;
+  } {
+    return {
+      lastReplayedLedger: this.getLastReplayedLedger(),
+      eventCount: this.getReplayEventCount(),
+      integrityHash: this.getReplayIntegrityHash(),
+    };
   }
 
   // ──────────────────────────────────────────

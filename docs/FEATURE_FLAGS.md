@@ -54,7 +54,28 @@ Public copies of the main booleans are exposed on `GET /api/v1/system/status` un
 - **Contributor debugging:** `ENABLE_DEBUG_ROUTES=true` locally, hit `/api/v1/debug/force-fresh-prices` (still requires the debug gate middleware).
 - **Demo kiosk:** `DEMO_MODE=true`, `ENABLE_DEMO_DB_SEED=true`, `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO=false` unless you understand the data exposure.
 
+## File-Based Overrides (Staging / Local)
+
+To support repeatable combinations of feature flags in staging or local environments without managing a large number of environment variables, you can use a file-based override path.
+
+- **Variable:** `FEATURE_FLAGS_FILE`
+- **Description:** Path to a local JSON file containing feature flag overrides (relative to the process working directory).
+- **Behavior:** If specified, the JSON file is loaded at startup (and cached for subsequent request evaluations). Any boolean keys in the file matching feature flag names (either in camelCase like `demoMode` or UPPER_SNAKE_CASE like `DEMO_MODE`) will override the environment variable settings and their defaults.
+
+### Example JSON file (`config/feature-flags.staging.json`)
+
+```json
+{
+  "demoMode": false,
+  "ALLOW_FALLBACK_PRICES": true,
+  "ENABLE_DEBUG_ROUTES": true
+}
+```
+
+If the file contains invalid JSON or cannot be read, the server will log an error and throw an exception during startup, preventing improper execution.
+
 ## See also
 
 - `docs/CONTRACT_EVENTS.md` — contract event topics and schema version.
 - `backend/.env.example` and `frontend/.env.example` — full lists with placeholders.
+
