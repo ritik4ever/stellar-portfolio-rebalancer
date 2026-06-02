@@ -136,8 +136,12 @@ export const adminAddAssetSchema = z.object({
 }).strict();
 
 export const adminPatchAssetSchema = z.object({
-    enabled: z.boolean()
-}).strict();
+    enabled: z.boolean().optional(),
+    quarantined: z.boolean().optional()
+}).strict().refine(
+    (data) => data.enabled !== undefined || data.quarantined !== undefined,
+    { message: 'At least one of enabled or quarantined must be provided' }
+);
 
 // Query params for GET /assets — pagination, sorting, and issuer/symbol filters.
 export const assetsListQuerySchema = z.object({
