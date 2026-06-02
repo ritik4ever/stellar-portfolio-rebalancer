@@ -25,6 +25,22 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 
 ---
 
+## Project Roadmap
+
+See where the Stellar Portfolio Rebalancer is headed!
+
+| **Now** (Current Sprint) | **Next** (1-2 months) | **Later** (3-6+ months) |
+|-------------------------|------------------------|-------------------------|
+| Core rebalancing algorithm | Portfolio dashboard | Mobile app |
+| Reflector oracle integration | Historical reports | Custom strategies |
+| Wallet connection stability | Notification system | DeFi integration |
+| Bug fixes | Multi-asset support | Tax optimization |
+
+**[View detailed roadmap →](docs/ROADMAP.md)**
+
+---
+
+
 ## Architecture
 ```text
 stellar-portfolio-rebalancer/
