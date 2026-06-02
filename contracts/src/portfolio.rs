@@ -113,7 +113,7 @@ pub fn calculate_portfolio_value(
         if let Some(price_data) =
             reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
         {
-            if price_data.timestamp + PRICE_MAX_AGE_SECONDS < current_time {
+            if price_data.timestamp.saturating_add(PRICE_MAX_AGE_SECONDS) < current_time {
                 return Err(ValuationError::StaleData);
             }
             if price_data.price <= 0 {

@@ -25,6 +25,14 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
 pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
 pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
+/// Maximum acceptable ledger timestamp forward drift in seconds (#416).
+///
+/// If the ledger timestamp jumps more than this amount between consecutive
+/// time-sensitive operations, the contract rejects the call to guard against
+/// surprising ledger time assumptions (e.g., cooldown bypass, price staleness
+/// miscalculation). 7200 seconds = 2 hours is well above any expected network
+/// clock drift but prevents extreme outlier timestamps from being used.
+pub const MAX_TIMESTAMP_DRIFT_SECONDS: u64 = 7200;
 
 /// Minimum allowed rebalance threshold percentage.
 ///
@@ -143,6 +151,7 @@ pub enum DataKey {
     FeeConfig,
     UpgradeAuthority,
     WasmHash,
+    LastTimestamp,
 }
 
 // Portfolio identifiers (`u64`) are derived deterministically by a monotonically
@@ -181,6 +190,7 @@ pub enum Error {
     PortfolioNotFound = 23,
     PortfolioInactive = 24,
     InvalidWithdrawAmount = 25,
+    TimestampDrift = 26,
 }
 
 #[contracttype]
