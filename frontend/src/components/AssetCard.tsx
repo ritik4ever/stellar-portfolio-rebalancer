@@ -21,6 +21,7 @@ interface AssetCardProps {
         servedFromCache?: boolean
         dataTier?: string
     } | null
+
     isLoading?: boolean
 }
 
