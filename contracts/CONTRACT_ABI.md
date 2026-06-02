@@ -33,10 +33,12 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
   - `Err(Error::TooManyAssets)`
   - `Err(Error::InvalidThreshold)`
   - `Err(Error::InvalidSlippageTolerance)`
+  - `Err(Error::PortfolioStorageFootprintTooLarge)`
 - **Preconditions:**
   - `user.require_auth()` succeeds.
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
+  - Estimated serialized portfolio footprint is `<= MAX_PORTFOLIO_STORAGE_BYTES`.
 
 ### `get_portfolio(env: Env, portfolio_id: u64) -> Portfolio`
 
@@ -109,6 +111,7 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
+| `12` | `PortfolioStorageFootprintTooLarge` | `create_portfolio` estimated serialized portfolio footprint exceeds `MAX_PORTFOLIO_STORAGE_BYTES`. |
 
 ## XDR/Contract Type References
 

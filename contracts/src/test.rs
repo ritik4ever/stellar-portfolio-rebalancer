@@ -636,7 +636,10 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
 
     let target_balance = 50_000_000i128;
     let mut balances = Map::new(&env);
-    balances.set(asset1.clone(), target_balance - (MIN_TRADE_AMOUNT_STROOPS / 2));
+    balances.set(
+        asset1.clone(),
+        target_balance - (MIN_TRADE_AMOUNT_STROOPS / 2),
+    );
     balances.set(asset2.clone(), target_balance - MIN_TRADE_AMOUNT_STROOPS);
     balances.set(
         asset3.clone(),
@@ -662,10 +665,7 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
     assert!(!trades.contains_key(asset1));
     assert!(!trades.contains_key(asset2));
-    assert_eq!(
-        trades.get(asset3).unwrap(),
-        MIN_TRADE_AMOUNT_STROOPS + 1
-    );
+    assert_eq!(trades.get(asset3).unwrap(), MIN_TRADE_AMOUNT_STROOPS + 1);
 }
 
 #[test]
@@ -766,7 +766,7 @@ fn test_calculate_rebalance_trades_5_asset() {
     prices.set(a5.clone(), 10i128.pow(14));
 
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
-    
+
     assert_eq!(trades.get(a1).unwrap(), 50 * 10i128.pow(14));
     assert_eq!(trades.get(a2).unwrap(), -50 * 10i128.pow(14));
     assert!(!trades.contains_key(a3));
@@ -786,7 +786,7 @@ fn test_calculate_rebalance_trades_direction_buy_sell() {
 
     let mut balances = Map::new(&env);
     balances.set(asset1.clone(), 120 * 10i128.pow(14)); // overweight
-    balances.set(asset2.clone(), 80 * 10i128.pow(14));  // underweight
+    balances.set(asset2.clone(), 80 * 10i128.pow(14)); // underweight
 
     let portfolio = Portfolio {
         user: Address::generate(&env),
@@ -804,12 +804,18 @@ fn test_calculate_rebalance_trades_direction_buy_sell() {
     prices.set(asset2.clone(), 10i128.pow(14));
 
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
-    
+
     let trade_a1 = trades.get(asset1).unwrap();
     let trade_a2 = trades.get(asset2).unwrap();
-    
-    assert!(trade_a1 < 0, "Overweight asset should result in a sell (negative) trade");
-    assert!(trade_a2 > 0, "Underweight asset should result in a buy (positive) trade");
+
+    assert!(
+        trade_a1 < 0,
+        "Overweight asset should result in a sell (negative) trade"
+    );
+    assert!(
+        trade_a2 > 0,
+        "Underweight asset should result in a buy (positive) trade"
+    );
     assert_eq!(trade_a1, -20 * 10i128.pow(14));
     assert_eq!(trade_a2, 20 * 10i128.pow(14));
 }
@@ -844,7 +850,7 @@ fn test_calculate_rebalance_trades_price_precision() {
     prices.set(asset2.clone(), 200_000_000_000_000); // 2.0 * 10^14
 
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
-    
+
     assert_eq!(trades.get(asset1).unwrap(), -30 * 10i128.pow(14));
     assert_eq!(trades.get(asset2).unwrap(), 75 * 10i128.pow(13)); // 7.5 * 10^14
 }
@@ -951,7 +957,16 @@ fn test_calculate_rebalance_trades_five_asset_rebalance_path() {
         500_000_000,
     );
     let mut prices = Map::new(&env);
-    for asset in vec![&env, a1.clone(), a2.clone(), a3.clone(), a4.clone(), a5.clone()].iter() {
+    for asset in vec![
+        &env,
+        a1.clone(),
+        a2.clone(),
+        a3.clone(),
+        a4.clone(),
+        a5.clone(),
+    ]
+    .iter()
+    {
         prices.set(asset.clone(), 10i128.pow(14));
     }
 
@@ -974,8 +989,14 @@ fn test_calculate_rebalance_trades_price_precision_14_decimals_edge_case() {
         &env,
         &[(asset1.clone(), 50), (asset2.clone(), 50)],
         &[
-            (asset1.clone(), target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5)),
-            (asset2.clone(), target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5)),
+            (
+                asset1.clone(),
+                target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5),
+            ),
+            (
+                asset2.clone(),
+                target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5),
+            ),
         ],
         246_913_578,
     );
@@ -1200,10 +1221,10 @@ fn test_emergency_stop_reactivation_snapshot() {
 
     // Pause
     client.set_emergency_stop(&true);
-    
+
     // Reactivate
     client.set_emergency_stop(&false);
-    
+
     // Resume operations
     client.deposit(&pid, &asset, &100);
     let portfolio = client.get_portfolio(&pid);
@@ -1219,19 +1240,21 @@ fn test_emergency_stop_non_admin_snapshot_captured() {
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
     let non_admin = Address::generate(&env);
-    
+
     client.mock_all_auths().initialize(&admin, &reflector_id);
-    
+
     // Non-admin auth should be rejected by require_auth on the admin address
-    client.mock_auths(&[MockAuth {
-        address: &non_admin,
-        invoke: &MockAuthInvoke {
-            contract: &contract_id,
-            fn_name: "set_emergency_stop",
-            args: vec![&env, true.into_val(&env)],
-            sub_invokes: &[],
-        },
-    }]).set_emergency_stop(&true);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_emergency_stop",
+                args: vec![&env, true.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_emergency_stop(&true);
 }
 
 #[test]
@@ -1257,8 +1280,11 @@ fn test_calculate_portfolio_value_all_prices_available() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
     assert_eq!(value, Some(15000));
 }
 
@@ -1269,7 +1295,10 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_with_missing_price::ReflectorWithMissingPrice);
+    let reflector_id = env.register_contract(
+        None,
+        reflector_with_missing_price::ReflectorWithMissingPrice,
+    );
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
@@ -1288,8 +1317,11 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
 
     assert_eq!(value, None); // Should be None now that we don't skip
 }
@@ -1301,7 +1333,8 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
+    let reflector_id =
+        env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
@@ -1314,8 +1347,11 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
     assert_eq!(value, None); // Should be None if all missing
 }
 
@@ -1344,6 +1380,60 @@ fn test_create_portfolio_max_assets_limit() {
     }
     let result = client.try_create_portfolio(&user, &too_many_allocations, &5, &50);
     assert_eq!(result, Err(Ok(Error::TooManyAssets)));
+}
+
+#[test]
+fn test_portfolio_storage_footprint_estimate_is_deterministic() {
+    let env = Env::default();
+
+    let portfolio = build_trade_test_portfolio(
+        &env,
+        &[(Address::generate(&env), 70), (Address::generate(&env), 30)],
+        &[],
+        0,
+    );
+
+    let portfolio_id = 7;
+    let estimate =
+        crate::portfolio::estimate_portfolio_storage_footprint(&env, portfolio_id, &portfolio);
+    let estimate_again =
+        crate::portfolio::estimate_portfolio_storage_footprint(&env, portfolio_id, &portfolio);
+
+    assert_eq!(estimate, estimate_again);
+    assert!(estimate > 0);
+    assert_eq!(
+        crate::portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio),
+        Ok(estimate)
+    );
+}
+
+#[test]
+fn test_create_portfolio_rejects_when_storage_footprint_limit_is_tight() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    struct ResetStorageLimit;
+    impl Drop for ResetStorageLimit {
+        fn drop(&mut self) {
+            crate::portfolio::set_portfolio_storage_limit_for_tests(None);
+        }
+    }
+
+    let _reset = ResetStorageLimit;
+    crate::portfolio::set_portfolio_storage_limit_for_tests(Some(0));
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+
+    let result = client.try_create_portfolio(&user, &allocations, &5, &50);
+    assert_eq!(result, Err(Ok(Error::PortfolioStorageFootprintTooLarge)));
 }
 
 #[test]
@@ -1461,10 +1551,15 @@ fn benchmark_deposit_gas() {
     );
 }
 
-fn assert_cost_within_tolerance(name: &str, cpu: u64, mem: u64, baseline_cpu: u64, baseline_mem: u64) {
+fn assert_cost_within_tolerance(
+    _name: &str,
+    cpu: u64,
+    mem: u64,
+    baseline_cpu: u64,
+    baseline_mem: u64,
+) {
     let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
     let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
-    std::println!("BENCHMARK_RESULT|{}|{}|{}|{}|{}", name, cpu, baseline_cpu, mem, baseline_mem);
     assert!(
         cpu <= cpu_limit,
         "CPU instruction usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
