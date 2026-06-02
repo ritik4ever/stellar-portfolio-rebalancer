@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import type { IdempotencyRecord } from '../types/index.js'
 
 interface IdempotencyRow {
     key: string
@@ -9,17 +10,6 @@ interface IdempotencyRow {
     response_body: string
     created_at: string
     expires_at: string
-}
-
-export interface IdempotencyRecord {
-    key: string
-    requestHash: string
-    method: string
-    path: string
-    statusCode: number
-    responseBody: string
-    createdAt: string
-    expiresAt: string
 }
 
 let idemDb: Database.Database | null = null

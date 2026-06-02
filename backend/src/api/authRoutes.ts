@@ -4,8 +4,10 @@ import {
     issueTokens,
     refreshTokens,
     logout,
+    revokeDeviceSession,
     issueChallenge,
-    verifyWalletSignature
+    verifyWalletSignature,
+    getRecentAuthAuditEvents
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { authRateLimiter } from '../middleware/rateLimit.js'
@@ -13,6 +15,7 @@ import { validateRequest } from '../middleware/validate.js'
 import { loginSchema, refreshTokenSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
+import type { RefreshTokenMetadata } from '../types/index.js'
 
 const router = Router()
 
@@ -50,6 +53,15 @@ router.post('/challenge', authRateLimiter, async (req: Request, res: Response) =
  *   signature — base64-encoded Ed25519 signature over the challenge string
  *               returned by POST /api/auth/challenge
  */
+function extractMetadata(req: Request): RefreshTokenMetadata {
+    return {
+        device: req.headers['x-device-id'] as string || undefined,
+        platform: req.headers['x-platform'] as string || undefined,
+        userAgent: req.headers['user-agent'] || undefined,
+        ipAddress: req.ip || req.socket?.remoteAddress || undefined,
+    }
+}
+
 router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
@@ -69,7 +81,8 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
         if (!valid) {
             return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired signature — request a new challenge and sign it with your wallet')
         }
-        const tokens = await issueTokens(trimmed)
+        const metadata = extractMetadata(req)
+        const tokens = await issueTokens(trimmed, metadata)
         return ok(res, {
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
@@ -123,6 +136,12 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
         }
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }

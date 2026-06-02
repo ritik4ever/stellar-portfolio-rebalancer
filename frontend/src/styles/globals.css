@@ -59,6 +59,33 @@ body {
     to { opacity: 1; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .motion-safe\:animate-spin {
+        animation: none !important;
+    }
+
+    .motion-safe\:animate-pulse {
+        animation: none !important;
+    }
+
+    .motion-safe\:transition-transform {
+        transition: none !important;
+    }
+
+    .dashboard-card:hover {
+        transform: none;
+    }
+}
+
 /* Mobile responsive styles */
 @media (max-width: 640px) {
     body {

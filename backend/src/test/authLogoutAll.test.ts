@@ -17,6 +17,9 @@ vi.mock('../services/authService.js', () => ({
     getAuthConfig: () => ({ enabled: true }),
     issueTokens: vi.fn(),
     refreshTokens: vi.fn(),
+    revokeDeviceSession: vi.fn(),
+    issueChallenge: vi.fn(),
+    verifyWalletSignature: vi.fn(),
     verifyAccessToken: verifyAccessTokenMock,
 }))
 

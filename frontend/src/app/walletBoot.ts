@@ -151,3 +151,75 @@ export function resolveConsentAcceptedNavigation(
     if (!pendingPublicKey) return null
     return { targetView: 'dashboard', publicKey: pendingPublicKey }
 }
+
+// ─── Boot diagnostics ───────────────────────────────────────────────────
+
+export type BootCheckStatus = 'loading' | 'passed' | 'failed'
+
+export interface BootCheck {
+    id: string
+    label: string
+    status: BootCheckStatus
+    message?: string
+}
+
+export interface BootDiagnostics {
+    checks: BootCheck[]
+    allPassed: boolean
+    timestamp: number
+}
+
+export type BootDiagnosticsDeps = {
+    checkWallets: () => boolean | Promise<boolean>
+    checkApi: () => Promise<boolean>
+}
+
+export async function runBootDiagnostics(
+    deps: BootDiagnosticsDeps,
+): Promise<BootDiagnostics> {
+    const checks: BootCheck[] = []
+
+    try {
+        const hasWallets = await deps.checkWallets()
+        checks.push({
+            id: 'wallet-detection',
+            label: 'Wallet extension',
+            status: hasWallets ? 'passed' : 'failed',
+            message: hasWallets
+                ? 'Stellar wallet detected'
+                : 'No Stellar wallet extension found. Install Freighter, Rabet, or xBull.',
+        })
+    } catch {
+        checks.push({
+            id: 'wallet-detection',
+            label: 'Wallet extension',
+            status: 'failed',
+            message: 'Wallet detection check failed.',
+        })
+    }
+
+    try {
+        const apiReachable = await deps.checkApi()
+        checks.push({
+            id: 'api-reachability',
+            label: 'API reachability',
+            status: apiReachable ? 'passed' : 'failed',
+            message: apiReachable
+                ? 'Backend API is reachable'
+                : 'Cannot reach the backend API. The app may have limited functionality.',
+        })
+    } catch {
+        checks.push({
+            id: 'api-reachability',
+            label: 'API reachability',
+            status: 'failed',
+            message: 'API reachability check failed.',
+        })
+    }
+
+    return {
+        checks,
+        allPassed: checks.every((c) => c.status === 'passed'),
+        timestamp: Date.now(),
+    }
+}

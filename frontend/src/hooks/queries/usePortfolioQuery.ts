@@ -16,6 +16,21 @@ export type RebalanceConfirmationSummary = {
     risks: string[]
 }
 
+export type RebalancePrecondition = {
+    id: string
+    label: string
+    ok: boolean
+    detail?: string
+}
+
+export type RebalancePlanSnapshot = {
+    portfolioId: string
+    totalValue: number
+    maxSlippagePercent: number
+    estimatedSlippageBps: number
+    priceFeedMeta?: PriceFeedClientMeta
+}
+
 export function buildRebalanceConfirmationSummary(input: {
     slippageTolerancePercent?: number | null
     slippageTolerance?: number | null
@@ -72,6 +87,64 @@ export function buildRebalanceConfirmationSummary(input: {
     return { slippage, prices, risks }
 }
 
+export function buildRebalancePreconditions(input: {
+    publicKey: string | null
+    portfolioId?: string | null
+    needsRebalance?: boolean
+    hasPartialPriceData: boolean
+    feedDegraded?: boolean
+    tradeCount: number
+    hasHighGasWarning: boolean
+}): RebalancePrecondition[] {
+    const walletOk = Boolean(input.publicKey)
+    const portfolioOk = Boolean(input.portfolioId && input.portfolioId !== 'demo')
+    const driftOk = input.needsRebalance !== false
+    const pricesOk = !input.hasPartialPriceData && !input.feedDegraded
+    const tradesOk = input.tradeCount > 0
+    const gasOk = !input.hasHighGasWarning
+
+    return [
+        {
+            id: 'wallet',
+            label: 'Wallet connected',
+            ok: walletOk,
+            detail: walletOk ? undefined : 'Connect your Stellar wallet before rebalancing.',
+        },
+        {
+            id: 'portfolio',
+            label: 'Live portfolio selected',
+            ok: portfolioOk,
+            detail: portfolioOk ? undefined : 'Create a saved portfolio (demo mode cannot rebalance).',
+        },
+        {
+            id: 'drift',
+            label: 'Rebalance threshold met',
+            ok: driftOk,
+            detail: driftOk ? undefined : 'Allocations are within your configured drift threshold.',
+        },
+        {
+            id: 'prices',
+            label: 'Price feed ready',
+            ok: pricesOk,
+            detail: pricesOk
+                ? undefined
+                : 'Some quotes are missing, cached, or degraded — confirm sizes before submitting.',
+        },
+        {
+            id: 'trades',
+            label: 'Trades planned',
+            ok: tradesOk,
+            detail: tradesOk ? undefined : 'No executable trades were estimated for the current book.',
+        },
+        {
+            id: 'gas',
+            label: 'Network fees within expected range',
+            ok: gasOk,
+            detail: gasOk ? undefined : 'Estimated fees are higher than usual for this portfolio.',
+        },
+    ]
+}
+
 export const useUserPortfolios = (address: string | null) => {
     return useQuery({
         queryKey: portfolioKeys.list(address || ''),
@@ -103,6 +176,16 @@ export const useRebalanceEstimate = (id: string | null) => {
         refetchInterval: 30000,
         staleTime: 25000,
         refetchOnReconnect: false,
+        placeholderData: (previous) => previous,
+    })
+}
+
+export const useRebalancePlan = (id: string | null, enabled = true) => {
+    return useQuery({
+        queryKey: [...portfolioKeys.detail(id || ''), 'rebalance-plan'],
+        queryFn: () => api.get<RebalancePlanSnapshot>(ENDPOINTS.PORTFOLIO_REBALANCE_PLAN(id!)),
+        enabled: enabled && !!id && id !== 'demo',
+        staleTime: 25000,
         placeholderData: (previous) => previous,
     })
 }
