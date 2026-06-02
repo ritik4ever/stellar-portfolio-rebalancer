@@ -93,4 +93,23 @@ if [[ "${needs_openapi_check}" == true && "${SKIP_OPENAPI_FRESHNESS:-0}" != "1" 
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Part C — enforce API change notes when route/schema changes materially
+# ---------------------------------------------------------------------------
+if [[ "${needs_openapi_check}" == true ]]; then
+  echo "API definition changes detected. Verifying change notes are provided…"
+  has_notes=false
+  case "${CHANGED_FILES}" in
+    *"API.md"*) has_notes=true ;;
+    *"CHANGELOG.md"*) has_notes=true ;;
+  esac
+
+  if [[ "${has_notes}" == false ]]; then
+    echo "✗ API changes require documentation updates."
+    echo "  Please update API.md and/or CHANGELOG.md to document the route/schema updates."
+    exit 1
+  fi
+  echo "✓ API change notes verified."
+fi
+
 echo "Generated artifact guard passed."

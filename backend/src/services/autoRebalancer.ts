@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { StellarService } from './stellar.js'
+import { StellarService, type ExecuteRebalanceOptions, type RebalanceDryRunResult } from './stellar.js'
 import { ReflectorService } from './reflector.js'
 import { rebalanceHistoryService } from './serviceContainer.js'
 import { portfolioStorage } from './portfolioStorage.js'
@@ -107,6 +107,18 @@ await queue.add(
         )
         logger.info('[AUTO-REBALANCER] Force check job enqueued')
         logAudit('auto_rebalancer_force_check_enqueued', { backend: 'bullmq' })
+    }
+
+    async dryRunPortfolioRebalance(
+        portfolioId: string,
+        options: ExecuteRebalanceOptions = {}
+    ): Promise<RebalanceDryRunResult> {
+        if (!portfolioId) {
+            throw new Error('Portfolio ID required')
+        }
+
+        logger.info('[AUTO-REBALANCER] Dry-run requested', { portfolioId })
+        return this.stellarService.dryRunRebalance(portfolioId, options)
     }
 
     /**
