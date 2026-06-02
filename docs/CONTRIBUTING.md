@@ -552,7 +552,18 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
-## 13. Commit message conventions
+## 13. Pull request requirements
+
+Every pull request must link to at least one issue using `Fixes #<issue-number>` in the PR description. If the change intentionally has no related issue, explain why in the `Rationale for no issue` section of the PR template.
+
+A CI check (`PR Lint`) runs on every PR to verify that the body references an issue or contains a rationale. PRs that fail this check are blocked from merging.
+
+This requirement ensures:
+- Backlog management stays traceable from issue to release notes.
+- Reviewers understand the motivation behind every change.
+- The changelog and release notes can be generated from structured PR metadata.
+
+## 14. Commit message conventions
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
 
@@ -587,7 +598,7 @@ scripts/check-commit-messages.sh origin/main..HEAD
 
 If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
 
-## 14. Optional local Git hooks
+## 15. Optional local Git hooks
 
 Install the optional hook templates when you want fast feedback before committing or pushing:
 

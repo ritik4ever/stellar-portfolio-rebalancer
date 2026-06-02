@@ -26,6 +26,8 @@ const defaultPreferences: Preferences = {
         priceMovement: true,
         riskChange: true,
     },
+    digestEnabled: false,
+    digestFrequency: 'realtime',
 }
 
 const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userId, portfolioId }) => {
@@ -654,6 +656,72 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 </div>
 
         
+            </div>
+
+            {/* Digest Mode */}
+            <div className="mb-6 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center">
+                        <Bell className="w-5 h-5 text-gray-600 mr-2" />
+                        <span className="font-medium text-gray-900">Digest Mode</span>
+                    </div>
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={preferences.digestEnabled}
+                        aria-label="Digest mode"
+                        onClick={() => {
+                            setPreferences(prev => ({
+                                ...prev,
+                                digestEnabled: !prev.digestEnabled,
+                                digestFrequency: !prev.digestEnabled ? 'daily' : 'realtime',
+                            }))
+                        }}
+                        disabled={actionPending}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            preferences.digestEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                        <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                preferences.digestEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                        />
+                    </button>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">
+                    Group notifications into a single daily or weekly summary instead of sending them in real time.
+                </p>
+
+                {preferences.digestEnabled && (
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Digest Frequency
+                        </label>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            {(['daily', 'weekly'] as const).map((freq) => (
+                                <button
+                                    key={freq}
+                                    type="button"
+                                    onClick={() => setPreferences(prev => ({ ...prev, digestFrequency: freq }))}
+                                    disabled={actionPending}
+                                    className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                                        preferences.digestFrequency === freq
+                                            ? 'bg-blue-600 text-white border-blue-600'
+                                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                    {freq === 'daily' ? 'Daily' : 'Weekly'}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">
+                            {preferences.digestFrequency === 'daily'
+                                ? 'Receive one summary per day with all events.'
+                                : 'Receive one summary per week with all events.'}
+                        </p>
+                    </div>
+                )}
             </div>
 
             {/* Inline notification test delivery */}

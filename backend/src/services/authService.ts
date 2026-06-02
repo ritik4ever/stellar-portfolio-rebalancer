@@ -9,8 +9,10 @@ import {
   deleteRefreshTokenById,
   deleteAllRefreshTokensForUser,
   generateRefreshTokenId,
+  touchRefreshToken,
 } from "../db/refreshTokenDb.js";
 import { logger } from "../utils/logger.js";
+import type { RefreshTokenMetadata } from "../types/index.js";
 
 const ACCESS_EXPIRY_SEC = parseInt(
   process.env.JWT_ACCESS_EXPIRY_SEC || "900",
@@ -71,7 +73,10 @@ export function generateAccessToken(address: string): string {
   );
 }
 
-export async function issueTokens(address: string): Promise<AuthTokens> {
+export async function issueTokens(
+  address: string,
+  metadata?: RefreshTokenMetadata | null,
+): Promise<AuthTokens> {
   const accessToken = generateAccessToken(address);
   const refreshId = generateRefreshTokenId();
   const refreshToken = jwt.sign(
@@ -82,7 +87,7 @@ export async function issueTokens(address: string): Promise<AuthTokens> {
     { expiresIn: REFRESH_EXPIRY_SEC },
   );
   const expiresAt = new Date(Date.now() + REFRESH_EXPIRY_SEC * 1000);
-  await createRefreshToken(refreshId, address, refreshToken, expiresAt);
+  await createRefreshToken(refreshId, address, refreshToken, expiresAt, metadata);
   return {
     accessToken,
     refreshToken,
@@ -118,7 +123,11 @@ export async function refreshTokens(
     return null;
   }
   await deleteRefreshTokenById(row.id);
-  return issueTokens(row.user_address);
+  const metadata: RefreshTokenMetadata = {
+    ...(row.metadata || {}),
+    lastUsedAt: new Date().toISOString(),
+  };
+  return issueTokens(row.user_address, metadata);
 }
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────
