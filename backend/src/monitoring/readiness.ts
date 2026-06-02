@@ -3,6 +3,7 @@ import {
   getPortfolioCheckQueue,
   getRebalanceQueue,
   getAnalyticsSnapshotQueue,
+  getAnalyticsCompactionQueue,
   QUEUE_NAMES,
 } from "../queue/queues.js";
 import { isRedisAvailable } from "../queue/connection.js";
@@ -11,6 +12,7 @@ import { autoRebalancer } from "../services/runtimeServices.js";
 import { getPortfolioCheckWorkerStatus } from "../queue/workers/portfolioCheckWorker.js";
 import { getRebalanceWorkerStatus } from "../queue/workers/rebalanceWorker.js";
 import { getAnalyticsSnapshotWorkerStatus } from "../queue/workers/analyticsSnapshotWorker.js";
+import { getAnalyticsCompactionWorkerStatus } from "../queue/workers/analyticsCompactionWorker.js";
 import { logger } from "../utils/logger.js";
 
 type ReadinessState = "ready" | "not_ready" | "disabled";
@@ -134,6 +136,17 @@ export async function buildReadinessReport() {
         "Queue subsystem disabled — Redis unavailable",
       );
 
+  const analyticsCompactionQueueCheck = redisConnected
+    ? await checkQueueReady(
+        QUEUE_NAMES.ANALYTICS_COMPACTION,
+        getAnalyticsCompactionQueue(),
+      )
+    : buildCheck(
+        "disabled",
+        false,
+        "Queue subsystem disabled — Redis unavailable",
+      );
+
   const queueCheck = !redisConnected
     ? buildCheck(
         "disabled",
@@ -145,18 +158,21 @@ export async function buildReadinessReport() {
             [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioQueueCheck,
             [QUEUE_NAMES.REBALANCE]: rebalanceQueueCheck,
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: analyticsQueueCheck,
+            [QUEUE_NAMES.ANALYTICS_COMPACTION]: analyticsCompactionQueueCheck,
           },
         },
       )
     : portfolioQueueCheck.status === "ready" &&
         rebalanceQueueCheck.status === "ready" &&
-        analyticsQueueCheck.status === "ready"
+        analyticsQueueCheck.status === "ready" &&
+        analyticsCompactionQueueCheck.status === "ready"
       ? buildCheck("ready", true, "Redis and BullMQ queues are ready", {
           redisConnected,
           queues: {
             [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioQueueCheck,
             [QUEUE_NAMES.REBALANCE]: rebalanceQueueCheck,
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: analyticsQueueCheck,
+            [QUEUE_NAMES.ANALYTICS_COMPACTION]: analyticsCompactionQueueCheck,
           },
         })
       : buildCheck("not_ready", true, "Queue subsystem is not ready", {
@@ -165,6 +181,7 @@ export async function buildReadinessReport() {
             [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioQueueCheck,
             [QUEUE_NAMES.REBALANCE]: rebalanceQueueCheck,
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: analyticsQueueCheck,
+            [QUEUE_NAMES.ANALYTICS_COMPACTION]: analyticsCompactionQueueCheck,
           },
         });
 
@@ -172,6 +189,7 @@ export async function buildReadinessReport() {
     portfolioCheck: getPortfolioCheckWorkerStatus(),
     rebalance: getRebalanceWorkerStatus(),
     analyticsSnapshot: getAnalyticsSnapshotWorkerStatus(),
+    analyticsCompaction: getAnalyticsCompactionWorkerStatus(),
   };
 
   const workersReady = Object.values(workerStatuses).every(
