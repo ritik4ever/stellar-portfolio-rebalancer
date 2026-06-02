@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, copyFileSync, existsSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
@@ -1705,6 +1705,60 @@ export class DatabaseService {
       .prepare("DELETE FROM portfolio_drafts WHERE expires_at <= datetime('now')")
       .run();
     return result.changes;
+  backup(backupPath?: string): string {
+    try {
+      const dbPath = process.env.DB_PATH || "./data/portfolio.db";
+      const defaultBackupDir = join(dirname(dbPath), "backups");
+      mkdirSync(defaultBackupDir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const defaultBackupPath = join(defaultBackupDir, `portfolio-backup-${timestamp}.db`);
+      const finalBackupPath = backupPath || defaultBackupPath;
+
+      this.db.backup(finalBackupPath);
+      logger.info(`[DB] Backup created successfully at ${finalBackupPath}`);
+      return finalBackupPath;
+    } catch (err) {
+      throw new Error(`Failed to create backup: ${err}`);
+    }
+  }
+
+  restore(backupPath: string): void {
+    try {
+      if (!existsSync(backupPath)) {
+        throw new Error(`Backup file not found: ${backupPath}`);
+      }
+
+      const dbPath = process.env.DB_PATH || "./data/portfolio.db";
+      
+      // First close current connection
+      this.db.close();
+
+      try {
+        // Copy backup to current DB path
+        copyFileSync(backupPath, dbPath);
+        logger.info(`[DB] Restored from backup: ${backupPath}`);
+
+        // Reopen the database connection
+        this.db = new Database(dbPath);
+        this.db.exec(SCHEMA_SQL);
+        this._migrateSchema();
+        this._seedDefaultAssets();
+      } catch (copyErr) {
+        // If copy failed, try to reopen original DB if possible
+        try {
+          this.db = new Database(dbPath);
+          this.db.exec(SCHEMA_SQL);
+          this._migrateSchema();
+          this._seedDefaultAssets();
+        } catch (reopenErr) {
+          // Ignore
+        }
+        throw copyErr;
+      }
+    } catch (err) {
+      throw new Error(`Failed to restore backup: ${err}`);
+    }
   }
 
   close(): void {

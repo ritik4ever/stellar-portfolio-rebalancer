@@ -204,6 +204,17 @@ soroban contract invoke \
 ```
 Contract address example: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I`
 
+### WASM Hash Verification
+
+Before deploying, you can compute and audit the canonical SHA-256 hash of the compiled WASM contract to ensure reproducibility and security:
+
+```bash
+cd contracts
+make hash
+```
+
+This target outputs the hash of both the release WASM and the optimized WASM (if available). The same hash calculation runs automatically on release/PR builds to simplify deployment audits.
+
 Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
 Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
 
@@ -306,6 +317,7 @@ docker compose -f deployment/docker-compose.yml up --build -d
 ## Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+For branch protection rules and which CI checks must pass before merging, see [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md).
 For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
 For issue management, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
 

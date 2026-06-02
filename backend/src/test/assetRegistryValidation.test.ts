@@ -131,4 +131,11 @@ describe('assetRegistryValidation', () => {
         assets: [
           'USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
           'BTC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQZ3K6Z4Z3B',
-          'USDC:GA5
+          'USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVV',
+        ]
+      }
+      expect(() => validateAssetRegistryEntry(entryWithDuplicate))
+        .toThrow(/duplicate|duplicate assets/i)
+    })
+  })
+})
