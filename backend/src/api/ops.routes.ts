@@ -13,7 +13,7 @@ import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWorker.js'
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
-import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
+import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -21,7 +21,15 @@ import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
-import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue, getDLQQueue } from '../queue/queues.js'
+import {
+    QUEUE_NAMES,
+    getPortfolioCheckQueue,
+    getRebalanceQueue,
+    getAnalyticsSnapshotQueue,
+    getPortfolioExportQueue,
+    getDLQQueue,
+    getQueueByName
+} from '../queue/queues.js'
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 
 export const opsRouter = Router()
@@ -138,6 +146,7 @@ opsRouter.get('/queue/health', async (req: Request, res: Response) => {
             portfolioCheck: getPortfolioCheckWorkerStatus(),
             rebalance: getRebalanceWorkerStatus(),
             analyticsSnapshot: getAnalyticsSnapshotWorkerStatus(),
+            portfolioExport: getPortfolioExportWorkerStatus(),
         }
         const payload = { ...metrics, workers }
         if (metrics.redisConnected) {
@@ -215,6 +224,7 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
             [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue(),
             [QUEUE_NAMES.REBALANCE]: getRebalanceQueue(),
             [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue(),
+            [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue(),
         }
 
         const queue = queueMap[queueName]
@@ -230,6 +240,52 @@ opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response)
         await job.retry()
         return ok(res, { message: 'Job retried', jobId, queue: queueName })
     } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/queue/:queueName/pause', async (req: Request, res: Response) => {
+    try {
+        const { queueName } = req.params
+        const queue = getQueueByName(queueName)
+
+        if (!queue) {
+            return fail(res, 400, 'INVALID_QUEUE', 'Invalid queue name')
+        }
+
+        await queue.pause()
+
+        logger.info('[QUEUE] Paused queue', { queue: queueName })
+
+        return ok(res, {
+            message: 'Queue paused',
+            queue: queueName
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to pause queue', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/queue/:queueName/resume', async (req: Request, res: Response) => {
+    try {
+        const { queueName } = req.params
+        const queue = getQueueByName(queueName)
+
+        if (!queue) {
+            return fail(res, 400, 'INVALID_QUEUE', 'Invalid queue name')
+        }
+
+        await queue.resume()
+
+        logger.info('[QUEUE] Resumed queue', { queue: queueName })
+
+        return ok(res, {
+            message: 'Queue resumed',
+            queue: queueName
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to resume queue', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

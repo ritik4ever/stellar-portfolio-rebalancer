@@ -1,14 +1,4 @@
-import type { Job } from "bullmq";
-import { Worker } from "bullmq";
-import { randomUUID } from "node:crypto";
-import { runWithRequestContext } from "../../utils/requestContext.js";
-import { logger, logAudit } from "../../utils/logger.js";
-import { rebalanceLockService } from "../../services/rebalanceLock.js";
-import { StellarService } from "../../services/stellar.js";
-import { rebalanceHistoryService } from "../../services/serviceContainer.js";
-import { notificationService } from "../../services/notificationService.js";
-import { getConnectionOptions } from "../connection.js";
-import type { RebalanceJobData } from "../queues.js";
+
 import {
   createWorkerRuntimeStatus,
   markWorkerFailed,
@@ -49,16 +39,9 @@ export async function processRebalanceJob(
       });
     }
 
-    const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+    const lockAcquired = await acquireWorkerLock(portfolioId);
 
-    if (!lockAcquired) {
-      logger.info(
-        "[WORKER:rebalance] Rebalance already in progress. Aborting.",
-        {
-          portfolioId,
-        },
-      );
-      return;
+
     }
 
     const stellarService = new StellarService();
@@ -148,7 +131,7 @@ export async function processRebalanceJob(
 
       throw err;
     } finally {
-      await rebalanceLockService.releaseLock(portfolioId);
+      await releaseWorkerLock(portfolioId);
     }
   });
 }

@@ -1,21 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { walletManager } from '../utils/walletManager'
 import { WalletAdapter } from '../utils/walletAdapters'
+import { getConfiguredNetwork, detectWalletNetwork } from '../utils/networkDetection'
+import { NetworkMismatchBanner } from './NetworkMismatchBanner'
+import { runBootDiagnostics, type BootCheck } from '../app/walletBoot'
+import BootDiagnosticsPanel from './BootDiagnosticsPanel'
+import { api, ENDPOINTS } from '../config/api'
 
 interface WalletSelectorProps {
     onConnect: (publicKey: string) => void
     onError: (error: string) => void
 }
 
+interface NetworkMismatchState {
+    configured: string
+    detected: string
+    walletType: string
+}
+
 export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onError }) => {
     const [connecting, setConnecting] = useState<string | null>(null)
     const [availableWallets, setAvailableWallets] = useState<WalletAdapter[]>([])
+    const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
+    const [showDiagnostics, setShowDiagnostics] = useState(false)
     const [autoReconnect, setAutoReconnect] = useState<boolean>(walletManager.getAutoReconnect())
+    const [networkMismatch, setNetworkMismatch] = useState<NetworkMismatchState | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         const wallets = walletManager.getAvailableWallets()
         setAvailableWallets(wallets)
+        runChecks()
     }, [])
 
     useEffect(() => {
@@ -25,7 +40,43 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
         }
     }, [availableWallets])
 
+    const runChecks = async () => {
+        setBootChecks([
+            { id: 'wallet-detection', label: 'Wallet extension', status: 'loading' },
+            { id: 'api-reachability', label: 'API reachability', status: 'loading' },
+        ])
+        const result = await runBootDiagnostics({
+            checkWallets: () => {
+                const wallets = walletManager.getAvailableWallets()
+                return wallets.length > 0
+            },
+            checkApi: async () => {
+                try {
+                    await api.get(ENDPOINTS.HEALTH)
+                    return true
+                } catch {
+                    return false
+                }
+            },
+        })
+        setBootChecks(result.checks)
+    }
+
     const handleConnect = async (walletType: string) => {
+        setNetworkMismatch(null)
+        const configuredNetwork = getConfiguredNetwork()
+
+        const detected = await detectWalletNetwork(walletType)
+        if (detected && configuredNetwork !== 'unknown' && detected !== configuredNetwork) {
+            setNetworkMismatch({
+                configured: configuredNetwork,
+                detected,
+                walletType,
+            })
+            onError(`Network mismatch: wallet on ${detected}, app expects ${configuredNetwork}`)
+            return
+        }
+
         setConnecting(walletType)
         try {
             const publicKey = await walletManager.connect(walletType as any)
@@ -57,16 +108,41 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
 
     if (availableWallets.length === 0) {
         return (
-            <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800" role="alert">
-                <p className="text-yellow-800 dark:text-yellow-300 text-sm">
-                    No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.
-                </p>
+            <div>
+                <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800" role="alert">
+                    <p className="text-yellow-800 dark:text-yellow-300 text-sm">
+                        No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.
+                    </p>
+                </div>
+                <div className="mt-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                    <button
+                        type="button"
+                        onClick={() => setShowDiagnostics(!showDiagnostics)}
+                        className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    >
+                        {showDiagnostics ? 'Hide' : 'Show'} startup diagnostics
+                    </button>
+                    {showDiagnostics ? (
+                        <BootDiagnosticsPanel
+                            checks={bootChecks}
+                            onRetry={runChecks}
+                            className="mt-2"
+                        />
+                    ) : null}
+                </div>
             </div>
         )
     }
 
     return (
         <div className="space-y-3" ref={containerRef} role="group" aria-label="Available wallets">
+            {networkMismatch && (
+                <NetworkMismatchBanner
+                    configuredNetwork={networkMismatch.configured as any}
+                    walletNetwork={networkMismatch.detected as any}
+                    onDismiss={() => setNetworkMismatch(null)}
+                />
+            )}
             <p className="text-sm text-gray-600 dark:text-gray-400" id="wallet-selector-label">
                 Select a wallet to connect
             </p>
@@ -107,6 +183,22 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                 <label className="text-xs text-gray-500 dark:text-gray-400 select-none">
                     Auto-reconnect on page refresh
                 </label>
+            </div>
+            <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+                <button
+                    type="button"
+                    onClick={() => setShowDiagnostics(!showDiagnostics)}
+                    className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                >
+                    {showDiagnostics ? 'Hide' : 'Show'} startup diagnostics
+                </button>
+                {showDiagnostics ? (
+                    <BootDiagnosticsPanel
+                        checks={bootChecks}
+                        onRetry={runChecks}
+                        className="mt-2"
+                    />
+                ) : null}
             </div>
         </div>
     )

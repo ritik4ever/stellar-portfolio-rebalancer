@@ -56,6 +56,24 @@ export async function findRefreshToken(token: string): Promise<RefreshTokenRow |
     }
 }
 
+export async function findRefreshTokenById(id: string): Promise<RefreshTokenRow | null> {
+    if (isDbConfigured()) {
+        const result = await getPool().query<RefreshTokenRow>(
+            `SELECT id, user_address, token_hash, expires_at, created_at
+             FROM refresh_tokens WHERE id = $1`,
+            [id]
+        )
+        const row = result.rows[0]
+        return row ? { ...row, expires_at: new Date(row.expires_at), created_at: new Date(row.created_at) } : null
+    }
+    for (const [hash, entry] of inMemoryStore) {
+        if (entry.id === id) {
+            return { id: entry.id, user_address: entry.user_address, token_hash: hash, expires_at: entry.expires_at, created_at: new Date() }
+        }
+    }
+    return null
+}
+
 export async function deleteRefreshTokenById(id: string): Promise<boolean> {
     if (isDbConfigured()) {
         const result = await getPool().query('DELETE FROM refresh_tokens WHERE id = $1', [id])

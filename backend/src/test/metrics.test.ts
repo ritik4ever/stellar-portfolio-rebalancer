@@ -8,6 +8,8 @@ vi.mock('../monitoring/readiness.js', () => ({
 }))
 
 vi.mock('../queue/queueMetrics.js', () => ({
+    QUEUE_METRIC_NAMES: ['portfolio-check', 'rebalance', 'analytics-snapshot'],
+    QUEUE_METRIC_STATES: ['waiting', 'active', 'completed', 'failed', 'delayed'],
     getQueueMetrics: mockGetQueueMetrics
 }))
 
@@ -27,12 +29,26 @@ describe('metrics observability', () => {
         mockGetQueueMetrics.mockResolvedValue({
             redisConnected: true,
             queues: {
+                'portfolio-check': {
+                    waiting: 0,
+                    active: 0,
+                    completed: 0,
+                    failed: 0,
+                    delayed: 0
+                },
                 rebalance: {
                     waiting: 1,
                     active: 2,
                     completed: 3,
                     failed: 4,
                     delayed: 5
+                },
+                'analytics-snapshot': {
+                    waiting: 0,
+                    active: 0,
+                    completed: 0,
+                    failed: 0,
+                    delayed: 0
                 }
             }
         })
@@ -46,6 +62,9 @@ describe('metrics observability', () => {
         expect(payload).toContain('stellar_portfolio_readiness_status')
         expect(payload).toContain('stellar_portfolio_queue_jobs')
         expect(payload).toContain('queue="rebalance",state="failed"')
+    })
+
+
     })
 })
 
