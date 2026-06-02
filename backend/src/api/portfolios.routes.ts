@@ -92,10 +92,52 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        const portfolio = await stellarService.getPortfolio(portfolioId)
-        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        
+        let portfolio: any
+        let riskHeatmap: any = undefined
+        
+        try {
+            portfolio = await stellarService.getPortfolio(portfolioId)
+            
+            try {
+                const prices = await reflectorService.getCurrentPrices()
+                riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
+            } catch (err) {
+                logger.warn('[WARN] Failed to calculate risk heatmap for portfolio, falling back', { portfolioId, error: getErrorObject(err) })
+            }
+        } catch (error) {
+            const errMsg = getErrorMessage(error)
+            if (errMsg.includes('Portfolio not found')) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
+            
+            logger.warn('[WARN] Failed to fetch portfolio with prices, attempting storage fallback', { portfolioId, error: getErrorObject(error) })
+            const rawPortfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (!rawPortfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
+            
+            portfolio = {
+                id: portfolioId,
+                userAddress: rawPortfolio.userAddress,
+                totalValue: rawPortfolio.totalValue || 0,
+                allocations: Object.entries(rawPortfolio.allocations).map(([asset, target]) => ({
+                    asset,
+                    target,
+                    current: target,
+                    amount: 0,
+                    balance: rawPortfolio.balances[asset] || 0,
+                    price: 0
+                })),
+                needsRebalance: false,
+                lastRebalance: rawPortfolio.lastRebalance,
+                threshold: rawPortfolio.threshold,
+                slippageTolerancePercent: rawPortfolio.slippageTolerancePercent ?? rawPortfolio.slippageTolerance ?? 1,
+                dayChange: 0
+            }
+        }
 
-        return ok(res, { portfolio })
+        return ok(res, { portfolio, riskHeatmap })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -406,6 +448,34 @@ portfoliosRouter.get('/portfolio/:id/performance-summary', async (req: Request, 
         return ok(res, { portfolioId, ...summary })
     } catch (error) {
         logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        }
+
+        let portfolio: any
+        try {
+            portfolio = await stellarService.getPortfolio(portfolioId)
+        } catch (error) {
+            const errMsg = getErrorMessage(error)
+            if (errMsg.includes('Portfolio not found')) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
+            throw error
+        }
+
+        const prices = await reflectorService.getCurrentPrices()
+        const riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
+
+        return ok(res, { riskHeatmap })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio risk diagnostics failed', { error: getErrorObject(error), portfolioId: req.params.id })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

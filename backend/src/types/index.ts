@@ -191,10 +191,22 @@ export interface ApiResponse<T = any> {
     meta?: Record<string, unknown>
 }
 
+export interface RiskHeatmapDiagnostic {
+    score: number
+    level: 'low' | 'medium' | 'high'
+}
+
+export interface RiskHeatmap {
+    concentration: RiskHeatmapDiagnostic
+    volatility: RiskHeatmapDiagnostic
+    drawdown: RiskHeatmapDiagnostic
+}
+
 export interface PortfolioApiResponse extends ApiResponse {
     portfolio?: Portfolio
     prices?: PricesMap
     riskMetrics?: RiskMetrics
+    riskHeatmap?: RiskHeatmap
 }
 
 export interface RebalanceHistoryResponse extends ApiResponse {
