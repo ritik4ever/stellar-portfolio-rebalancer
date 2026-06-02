@@ -103,9 +103,11 @@ notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, 
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
+        const unsubscribeReason = typeof req.query.reason === 'string' ? req.query.reason.trim() : undefined
+
         notificationService.unsubscribe(userId)
 
-        logger.info('User unsubscribed from notifications', { userId })
+        logger.info('User unsubscribed from notifications', { userId, reason: unsubscribeReason || undefined })
 
         return ok(res, { message: 'Successfully unsubscribed from all notifications' })
     } catch (error) {
