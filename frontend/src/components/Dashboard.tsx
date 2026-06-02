@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
@@ -13,7 +13,13 @@ import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
 
 // TanStack Query Hooks
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import {
+    useUserPortfolios,
+    usePortfolioDetails,
+    useRebalanceEstimate,
+    buildRebalanceConfirmationSummary,
+    portfolioKeys,
+} from '../hooks/queries/usePortfolioQuery'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { useQueryClient } from '@tanstack/react-query'
@@ -21,9 +27,6 @@ import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
 import RouteErrorState from './RouteErrorState'
 
-//  NEW: export utils (create frontend/src/utils/export.ts first)
-import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
-import { downloadPortfolioExport } from '../config/api'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -60,7 +63,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         refetch: refetchPortfolioDetails,
     } = usePortfolioDetails(latestPortfolioId)
 
-    // Query for prices
     const {
         data: priceBundle,
         isLoading: pricesLoading,
@@ -105,7 +107,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         publicKey &&
         portfoliosLoadError &&
         !portfoliosLoading &&
-        (!portfolios || portfolios.length === 0)
+        (!portfolios || portfolios.length === 0),
     )
 
     const allocationData = portfolioData?.allocations?.map((alloc: any, index: number) => ({
@@ -410,6 +412,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     <Trash2 className="w-4 h-4" />
                                     Delete my data
                                 </button>
+                                {portfolioData?.id && portfolioData.id !== 'demo' ? (
+                                    <button
+                                        onClick={startClonePortfolio}
+                                        className="border border-blue-200 dark:border-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-200 px-4 py-2 rounded-lg transition-colors flex items-center gap-1"
+                                        title="Copy allocations into a new portfolio"
+                                    >
+                                        <Copy className="w-4 h-4" />
+                                        Clone as new
+                                    </button>
+                                ) : null}
                                 <button
                                     onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
@@ -431,6 +443,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 >
                                     Connect Wallet
                                 </button>
+                                {/* NEW: Demo reset button for local testing */}
                                 <button
                                     onClick={() => setShowDemoResetConfirm(true)}
                                     className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"

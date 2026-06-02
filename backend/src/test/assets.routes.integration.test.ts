@@ -67,6 +67,42 @@ describe('assets routes integration', () => {
         expect(noMatch.body.data.total).toBe(0)
     })
 
+    it('sorts assets by symbol descending', async () => {
+        const res = await request(app).get('/api/v1/assets?sortBy=symbol&order=desc&limit=100').expect(200)
+        const symbols = res.body.data.assets.map((a: { symbol: string }) => a.symbol)
+        const expected = [...symbols].sort((a, b) => b.localeCompare(a))
+        expect(symbols).toEqual(expected)
+    })
+
+    it('filters assets by issuer substring', async () => {
+        const all = await request(app).get('/api/v1/assets?limit=100').expect(200)
+        const withIssuer = all.body.data.assets.find((a: { issuerAccount?: string }) => a.issuerAccount)
+
+        if (withIssuer) {
+            const fragment = withIssuer.issuerAccount.slice(0, 6)
+            const res = await request(app).get(`/api/v1/assets?issuer=${fragment}`).expect(200)
+            expect(res.body.data.assets.length).toBeGreaterThan(0)
+            expect(
+                res.body.data.assets.every((a: { issuerAccount?: string }) =>
+                    (a.issuerAccount ?? '').toUpperCase().includes(fragment.toUpperCase())
+                )
+            ).toBe(true)
+        }
+
+        const noMatch = await request(app).get('/api/v1/assets?issuer=ZZZ_NO_SUCH_ISSUER').expect(200)
+        expect(noMatch.body.data.assets).toEqual([])
+        expect(noMatch.body.data.total).toBe(0)
+    })
+
+    it('rejects invalid sort/pagination query params with 400', async () => {
+        const badSort = await request(app).get('/api/v1/assets?sortBy=nope').expect(400)
+        expect(badSort.body.success).toBe(false)
+        expect(badSort.body.error.code).toBe('VALIDATION_ERROR')
+
+        const badLimit = await request(app).get('/api/v1/assets?limit=99999').expect(400)
+        expect(badLimit.body.error.code).toBe('VALIDATION_ERROR')
+    })
+
     it('GET /api/v1/assets/:id returns 404 for unknown asset', async () => {
         const res = await request(app).get('/api/v1/assets/UNKNOWN_ASSET').expect(404)
         expect(res.body.success).toBe(false)

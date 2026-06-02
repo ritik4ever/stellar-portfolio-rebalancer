@@ -72,11 +72,19 @@ vi.mock('../services/authService', () => ({
     logout: vi.fn(async () => undefined),
 }))
 
-vi.mock('../utils/export', () => ({
-    downloadCSV: vi.fn(),
-    downloadJSON: vi.fn(),
-    toCSV: vi.fn(() => 'csv'),
-}))
+vi.mock('../hooks/usePortfolio', async () => {
+    const actual = await vi.importActual<typeof import('../hooks/usePortfolio')>('../hooks/usePortfolio')
+    return {
+        ...actual,
+        usePortfolioExport: () => ({
+            exportProgress: { phase: 'idle', label: '' },
+            resetExportProgress: vi.fn(),
+            exportClientCsv: vi.fn(async () => undefined),
+            exportClientJson: vi.fn(async () => undefined),
+            exportFromServer: vi.fn(async () => undefined),
+        }),
+    }
+})
 
 vi.mock('../config/api', async () => {
     const actual = await vi.importActual<typeof import('../config/api')>('../config/api')
@@ -106,6 +114,13 @@ class TestErrorBoundary extends React.Component<{ children: React.ReactNode }, {
     }
 }
 
+function renderDashboard(ui: React.ReactElement) {
+    const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
+
 describe('Dashboard', () => {
     beforeEach(() => {
         cleanup()
@@ -123,6 +138,49 @@ describe('Dashboard', () => {
 
         expect(await screen.findByRole('button', { name: /create portfolio/i })).toBeTruthy()
         expect(screen.getByText(/portfolio dashboard/i)).toBeTruthy()
+    })
+
+    it('offers clone as new when a saved portfolio is loaded', async () => {
+        queryMocks.useUserPortfolios.mockReturnValue({
+            data: [{
+                id: 'p-1',
+                totalValue: 5000,
+                threshold: 5,
+                slippageTolerance: 1,
+                strategy: 'threshold',
+                allocations: [
+                    { asset: 'XLM', target: 60, amount: 3000 },
+                    { asset: 'USDC', target: 40, amount: 2000 },
+                ]
+            }],
+            isLoading: false
+        })
+        queryMocks.usePortfolioDetails.mockReturnValue({
+            data: {
+                id: 'p-1',
+                threshold: 5,
+                slippageTolerance: 1,
+                strategy: 'threshold',
+                allocations: [
+                    { asset: 'XLM', target: 60 },
+                    { asset: 'USDC', target: 40 },
+                ],
+            },
+            isLoading: false,
+        })
+        queryMocks.usePrices.mockReturnValue({
+            data: {
+                prices: { XLM: { price: 0.12, change: 1.1 }, USDC: { price: 1, change: 0 } },
+                feedMeta: null
+            },
+            isLoading: false
+        })
+
+        const onNavigate = vi.fn()
+        renderDashboard(<Dashboard onNavigate={onNavigate} publicKey="GABC1234TEST" />)
+
+        fireEvent.click(await screen.findByRole('button', { name: /clone as new/i }))
+        expect(onNavigate).toHaveBeenCalledWith('setup')
     })
 
     it('renders asset cards when portfolio data is populated', async () => {
@@ -187,7 +245,7 @@ describe('Dashboard', () => {
             throw new Error('portfolio fetch failed')
         })
 
-        render(
+        renderDashboard(
             <TestErrorBoundary>
                 <Dashboard onNavigate={vi.fn()} publicKey="GABC1234TEST" />
             </TestErrorBoundary>

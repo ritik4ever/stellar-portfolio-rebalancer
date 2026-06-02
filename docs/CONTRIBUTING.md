@@ -597,3 +597,7 @@ Missing optional scripts are reported as skips. Any configured command that exit
 - [Queue worker lifecycle](QUEUE_WORKER_LIFECYCLE.md) — Job states, retry policy, worker deployment
 - [Contract deployment checklist](CONTRACT_DEPLOYMENT_CHECKLIST.md) — Environment-specific steps for local, testnet, staging, production
 - [Privacy and consent alignment](PRIVACY_CONSENT_ALIGNMENT.md) — Legal wording, consent flow, GDPR compliance
+
+### Legal content version
+
+Legal copy is versioned in `frontend/src/content/legalMetadata.ts` (`LEGAL_BUNDLE_VERSION`, `LEGAL_EFFECTIVE_DATE`). The same label is shown on legal pages and in the consent modal. When you change Terms, Privacy, or Cookie text in `frontend/src/components/Legal.tsx`, bump both constants and note the change in your PR so users and auditors can match UI text to a specific release.

@@ -14,6 +14,34 @@ pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
 /// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
 
+/// Minimum allowed rebalance threshold percentage.
+///
+/// The rebalance threshold determines when a portfolio drift is significant
+/// enough to trigger a rebalance. Values below 1% are too sensitive and would
+/// cause excessive rebalancing with minimal benefit.
+pub const MIN_REBALANCE_THRESHOLD: u32 = 1;
+
+/// Maximum allowed rebalance threshold percentage.
+///
+/// The rebalance threshold determines when a portfolio drift is significant
+/// enough to trigger a rebalance. Values above 50% are too permissive and would
+/// allow portfolios to drift far from target allocations before rebalancing.
+pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
+
+/// Minimum allowed slippage tolerance in basis points.
+///
+/// Slippage tolerance is expressed in basis points (1/100th of a percent).
+/// 10 basis points = 0.1%. Values below this are too strict for practical
+/// trading on decentralized exchanges.
+pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
+
+/// Maximum allowed slippage tolerance in basis points.
+///
+/// Slippage tolerance is expressed in basis points (1/100th of a percent).
+/// 500 basis points = 5%. Values above this would allow excessive slippage
+/// that could significantly impact portfolio value.
+pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Portfolio {
