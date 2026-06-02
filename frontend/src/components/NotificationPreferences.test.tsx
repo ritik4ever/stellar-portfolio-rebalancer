@@ -83,6 +83,8 @@ describe('NotificationPreferences', () => {
                     priceMovement: true,
                     riskChange: true,
                 },
+                digestEnabled: false,
+                digestFrequency: 'realtime',
             })
         })
     })
@@ -164,6 +166,8 @@ describe('NotificationPreferences', () => {
                     priceMovement: true,
                     riskChange: true,
                 },
+                digestEnabled: false,
+                digestFrequency: 'realtime',
             },
         } as any)
         let resolveUnsubscribe!: (value: any) => void

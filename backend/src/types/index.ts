@@ -97,6 +97,15 @@ export interface UIAllocation {
     current?: number
 }
 
+// Refresh token session metadata for transparent session management
+export interface RefreshTokenMetadata {
+    device?: string
+    platform?: string
+    userAgent?: string
+    ipAddress?: string
+    lastUsedAt?: string
+}
+
 // Thrown when an update targets a stale portfolio version
 export class ConflictError extends Error {
     readonly currentVersion: number

@@ -41,6 +41,13 @@ const readinessGauge = new Gauge({
   registers: [register],
 });
 
+const readinessDependencyLatency = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}readiness_dependency_latency_ms`,
+    help: 'Measured latency (ms) for readiness dependency checks',
+    labelNames: ['dependency'] as const,
+    registers: [register],
+})
+
 const queueDepthGauge = new Gauge({
   name: `${observabilityConfig.metrics.prefix}queue_jobs`,
   help: "Current queue depth by state",
@@ -226,4 +233,17 @@ export function recordCacheTtl(ttlSeconds: number): void {
 
 export function recordCacheExpiration(asset: string): void {
   cacheExpirationCounterTotal.inc({ asset });
+}
+
+// ── Auth security event metrics (Issue #423) ─────────────────────────────────
+
+const authSecurityEventsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}auth_security_events_total`,
+    help: 'Total authentication security events by type',
+    labelNames: ['event_type'] as const,
+    registers: [register],
+})
+
+export function recordAuthSecurityEvent(eventType: string): void {
+    authSecurityEventsTotal.inc({ event_type: eventType })
 }

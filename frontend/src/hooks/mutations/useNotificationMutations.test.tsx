@@ -35,6 +35,8 @@ const samplePrefs = {
     webhookEnabled: false,
     webhookUrl: '',
     events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
+    digestEnabled: false,
+    digestFrequency: 'realtime',
 }
 
 describe('useNotificationMutations', () => {
