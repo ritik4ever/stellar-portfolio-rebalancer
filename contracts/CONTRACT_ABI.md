@@ -26,8 +26,8 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `user`: Portfolio owner; must authorize this call.
   - `target_allocations`: Target allocations per asset (`Address -> percentage`).
-  - `rebalance_threshold`: Drift threshold percent (`1..=50`).
-  - `slippage_tolerance`: Slippage tolerance in basis points (`10..=500`).
+  - `rebalance_threshold`: Drift threshold percent (must be between `MIN_REBALANCE_THRESHOLD` and `MAX_REBALANCE_THRESHOLD`, i.e., `1..=50`).
+  - `slippage_tolerance`: Slippage tolerance in basis points (must be between `MIN_SLIPPAGE_TOLERANCE_BPS` and `MAX_SLIPPAGE_TOLERANCE_BPS`, i.e., `10..=500`).
 - **Returns:** `Ok(portfolio_id)` or one of:
   - `Err(Error::InvalidAllocation)`
   - `Err(Error::TooManyAssets)`
@@ -92,6 +92,31 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Preconditions:**
   - Admin address stored in `DataKey::Admin` must authorize the call.
 
+### `min_rebalance_threshold(env: Env) -> u32`
+
+- **Purpose:** Returns the minimum allowed rebalance threshold percentage.
+- **Returns:** `MIN_REBALANCE_THRESHOLD` (currently `1`).
+
+### `max_rebalance_threshold(env: Env) -> u32`
+
+- **Purpose:** Returns the maximum allowed rebalance threshold percentage.
+- **Returns:** `MAX_REBALANCE_THRESHOLD` (currently `50`).
+
+### `min_slippage_tolerance_bps(env: Env) -> u32`
+
+- **Purpose:** Returns the minimum allowed slippage tolerance in basis points.
+- **Returns:** `MIN_SLIPPAGE_TOLERANCE_BPS` (currently `10`).
+
+### `max_slippage_tolerance_bps(env: Env) -> u32`
+
+- **Purpose:** Returns the maximum allowed slippage tolerance in basis points.
+- **Returns:** `MAX_SLIPPAGE_TOLERANCE_BPS` (currently `500`).
+
+### `max_portfolio_assets(env: Env) -> u32`
+
+- **Purpose:** Returns the maximum number of assets allowed in a portfolio.
+- **Returns:** `MAX_PORTFOLIO_ASSETS` (currently `10`).
+
 ## Error Codes (`contracts/src/types.rs`)
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
@@ -105,8 +130,8 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `5` | `StaleData` | Reserved variant; stale-price path currently panics instead of returning this error. |
 | `6` | `ExcessiveDrift` | Reserved variant; currently not explicitly returned by `lib.rs`. |
 | `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
-| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `1..=50`. |
-| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `10..=500`. |
+| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD` (i.e., `1..=50`). |
+| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
 
