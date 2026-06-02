@@ -1162,6 +1162,21 @@ fn test_emergency_stop_admin_pause_and_reactivate() {
 }
 
 #[test]
+fn test_get_admin_returns_configured_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let configured_admin = client.get_admin();
+    assert_eq!(configured_admin, admin);
+}
+
+#[test]
 #[should_panic]
 fn test_emergency_stop_non_admin_rejected() {
     let env = Env::default();

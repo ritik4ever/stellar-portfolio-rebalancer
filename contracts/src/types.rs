@@ -74,6 +74,8 @@ pub struct UpgradeEvent {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
+    /// Admin address for privileged actions such as emergency stop.
+    /// This can be a standard account or a contract-managed governance address.
     Admin,
     ReflectorAddress,
     EmergencyStop,
