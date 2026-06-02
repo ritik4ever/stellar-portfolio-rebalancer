@@ -307,7 +307,12 @@ Add backup verification to your CI pipeline:
     ls -la data/backups/
 ```
 
+## Disaster recovery
+
+For detailed, step-by-step procedures to handle incident response, outages, containment, rollbacks, database restoration, and validation across the smart contract, backend, and frontend stacks, refer to the [Disaster Recovery Runbook](DISASTER_RECOVERY.md).
+
 ## Related docs
 
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
 - OpenAPI source of truth: [backend/docs/openapi.md](../backend/docs/openapi.md)
+- Disaster Recovery Runbook: [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)
