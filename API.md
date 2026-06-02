@@ -30,7 +30,309 @@ The **frontend** defaults to `/api/v1` for resource routes via `VITE_API_VERSION
 ## Authentication
 
 - Most endpoints are unauthenticated.
-- **Admin-only** endpoints (e.g. auto-rebalancer start/stop, sync-onchain, auto-rebalancer history) require admin auth (e.g. `Authorization` header or project-specific mechanism). See the OpenAPI spec and your deployment config for details.
+- **JWT-protected endpoints** (e.g. rebalance execution, portfolio export) require a valid `Authorization: Bearer <token>` header.
+- **Admin-only endpoints** (e.g. auto-rebalancer start/stop, sync-onchain, asset management) require admin auth via `X-Public-Key`, `X-Message`, and `X-Signature` headers using a Stellar keypair.
+
+### JWT authentication workflow
+
+The backend uses a wallet-signature challenge flow:
+
+1. **Obtain a challenge nonce** via `POST /api/auth/challenge`
+2. **Sign the challenge** with your Stellar wallet private key
+3. **Exchange the signature** for JWT access + refresh tokens via `POST /api/auth/login`
+4. **Include the access token** in the `Authorization` header for protected requests
+5. **Refresh the access token** when it expires via `POST /api/auth/refresh`
+
+### Quick-start curl examples
+
+#### Prerequisites
+
+```bash
+# Backend running locally on port 3001
+# JWT_SECRET configured in backend/.env (at least 32 chars)
+# ADMIN_PUBLIC_KEYS configured with your Stellar public key
+```
+
+#### 1. JWT auth flow (wallet-signed challenge)
+
+```bash
+# Step 1: Request a challenge nonce
+# Replace GABCD... with your Stellar public key
+curl -s http://localhost:3001/api/auth/challenge \
+  -H 'Content-Type: application/json' \
+  -d '{"address":"GABCD...YOUR_STELLAR_PUBLIC_KEY"}' | jq .
+
+# Expected response (200):
+# {
+#   "success": true,
+#   "data": { "challenge": "sign-this-message-1748300000000-abc123" }
+# }
+
+# Step 2: Sign the challenge with your wallet and exchange for tokens
+# Replace the signature with your base64-encoded Ed25519 signature
+curl -s http://localhost:3001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "address":"GABCD...YOUR_STELLAR_PUBLIC_KEY",
+    "signature":"BASE64_ENCODED_SIGNATURE"
+  }' | jq .
+
+# Expected response (200):
+# {
+#   "success": true,
+#   "data": {
+#     "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+#     "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+#     "expiresIn": 900,
+#     "refreshExpiresIn": 604800
+#   }
+# }
+
+# Step 3: Use the access token for protected endpoints
+TOKEN="eyJhbGciOiJIUzI1NiIs..."
+
+curl -s http://localhost:3001/api/portfolio/YOUR_PORTFOLIO_ID/rebalance \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{}' | jq .
+
+# Step 4: Refresh an expired token
+REFRESH_TOKEN="eyJhbGciOiJIUzI1NiIs..."
+
+curl -s http://localhost:3001/api/auth/refresh \
+  -H 'Content-Type: application/json' \
+  -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}" | jq .
+
+# Step 5: Logout (invalidate refresh token)
+curl -s http://localhost:3001/api/auth/logout \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}" | jq .
+```
+
+#### 2. Admin auth flow (Stellar keypair signature)
+
+Admin endpoints use `X-Public-Key`, `X-Message`, and `X-Signature` headers. `X-Message` is a Unix timestamp in milliseconds; `X-Signature` is the base64-encoded Ed25519 signature over that timestamp.
+
+```bash
+# Generate a signed message using a Stellar keypair
+# Requires @stellar/stellar-sdk (npm install @stellar/stellar-sdk)
+node -e "
+const { Keypair } = require('@stellar/stellar-sdk');
+const kp = Keypair.fromSecret('S...YOUR_SECRET_KEY');
+const msg = String(Date.now());
+const sig = kp.sign(Buffer.from(msg, 'utf8')).toString('base64');
+console.log('PUB:', kp.publicKey());
+console.log('MSG:', msg);
+console.log('SIG:', sig);
+"
+
+# Then use the output values in curl:
+PUB="GABCD...YOUR_ADMIN_PUBLIC_KEY"
+MSG="1748300000000"
+SIG="BASE64_ENCODED_SIGNATURE"
+
+# Start auto-rebalancer (admin)
+curl -s http://localhost:3001/api/auto-rebalancer/start \
+  -H 'Content-Type: application/json' \
+  -H "X-Public-Key: $PUB" \
+  -H "X-Message: $MSG" \
+  -H "X-Signature: $SIG" \
+  -d '{}' | jq .
+
+# Stop auto-rebalancer (admin)
+curl -s http://localhost:3001/api/auto-rebalancer/stop \
+  -H 'Content-Type: application/json' \
+  -H "X-Public-Key: $PUB" \
+  -H "X-Message: $MSG" \
+  -H "X-Signature: $SIG" \
+  -d '{}' | jq .
+
+# Force rebalance check (admin)
+curl -s http://localhost:3001/api/auto-rebalancer/force-check \
+  -H 'Content-Type: application/json' \
+  -H "X-Public-Key: $PUB" \
+  -H "X-Message: $MSG" \
+  -H "X-Signature: $SIG" \
+  -d '{}' | jq .
+
+# List assets (admin)
+curl -s http://localhost:3001/api/admin/assets \
+  -H "X-Public-Key: $PUB" \
+  -H "X-Message: $MSG" \
+  -H "X-Signature: $SIG" | jq .
+
+# Add asset (admin)
+curl -s -X POST http://localhost:3001/api/admin/assets \
+  -H 'Content-Type: application/json' \
+  -H "X-Public-Key: $PUB" \
+  -H "X-Message: $MSG" \
+  -H "X-Signature: $SIG" \
+  -d '{"symbol":"SOL","name":"Solana","coingeckoId":"solana"}' | jq .
+
+# Sync on-chain history (admin)
+curl -s http://localhost:3001/api/rebalance/history/sync-onchain \
+  -H 'Content-Type: application/json' \
+  -H "X-Public-Key: $PUB" \
+  -H "X-Message: $MSG" \
+  -H "X-Signature: $SIG" \
+  -d '{}' | jq .
+```
+
+#### 3. Common authenticated routes
+
+```bash
+# Replace these with actual values
+TOKEN="eyJhbGciOiJIUzI1NiIs..."
+PORTFOLIO_ID="your-portfolio-uuid"
+
+# Create portfolio (JWT optional, best practice to include it)
+curl -s -X POST http://localhost:3001/api/portfolio \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "userAddress": "GABCD...YOUR_STELLAR_PUBLIC_KEY",
+    "allocations": {"XLM": 40, "BTC": 30, "USDC": 30},
+    "threshold": 5
+  }' | jq .
+
+# Execute rebalance (JWT required when auth enabled)
+curl -s -X POST "http://localhost:3001/api/portfolio/$PORTFOLIO_ID/rebalance" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{}' | jq .
+
+# Export portfolio as JSON (JWT required when auth enabled)
+curl -s "http://localhost:3001/api/portfolio/$PORTFOLIO_ID/export?format=json" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+
+# List user portfolios (JWT required when auth enabled)
+curl -s "http://localhost:3001/api/user/GABCD...YOUR_STELLAR_PUBLIC_KEY/portfolios" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+#### 4. Auth failure examples
+
+```bash
+# Missing Authorization header (401)
+curl -s http://localhost:3001/api/portfolio/some-id/rebalance \
+  -H 'Content-Type: application/json' \
+  -d '{}' | jq .
+# Expected: 401 with error code UNAUTHORIZED
+
+# Expired token (401 with TOKEN_EXPIRED)
+curl -s http://localhost:3001/api/portfolio/some-id/rebalance \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.expired.token" \
+  -d '{}' | jq .
+# Expected: 401 with error code TOKEN_EXPIRED
+
+# Wrong user tries to access another user's portfolio (403)
+# Use a token for address GABC but access a portfolio owned by GXYZ
+curl -s "http://localhost:3001/api/user/GXYZ...OTHER_ADDRESS/portfolios" \
+  -H "Authorization: Bearer $TOKEN_FOR_GABC" | jq .
+# Expected: 403 with error code FORBIDDEN
+
+# Admin endpoint without admin headers (401)
+curl -s http://localhost:3001/api/auto-rebalancer/start \
+  -H 'Content-Type: application/json' \
+  -d '{}' | jq .
+# Expected: 401 with UNAUTHORIZED
+
+# Admin endpoint with invalid signature (403)
+curl -s http://localhost:3001/api/auto-rebalancer/start \
+  -H 'Content-Type: application/json' \
+  -H "X-Public-Key: GABC...INVALID_KEY" \
+  -H "X-Message: 1748300000000" \
+  -H "X-Signature: invalid_signature" \
+  -d '{}' | jq .
+# Expected: 403 with code FORBIDDEN
+
+# Auth service not configured (503)
+# When JWT_SECRET is not set in backend/.env
+curl -s http://localhost:3001/api/auth/challenge \
+  -H 'Content-Type: application/json' \
+  -d '{"address":"GABCD..."}' | jq .
+# Expected: 503 with SERVICE_UNAVAILABLE and message "JWT auth not configured (set JWT_SECRET)"
+```
+
+#### 5. Rate-limited endpoints
+
+Write endpoints are rate-limited. Exceed the limit to trigger a 429 response:
+
+```bash
+# Rapid requests will be throttled
+for i in {1..20}; do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    http://localhost:3001/api/portfolio \
+    -H 'Content-Type: application/json' \
+    -d '{"userAddress":"GABC...","allocations":{"XLM":100},"threshold":5}'
+done
+# Expected: Eventually returns 429 with error code RATE_LIMITED
+```
+
+#### 6. Idempotency key example
+
+```bash
+UUID="550e8400-e29b-41d4-a716-446655440000"
+
+# First call — processes normally
+curl -s -X POST http://localhost:3001/api/portfolio \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $UUID" \
+  -d '{"userAddress":"GABC...","allocations":{"XLM":60,"USDC":40},"threshold":5}' | jq .
+
+# Second call with same key and body — returns cached response
+curl -s -X POST http://localhost:3001/api/portfolio \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $UUID" \
+  -d '{"userAddress":"GABC...","allocations":{"XLM":60,"USDC":40},"threshold":5}' | jq .
+# Expected: Same response as first call, with Idempotency-Replayed: true header
+
+# Third call with same key but different body — returns 409 CONFLICT
+curl -s -X POST http://localhost:3001/api/portfolio \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $UUID" \
+  -d '{"userAddress":"GABC...","allocations":{"XLM":50,"USDC":50},"threshold":3}' | jq .
+# Expected: 409 with error code CONFLICT
+```
+
+### Local environment setup for auth testing
+
+```bash
+# 1. Configure JWT_SECRET in backend/.env
+# Generate a secure random secret:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# Copy the output and set it as JWT_SECRET in backend/.env
+
+# 2. Configure admin public key
+# Generate a Stellar keypair for testing:
+node -e "
+const { Keypair } = require('@stellar/stellar-sdk');
+const kp = Keypair.random();
+console.log('ADMIN_PUBLIC_KEYS=' + kp.publicKey());
+console.log('Secret (save this!): ' + kp.secret());
+"
+# Add ADMIN_PUBLIC_KEYS to backend/.env
+
+# 3. Start the backend
+cd backend && npm run dev
+
+# 4. Test that auth is enabled
+curl -s http://localhost:3001/api/auth/challenge \
+  -H 'Content-Type: application/json' \
+  -d '{"address":"GABC...YOUR_TEST_KEY"}' | jq .
+# Should return a challenge string, not 503
+```
+
+### Maintenance notes
+
+When adding or modifying authenticated endpoints:
+1. Update the corresponding curl example in this section
+2. Ensure the example matches the actual request/response shape
+3. Add new failure mode examples if the endpoint introduces new auth checks
+4. Verify examples work against the current local development environment
+5. Update `docs/CONTRIBUTING.md` if auth configuration requirements change
 
 ## Response format
 
@@ -144,6 +446,7 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **GET /api/rebalance/history** — List rebalance events (query: `portfolioId`, `limit`, `source`, `startTimestamp`, `endTimestamp`, `syncOnChain`).
 - **POST /api/rebalance/history** — Record a rebalance event. Supports `Idempotency-Key`.
 - **POST /api/rebalance/history/sync-onchain** — Sync on-chain rebalance history (admin).
+- **GET /api/rebalance/summary/{portfolioId}** — Get rebalance readiness summary (system readiness, drift, slippage, risk, data freshness) for manual rebalance UI guidance.
 
 ### Risk
 

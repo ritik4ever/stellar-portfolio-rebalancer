@@ -3,7 +3,7 @@ import { Worker } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { runWithRequestContext } from "../../utils/requestContext.js";
 import { logger, logAudit } from "../../utils/logger.js";
-import { rebalanceLockService } from "../../services/rebalanceLock.js";
+import { acquireWorkerLock, releaseWorkerLock } from "./workerRuntime.js";
 import { StellarService } from "../../services/stellar.js";
 import { rebalanceHistoryService } from "../../services/serviceContainer.js";
 import { notificationService } from "../../services/notificationService.js";
@@ -48,7 +48,7 @@ export async function processRebalanceJob(
       });
     }
 
-    const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
+    const lockAcquired = await acquireWorkerLock(portfolioId);
 
     if (!lockAcquired) {
       logger.info(
@@ -147,7 +147,7 @@ export async function processRebalanceJob(
 
       throw err;
     } finally {
-      await rebalanceLockService.releaseLock(portfolioId);
+      await releaseWorkerLock(portfolioId);
     }
   });
 }

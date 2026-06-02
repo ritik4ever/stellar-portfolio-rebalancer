@@ -4,6 +4,7 @@ import {
     issueTokens,
     refreshTokens,
     logout,
+    revokeDeviceSession,
     issueChallenge,
     verifyWalletSignature
 } from '../services/authService.js'
@@ -123,6 +124,21 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
         }
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+router.delete('/sessions/:tokenId', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.address
+        const { tokenId } = req.params
+        const result = await revokeDeviceSession(userId, tokenId)
+        if (!result.success) {
+            if (result.reason === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Session not found')
+            return fail(res, 403, 'FORBIDDEN', 'Session belongs to a different user')
+        }
+        return ok(res, { message: 'Session revoked' })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }

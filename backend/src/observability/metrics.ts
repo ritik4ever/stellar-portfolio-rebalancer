@@ -1,17 +1,5 @@
-import type { Request, Response, NextFunction } from "express";
-import {
-  collectDefaultMetrics,
-  Counter,
-  Gauge,
-  Histogram,
-  Registry,
-} from "prom-client";
-import { observabilityConfig } from "./config.js";
-import {
-  getQueueMetrics,
-  getWorkerHealthSummary,
-} from "../queue/queueMetrics.js";
-import { buildReadinessReport } from "../monitoring/readiness.js";
+
+
 
 const register = new Registry();
 
@@ -221,90 +209,7 @@ export const metricsMiddleware = (
 };
 
 export async function getMetricsPayload(): Promise<string> {
-  if (!observabilityConfig.metrics.enabled) {
-    return "# metrics disabled\n";
-  }
 
-  const readiness = await buildReadinessReport();
-  readinessGauge.set(readiness.status === "ready" ? 1 : 0);
-
-  const queueMetrics = await getQueueMetrics();
-  for (const [queue, stats] of Object.entries(queueMetrics.queues)) {
-    queueDepthGauge.set({ queue, state: "waiting" }, stats.waiting);
-    queueDepthGauge.set({ queue, state: "active" }, stats.active);
-    queueDepthGauge.set({ queue, state: "completed" }, stats.completed);
-    queueDepthGauge.set({ queue, state: "failed" }, stats.failed);
-    queueDepthGauge.set({ queue, state: "delayed" }, stats.delayed);
-
-    // Calculate worker lag ratio: (waiting + delayed) / (active + 1)
-    // The +1 prevents division by zero and represents a single worker minimum
-    const backlog = stats.waiting + stats.delayed;
-    const workerCount = Math.max(stats.active, 1);
-    const workerLag = backlog / workerCount;
-    queueWorkerLagGauge.set({ queue }, workerLag);
-
-    // Calculate drain rate (ratio of completed jobs to total processed)
-    const totalProcessed = stats.completed + stats.failed;
-    const drainRate = totalProcessed > 0 ? stats.completed / totalProcessed : 0;
-    queueDrainRateGauge.set({ queue }, drainRate);
-
-    // Calculate failure rate
-    const failureRate = totalProcessed > 0 ? stats.failed / totalProcessed : 0;
-    queueFailureRateGauge.set({ queue }, failureRate);
-  }
-
-  // Update worker health metrics
-  const workerHealth = await getWorkerHealthSummary();
-  workerHealthTotal.set(workerHealth.total);
-  workerHealthyTotal.set(workerHealth.healthy);
-  workerUnhealthyTotal.set(workerHealth.unhealthy);
-  workerIdleTotal.set(workerHealth.idle);
-  workerLaggingTotal.set(workerHealth.lagging);
-
-  // Update per-worker status
-  for (const worker of workerHealth.workers) {
-    workerStatus.set({ worker_name: worker.name }, worker.ready ? 1 : 0);
-  }
-
-  return register.metrics();
-}
-
-export function getMetricsContentType(): string {
-  return register.contentType;
-}
-
-export function recordPriceFeedResolution(
-  meta: Pick<
-    { resolutionHint: string; degraded: boolean; staleOrLimited: boolean },
-    "resolutionHint" | "degraded" | "staleOrLimited"
-  >,
-): void {
-  priceFeedResolutionsTotal.inc({
-    resolution_hint: meta.resolutionHint,
-    degraded: String(meta.degraded),
-    stale_or_limited: String(meta.staleOrLimited),
-  });
-}
-
-export function recordReflectorStalePrice(asset: string): void {
-  reflectorStalePricesTotal.inc({ asset });
-}
-
-export function recordReflectorFallbackUsage(reason: string): void {
-  reflectorFallbackUsageTotal.inc({ reason });
-}
-
-// Cache metrics recording functions
-export function recordCacheHitRatio(asset: string, ratio: number): void {
-  cacheHitRatioGauge.set({ asset }, Math.max(0, Math.min(1, ratio)));
-}
-
-export function recordCacheAge(asset: string, ageMs: number): void {
-  cacheAgeHistogram.observe({ asset }, ageMs);
-}
-
-export function recordCacheSize(sizeBytes: number): void {
-  cacheSizeGauge.set(sizeBytes);
 }
 
 export function recordCacheEntries(count: number): void {

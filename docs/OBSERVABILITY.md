@@ -48,6 +48,15 @@ The backend publishes:
 - BullMQ queue depth metrics
 - structured JSON logs for Loki ingestion
 
+### Queue Metrics Cardinality
+
+Prometheus queue depth is exported as `stellar_portfolio_queue_jobs` with two bounded labels:
+
+- `queue`: one of `portfolio-check`, `rebalance`, or `analytics-snapshot`
+- `state`: one of `waiting`, `active`, `completed`, `failed`, or `delayed`
+
+The `/metrics` collector intentionally iterates only this static queue/state allowlist. It does not create time series from job IDs, portfolio IDs, job names, trigger sources, correlation IDs, or dynamically discovered queue names. This keeps the queue metric cardinality capped at 15 series while preserving the dimensions needed for queue-depth dashboards and failed-job alerts. If an allowed queue cannot be reached, the backend logs a warning with the queue name and exports zeroes for that queue so operators can correlate the scrape with Redis or BullMQ readiness checks.
+
 ## Frontend
 
 Frontend Sentry is configured at build time through Vite env vars in [frontend/.env.example](C:\Users\HP\Documents\students\drips\stellar-portfolio-rebalancer\frontend.env.example).

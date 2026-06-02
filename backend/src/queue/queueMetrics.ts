@@ -17,8 +17,7 @@ export interface QueueStats {
 }
 
 export interface AllQueueMetrics {
-  redisConnected: boolean;
-  queues: Record<string, QueueStats>;
+
 }
 
 export interface FailedJobInfo {
@@ -36,35 +35,14 @@ export interface FailedJobsResult {
   countsByQueue: Record<string, number>;
 }
 
-const EMPTY_STATS: QueueStats = {
-  waiting: 0,
-  active: 0,
-  completed: 0,
-  failed: 0,
-  delayed: 0,
-};
 
-async function statsFor(queue: Queue<any> | null): Promise<QueueStats> {
-  if (!queue) return EMPTY_STATS;
-  try {
-    const [waiting, active, completed, failed, delayed] = await Promise.all([
-      queue.getWaitingCount(),
-      queue.getActiveCount(),
-      queue.getCompletedCount(),
-      queue.getFailedCount(),
-      queue.getDelayedCount(),
-    ]);
-    return { waiting, active, completed, failed, delayed };
-  } catch {
-    return EMPTY_STATS;
-  }
 }
 
 /**
  * Returns queue depth metrics for all three queues.
  */
 export async function getQueueMetrics(): Promise<AllQueueMetrics> {
-  const redisConnected = await isRedisAvailable();
+
 
   if (!redisConnected) {
     return {
