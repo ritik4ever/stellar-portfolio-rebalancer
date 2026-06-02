@@ -30,8 +30,7 @@ The **frontend** defaults to `/api/v1` for resource routes via `VITE_API_VERSION
 ## Authentication
 
 - Most endpoints are unauthenticated.
-- **Auth-only** audit routes are available under `/api/auth` and require a valid JWT access token.
-- **Admin-only** endpoints (e.g. auto-rebalancer start/stop, sync-onchain, auto-rebalancer history) require admin auth (e.g. `Authorization` header or project-specific mechanism). See the OpenAPI spec and your deployment config for details.
+
 
 ## Response format
 
@@ -139,12 +138,15 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
 - **GET /api/portfolio/{id}/performance-summary** — Performance summary.
+- **GET /api/portfolio/{id}/export** — Start portfolio export job (query: `format=json|csv|pdf`). Returns 202 Accepted with a `jobId`.
+- **GET /api/portfolio/{id}/export/status/{jobId}** — Poll export job status. Returns the file content when complete, or job status while processing.
 
 ### Rebalance history
 
 - **GET /api/rebalance/history** — List rebalance events (query: `portfolioId`, `limit`, `source`, `startTimestamp`, `endTimestamp`, `syncOnChain`).
 - **POST /api/rebalance/history** — Record a rebalance event. Supports `Idempotency-Key`.
 - **POST /api/rebalance/history/sync-onchain** — Sync on-chain rebalance history (admin).
+- **GET /api/rebalance/summary/{portfolioId}** — Get rebalance readiness summary (system readiness, drift, slippage, risk, data freshness) for manual rebalance UI guidance.
 
 ### Risk
 

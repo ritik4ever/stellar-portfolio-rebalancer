@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, Address, Map};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map};
 
 // Stellar assets use 7-decimal precision where 1 XLM = 10^7 stroops.
 // 1_000_000 stroops equals 0.1 XLM, which acts as the minimum executable trade size.
@@ -57,13 +57,34 @@ pub struct Portfolio {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeConfig {
+    pub fee_bps: u32,
+    pub fee_recipient: Address,
+    pub enabled: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeEvent {
+    pub from_hash: BytesN<32>,
+    pub to_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
+    /// Admin address for privileged actions such as emergency stop.
+    /// This can be a standard account or a contract-managed governance address.
     Admin,
     ReflectorAddress,
     EmergencyStop,
     Initialized,
     Portfolio(u64),
     NextPortfolioId,
+    FeeConfig,
+    UpgradeAuthority,
+    WasmHash,
 }
 
 #[contracterror]
@@ -81,4 +102,7 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    FeeTooHigh = 12,
+    NotAllowed = 13,
+    UpgradeFailed = 14,
 }

@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 vi.mock("../db/refreshTokenDb.js", () => ({
   createRefreshToken: vi.fn(() => Promise.resolve()),
   findRefreshToken: vi.fn(() => Promise.resolve(null)),
+  findRefreshTokenById: vi.fn(() => Promise.resolve(null)),
   deleteRefreshTokenById: vi.fn(() => Promise.resolve(true)),
   deleteAllRefreshTokensForUser: vi.fn(() => Promise.resolve(0)),
   generateRefreshTokenId: vi.fn(() => "mock-jti"),

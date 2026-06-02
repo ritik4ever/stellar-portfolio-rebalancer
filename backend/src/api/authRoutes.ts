@@ -4,6 +4,7 @@ import {
     issueTokens,
     refreshTokens,
     logout,
+    revokeDeviceSession,
     issueChallenge,
     verifyWalletSignature,
     getRecentAuthAuditEvents
@@ -129,14 +130,7 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
     }
 })
 
-/**
- * Return a compact view of recent auth events: sign-ins, refreshes, and revocations.
- * GET /api/auth/audit
- */
-router.get('/audit', requireJwt, async (req: Request, res: Response) => {
-    try {
-        const events = getRecentAuthAuditEvents()
-        return ok(res, { events })
+
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
