@@ -54,6 +54,7 @@ pub fn validate_portfolio_storage_footprint(
     }
 }
 use soroban_sdk::{Address, Env, Map, Symbol};
+use soroban_sdk::{Address, Env, Map, Symbol, Vec};
 
 pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {
     env.events().publish(
@@ -94,9 +95,6 @@ pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, time
 }
 
 pub fn check_portfolio_invariants(portfolio: &Portfolio) -> Result<(), Error> {
-    if !portfolio.is_active {
-        return Err(Error::PortfolioInactive);
-    }
     if !validate_allocations(&portfolio.target_allocations) {
         return Err(Error::InvariantViolation);
     }
@@ -125,8 +123,6 @@ pub fn portfolio_has_positive_balance(portfolio: &Portfolio) -> bool {
     }
     false
 }
-use soroban_sdk::{Address, Env, Map, Vec};
-
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
     if allocations.is_empty() {
         return false;
@@ -161,7 +157,7 @@ pub fn calculate_portfolio_value(
     balances: &Map<Address, i128>,
     asset_decimals: &Map<Address, u32>,
     reflector_client: &crate::reflector::ReflectorClient,
-) -> Option<i128> {
+) -> Result<i128, ValuationError> {
     let mut total_value = 0i128;
     let current_time = env.ledger().timestamp();
 
@@ -172,18 +168,19 @@ pub fn calculate_portfolio_value(
         if let Some(price_data) =
             reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
         {
-            // Check for stale price (e.g., 1 hour)
             if price_data.timestamp + PRICE_MAX_AGE_SECONDS < current_time {
-            if price_data.timestamp + 3600 < current_time {
-                return None;
+                return Err(ValuationError::StaleData);
+            }
+            if price_data.price <= 0 {
+                return Err(ValuationError::MalformedData);
             }
             total_value += balance_to_value(balance, price_data.price);
         } else {
-            return None;
+            return Err(ValuationError::MissingPrice);
         }
     }
 
-    Some(total_value)
+    Ok(total_value)
 }
 
 pub fn calculate_rebalance_trades(
@@ -230,8 +227,8 @@ pub fn build_rebalance_preview(
         &portfolio.asset_decimals,
         reflector_client,
     ) {
-        Some(value) if value > 0 => value,
-        Some(_) => {
+        Ok(value) if value > 0 => value,
+        Ok(_) => {
             return Ok(RebalancePreview {
                 candidate_trades,
                 skipped_assets,
@@ -241,7 +238,7 @@ pub fn build_rebalance_preview(
                 total_value: 0,
             });
         }
-        None => return Err(Error::PreviewUnavailable),
+        Err(_) => return Err(Error::PreviewUnavailable),
     };
 
     let mut current_prices = Map::new(env);

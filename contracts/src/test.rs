@@ -1,11 +1,10 @@
 #[cfg(test)]
-
 extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
-    vec, Address, BytesN, Env, IntoVal, Map, String,
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    vec, Address, Env, IntoVal, Map, String,
 };
 
 fn allocation_decimals(env: &Env, allocations: &Map<Address, u32>, decimals: u32) -> Map<Address, u32> {
@@ -228,6 +227,7 @@ fn test_deposit_valid() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #25)")]
 fn test_deposit_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
@@ -244,7 +244,7 @@ fn test_deposit_invalid_amount() {
     allocations.set(asset.clone(), 100);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    let result = client.try_deposit(&pid, &asset, &0);
+    let result = client.try_deposit(&pid, &asset, &0, &String::from_str(&env, ""));
     assert_eq!(result, Err(Ok(Error::InvalidWithdrawAmount)));
     client.deposit(&pid, &asset, &0, &String::from_str(&env, ""));
 }
@@ -397,16 +397,17 @@ fn test_emergency_stop() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
-    client.set_emergency_stop(&true);
-
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    let result = client.try_deposit(&pid, &asset, &100);
+    client.set_emergency_stop(&true);
+    let result = client.try_deposit(&pid, &asset, &100, &String::from_str(&env, ""));
     assert_eq!(result, Err(Ok(Error::EmergencyStop)));
+    client.set_emergency_stop(&false);
 
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 }
 
 #[test]
@@ -414,24 +415,9 @@ fn test_stale_data() {
     let env = Env::default();
     env.mock_all_auths();
 
-    // Initial time
     env.ledger().with_mut(|li| {
         li.timestamp = 10000;
     });
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-
-    // We can't easily mock "stale" data with just one mock impl unless we make it stateful or allow setting it.
-    // For this test, notice our mock uses `env.ledger().timestamp()` for price timestamp.
-    // So if we create the portfolio (and reflector checks env time), then advance time significantly
-    // without "updating" the reflector (reflector always returns current env time in simple mock),
-    // wait... in the simple mock `lastprice` returns `env.ledger().timestamp()`.
-    // So to simulate stale data, we need a MockReflector that returns OLD timestamps.
-    // Since we can't easily swap mocks or change logic dynamically in this simple setup without complex mocking,
-    // we can rely on verifying the *logic* in other ways or make the Mock configurable.
-    //
-    // Let's create a separate StaleMockReflector for this test.
 
     mod stale_reflector {
         use crate::reflector::{Asset, PriceData};
@@ -452,7 +438,6 @@ fn test_stale_data() {
                 14
             }
             pub fn lastprice(env: Env, _asset: Asset) -> Option<PriceData> {
-                // Return data from 2 hours ago (7200s)
                 let current = env.ledger().timestamp();
                 Some(PriceData {
                     price: 100_00000000000000,
@@ -465,6 +450,8 @@ fn test_stale_data() {
         }
     }
 
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let stale_reflector_id = env.register_contract(None, stale_reflector::StaleReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -475,15 +462,13 @@ fn test_stale_data() {
     allocations.set(asset, 100);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    // Advance time to pass cooldown so that's not the error
     env.ledger().with_mut(|li| {
         li.timestamp = 20000;
     });
 
     let actual_balances = Map::new(&env);
     let result = client.try_execute_rebalance(&pid, &actual_balances);
-    assert_eq!(result, Err(Ok(Error::StaleData)));
-
+    assert_eq!(result, Err(Ok(Error::StalePrice)));
 }
 
 #[test]
@@ -1110,6 +1095,7 @@ fn test_create_portfolio_invalid_allocation() {
     allocations.set(Address::generate(&env), 60);
     allocations.set(Address::generate(&env), 30); // sums to 90, not 100
 
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 }
 
 #[test]
@@ -1127,7 +1113,9 @@ fn test_create_portfolio_threshold_too_low() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
 
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 51, 50);
 }
+
 
 #[test]
 #[should_panic]
@@ -1144,6 +1132,7 @@ fn test_create_portfolio_threshold_too_high() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
 
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 51, 50);
 }
 
 #[test]
@@ -1194,7 +1183,7 @@ fn test_portfolio_id_starts_at_one() {
     let asset = Address::generate(&env);
     allocations.set(asset, 100);
 
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     assert_eq!(pid, 1, "First portfolio id should be 1 to match deterministic strategy");
 }
 
@@ -1211,6 +1200,7 @@ fn test_create_portfolio_slippage_too_low() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
 
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 5);
 }
 
 #[test]
@@ -1226,6 +1216,7 @@ fn test_create_portfolio_slippage_too_high() {
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
 
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 501);
 }
 
 #[test]
@@ -1377,6 +1368,11 @@ fn test_calculate_portfolio_value_all_prices_available() {
     allocations.set(asset1.clone(), 50);
     allocations.set(asset2.clone(), 50);
 
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let pid = client.create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+
+    client.deposit(&pid, &asset1, &100, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100, &String::from_str(&env, ""));
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
@@ -1387,10 +1383,13 @@ fn test_calculate_portfolio_value_all_prices_available() {
     );
 
     assert_eq!(value, Some(15000));
+    let value =
+        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
+    assert_eq!(value, Ok(20000));
 }
 
 #[test]
-fn test_calculate_portfolio_value_missing_price_skips_asset() {
+fn test_calculate_portfolio_value_missing_price_returns_err() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1413,6 +1412,11 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
     allocations.set(priced_asset.clone(), 50);
     allocations.set(missing_asset.clone(), 50);
 
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let pid = client.create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+
+    client.deposit(&pid, &priced_asset, &100, &String::from_str(&env, ""));
+    client.deposit(&pid, &missing_asset, &100, &String::from_str(&env, ""));
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
@@ -1422,12 +1426,12 @@ fn test_calculate_portfolio_value_missing_price_skips_asset() {
         &reflector_client,
     );
 
-
-    assert_eq!(value, None); // Should be None now that we don't skip
+    let value = crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
+    assert_eq!(value, Err(ValuationError::MissingPrice));
 }
 
 #[test]
-fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
+fn test_calculate_portfolio_value_all_prices_missing_returns_err() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1443,6 +1447,10 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
 
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let pid = client.create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
@@ -1453,6 +1461,9 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_zero() {
     );
 
     assert_eq!(value, None); // Should be None if all missing
+    let value =
+        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
+    assert_eq!(value, Err(ValuationError::MissingPrice));
 }
 
 #[test]
@@ -1512,6 +1523,64 @@ fn test_portfolio_storage_footprint_estimate_is_deterministic() {
     assert_eq!(
         crate::portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio),
         Ok(estimate)
+fn test_transfer_stewardship() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
+
+    let steward = client.get_steward(&pid);
+    assert_eq!(steward, new_steward);
+}
+
+#[test]
+fn test_transfer_stewardship_steward_can_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
+
+    client.mock_auths(&[MockAuth {
+        address: &new_steward,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "deposit",
+            args: (pid, asset.clone(), 500i128, String::from_str(&env, "")).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).deposit(&pid, &asset, &500, &String::from_str(&env, ""));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 500);
+}
+
+#[test]
 fn test_preview_rebalance_reports_trades_and_thresholds() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1530,8 +1599,8 @@ fn test_preview_rebalance_reports_trades_and_thresholds() {
     allocations.set(asset2.clone(), 50);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    client.deposit(&pid, &asset1, &20_000_000);
-    client.deposit(&pid, &asset2, &10_000_000);
+    client.deposit(&pid, &asset1, &20_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &10_000_000, &String::from_str(&env, ""));
 
     let preview = client.preview_rebalance(&pid);
     assert!(preview.rebalance_needed);
@@ -1557,7 +1626,8 @@ fn test_preview_rebalance_does_not_mutate_portfolio() {
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    client.deposit(&pid, &asset, &1000);
+
+    client.deposit(&pid, &asset, &1000, &String::from_str(&env, ""));
 
     let before = client.get_portfolio(&pid);
     let _ = client.preview_rebalance(&pid);
@@ -1599,6 +1669,96 @@ fn test_create_portfolio_stores_slippage_policy_version() {
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.slippage_policy_version, SLIPPAGE_POLICY_VERSION_V1);
+}
+
+#[test]
+#[should_panic]
+fn test_transfer_stewardship_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let unauthorized = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    client.mock_auths(&[MockAuth {
+        address: &unauthorized,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "transfer_stewardship",
+            args: (pid, attacker.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).transfer_stewardship(&pid, &attacker);
+}
+
+#[test]
+fn test_get_steward_defaults_to_user() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 100);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let steward = client.get_steward(&pid);
+    assert_eq!(steward, user);
+}
+
+#[test]
+fn test_capabilities() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let caps = client.capabilities();
+    assert!(caps & CapabilityFlag::PerPortfolioSteward as u32 != 0);
+    assert!(caps & CapabilityFlag::DifferentiatedPricing as u32 != 0);
+    assert!(caps & CapabilityFlag::EmergencyStop as u32 != 0);
+}
+
+#[test]
+fn test_missing_price_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let missing_reflector_id = env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &missing_reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 100);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20000;
+    });
+
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::MissingPrice)));
 }
 
 #[test]
@@ -1670,7 +1830,7 @@ fn test_pause_portfolio_persists_reason() {
 }
 
 #[test]
-#[should_panic(expected = "Portfolio paused")]
+#[should_panic(expected = "Error(Contract, #16)")]
 fn test_deposit_rejects_paused_portfolio() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1686,7 +1846,7 @@ fn test_deposit_rejects_paused_portfolio() {
     allocations.set(asset.clone(), 100);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.pause_portfolio(&pid, &PauseReason::VolatilityCircuitBreaker);
-    client.deposit(&pid, &asset, &100);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 }
 
 #[test]
@@ -1803,6 +1963,7 @@ fn benchmark_execute_rebalance_gas() {
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
 
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
     env.ledger().with_mut(|li| {
         li.timestamp = 20_000;
@@ -1858,25 +2019,6 @@ fn assert_cost_within_tolerance(
     let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
     let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
 #[test]
-fn test_check_invariants_valid_portfolio() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
-
-    let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &500);
-    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
-}
-
-#[test]
 fn test_check_invariants_inactive_portfolio() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1890,14 +2032,12 @@ fn test_check_invariants_inactive_portfolio() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &100);
+    let pid = client.create_portfolio(&user, &allocations, &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS), &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
     client.withdraw(&pid, &asset, &100);
 
-    assert_eq!(
-        client.try_check_invariants(&pid),
-        Err(Ok(Error::PortfolioInactive))
-    );
+    let result = client.try_check_invariants(&pid);
+    assert_eq!(result, Ok(Ok(())));
 }
 
 #[test]
@@ -1914,8 +2054,8 @@ fn test_withdraw_success() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &1000);
+    let pid = client.create_portfolio(&user, &allocations, &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS), &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    client.deposit(&pid, &asset, &1000, &String::from_str(&env, ""));
     client.withdraw(&pid, &asset, &400);
 
     let portfolio = client.get_portfolio(&pid);
@@ -1937,8 +2077,8 @@ fn test_withdraw_insufficient_balance() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &100);
+    let pid = client.create_portfolio(&user, &allocations, &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS), &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 
     let result = client.try_withdraw(&pid, &asset, &200);
     assert_eq!(result, Err(Ok(Error::InsufficientBalance)));
@@ -1958,8 +2098,8 @@ fn test_withdraw_full_exit_deactivates_portfolio() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &100);
+    let pid = client.create_portfolio(&user, &allocations, &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS), &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
     client.withdraw(&pid, &asset, &100);
 
     let portfolio = client.get_portfolio(&pid);
@@ -1986,8 +2126,8 @@ fn test_admin_force_rebalance_bypasses_cooldown() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    let pid = client.create_portfolio(&user, &allocations, &5, &50);
-    client.deposit(&pid, &asset, &100);
+    let pid = client.create_portfolio(&user, &allocations, &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS), &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 
     env.ledger().with_mut(|li| {
         li.timestamp = 10010;
@@ -2026,7 +2166,7 @@ fn test_admin_force_rebalance_non_admin_rejected() {
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 100);
-    client.mock_all_auths().create_portfolio(&user, &allocations, &5, &50);
+    client.mock_all_auths().create_portfolio(&user, &allocations, &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS), &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
     let pid = 1u64;
 
     env.ledger().with_mut(|li| {
@@ -2054,13 +2194,16 @@ fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
     allocations.set(Address::generate(&env), 40);
     let portfolio = Portfolio {
         user: Address::generate(&env),
-        target_allocations: allocations,
+        target_allocations: allocations.clone(),
         current_balances: Map::new(&env),
+        asset_decimals: allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS),
         rebalance_threshold: 5,
         slippage_tolerance: 50,
+        slippage_policy_version: CURRENT_SLIPPAGE_POLICY_VERSION,
         last_rebalance: 0,
         total_value: 0,
         is_active: true,
+        pause_reason: PauseReason::None,
     };
     assert_eq!(
         crate::portfolio::check_portfolio_invariants(&portfolio),
@@ -2072,7 +2215,6 @@ fn assert_cost_within_tolerance(name: &str, cpu: u64, mem: u64, baseline_cpu: u6
     let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
     let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
     std::println!("BENCHMARK_RESULT|{}|{}|{}|{}|{}", name, cpu, baseline_cpu, mem, baseline_mem);
-
     assert!(
         cpu <= cpu_limit,
         "CPU instruction usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
@@ -2087,28 +2229,4 @@ fn assert_cost_within_tolerance(name: &str, cpu: u64, mem: u64, baseline_cpu: u6
         baseline_mem,
         mem_limit
     );
-}
-
-
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
 }

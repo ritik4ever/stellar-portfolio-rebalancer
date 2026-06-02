@@ -56,6 +56,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Initialized"
                             }
                           ]
@@ -267,7 +279,7 @@
             ],
             "data": {
               "error": {
-                "contract": 12
+                "contract": 18
               }
             }
           }
@@ -288,7 +300,7 @@
               },
               {
                 "error": {
-                  "contract": 12
+                  "contract": 18
                 }
               }
             ],
@@ -313,7 +325,7 @@
               },
               {
                 "error": {
-                  "contract": 12
+                  "contract": 18
                 }
               }
             ],
@@ -376,7 +388,7 @@
               },
               {
                 "error": {
-                  "contract": 12
+                  "contract": 18
                 }
               }
             ],

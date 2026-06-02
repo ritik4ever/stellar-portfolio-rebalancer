@@ -122,7 +122,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 50
+                    "lo": 100
                   }
                 },
                 {
@@ -274,7 +274,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 50
+                                "lo": 100
                               }
                             }
                           }
@@ -415,6 +415,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
                         }
                       },
                       {
@@ -862,9 +874,6 @@
                     "hi": 0,
                     "lo": 100
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -923,7 +932,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 50
+                    "lo": 100
                   }
                 },
                 {
@@ -962,11 +971,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 50
+                    "lo": 100
                   }
-                },
-                {
-                  "string": ""
                 }
               ]
             }
@@ -1088,7 +1094,7 @@
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 50
+                            "lo": 100
                           }
                         }
                       }

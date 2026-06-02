@@ -355,36 +355,6 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "string": "contract"
-              },
-              {
-                "string": "emergency_stop"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "bool": true
-                },
-                {
-                  "u32": 2
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -469,36 +439,6 @@
             ],
             "data": {
               "bool": false
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "string": "contract"
-              },
-              {
-                "string": "emergency_stop"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "bool": false
-                },
-                {
-                  "u32": 0
-                }
-              ]
             }
           }
         }

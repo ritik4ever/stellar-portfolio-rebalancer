@@ -302,6 +302,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Initialized"
                             }
                           ]
@@ -547,10 +559,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "created"
+                "symbol": "created"
               }
             ],
             "data": {
