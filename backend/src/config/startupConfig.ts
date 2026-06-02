@@ -15,6 +15,11 @@ export interface StartupConfig {
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
+  // Cache tuning configuration
+  cacheDurationMs: number;
+  priceDataMaxAgeSeconds: number;
+  minRequestIntervalMs: number;
+  featureFlagsFile?: string;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -194,6 +199,46 @@ export function validateStartupConfigOrThrow(
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
+  // Cache tuning configuration
+  const cacheDurationMsRaw = (env.CACHE_DURATION_MS || "").trim();
+  let cacheDurationMs = nodeEnv === "production" ? 600000 : 300000; // 10 min vs 5 min default
+  if (cacheDurationMsRaw) {
+    const parsed = Number.parseInt(cacheDurationMsRaw, 10);
+    if (!Number.isInteger(parsed) || parsed < 1000) {
+      errors.push(
+        `CACHE_DURATION_MS '${cacheDurationMsRaw}' must be an integer >= 1000 (1 second minimum).`,
+      );
+    } else {
+      cacheDurationMs = parsed;
+    }
+  }
+
+  const priceDataMaxAgeSecondsRaw = (env.PRICE_DATA_MAX_AGE || "").trim();
+  let priceDataMaxAgeSeconds = 600; // 10 minutes default
+  if (priceDataMaxAgeSecondsRaw) {
+    const parsed = Number.parseInt(priceDataMaxAgeSecondsRaw, 10);
+    if (!Number.isInteger(parsed) || parsed < 60) {
+      errors.push(
+        `PRICE_DATA_MAX_AGE '${priceDataMaxAgeSecondsRaw}' must be an integer >= 60.`,
+      );
+    } else {
+      priceDataMaxAgeSeconds = parsed;
+    }
+  }
+
+  const minRequestIntervalMsRaw = (env.MIN_REQUEST_INTERVAL_MS || "").trim();
+  let minRequestIntervalMs = 90000; // 1.5 minutes default
+  if (minRequestIntervalMsRaw) {
+    const parsed = Number.parseInt(minRequestIntervalMsRaw, 10);
+    if (!Number.isInteger(parsed) || parsed < 1000) {
+      errors.push(
+        `MIN_REQUEST_INTERVAL_MS '${minRequestIntervalMsRaw}' must be an integer >= 1000.`,
+      );
+    } else {
+      minRequestIntervalMs = parsed;
+    }
+  }
+
   if (errors.length > 0) {
     const numberedErrors = errors
       .map((msg, idx) => `${idx + 1}. ${msg}`)
@@ -214,6 +259,8 @@ export function validateStartupConfigOrThrow(
     logger.warn("[STARTUP-CONFIG] Warnings", { warnings });
   }
 
+  const featureFlagsFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : undefined;
+
   return {
     nodeEnv: nodeEnv || "development",
     port: Number.isInteger(port) ? port : 3001,
@@ -228,6 +275,10 @@ export function validateStartupConfigOrThrow(
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
+    cacheDurationMs,
+    priceDataMaxAgeSeconds,
+    minRequestIntervalMs,
+    featureFlagsFile,
   };
 }
 
@@ -245,6 +296,11 @@ export function buildStartupSummary(
     autoRebalancerEnabled: config.autoRebalancerEnabled,
     rebalanceSignerConfigured: config.hasRebalanceSigner,
     corsOriginsConfigured: config.corsOrigins.length,
+    cache: {
+      durationMs: config.cacheDurationMs,
+      priceDataMaxAgeSeconds: config.priceDataMaxAgeSeconds,
+      minRequestIntervalMs: config.minRequestIntervalMs,
+    },
     redis: {
       available: redisAvailable ?? null,
       rateLimitStore: queueEnabled ? "redis" : "memory",
@@ -268,6 +324,7 @@ export function buildStartupSummary(
       allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
       allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
+      overrideFile: config.featureFlagsFile || null,
     },
   };
 }
@@ -299,6 +356,7 @@ export function logStartupSubsystems(
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       debugRoutes: config.featureFlags.enableDebugRoutes,
+      overrideFile: config.featureFlagsFile || "none",
     },
   });
 
