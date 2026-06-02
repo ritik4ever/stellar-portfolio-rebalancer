@@ -36,6 +36,11 @@ import {
   savePortfolioSetupDraft,
   type PortfolioSetupDraft,
 } from '../hooks/usePortfolio'
+import {
+  clearPortfolioCloneDraft,
+  loadPortfolioCloneDraft,
+  type PortfolioCloneDraft,
+} from "../utils/portfolioCloneDraft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -282,6 +287,19 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     })
   }
 
+  useEffect(() => {
+    const draft = loadPortfolioCloneDraft();
+    if (!draft) return
+
+    setCloneDraft(draft);
+    setAllocations(draft.allocations.map((row) => ({ ...row })));
+    setThreshold(draft.threshold);
+    setSlippageTolerance(draft.slippageTolerance);
+    setStrategy(draft.strategy || "threshold");
+    setStrategyConfig(draft.strategyConfig ?? {});
+    setSelectedTemplateId("custom");
+  }, []);
+
   const getRiskLevelLabel = (level: RiskLevel): string => {
     switch (level) {
       case 'low':
@@ -497,6 +515,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
       setDraftPromptResolved(true)
       setSuccess(true)
       setTimeout(() => onNavigate('dashboard'), 2000)
+      clearPortfolioCloneDraft();
+      setCloneDraft(null);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Network error. Please try again.',
@@ -554,6 +574,31 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
           )}
         </div>
+
+        {cloneDraft ? (
+          <div className="bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-indigo-900 dark:text-indigo-200 font-medium">
+                  Cloning portfolio {cloneDraft.sourceLabel ?? cloneDraft.sourcePortfolioId}
+                </h4>
+                <p className="text-indigo-800 dark:text-indigo-300 text-sm mt-1">
+                  Allocations and rebalance settings are pre-filled. Saving creates a new portfolio and does not change the original.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  clearPortfolioCloneDraft();
+                  setCloneDraft(null);
+                }}
+                className="self-start rounded-lg border border-indigo-300 dark:border-indigo-700 px-3 py-2 text-sm text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+              >
+                Discard clone
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {/* ── Demo mode information banner ── */}
         {isDemoMode && (
