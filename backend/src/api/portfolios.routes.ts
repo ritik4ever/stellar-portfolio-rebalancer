@@ -11,7 +11,7 @@ import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRun
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { createPortfolioSchema, portfolioExportQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
+
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
@@ -21,12 +21,20 @@ import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
 import { updatePortfolioSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
+import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 
 export const portfoliosRouter = Router()
 
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
+
+const mapRebalanceOptions = (body: unknown): ExecuteRebalanceOptions => {
+    const options = (body as { options?: { slippageOverrides?: Record<string, number> } } | undefined)?.options
+    return {
+        tradeSlippageOverrides: options?.slippageOverrides
+    }
+}
 
 portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
@@ -406,8 +414,39 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
+portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', requireJwtWhenEnabled, ...protectedCriticalLimiter, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        }
+
+        const portfolio = await stellarService.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        }
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only dry-run your own portfolio')
+        }
+
+        const result = await stellarService.dryRunRebalance(portfolioId, mapRebalanceOptions(req.body))
+        return ok(res, { result })
+    } catch (error) {
+        const message = getErrorMessage(error)
+        logger.error('[ERROR] Rebalance dry-run failed', { error: getErrorObject(error), portfolioId: req.params.id })
+
+        if (message.toLowerCase().includes('not found')) {
+            return fail(res, 404, 'NOT_FOUND', message)
+        }
+
+        return fail(res, 500, 'INTERNAL_ERROR', message)
+    }
+})
+
 // Manual portfolio rebalance
-portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...protectedCriticalLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...protectedCriticalLimiter, idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -436,7 +475,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
                 return fail(res, 400, 'BAD_REQUEST', riskCheck.reason ?? 'Rebalance blocked by risk checks', { alerts: riskCheck.alerts });
             }
 
-            const result = await stellarService.executeRebalance(portfolioId);
+            const result = await stellarService.executeRebalance(portfolioId, mapRebalanceOptions(req.body));
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 

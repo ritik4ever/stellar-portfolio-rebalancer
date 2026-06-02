@@ -1,6 +1,7 @@
 
 
 
+
 const register = new Registry();
 
 register.setDefaultLabels({
@@ -219,8 +220,7 @@ export async function getMetricsPayload(): Promise<string> {
 
 }
 
-export function recordCacheEntries(count: number): void {
-  cacheEntriesGauge.set(count);
+
 }
 
 export function recordCacheOperation(operation: "hit" | "miss" | "eviction" | "update", asset: string): void {

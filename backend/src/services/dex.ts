@@ -67,6 +67,30 @@ export interface DEXRebalanceExecutionResult {
     explanation: ExecutionExplanation
 }
 
+export interface DEXTradeAssessmentResult {
+    tradeId: string
+    fromAsset: string
+    toAsset: string
+    requestedAmount: number
+    estimatedReceivedAmount: number
+    referencePrice: number
+    priceLimit: number
+    spreadBps: number
+    slippageBps: number
+    liquidityCoverage: number
+    status: 'executable' | 'skipped'
+    skipReason?: string
+}
+
+export interface DEXRebalanceAssessmentResult {
+    status: 'success' | 'partial' | 'failed'
+    assessedTrades: DEXTradeAssessmentResult[]
+    executableTrades: DEXTradeAssessmentResult[]
+    skippedTrades: DEXTradeAssessmentResult[]
+    totalEstimatedFeeXLM: number
+    totalSlippageBps: number
+}
+
 interface MarketAssessment {
     referencePrice: number
     spreadBps: number
@@ -273,6 +297,192 @@ export class StellarDEXService {
             rollback,
             failureReason,
             explanation
+        }
+    }
+
+    async assessRebalanceTrades(
+        trades: DEXTradeRequest[],
+        requestedConfig: Partial<RebalanceExecutionConfig> = {}
+    ): Promise<DEXRebalanceAssessmentResult> {
+        const config = {
+            ...this.getDefaultExecutionConfig(),
+            ...requestedConfig
+        }
+
+        const assessedTrades: DEXTradeAssessmentResult[] = []
+        const executableTrades: DEXTradeAssessmentResult[] = []
+        const skippedTrades: DEXTradeAssessmentResult[] = []
+
+        const feeEstimate = await this.estimateNetworkFeeXlm(trades.length)
+        let slippageWeightedSum = 0
+        let slippageWeight = 0
+
+        for (const trade of trades) {
+            const effectiveTradeSlippage = this.getEffectiveTradeSlippage(config, trade.maxSlippageBps)
+            const assessment = await this.assessSingleTrade(
+                trade,
+                effectiveTradeSlippage,
+                config.maxSpreadBps,
+                config.minLiquidityCoverage
+            )
+
+            if (assessment.status === 'skipped') {
+                assessedTrades.push(assessment)
+                skippedTrades.push(assessment)
+                continue
+            }
+
+            if (assessment.requestedAmount > 0 && assessment.referencePrice > 0) {
+                const notional = assessment.requestedAmount * assessment.referencePrice
+                slippageWeightedSum += assessment.slippageBps * notional
+                slippageWeight += notional
+            }
+
+            const cumulativeSlippageBps = slippageWeight > 0 ? (slippageWeightedSum / slippageWeight) : 0
+            if (cumulativeSlippageBps > config.maxSlippageBpsPerRebalance) {
+                const skipped: DEXTradeAssessmentResult = {
+                    ...assessment,
+                    status: 'skipped',
+                    skipReason: `Rebalance slippage ${Dec.formatBps(cumulativeSlippageBps)} bps exceeds max ${config.maxSlippageBpsPerRebalance} bps`
+                }
+                assessedTrades.push(skipped)
+                skippedTrades.push(skipped)
+                continue
+            }
+
+            assessedTrades.push(assessment)
+            executableTrades.push(assessment)
+        }
+
+        const status: DEXRebalanceAssessmentResult['status'] =
+            executableTrades.length === 0
+                ? 'failed'
+                : skippedTrades.length > 0
+                    ? 'partial'
+                    : 'success'
+
+        return {
+            status,
+            assessedTrades,
+            executableTrades,
+            skippedTrades,
+            totalEstimatedFeeXLM: feeEstimate.totalFeeXlm,
+            totalSlippageBps: slippageWeight > 0 ? (slippageWeightedSum / slippageWeight) : 0
+        }
+    }
+
+    private async assessSingleTrade(
+        trade: DEXTradeRequest,
+        maxSlippageBps: number,
+        maxSpreadBps: number,
+        minLiquidityCoverage: number
+    ): Promise<DEXTradeAssessmentResult> {
+        const requestedAmount = this.roundAmount(trade.amount)
+        let fromAsset: Asset
+        let toAsset: Asset
+
+        try {
+            fromAsset = this.getAssetObject(trade.fromAsset)
+            toAsset = this.getAssetObject(trade.toAsset)
+        } catch (error) {
+            return {
+                tradeId: trade.tradeId,
+                fromAsset: trade.fromAsset,
+                toAsset: trade.toAsset,
+                requestedAmount,
+                estimatedReceivedAmount: 0,
+                referencePrice: 0,
+                priceLimit: 0,
+                spreadBps: 0,
+                slippageBps: 0,
+                liquidityCoverage: 0,
+                status: 'skipped',
+                skipReason: this.getErrorMessage(error)
+            }
+        }
+
+        if (requestedAmount <= 0) {
+            return {
+                tradeId: trade.tradeId,
+                fromAsset: trade.fromAsset,
+                toAsset: trade.toAsset,
+                requestedAmount,
+                estimatedReceivedAmount: 0,
+                referencePrice: 0,
+                priceLimit: 0,
+                spreadBps: 0,
+                slippageBps: 0,
+                liquidityCoverage: 0,
+                status: 'skipped',
+                skipReason: 'Trade amount must be greater than zero'
+            }
+        }
+
+        const market = await this.assessMarket(fromAsset, toAsset, requestedAmount)
+        if (market.spreadBps > maxSpreadBps) {
+            return {
+                tradeId: trade.tradeId,
+                fromAsset: trade.fromAsset,
+                toAsset: trade.toAsset,
+                requestedAmount,
+                estimatedReceivedAmount: 0,
+                referencePrice: market.referencePrice,
+                priceLimit: market.referencePrice,
+                spreadBps: market.spreadBps,
+                slippageBps: 0,
+                liquidityCoverage: market.liquidityCoverage,
+                status: 'skipped',
+                skipReason: `Spread ${Dec.formatBps(market.spreadBps)} bps exceeds max ${maxSpreadBps} bps`
+            }
+        }
+
+        if (market.liquidityCoverage < minLiquidityCoverage) {
+            return {
+                tradeId: trade.tradeId,
+                fromAsset: trade.fromAsset,
+                toAsset: trade.toAsset,
+                requestedAmount,
+                estimatedReceivedAmount: 0,
+                referencePrice: market.referencePrice,
+                priceLimit: market.referencePrice,
+                spreadBps: market.spreadBps,
+                slippageBps: 0,
+                liquidityCoverage: market.liquidityCoverage,
+                status: 'skipped',
+                skipReason: `Liquidity coverage ${Dec.formatBps(market.liquidityCoverage, 2)}x below required ${minLiquidityCoverage}x`
+            }
+        }
+
+        const priceLimit = Dec.priceLimit(market.referencePrice, maxSlippageBps)
+        if (!Number.isFinite(priceLimit) || priceLimit <= 0) {
+            return {
+                tradeId: trade.tradeId,
+                fromAsset: trade.fromAsset,
+                toAsset: trade.toAsset,
+                requestedAmount,
+                estimatedReceivedAmount: 0,
+                referencePrice: market.referencePrice,
+                priceLimit: 0,
+                spreadBps: market.spreadBps,
+                slippageBps: 0,
+                liquidityCoverage: market.liquidityCoverage,
+                status: 'skipped',
+                skipReason: 'Invalid limit price computed for trade'
+            }
+        }
+
+        return {
+            tradeId: trade.tradeId,
+            fromAsset: trade.fromAsset,
+            toAsset: trade.toAsset,
+            requestedAmount,
+            estimatedReceivedAmount: this.roundAmount(requestedAmount * market.referencePrice),
+            referencePrice: market.referencePrice,
+            priceLimit,
+            spreadBps: market.spreadBps,
+            slippageBps: maxSlippageBps,
+            liquidityCoverage: market.liquidityCoverage,
+            status: 'executable'
         }
     }
 

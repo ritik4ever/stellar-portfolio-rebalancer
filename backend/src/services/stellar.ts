@@ -1,27 +1,4 @@
-import { randomUUID } from 'node:crypto'
-import { StellarService } from './stellar.js'
-import { ReflectorService } from './reflector.js'
-import { rebalanceHistoryService } from './serviceContainer.js'
-import { portfolioStorage } from './portfolioStorage.js'
-import { CircuitBreakers } from './circuitBreakers.js'
-import { notificationService } from './notificationService.js'
-import { logger, logAudit } from '../utils/logger.js'
-import { getPortfolioCheckQueue } from '../queue/queues.js'
-import { isRedisAvailable } from '../queue/connection.js'
-import { getRequestId } from '../utils/requestContext.js'
 
-export class AutoRebalancerService {
-    private stellarService: StellarService
-    private reflectorService: ReflectorService
-    private isRunning = false
-    private initialized = false
-    private lastStartedAt?: string
-    private lastInitializationError?: string
-
-    // Configuration (kept for getStatus() compatibility)
-    private readonly CHECK_INTERVAL = 30 * 60 * 1000        // 30 minutes
-    private readonly MIN_REBALANCE_INTERVAL = 24 * 60 * 60 * 1000
-    private readonly MAX_AUTO_REBALANCES_PER_DAY = 3
 
     constructor() {
         this.stellarService = new StellarService()
@@ -155,17 +132,17 @@ await queue.add(
 
             }
         } catch (error) {
-            logger.error('[AUTO-REBALANCER] Readiness check failed', { error })
-            return {
-                ready: false,
-                reason: 'Readiness check failed',
-                checks: {
-                    serviceRunning: false,
-                    queueAvailable: false,
-                    redisConnected: false
-                }
+
+            }
+
+            if (remainingOverValue > minTradeUsd) {
+                skippedAssets.push({
+                    asset: over.asset,
+                    reason: 'Insufficient counterpart drift to construct full trade set'
+                })
             }
         }
+
     }
 
     /**
