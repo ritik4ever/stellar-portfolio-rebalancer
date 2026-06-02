@@ -37,11 +37,13 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
   - `Err(Error::TooManyAssets)`
   - `Err(Error::InvalidThreshold)`
   - `Err(Error::InvalidSlippageTolerance)`
+  - `Err(Error::PortfolioStorageFootprintTooLarge)`
   - `Err(Error::UnsupportedSlippagePolicyVersion)`
 - **Preconditions:**
   - `user.require_auth()` succeeds.
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
+  - Estimated serialized portfolio footprint is `<= MAX_PORTFOLIO_STORAGE_BYTES`.
 
 #### Portfolio ID derivation (deterministic)
 
@@ -195,57 +197,7 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 | `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |
 | `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
 | `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
-| `12` | `TimestampDrift` | `guard_ledger_timestamp` detects backward or excessive forward drift. |
-| `13` | `InvalidAmount` | `deposit` receives a zero or negative amount. |
-| `14` | `MissingPriceData` | `execute_rebalance` cannot find a Reflector price for a target asset. |
-| `15` | `InvalidAssetDecimals` | `create_portfolio` receives missing or unsupported asset decimal metadata. |
-| `16` | `UnsupportedSlippagePolicyVersion` | `create_portfolio` receives a slippage policy version other than the current version. |
-| `17` | `PortfolioPaused` | `execute_rebalance` is called for an inactive portfolio. |
-| `18` | `PreviewUnavailable` | Rebalance preview cannot be computed from available price data. |
 
-## Timestamp Drift Guard
-
-The contract maintains a **last observed ledger timestamp** (`DataKey::LastTimestamp`) in instance
-storage to defend against surprising or malicious ledger time assumptions.
-
-**Guard logic (`guard_ledger_timestamp`):**
-1. On every time-sensitive mutation (`create_portfolio`, `execute_rebalance`), read the current
-   `env.ledger().timestamp()`.
-2. If a `LastTimestamp` is already stored:
-   - **Backward drift:** `current < last_ts` → returns `Err(Error::TimestampDrift)`.
-   - **Excessive forward drift:** `current > last_ts + MAX_TIMESTAMP_DRIFT_SECONDS` → returns
-     `Err(Error::TimestampDrift)`.
-3. Update the stored `LastTimestamp` to the validated value and return `Ok(current)`.
-
-**Constants:**
-- `MAX_TIMESTAMP_DRIFT_SECONDS = 7200` (2 hours). Any jump larger than this is treated as
-  invalid, preventing cooldown bypass and price staleness miscalculation from extreme timestamps.
-
-**Non-mutating calls** (`check_rebalance_needed`) read `env.ledger().timestamp()` directly
-without updating `LastTimestamp`, since view functions must not have storage side-effects.
-
-## Canonical Error Mapping: Contract → API
-
-This table maps each contract error to the higher-level semantics that users and
-backend/frontend layers observe. Consumers of the contract should use these numeric
-codes for cross-layer correlation.
-
-| Code | Contract Variant | Backend HTTP Status | Backend Error Code | User-Facing Meaning |
-|---|---|---|---|---|
-| `1` | `InvalidAllocation` | `400` | `VALIDATION_ERROR` | Target allocations must sum to 100%. |
-| `2` | `RebalanceNotNeeded` | — | — | _Reserved; not currently emitted._ |
-| `3` | `EmergencyStop` | `503` | `SERVICE_UNAVAILABLE` | Contract is paused by admin; no mutations allowed. |
-| `4` | `CooldownActive` | `429` | `RATE_LIMITED` | Must wait 3600 s since last rebalance. |
-| `5` | `StaleData` | `502` | `SERVICE_UNAVAILABLE` | Reflector oracle price data is stale. |
-| `6` | `ExcessiveDrift` | — | — | _Reserved; not currently emitted._ |
-| `7` | `AlreadyInitialized` | `409` | `CONFLICT` | Contract already initialized. |
-| `8` | `InvalidThreshold` | `400` | `VALIDATION_ERROR` | Rebalance threshold must be 1–50. |
-| `9` | `InvalidSlippageTolerance` | `400` | `VALIDATION_ERROR` | Slippage tolerance must be 10–500 bps. |
-| `10` | `SlippageExceeded` | `400` | `VALIDATION_ERROR` | Post-trade execution exceeds the portfolio's slippage tolerance. |
-| `11` | `TooManyAssets` | `400` | `VALIDATION_ERROR` | Portfolio exceeds maximum of 10 assets. |
-| `12` | `TimestampDrift` | `400` | `VALIDATION_ERROR` | Ledger timestamp moved backward or jumped more than 7200 s. |
-| `13` | `InvalidAmount` | `400` | `VALIDATION_ERROR` | Deposit amount must be positive. |
-| `14` | `MissingPriceData` | `502` | `SERVICE_UNAVAILABLE` | Reflector oracle returned no price for an asset. |
 
 ## XDR/Contract Type References
 

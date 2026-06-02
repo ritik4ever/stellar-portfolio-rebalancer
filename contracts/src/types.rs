@@ -23,6 +23,11 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 ///
 /// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
+/// Maximum estimated XDR footprint in bytes allowed for one stored portfolio record.
+///
+/// The contract estimates the serialized size of the `Portfolio` value before it is
+/// written to persistent storage and rejects obviously risky payloads early.
+pub const MAX_PORTFOLIO_STORAGE_BYTES: u32 = 3_072;
 pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
 pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
 /// Maximum acceptable ledger timestamp forward drift in seconds (#416).
@@ -176,6 +181,12 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    PortfolioStorageFootprintTooLarge = 12,
+    InsufficientBalance = 12,
+    InvariantViolation = 13,
+    PortfolioNotFound = 14,
+    PortfolioInactive = 15,
+    InvalidWithdrawAmount = 16,
     Unauthorized = 12,
     StalePrice = 13,
     MissingPrice = 14,

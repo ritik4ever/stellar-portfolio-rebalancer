@@ -1,4 +1,59 @@
 use crate::types::*;
+use soroban_sdk::{xdr::ToXdr, Address, Env, Map};
+
+#[cfg(test)]
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(test)]
+static PORTFOLIO_STORAGE_LIMIT_OVERRIDE: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+#[cfg(test)]
+pub fn set_portfolio_storage_limit_for_tests(limit: Option<usize>) {
+    PORTFOLIO_STORAGE_LIMIT_OVERRIDE.store(limit.unwrap_or(usize::MAX), Ordering::Relaxed);
+}
+
+fn portfolio_storage_limit_bytes() -> usize {
+    #[cfg(test)]
+    {
+        let override_limit = PORTFOLIO_STORAGE_LIMIT_OVERRIDE.load(Ordering::Relaxed);
+        if override_limit == usize::MAX {
+            MAX_PORTFOLIO_STORAGE_BYTES as usize
+        } else {
+            override_limit
+        }
+    }
+
+    #[cfg(not(test))]
+    {
+        MAX_PORTFOLIO_STORAGE_BYTES as usize
+    }
+}
+
+const STORAGE_FOOTPRINT_HEADROOM_BYTES: usize = 64;
+
+pub fn estimate_portfolio_storage_footprint(
+    env: &Env,
+    portfolio_id: u64,
+    portfolio: &Portfolio,
+) -> usize {
+    let key_bytes = DataKey::Portfolio(portfolio_id).to_xdr(env);
+    let value_bytes = portfolio.clone().to_xdr(env);
+    key_bytes.len() as usize + value_bytes.len() as usize + STORAGE_FOOTPRINT_HEADROOM_BYTES
+}
+
+pub fn validate_portfolio_storage_footprint(
+    env: &Env,
+    portfolio_id: u64,
+    portfolio: &Portfolio,
+) -> Result<usize, Error> {
+    let estimated = estimate_portfolio_storage_footprint(env, portfolio_id, portfolio);
+    if estimated > portfolio_storage_limit_bytes() {
+        Err(Error::PortfolioStorageFootprintTooLarge)
+    } else {
+        Ok(estimated)
+    }
+}
+use soroban_sdk::{Address, Env, Map, Symbol};
 use soroban_sdk::{Address, Env, Map, Symbol, Vec};
 
 pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {

@@ -89,10 +89,6 @@ impl PortfolioRebalancer {
             .persistent()
             .get(&DataKey::NextPortfolioId)
             .unwrap_or(1);
-        env.storage()
-            .persistent()
-            .set(&DataKey::NextPortfolioId, &(portfolio_id + 1));
-
         let portfolio = Portfolio {
             user: user.clone(),
             target_allocations,
@@ -107,6 +103,12 @@ impl PortfolioRebalancer {
             pause_reason: PauseReason::None,
         };
 
+        let _estimated_footprint =
+            portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::NextPortfolioId, &(portfolio_id + 1));
         portfolio::check_portfolio_invariants(&portfolio)?;
 
         env.storage()
@@ -523,6 +525,9 @@ impl PortfolioRebalancer {
                 &portfolio.current_balances,
                 &portfolio.asset_decimals,
                 &reflector_client,
+            )
+            .unwrap(); // Already verified prices above
+            .ok_or(Error::StaleData)?;
             ).map_err(|_| Error::StalePrice)?;
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {

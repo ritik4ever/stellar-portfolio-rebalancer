@@ -1376,6 +1376,13 @@ fn test_calculate_portfolio_value_all_prices_available() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
+
+    assert_eq!(value, Some(15000));
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
     assert_eq!(value, Ok(20000));
@@ -1413,6 +1420,11 @@ fn test_calculate_portfolio_value_missing_price_returns_err() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
 
     let value = crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
     assert_eq!(value, Err(ValuationError::MissingPrice));
@@ -1442,6 +1454,13 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_err() {
 
     let portfolio = client.get_portfolio(&pid);
     let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let value = crate::portfolio::calculate_portfolio_value(
+        &env,
+        &portfolio.current_balances,
+        &reflector_client,
+    );
+
+    assert_eq!(value, None); // Should be None if all missing
     let value =
         crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
     assert_eq!(value, Err(ValuationError::MissingPrice));
@@ -1483,6 +1502,27 @@ fn test_create_portfolio_max_assets_limit() {
 }
 
 #[test]
+fn test_portfolio_storage_footprint_estimate_is_deterministic() {
+    let env = Env::default();
+
+    let portfolio = build_trade_test_portfolio(
+        &env,
+        &[(Address::generate(&env), 70), (Address::generate(&env), 30)],
+        &[],
+        0,
+    );
+
+    let portfolio_id = 7;
+    let estimate =
+        crate::portfolio::estimate_portfolio_storage_footprint(&env, portfolio_id, &portfolio);
+    let estimate_again =
+        crate::portfolio::estimate_portfolio_storage_footprint(&env, portfolio_id, &portfolio);
+
+    assert_eq!(estimate, estimate_again);
+    assert!(estimate > 0);
+    assert_eq!(
+        crate::portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio),
+        Ok(estimate)
 fn test_transfer_stewardship() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1600,6 +1640,20 @@ fn test_preview_rebalance_does_not_mutate_portfolio() {
 }
 
 #[test]
+fn test_create_portfolio_rejects_when_storage_footprint_limit_is_tight() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    struct ResetStorageLimit;
+    impl Drop for ResetStorageLimit {
+        fn drop(&mut self) {
+            crate::portfolio::set_portfolio_storage_limit_for_tests(None);
+        }
+    }
+
+    let _reset = ResetStorageLimit;
+    crate::portfolio::set_portfolio_storage_limit_for_tests(Some(0));
+
 fn test_create_portfolio_stores_slippage_policy_version() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1739,6 +1793,9 @@ fn test_create_portfolio_invalid_asset_decimals() {
 
     let mut allocations = Map::new(&env);
     allocations.set(Address::generate(&env), 100);
+
+    let result = client.try_create_portfolio(&user, &allocations, &5, &50);
+    assert_eq!(result, Err(Ok(Error::PortfolioStorageFootprintTooLarge)));
     let empty_decimals = Map::new(&env);
     client.create_portfolio(
         &user,
@@ -1952,6 +2009,15 @@ fn benchmark_deposit_gas() {
     );
 }
 
+fn assert_cost_within_tolerance(
+    _name: &str,
+    cpu: u64,
+    mem: u64,
+    baseline_cpu: u64,
+    baseline_mem: u64,
+) {
+    let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
+    let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
 #[test]
 fn test_check_invariants_inactive_portfolio() {
     let env = Env::default();
