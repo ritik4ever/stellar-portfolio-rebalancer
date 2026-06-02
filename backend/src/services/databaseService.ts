@@ -1253,6 +1253,7 @@ export class DatabaseService {
         portfolioId: eventData.portfolioId,
         timestamp: eventData.timestamp ?? new Date().toISOString(),
         trigger: eventData.trigger,
+        reasonCode: eventData.reasonCode as any,
         trades: eventData.trades,
         gasUsed: eventData.gasUsed,
         status: eventData.status,
@@ -1280,21 +1281,7 @@ export class DatabaseService {
                     (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-          )
-          .run(
-            event.id,
-            event.portfolioId,
-            event.timestamp,
-            event.trigger,
-            event.reasonCode ?? null,
-            event.trades,
-            event.gasUsed,
-            event.status,
-            event.isAutomatic ? 1 : 0,
-            event.riskAlerts?.length ? JSON.stringify(event.riskAlerts) : null,
-            event.error ?? null,
-            event.details ? JSON.stringify(event.details) : null,
-          );
+
 
         return event;
       } catch (err) {
