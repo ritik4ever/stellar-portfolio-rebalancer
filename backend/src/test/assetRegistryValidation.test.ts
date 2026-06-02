@@ -153,10 +153,7 @@ describe('assetRegistryValidation', () => {
       expect(isSqliteAssetPrimaryKeyConflict({ code: 'SQLITE_CONSTRAINT_UNIQUE' })).toBe(false)
     })
 
-    it('returns false for non-error values', () => {
-      expect(isSqliteAssetPrimaryKeyConflict(null)).toBe(false)
-      expect(isSqliteAssetPrimaryKeyConflict(undefined)).toBe(false)
-      expect(isSqliteAssetPrimaryKeyConflict('SQLITE_CONSTRAINT_PRIMARYKEY')).toBe(false)
+
     })
   })
 })

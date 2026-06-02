@@ -580,15 +580,39 @@ Missing optional scripts are reported as skips. Any configured command that exit
 
 ---
 
-## Further reading
+---
+ 
+## Architecture Decision Records (ADRs)
 
+Major architectural decisions and their rationales are captured in **[docs/adr/](adr/README.md)**.
+
+### When to write an ADR
+
+- When introducing a new architectural pattern (e.g., switching to a new state management library).
+- When making a high-impact choice with significant trade-offs (e.g., choosing a specific database strategy).
+- When changing fundamental infrastructure or communication protocols.
+
+### How to contribute an ADR
+
+1. Copy `docs/adr/template.md` to a new file named `docs/adr/NNNN-my-decision-title.md`.
+2. Fill in the details (Context, Decision, Consequences).
+3. Submit as part of your Pull Request.
+
+---
+
+
+
+
+- [Branch protection and required checks](BRANCH_PROTECTION.md) — CI checks that block merges, merge requirements, common failure scenarios
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
 - [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
+- [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design

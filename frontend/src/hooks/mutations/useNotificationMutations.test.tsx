@@ -2,7 +2,7 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { api } from '../../config/api'
+import { api, ENDPOINTS } from '../../config/api'
 import {
     useSaveNotificationPreferencesMutation,
     useUnsubscribeNotificationsMutation,
@@ -65,9 +65,27 @@ describe('useNotificationMutations', () => {
         })
 
         await act(async () => {
-            await result.current.mutateAsync()
+            await result.current.mutateAsync(undefined)
         })
 
         expect(spy).toHaveBeenCalledWith({ queryKey: notificationKeys.preferences(userId) })
+    })
+
+    it('includes an optional unsubscribe reason when provided', async () => {
+        const qc = createTestClient()
+        const deleteSpy = vi.spyOn(api, 'delete').mockResolvedValue({ ok: true })
+        const userId = 'GUSER789'
+
+        const { result } = renderHook(() => useUnsubscribeNotificationsMutation(userId), {
+            wrapper: withClient(qc),
+        })
+
+        await act(async () => {
+            await result.current.mutateAsync(' Too many alerts ')
+        })
+
+        expect(deleteSpy).toHaveBeenCalledWith(
+            ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE(userId, 'Too many alerts')
+        )
     })
 })

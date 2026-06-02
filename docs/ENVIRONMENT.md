@@ -75,6 +75,7 @@ This document is the canonical reference for `backend/.env.example`.
 | `LOG_LEVEL` | enum | No | `info` | Application log level. |
 | `LOG_PRETTY` | boolean | No | `false` | Pretty logs when true; JSON logs when false. |
 | `LOG_DEPLOYMENT_ENV` | string | No | `local` | Extra deployment label for logs/metrics. |
+| `METRICS_ALLOWLIST` | CSV IPs/CIDRs | No | empty | Additional IP ranges allowed to read `/metrics` outside development and test. |
 | `ENABLE_API_LOGGING` | boolean | No | `true` | Enables verbose API request logging. |
 | `DEBUG_PRICE_FEEDS` | boolean | No | `false` | Emits extra market-feed debug logs. |
 | `WS_PORT` | integer | No | `3001` | WebSocket port if not sharing the API server port. |
@@ -115,10 +116,12 @@ This document is the canonical reference for `backend/.env.example`.
 | `SOROBAN_EVENT_INDEXER_BOOTSTRAP_WINDOW` | integer | No | `500` | Ledger lookback window on first sync. |
 | `SOROBAN_EVENT_INDEXER_MAX_PAGES` | integer | No | `10` | Max pages fetched per sync cycle. |
 | `CONTRACT_EVENT_SCHEMA_VERSION` | integer | No | `1` | Declares expected contract-event schema version. |
+| `CONSENT_AUDIT_RETENTION_DAYS` | integer (days) | No | `365` | Retention window for consent audit records. |
+| `READINESS_CACHE_TTL_MS` | integer (ms) | No | `2000` | Cache TTL for readiness checks. |
 | `SENTRY_ENABLED` | boolean | No | `false` | Enables backend Sentry integration. |
 | `SENTRY_DSN` | URL | No | empty | Sentry DSN. |
-| `SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. |
-| `SENTRY_RELEASE` | string | No | empty | Sentry release identifier. |
+| `SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. Set this to the deployed tier, not the local shell mode. |
+| `SENTRY_RELEASE` | string | No | empty | Sentry release identifier. Use the full git SHA for the deployed build. |
 | `SENTRY_TRACES_SAMPLE_RATE` | number | No | `0.2` | Sentry traces sample rate (0-1). |
 | `SENTRY_PROFILES_SAMPLE_RATE` | number | No | `0.1` | Sentry profiling sample rate (0-1). |
 | `NEW_RELIC_ENABLED` | boolean | No | `false` | Enables New Relic APM integration. |
@@ -147,8 +150,8 @@ This table is the canonical reference for `frontend/.env.example`.
 | `VITE_ENABLE_BROWSER_PRICE_DEBUG` | boolean | No | `false` | Enables verbose browser price fallback logging and debug price behavior. |
 | `VITE_SENTRY_ENABLED` | boolean | No | `false` | Enables frontend Sentry integration. |
 | `VITE_SENTRY_DSN` | URL | No | empty | Sentry DSN for browser error reporting. |
-| `VITE_SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. |
-| `VITE_SENTRY_RELEASE` | string | No | empty | Sentry release identifier. |
+| `VITE_SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. Set this to the deployed tier, not the local Vite mode. |
+| `VITE_SENTRY_RELEASE` | string | No | empty | Sentry release identifier. Use the full git SHA for the deployed build. |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | number | No | `0.1` | Frontend Sentry traces sample rate. |
 | `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | number | No | `0` | Sentry replay sample rate for normal sessions. |
 | `VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | number | No | `1` | Sentry replay sample rate after errors. |

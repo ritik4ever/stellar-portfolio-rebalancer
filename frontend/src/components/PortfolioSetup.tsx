@@ -525,6 +525,45 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           </motion.div>
         )}
 
+        {/* ── First-time user quick-start / empty state ── */}
+        {savedTemplates.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm mb-6">
+            <div className="flex items-start">
+              <div className="flex-1">
+                <h4 className="text-md font-semibold text-gray-900 dark:text-white">Quick start</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  New here? Try a template to populate allocations, or learn how to set up a portfolio.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate(PORTFOLIO_TEMPLATES.find(t => t.id === 'balanced')!)}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+                  >
+                    Try Balanced Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
+                    className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                  >
+                    Read setup guide
+                  </button>
+                  {!publicKey && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('landing')}
+                      className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                    >
+                      Connect wallet
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Main two-column layout ── */}
         <div className="grid lg:grid-cols-2 gap-8">
           {/* ════ Left column: configuration inputs ════ */}
