@@ -23,6 +23,7 @@ export interface StartupConfig {
   priceDataMaxAgeSeconds: number;
   minRequestIntervalMs: number;
   featureFlagsFile?: string;
+  webhookSigningSecret?: string;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -224,6 +225,8 @@ export function validateStartupConfigOrThrow(
     );
   }
 
+  const webhookSigningSecret = (env.WEBHOOK_SIGNING_SECRET || "").trim() || undefined;
+
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
@@ -310,6 +313,7 @@ export function validateStartupConfigOrThrow(
     priceDataMaxAgeSeconds,
     minRequestIntervalMs,
     featureFlagsFile,
+    webhookSigningSecret,
   };
 }
 
@@ -349,6 +353,7 @@ export function buildStartupSummary(
       startupMaxDelayMs: config.queueStartupMaxDelayMs,
     },
     jwtAuthEnabled: config.jwtAuthEnabled,
+    webhookSigning: config.webhookSigningSecret ? "enabled" : "disabled",
     readinessCacheTtlMs: config.readinessCacheTtlMs,
     consentAuditRetentionDays: config.consentAuditRetentionDays,
     featureFlags: {
