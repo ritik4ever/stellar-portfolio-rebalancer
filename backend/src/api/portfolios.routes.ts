@@ -338,6 +338,8 @@ portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...prot
 
             const result = await stellarService.executeRebalance(portfolioId);
 
+            logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
+
             return ok(res, { result });
         } finally {
             await releaseWorkerLock(portfolioId);

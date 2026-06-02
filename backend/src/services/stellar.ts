@@ -152,13 +152,7 @@ await queue.add(
             })
 
             return {
-                ready,
-                reason,
-                checks: {
-                    serviceRunning: this.isRunning,
-                    queueAvailable,
-                    redisConnected
-                }
+
             }
         } catch (error) {
             logger.error('[AUTO-REBALANCER] Readiness check failed', { error })
