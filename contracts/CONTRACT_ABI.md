@@ -104,14 +104,18 @@ For common invocation examples and debugging commands, see the [Soroban Cookbook
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.
-- **Returns:** `Ok(())` or `Err(Error::SlippageExceeded)`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::EmergencyStop)`
+  - `Err(Error::CooldownActive)`
+  - `Err(Error::StaleData)`
+  - `Err(Error::SlippageExceeded)`
 - **Preconditions / failure behavior:**
-  - Emergency stop must be off (otherwise panic `"Emergency stop active"`).
+  - Emergency stop must be off (otherwise returns `Err(Error::EmergencyStop)`).
   - Portfolio must exist and owner must authorize call.
-  - Cooldown must be elapsed (`>= 3600` seconds since last rebalance) or panic `"Cooldown active"`.
-  - Every target asset must have non-stale Reflector price data or panic:
-    - `"Stale price data"`
-    - `"Missing price data"`
+  - Cooldown must be elapsed (`>= 3600` seconds since last rebalance) or returns `Err(Error::CooldownActive)`.
+  - Every target asset must have non-stale Reflector price data or returns `Err(Error::StaleData)`.
+  - If `actual_balances` are provided, the current portfolio value must be computable from non-stale prices and every checked balance must be within slippage tolerance.
+  - Failed validations do not update `last_rebalance` and do not emit `("portfolio","rebalanced")`; callers may retry once the failing condition is fixed.
 
 ### `set_emergency_stop(env: Env, stop: bool) -> ()`
 

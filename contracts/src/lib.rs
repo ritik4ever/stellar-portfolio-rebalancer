@@ -183,9 +183,13 @@ impl PortfolioRebalancer {
         false
     }
 
-    pub fn execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error> {
+    pub fn execute_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+    ) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
-            panic!("Emergency stop active");
+            return Err(Error::EmergencyStop);
         }
 
         let mut portfolio: Portfolio = env
@@ -198,7 +202,7 @@ impl PortfolioRebalancer {
 
         let current_time = env.ledger().timestamp();
         if current_time < portfolio.last_rebalance + 3600 {
-            panic!("Cooldown active");
+            return Err(Error::CooldownActive);
         }
 
         let reflector_address: Address = env
@@ -213,10 +217,10 @@ impl PortfolioRebalancer {
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
                 if price_data.is_stale(current_time, 3600) {
-                    panic!("Stale price data");
+                    return Err(Error::StaleData);
                 }
             } else {
-                panic!("Missing price data");
+                return Err(Error::StaleData);
             }
         }
 
@@ -350,6 +354,7 @@ impl PortfolioRebalancer {
             break;
         }
         if has_actual_balances {
+
             if total_value > 0 {
                 for (asset, target_pct) in snapshot.target_allocations.iter() {
                     let price = current_prices.get(asset.clone()).unwrap();
