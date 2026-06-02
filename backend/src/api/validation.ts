@@ -122,7 +122,8 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional()
+    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
@@ -137,6 +138,27 @@ export const adminAddAssetSchema = z.object({
 export const adminPatchAssetSchema = z.object({
     enabled: z.boolean()
 }).strict();
+
+// Query params for GET /assets — pagination, sorting, and issuer/symbol filters.
+export const assetsListQuerySchema = z.object({
+    enabledOnly: strictBoolean.optional(),
+    // Symbol/name search aliases (kept for backward compatibility).
+    code: z.string().trim().optional(),
+    search: z.string().trim().optional(),
+    q: z.string().trim().optional(),
+    // Filter by issuer account (case-insensitive substring).
+    issuer: z.string().trim().optional(),
+    sortBy: z.enum(['symbol', 'name', 'enabled']).optional(),
+    order: z.enum(['asc', 'desc']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).optional()
+    ),
+    limit: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).optional()
+    )
+});
 
 // ─── Export / query-param schemas ─────────────────────────────────────────────
 export const portfolioExportQuerySchema = z.object({

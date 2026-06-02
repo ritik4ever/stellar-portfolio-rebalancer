@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet release-checklist
+
 
 # Default target
 all: build
@@ -8,6 +8,7 @@ all: build
 # Build the contract
 build:
 	cargo build --target wasm32-unknown-unknown --release
+	@$(MAKE) hash
 
 # Build with optimization
 build-optimized:
@@ -16,6 +17,30 @@ build-optimized:
 		soroban contract optimize --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm; \
 	else \
 		echo "Soroban CLI not found. Install it for optimization."; \
+	fi
+	@$(MAKE) hash
+
+# Calculate WASM hash
+hash:
+	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm ]; then \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Release):    " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Release):    " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+		else \
+			echo -n "WASM Hash (Release):    " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | awk '{print $$NF}'; \
+		fi; \
+	else \
+		echo "WASM target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm not found. Build it first."; \
+	fi
+	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm ]; then \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Optimized):  " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Optimized):  " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+		else \
+			echo -n "WASM Hash (Optimized):  " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | awk '{print $$NF}'; \
+		fi; \
 	fi
 
 # Run tests
@@ -147,6 +172,40 @@ help:
 	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
 	@echo "  release-checklist - Print the release checklist location and contract release steps"
 	@echo "  help            - Show this help message"
+
+# Contract upgrade workflow
+upgrade-check:
+	@echo "=== Upgrade Pre-flight Checklist ==="
+	@echo "1) Compute current WASM hash:"
+	@echo "   soroban contract wasm hash --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm"
+	@echo "2) Verify storage shape compatibility (see docs/MIGRATION.md)"
+	@echo "3) Confirm rollback path:"
+	@echo "   - Keep previous WASM artifact: cp target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm previous.wasm"
+	@echo "   - Record current WASM hash for downgrade capability"
+	@echo "4) Deploy new WASM:"
+	@echo "   soroban contract install \\"
+	@echo "     --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \\"
+	@echo "     --source \$$(STELLAR_SECRET_KEY) \\"
+	@echo "     --network \$$(STELLAR_NETWORK)"
+	@echo "5) Upgrade contract instance:"
+	@echo "   soroban contract invoke \\"
+	@echo "     --id \$$(CONTRACT_ID) \\"
+	@echo "     --source \$$(STELLAR_SECRET_KEY) \\"
+	@echo "     --network \$$(STELLAR_NETWORK) \\"
+	@echo "     -- upgrade \\"
+	@echo "     --new_wasm_hash <hash-from-step-4>"
+	@echo "6) Verify upgrade event was emitted"
+	@echo "7) Run post-upgrade health checks"
+	@echo ""
+	@echo "Rollback:"
+	@echo "  soroban contract invoke \\"
+	@echo "    --id \$$(CONTRACT_ID) \\"
+	@echo "    --source \$$(STELLAR_SECRET_KEY) \\"
+	@echo "    --network \$$(STELLAR_NETWORK) \\"
+	@echo "    -- upgrade \\"
+	@echo "    --new_wasm_hash <previous-wasm-hash>"
+	@echo ""
+	@echo "See docs/MIGRATION.md for storage compatibility notes."
 
 # Contract release checklist
 release-checklist:

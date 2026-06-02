@@ -22,7 +22,10 @@ export function useUnsubscribeNotificationsMutation(userId: string) {
     const queryClient = useQueryClient()
 
     return useMutation({
-        mutationFn: () => api.delete(ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE(userId)),
+        mutationFn: (reason?: string) => {
+            const trimmedReason = reason?.trim()
+            return api.delete(ENDPOINTS.NOTIFICATIONS_UNSUBSCRIBE(userId, trimmedReason))
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: notificationKeys.preferences(userId) })
         },

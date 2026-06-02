@@ -4,6 +4,24 @@ interface Trade {
     amount: number
 }
 
+export interface RelativeMovement {
+    /** How much more (positive) or less (negative) asset A moved vs asset B, in percentage points */
+    relativeChange: number
+    /** Which asset outperformed */
+    leader: 'a' | 'b' | 'equal'
+}
+
+/**
+ * Computes the relative 24h price movement between two assets.
+ * @param changeA  24h % change for asset A
+ * @param changeB  24h % change for asset B
+ */
+export function calculateRelativeMovement(changeA: number, changeB: number): RelativeMovement {
+    const relativeChange = changeA - changeB
+    const leader = relativeChange > 0 ? 'a' : relativeChange < 0 ? 'b' : 'equal'
+    return { relativeChange, leader }
+}
+
 export const calculateRebalanceTrades = (portfolio: any): Trade[] => {
     const trades: Trade[] = []
 
