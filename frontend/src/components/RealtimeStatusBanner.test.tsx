@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 let mockStatus = "connected";
 const mockReconnect = vi.fn();
@@ -16,23 +16,28 @@ vi.mock("../context/RealtimeConnectionContext", () => ({
   }),
 }));
 
+// Default: fully ready, no drilldown shown
+vi.mock("../hooks/useReadinessReport", () => ({
+    useReadinessReport: () => ({
+        report: {
+            status: 'ready',
+            timestamp: new Date().toISOString(),
+            checks: {
+                database: { status: 'ready', required: true, message: 'ok' },
+                queue: { status: 'ready', required: true, message: 'ok' },
+                workers: { status: 'ready', required: true, message: 'ok' },
+                contractEventIndexer: { status: 'ready', required: false, message: 'ok' },
+                autoRebalancer: { status: 'ready', required: false, message: 'ok' },
+            },
+        },
+        loading: false,
+        loadError: false,
+        notices: [],
+        refresh: vi.fn(),
+    }),
+}));
+
 import RealtimeStatusBanner from "./RealtimeStatusBanner";
-
-describe("RealtimeStatusBanner", () => {
-  beforeEach(() => {
-    mockStatus = "connected";
-    mockReconnect.mockClear();
-  });
-
-  it("does not render warning bar when connected (shows live badge)", () => {
-    mockStatus = "connected";
-
-    render(<RealtimeStatusBanner />);
-    expect(screen.getByText(/live updates/i)).toBeInTheDocument();
-  });
-
-  it("shows reconnecting state", () => {
-    mockStatus = "reconnecting";
 
     render(<RealtimeStatusBanner />);
     expect(screen.getByText(/reconnecting \(1\/12\)/i)).toBeInTheDocument();
@@ -47,15 +52,30 @@ describe("RealtimeStatusBanner", () => {
     expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
   });
 
-  it("shows disconnected state and retry button", () => {
-    mockStatus = "disconnected";
+describe("RealtimeStatusBanner", () => {
+    beforeEach(() => {
+        mockStatus = "connected";
+        mockReconnect.mockClear();
+    });
 
-    render(<RealtimeStatusBanner />);
+    it("does not render warning bar when connected (shows live badge)", () => {
+        mockStatus = "connected";
+        render(<RealtimeStatusBanner />);
+        expect(screen.getByText(/live updates/i)).toBeInTheDocument();
+    });
 
-    const button = screen.getByRole("button", { name: /retry/i });
-    expect(button).toBeInTheDocument();
+    it("shows reconnecting state", () => {
+        mockStatus = "reconnecting";
+        render(<RealtimeStatusBanner />);
+        expect(screen.getByText(/reconnecting/i)).toBeInTheDocument();
+    });
 
-    fireEvent.click(button);
-    expect(mockReconnect).toHaveBeenCalled();
-  });
+    it("shows disconnected state and retry button", () => {
+        mockStatus = "disconnected";
+        render(<RealtimeStatusBanner />);
+        const button = screen.getByRole("button", { name: /retry/i });
+        expect(button).toBeInTheDocument();
+        fireEvent.click(button);
+        expect(mockReconnect).toHaveBeenCalled();
+    });
 });
