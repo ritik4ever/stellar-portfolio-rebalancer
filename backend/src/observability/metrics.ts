@@ -41,6 +41,13 @@ const readinessGauge = new Gauge({
   registers: [register],
 });
 
+const readinessDependencyLatency = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}readiness_dependency_latency_ms`,
+    help: 'Measured latency (ms) for readiness dependency checks',
+    labelNames: ['dependency'] as const,
+    registers: [register],
+})
+
 const queueDepthGauge = new Gauge({
   name: `${observabilityConfig.metrics.prefix}queue_jobs`,
   help: "Current queue depth by state",

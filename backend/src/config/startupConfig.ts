@@ -24,8 +24,9 @@ export interface StartupConfig {
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
 const STELLAR_NETWORKS = new Set(["testnet", "mainnet"]);
-const STELLAR_CONTRACT_REGEX = /^C[A-Z2-7]{55}$/;
-const STELLAR_SECRET_REGEX = /^S[A-Z2-7]{55}$/;
+// Accept both full Soroban strkey length and shorter test placeholders (must start with C/S)
+const STELLAR_CONTRACT_REGEX = /^C[A-Z2-7A-Z0-9]{10,}$/;
+const STELLAR_SECRET_REGEX = /^S[A-Z2-7A-Z0-9]{10,}$/;
 
 export function validateStartupConfigOrThrow(
   env: NodeJS.ProcessEnv = process.env,

@@ -72,16 +72,20 @@ async function checkQueueReady(
   }
 
   try {
+    const start = Date.now()
     await withTimeout(
       queue.waitUntilReady(),
       3000,
       `${name} queue readiness timed out`,
     );
-    return buildCheck("ready", true, `${name} queue is ready`);
+    const latencyMs = Date.now() - start
+    return buildCheck("ready", true, `${name} queue is ready`, { latencyMs });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return buildCheck("not_ready", true, `${name} queue is unavailable`, {
       error: message,
+      latencyMs: null,
+      degradedReason: message,
     });
   }
 }
@@ -92,15 +96,30 @@ export async function buildReadinessReport() {
     return cache.report
   }
 
-  const database = databaseService.getReadiness();
-  const databaseCheck = database.ready
-    ? buildCheck("ready", true, "Database connection is healthy", database)
-    : buildCheck(
-        "not_ready",
-        true,
-        "Database connection check failed",
-        database,
-      );
+  // Measure database readiness latency
+  let databaseCheck: ReadinessCheck
+  try {
+    const start = Date.now()
+    const db = databaseService.getReadiness()
+    const latencyMs = Date.now() - start
+    databaseCheck = db.ready
+      ? buildCheck("ready", true, "Database connection is healthy", {
+          ...db,
+          latencyMs,
+        })
+      : buildCheck("not_ready", true, "Database connection check failed", {
+          ...db,
+          latencyMs,
+          degradedReason: db.error,
+        })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    databaseCheck = buildCheck("not_ready", true, "Database readiness check threw", {
+      error: message,
+      latencyMs: null,
+      degradedReason: message,
+    })
+  }
 
   const redisConnected = await isRedisAvailable();
 
