@@ -25,6 +25,7 @@ import {
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
+import { appCopy } from './content/uiCopy'
 
 function App() {
     const queryClient = useQueryClient()
@@ -37,6 +38,10 @@ function App() {
     const [sessionRecovery, setSessionRecovery] = useState<string | null>(null)
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
+    const { notices, loadError, loading: readinessLoading, bootReady } = useReadinessReport()
+    const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
+    const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
+    const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
 
     const showBackendBanner = loadError || notices.length > 0
     const showApiCompatibilityBanner =
@@ -262,14 +267,14 @@ function App() {
                             onClick={() => setApiCompatibilityDismissed(true)}
                             className="shrink-0 rounded px-2 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10"
                         >
-                            Dismiss
+                            {appCopy.dismiss}
                         </button>
                     </div>
                 </div>
             ) : null}
             {apiCompatibilityLoading && !apiCompatibility ? (
                 <span className="sr-only" role="status">
-                    Checking API configuration
+                    {appCopy.checkingApiConfig}
                 </span>
             ) : null}
             <DeveloperDrawer publicKey={publicKey} />
@@ -282,7 +287,7 @@ function App() {
                     <div className="flex items-start gap-3">
                         <div className="mt-0.5 text-lg">⚠️</div>
                         <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold">Session expired</p>
+                            <p className="text-sm font-semibold">{appCopy.sessionExpiredTitle}</p>
                             <p className="mt-1 text-sm leading-5 opacity-90">{sessionRecovery}</p>
                             {sessionRecoverySource ? (
                                 <p className="mt-1 text-[11px] uppercase tracking-[0.2em] opacity-70">
@@ -296,7 +301,7 @@ function App() {
                                     disabled={isRecoveringSession}
                                     className="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {isRecoveringSession ? 'Reconnecting…' : 'Retry sign-in'}
+                                    {isRecoveringSession ? appCopy.reconnecting : appCopy.retrySignIn}
                                 </button>
                                 <button
                                     type="button"
@@ -306,7 +311,7 @@ function App() {
                                     }}
                                     className="rounded-full border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-100 dark:hover:bg-amber-900/40"
                                 >
-                                    Dismiss
+                                    {appCopy.dismiss}
                                 </button>
                             </div>
                         </div>

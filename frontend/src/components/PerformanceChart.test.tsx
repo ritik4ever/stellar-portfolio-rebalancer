@@ -178,7 +178,7 @@ describe("PerformanceChart", () => {
       expect(chart.getAttribute("data-chart-length")).toBe("3");
     });
 
-    it("should demonstrate the current bug with null/undefined values", () => {
+    it("should coerce null snapshot values to zero without crashing", () => {
       const snapshotsWithNulls = [
         { timestamp: "2024-01-01T00:00:00Z", totalValue: null },
         { timestamp: "2024-01-02T00:00:00Z", totalValue: 1000.0 },
@@ -190,10 +190,9 @@ describe("PerformanceChart", () => {
         error: null,
       });
 
-      // This should fail due to the bug in formatChartData function
-      expect(() => {
-        render(<PerformanceChart portfolioId="test-portfolio" />);
-      }).toThrow("Cannot read properties of null");
+      render(<PerformanceChart portfolioId="test-portfolio" />);
+      const chart = screen.getByTestId("line-chart");
+      expect(chart.getAttribute("data-chart-length")).toBe("2");
     });
   });
 
