@@ -34,8 +34,21 @@ export interface AnalyticsCompactionJobData {
 }
 
 export interface IdempotencyCleanupJobData {
-  triggeredBy?: "scheduler" | "manual" | "startup";
-  correlationId?: string;
+    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
+}
+
+export interface PortfolioExportJobData {
+    portfolioId: string
+    format: 'json' | 'csv' | 'pdf'
+    userId?: string
+}
+
+export interface PortfolioExportResult {
+    contentType: string
+    filename: string
+    bodyBase64?: string
+    bodyString?: string
 }
 
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
@@ -131,6 +144,21 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   } catch {
     return null;
   }
+}
+
+export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, PortfolioExportResult> | null {
+    try {
+        if (!portfolioExportQueue) {
+            portfolioExportQueue = new Queue<PortfolioExportJobData, PortfolioExportResult>(QUEUE_NAMES.PORTFOLIO_EXPORT, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PORTFOLIO_EXPORT}`)
+        }
+        return portfolioExportQueue
+    } catch {
+        return null
+    }
 }
 
 // ─── Graceful Close ───────────────────────────────────────────────────────────
