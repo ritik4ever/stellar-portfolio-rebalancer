@@ -3,6 +3,7 @@ import { WalletAdapter, WalletType, getAdapter, getAvailableAdapters, WalletErro
 const STORAGE_KEY_WALLET_TYPE = 'wallet_type'
 const STORAGE_KEY_PUBLIC_KEY = 'stellar_public_key'
 const STORAGE_KEY_WALLET_CONNECTED = 'wallet_connected'
+const STORAGE_KEY_AUTO_RECONNECT = 'wallet_auto_reconnect'
 
 export class WalletManager {
     private currentAdapter: WalletAdapter | null = null
@@ -100,6 +101,15 @@ export class WalletManager {
 
     getAvailableWallets() {
         return getAvailableAdapters()
+    }
+
+    setAutoReconnect(enabled: boolean): void {
+        localStorage.setItem(STORAGE_KEY_AUTO_RECONNECT, enabled ? 'true' : 'false')
+    }
+
+    getAutoReconnect(): boolean {
+        const val = localStorage.getItem(STORAGE_KEY_AUTO_RECONNECT)
+        return val !== 'false'
     }
 
     private clearStorage(): void {
