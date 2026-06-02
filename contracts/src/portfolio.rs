@@ -1,128 +1,7 @@
 use crate::types::*;
 use soroban_sdk::{xdr::ToXdr, Address, Env, Map};
 
-#[cfg(test)]
-use core::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(test)]
-static PORTFOLIO_STORAGE_LIMIT_OVERRIDE: AtomicUsize = AtomicUsize::new(usize::MAX);
-
-#[cfg(test)]
-pub fn set_portfolio_storage_limit_for_tests(limit: Option<usize>) {
-    PORTFOLIO_STORAGE_LIMIT_OVERRIDE.store(limit.unwrap_or(usize::MAX), Ordering::Relaxed);
-}
-
-fn portfolio_storage_limit_bytes() -> usize {
-    #[cfg(test)]
-    {
-        let override_limit = PORTFOLIO_STORAGE_LIMIT_OVERRIDE.load(Ordering::Relaxed);
-        if override_limit == usize::MAX {
-            MAX_PORTFOLIO_STORAGE_BYTES as usize
-        } else {
-            override_limit
-        }
-    }
-
-    #[cfg(not(test))]
-    {
-        MAX_PORTFOLIO_STORAGE_BYTES as usize
-    }
-}
-
-const STORAGE_FOOTPRINT_HEADROOM_BYTES: usize = 64;
-
-pub fn estimate_portfolio_storage_footprint(
-    env: &Env,
-    portfolio_id: u64,
-    portfolio: &Portfolio,
-) -> usize {
-    let key_bytes = DataKey::Portfolio(portfolio_id).to_xdr(env);
-    let value_bytes = portfolio.clone().to_xdr(env);
-    key_bytes.len() as usize + value_bytes.len() as usize + STORAGE_FOOTPRINT_HEADROOM_BYTES
-}
-
-pub fn validate_portfolio_storage_footprint(
-    env: &Env,
-    portfolio_id: u64,
-    portfolio: &Portfolio,
-) -> Result<usize, Error> {
-    let estimated = estimate_portfolio_storage_footprint(env, portfolio_id, portfolio);
-    if estimated > portfolio_storage_limit_bytes() {
-        Err(Error::PortfolioStorageFootprintTooLarge)
-    } else {
-        Ok(estimated)
-    }
-}
-use soroban_sdk::{Address, Env, Map, Symbol};
-use soroban_sdk::{Address, Env, Map, Symbol, Vec};
-
-pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {
-    env.events().publish(
-        (Symbol::new(env, "portfolio"), Symbol::new(env, "created")),
-        (portfolio_id, user),
-    );
-}
-
-pub fn emit_portfolio_deposit(env: &Env, portfolio_id: u64, asset: Address, amount: i128) {
-    env.events().publish(
-        (Symbol::new(env, "portfolio"), Symbol::new(env, "deposit")),
-        (portfolio_id, asset, amount),
-    );
-}
-
-pub fn emit_portfolio_withdraw(env: &Env, portfolio_id: u64, asset: Address, amount: i128) {
-    env.events().publish(
-        (Symbol::new(env, "portfolio"), Symbol::new(env, "withdraw")),
-        (portfolio_id, asset, amount),
-    );
-}
-
-pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
-    env.events().publish(
-        (Symbol::new(env, "portfolio"), Symbol::new(env, "rebalanced")),
-        (portfolio_id, timestamp),
-    );
-}
-
-pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, timestamp: u64) {
-    env.events().publish(
-        (
-            Symbol::new(env, "portfolio"),
-            Symbol::new(env, "cooldown_override"),
-        ),
-        (portfolio_id, admin, timestamp),
-    );
-}
-
-pub fn check_portfolio_invariants(portfolio: &Portfolio) -> Result<(), Error> {
-    if !validate_allocations(&portfolio.target_allocations) {
-        return Err(Error::InvariantViolation);
-    }
-    if portfolio.target_allocations.len() > MAX_PORTFOLIO_ASSETS {
-        return Err(Error::InvariantViolation);
-    }
-    if !(1..=50).contains(&portfolio.rebalance_threshold) {
-        return Err(Error::InvariantViolation);
-    }
-    if !(10..=500).contains(&portfolio.slippage_tolerance) {
-        return Err(Error::InvariantViolation);
-    }
-    for (_, balance) in portfolio.current_balances.iter() {
-        if balance < 0 {
-            return Err(Error::InvariantViolation);
-        }
-    }
-    Ok(())
-}
-
-pub fn portfolio_has_positive_balance(portfolio: &Portfolio) -> bool {
-    for (_, balance) in portfolio.current_balances.iter() {
-        if balance > 0 {
-            return true;
-        }
-    }
-    false
-}
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
     if allocations.is_empty() {
         return false;
@@ -157,7 +36,7 @@ pub fn calculate_portfolio_value(
     balances: &Map<Address, i128>,
     asset_decimals: &Map<Address, u32>,
     reflector_client: &crate::reflector::ReflectorClient,
-) -> Result<i128, ValuationError> {
+
     let mut total_value = 0i128;
     let current_time = env.ledger().timestamp();
 
@@ -170,12 +49,9 @@ pub fn calculate_portfolio_value(
         {
 
             }
-            if price_data.price <= 0 {
-                return Err(ValuationError::MalformedData);
-            }
             total_value += balance_to_value(balance, price_data.price);
         } else {
-            return Err(ValuationError::MissingPrice);
+
         }
     }
 

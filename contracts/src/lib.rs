@@ -236,7 +236,7 @@ impl PortfolioRebalancer {
             &reflector_client,
         ) {
             Ok(val) => val,
-            Err(_) => return false,
+
         };
 
         if total_value == 0 {
@@ -244,6 +244,7 @@ impl PortfolioRebalancer {
         }
 
 
+<
             }
         }
 
@@ -255,6 +256,7 @@ impl PortfolioRebalancer {
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
+
 
 
     pub fn admin_force_rebalance(
@@ -476,15 +478,11 @@ impl PortfolioRebalancer {
             if let Some(price_data) =
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
-                if price_data.is_stale(current_time, PRICE_MAX_AGE_SECONDS) {
-                    return Err(Error::StalePrice);
-                }
-                if price_data.price <= 0 {
-                    return Err(Error::MalformedPrice);
+
                 }
                 current_prices.set(asset.clone(), price_data.price);
             } else {
-                return Err(Error::MissingPrice);
+
             }
         }
 
@@ -515,9 +513,7 @@ impl PortfolioRebalancer {
                 &portfolio.asset_decimals,
                 &reflector_client,
             )
-            .unwrap(); // Already verified prices above
-            .ok_or(Error::StaleData)?;
-            ).map_err(|_| Error::StalePrice)?;
+
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client

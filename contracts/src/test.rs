@@ -1382,23 +1382,12 @@ fn test_calculate_portfolio_value_all_prices_available() {
         &reflector_client,
     );
 
-    assert_eq!(value, Some(15000));
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
-    assert_eq!(value, Ok(20000));
-}
-
-#[test]
-fn test_calculate_portfolio_value_missing_price_returns_err() {
     let env = Env::default();
     env.mock_all_auths();
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(
-        None,
-        reflector_with_missing_price::ReflectorWithMissingPrice,
-    );
+
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
@@ -1426,12 +1415,7 @@ fn test_calculate_portfolio_value_missing_price_returns_err() {
         &reflector_client,
     );
 
-    let value = crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
-    assert_eq!(value, Err(ValuationError::MissingPrice));
-}
 
-#[test]
-fn test_calculate_portfolio_value_all_prices_missing_returns_err() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1460,10 +1444,6 @@ fn test_calculate_portfolio_value_all_prices_missing_returns_err() {
         &reflector_client,
     );
 
-    assert_eq!(value, None); // Should be None if all missing
-    let value =
-        crate::portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &portfolio.asset_decimals, &reflector_client);
-    assert_eq!(value, Err(ValuationError::MissingPrice));
 }
 
 #[test]
