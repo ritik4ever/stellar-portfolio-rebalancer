@@ -14,7 +14,7 @@ function clampSlippageTolerance(p: number): number {
 
 const useCache = process.env.USE_MEMORY_CACHE === 'true'
 
-class PortfolioStorage {
+export class PortfolioStorage {
     public portfolios: Map<string, Portfolio> = new Map()
 
     private async cacheGet(id: string): Promise<Portfolio | undefined> {
@@ -112,6 +112,9 @@ class PortfolioStorage {
         const updated = { ...portfolio, ...updates }
         if (isDbConfigured()) {
             const ok = await portfolioDb.dbUpdatePortfolio(id, {
+                userAddress: updates.userAddress,
+                allocations: updates.allocations,
+                threshold: updates.threshold,
                 balances: updates.balances,
                 totalValue: updates.totalValue,
                 lastRebalance: updates.lastRebalance

@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { Wifi, WifiOff, TrendingUp, TrendingDown } from 'lucide-react'
-import { api, ENDPOINTS } from '../config/api'
-import { usePrices, type PriceFeedClientMeta } from '../hooks/queries/usePricesQuery'
+import { usePrices, formatPriceFeedSummary, type PriceFeedClientMeta } from '../hooks/queries/usePricesQuery'
+import { useAssets } from '../hooks/queries/useAssetsQuery'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 
 interface PriceTrackerProps {
@@ -81,15 +81,28 @@ function qualityMessage(meta: PriceFeedClientMeta | undefined): string | null {
 }
 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
-    const [assetList, setAssetList] = useState<string[]>(['XLM', 'BTC', 'ETH', 'USDC'])
+    const { data: assetList = ['XLM', 'BTC', 'ETH', 'USDC'] } = useAssets()
     const { data: priceBundle, isLoading, error: queryError, refetch } = usePrices()
-    const { state: realtimeState } = useRealtimeConnection()
+    const { state: realtimeState, statusDetail, reconnectInfo } = useRealtimeConnection()
 
     const prices = useMemo(() => normalizePrices(priceBundle?.prices), [priceBundle?.prices])
     const feedMeta = priceBundle?.feedMeta
+    const hasLivePriceRows = Object.keys(prices).length > 0
+    const priceSourceLabel = formatPriceFeedSummary(feedMeta, hasLivePriceRows, false)
     const qualityHint = useMemo(() => qualityMessage(feedMeta), [feedMeta])
     const loading = isLoading
     const isConnected = realtimeState === 'connected'
+    const isPaused = realtimeState === 'paused'
+    const isReconnecting = realtimeState === 'reconnecting' || realtimeState === 'connecting'
+    const connectionLabel = isConnected
+        ? 'Connected'
+        : isPaused
+          ? 'Paused'
+          : isReconnecting
+            ? reconnectInfo
+                ? `Reconnecting (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})`
+                : 'Reconnecting'
+            : 'Disconnected'
     const error =
         queryError instanceof Error ? queryError.message : queryError ? String(queryError) : null
 
@@ -107,13 +120,8 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
         void refetch()
     }
 
-    useEffect(() => {
-        api.get<{ assets: Array<{ symbol: string }> }>(ENDPOINTS.ASSETS)
-            .then((res) => {
-                if (res?.assets?.length) setAssetList(res.assets.map((a) => a.symbol))
-            })
-            .catch(() => {})
-    }, [])
+    // Assets list is now handled by useAssets() React Query hook above.
+    // This eliminates the manual useEffect fetch + setState pattern.
 
     if (loading && Object.keys(prices).length === 0) {
         return (
@@ -180,8 +188,15 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Real-time Prices</h3>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-4">
+                <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Real-time Prices</h3>
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 space-x-2">
+                        <span>Source: {priceSourceLabel}</span>
+                        <span>•</span>
+                        <span>Updated: {lastUpdate}</span>
+                    </div>
+                </div>
                 <div className="flex items-center space-x-2">
                     <div className="flex items-center space-x-1">
                         {isConnected ? (
@@ -189,10 +204,25 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         ) : (
                             <WifiOff className="w-4 h-4 text-red-500" />
                         )}
-                        <span className={`text-xs ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
-                            {isConnected ? 'Connected' : 'Disconnected'}
+                        <span
+                            className={`text-xs ${
+                                isConnected
+                                    ? 'text-green-600'
+                                    : isPaused
+                                      ? 'text-slate-600 dark:text-slate-400'
+                                      : isReconnecting
+                                        ? 'text-amber-600'
+                                        : 'text-red-600'
+                            }`}
+                        >
+                            {connectionLabel}
                         </span>
                     </div>
+                    {statusDetail && !isConnected ? (
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-[12rem] truncate">
+                            {statusDetail}
+                        </span>
+                    ) : null}
                     {error && (
                         <div
                             className="text-xs text-red-500 bg-red-50 dark:bg-red-900/30 px-2 py-1 rounded cursor-pointer"
@@ -204,17 +234,15 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                             {error} (Click to retry)
                         </div>
                     )}
-                    <div className="text-sm text-gray-500 dark:text-gray-400">Last update: {lastUpdate}</div>
                 </div>
             </div>
 
             {qualityHint && (
                 <div
-                    className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
-                        feedMeta?.degraded
+                    className={`mb-4 rounded-lg border px-3 py-2 text-xs ${feedMeta?.degraded
                             ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200'
                             : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-300'
-                    }`}
+                        }`}
                 >
                     {qualityHint}
                 </div>
@@ -261,14 +289,14 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                             {(data.volume ||
                                 (data.quoteAgeSeconds !== undefined && Number.isFinite(data.quoteAgeSeconds)) ||
                                 data.servedFromCache) && (
-                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 space-y-0.5">
-                                    {data.volume ? <div>Vol: ${data.volume.toLocaleString()}</div> : null}
-                                    {data.quoteAgeSeconds !== undefined && Number.isFinite(data.quoteAgeSeconds) ? (
-                                        <div>Quote age: {Math.round(data.quoteAgeSeconds)}s</div>
-                                    ) : null}
-                                    {data.servedFromCache ? <div>From app cache</div> : null}
-                                </div>
-                            )}
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 space-y-0.5">
+                                        {data.volume ? <div>Vol: ${data.volume.toLocaleString()}</div> : null}
+                                        {data.quoteAgeSeconds !== undefined && Number.isFinite(data.quoteAgeSeconds) ? (
+                                            <div>Quote age: {Math.round(data.quoteAgeSeconds)}s</div>
+                                        ) : null}
+                                        {data.servedFromCache ? <div>From app cache</div> : null}
+                                    </div>
+                                )}
                         </div>
                     )
                 })}
@@ -280,7 +308,11 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                         <div className="flex items-center">
                             <WifiOff className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mr-2" />
                             <span className="text-sm text-yellow-800 dark:text-yellow-300">
-                                Connection lost. Showing last known prices.
+                                {isPaused
+                                    ? 'Live feed paused in the background. Showing last known prices.'
+                                    : isReconnecting
+                                      ? 'Reconnecting to live prices. Showing last known quotes until the socket is back.'
+                                      : 'Connection lost. Showing last known prices.'}
                             </span>
                         </div>
                         <button

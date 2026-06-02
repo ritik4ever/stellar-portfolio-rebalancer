@@ -2,7 +2,9 @@ import type { Request, Response, NextFunction } from 'express'
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client'
 import { observabilityConfig } from './config.js'
 import { getQueueMetrics } from '../queue/queueMetrics.js'
+import { getWorkerHealthSummary } from '../queue/workers/workerHeartbeat.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
+import type { PriceFeedMeta } from '../types/index.js'
 
 const register = new Registry()
 
@@ -51,11 +53,62 @@ const queueDepthGauge = new Gauge({
     registers: [register],
 })
 
-export const dbQueryDuration = new Histogram({
-    name: `${observabilityConfig.metrics.prefix}db_query_duration_seconds`,
-    help: 'Database query duration in seconds',
-    labelNames: ['operation', 'status'] as const,
-    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+const priceFeedResolutionsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}price_feed_resolutions_total`,
+    help: 'Total price feed resolutions by final quality classification',
+    labelNames: ['resolution_hint', 'degraded', 'stale_or_limited'] as const,
+    registers: [register],
+})
+
+const reflectorStalePricesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}reflector_stale_prices_total`,
+    help: 'Total stale Reflector price rows observed by asset',
+    labelNames: ['asset'] as const,
+    registers: [register],
+})
+
+const reflectorFallbackUsageTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}reflector_fallback_usage_total`,
+    help: 'Total fallback price resolutions used by the backend',
+    labelNames: ['reason'] as const,
+    registers: [register],
+})
+
+// Worker health metrics (Issue #450: Persist worker heartbeat and status for ops visibility)
+const workerHealthTotal = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}worker_health_total`,
+    help: 'Total number of workers',
+    registers: [register],
+})
+
+const workerHealthyTotal = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}worker_healthy_total`,
+    help: 'Number of healthy workers',
+    registers: [register],
+})
+
+const workerUnhealthyTotal = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}worker_unhealthy_total`,
+    help: 'Number of unhealthy workers',
+    registers: [register],
+})
+
+const workerIdleTotal = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}worker_idle_total`,
+    help: 'Number of idle workers',
+    registers: [register],
+})
+
+const workerLaggingTotal = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}worker_lagging_total`,
+    help: 'Number of lagging workers (last job >5min ago)',
+    registers: [register],
+})
+
+const workerStatus = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}worker_status`,
+    help: 'Worker status by name (1=ready, 0=not ready)',
+    labelNames: ['worker_name'] as const,
     registers: [register],
 })
 
@@ -103,9 +156,38 @@ export async function getMetricsPayload(): Promise<string> {
         queueDepthGauge.set({ queue, state: 'delayed' }, stats.delayed)
     }
 
+    // Update worker health metrics
+    const workerHealth = await getWorkerHealthSummary()
+    workerHealthTotal.set(workerHealth.total)
+    workerHealthyTotal.set(workerHealth.healthy)
+    workerUnhealthyTotal.set(workerHealth.unhealthy)
+    workerIdleTotal.set(workerHealth.idle)
+    workerLaggingTotal.set(workerHealth.lagging)
+
+    // Update per-worker status
+    for (const worker of workerHealth.workers) {
+        workerStatus.set({ worker_name: worker.name }, worker.ready ? 1 : 0)
+    }
+
     return register.metrics()
 }
 
 export function getMetricsContentType(): string {
     return register.contentType
+}
+
+export function recordPriceFeedResolution(meta: Pick<PriceFeedMeta, 'resolutionHint' | 'degraded' | 'staleOrLimited'>): void {
+    priceFeedResolutionsTotal.inc({
+        resolution_hint: meta.resolutionHint,
+        degraded: String(meta.degraded),
+        stale_or_limited: String(meta.staleOrLimited),
+    })
+}
+
+export function recordReflectorStalePrice(asset: string): void {
+    reflectorStalePricesTotal.inc({ asset })
+}
+
+export function recordReflectorFallbackUsage(reason: string): void {
+    reflectorFallbackUsageTotal.inc({ reason })
 }

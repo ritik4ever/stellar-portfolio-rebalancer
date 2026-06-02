@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
+import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
 import { rebalanceLockService } from '../services/rebalanceLock.js'
@@ -89,6 +90,9 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         const authConfig = getAuthConfig()
         if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
             return fail(res, 403, 'FORBIDDEN', 'You can only export your own portfolio')
+        }
+        if (!databaseService.hasFullConsent(portfolio.userAddress)) {
+            return fail(res, 403, 'FORBIDDEN', 'Active consent is required before exporting portfolio data')
         }
         const result = await getPortfolioExport(portfolioId, format)
         if (!result) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')

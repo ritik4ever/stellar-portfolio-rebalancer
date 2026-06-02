@@ -13,6 +13,7 @@ import { getQueueMetrics } from '../queue/queueMetrics.js'
 import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWorker.js'
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
+import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -20,7 +21,8 @@ import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
-import { QUEUE_NAMES } from '../queue/queues.js'
+import { QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue } from '../queue/queues.js'
+import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 
 export const opsRouter = Router()
 
@@ -83,6 +85,7 @@ opsRouter.get('/system/status', async (req: Request, res: Response) => {
                 enabled: true,
                 alertsActive: Object.values(circuitBreakers).some((cb: any) => cb.isTriggered)
             },
+            anomalySummary: getAnomalySummary(),
             autoRebalancer: {
                 status: autoRebalancerStatus,
                 statistics: autoRebalancerStats,
@@ -145,6 +148,51 @@ opsRouter.get('/queue/health', async (req: Request, res: Response) => {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
             redisConnected: false
         })
+    }
+})
+
+/**
+ * GET /api/workers/health
+ * Returns persisted worker health summary and detailed status
+ * Issue #450: Persist worker heartbeat and status for ops visibility
+ * Allows operators to see which workers are alive, idle, lagging, or unhealthy
+ */
+opsRouter.get('/workers/health', async (_req: Request, res: Response) => {
+    try {
+        const summary = await getWorkerHealthSummary()
+        const status = summary.unhealthy > 0 ? 503 : 200
+        return res.status(status).json({
+            timestamp: new Date().toISOString(),
+            summary: {
+                total: summary.total,
+                healthy: summary.healthy,
+                unhealthy: summary.unhealthy,
+                idle: summary.idle,
+                lagging: summary.lagging
+            },
+            workers: summary.workers
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to get worker health', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * GET /api/workers/status
+ * Returns detailed persisted status for all workers
+ * For dashboards and monitoring systems
+ */
+opsRouter.get('/workers/status', async (_req: Request, res: Response) => {
+    try {
+        const statuses = await getAllPersistedWorkerStatuses()
+        return ok(res, {
+            timestamp: new Date().toISOString(),
+            workers: statuses
+        })
+    } catch (error) {
+        logger.error('[ERROR] Failed to get worker statuses', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 

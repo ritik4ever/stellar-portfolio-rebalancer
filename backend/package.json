@@ -17,6 +17,9 @@
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
         "test:ci": "npm run test:coverage",
+        "test:shard": "vitest run --coverage --reporter=blob",
+        "test:merge-coverage": "vitest run --merge-reports --coverage",
+        "audit:policy": "node ../scripts/check-npm-audit-baseline.mjs backend",
         "test:rate-limits": "node scripts/test-rate-limits.js",
         "test:notifications:dev": "node scripts/test-notifications-dev.mjs",
         "openapi:export": "tsx scripts/export-openapi.ts",
@@ -53,7 +56,7 @@
         "@types/cors": "^2.8.19",
         "@types/express": "^4.17.23",
         "@types/jsonwebtoken": "^9.0.10",
-        "@types/node": "^20.19.13",
+        "@types/node": "^20.19.39",
         "@types/node-cron": "^3.0.11",
         "@types/nodemailer": "^7.0.10",
         "@types/pdfkit": "^0.17.5",
@@ -64,7 +67,7 @@
         "@vitest/coverage-v8": "^4.0.18",
         "supertest": "^6.3.3",
         "tsx": "^4.1.4",
-        "typescript": "^5.2.2",
+        "typescript": "^5.9.3",
         "vitest": "^4.0.18"
     }
 }

@@ -117,6 +117,9 @@ export interface RebalanceEvent {
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
+    actor?: 'user' | 'system' | 'admin' | 'scheduler'
+    source?: 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance'
+    triggerMetadata?: Record<string, unknown>
     eventSource?: 'offchain' | 'simulated' | 'onchain'
     onChainConfirmed?: boolean
     onChainEventType?: string

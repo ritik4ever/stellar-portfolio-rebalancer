@@ -12,3 +12,21 @@ export const WSMessageSchema = z.object({
 });
 
 export type WSMessage = z.infer<typeof WSMessageSchema>;
+
+/**
+ * WebSocket session metadata containing authentication and expiry info
+ * Ensures real-time sessions do not outlive their HTTP session auth guarantees
+ */
+export interface WSSessionMetadata {
+  /** User's wallet address from JWT sub claim */
+  userId: string;
+  
+  /** When the connection was authenticated (ISO 8601) */
+  authenticatedAt: string;
+  
+  /** When the JWT token expires (ISO 8601) */
+  tokenExpiresAt: string;
+  
+  /** Token expiry as Unix timestamp (seconds) */
+  tokenExpiryTimestamp: number;
+}

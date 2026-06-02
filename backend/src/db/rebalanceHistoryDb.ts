@@ -15,6 +15,7 @@ export interface RebalanceEventRow {
 }
 
 function rowToEvent(r: RebalanceEventRow) {
+    const details = r.details as Record<string, unknown> | undefined
     return {
         id: r.id,
         portfolioId: r.portfolio_id,
@@ -26,7 +27,10 @@ function rowToEvent(r: RebalanceEventRow) {
         isAutomatic: r.is_automatic,
         riskAlerts: (r.risk_alerts as any[]) ?? [],
         error: r.error ?? undefined,
-        details: r.details ?? undefined
+        actor: details?.actor as 'user' | 'system' | 'admin' | 'scheduler' | undefined,
+        source: details?.source as 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance' | undefined,
+        triggerMetadata: details?.triggerMetadata as Record<string, unknown> | undefined,
+        details: details ?? undefined
     }
 }
 
@@ -41,10 +45,11 @@ export async function dbInsertRebalanceEvent(event: {
     riskAlerts?: unknown[]
     error?: string
     details?: unknown
+    timestamp?: Date
 }) {
     await query(
-        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()))`,
         [
             event.id,
             event.portfolioId,
@@ -55,7 +60,8 @@ export async function dbInsertRebalanceEvent(event: {
             event.isAutomatic,
             event.riskAlerts ? JSON.stringify(event.riskAlerts) : null,
             event.error ?? null,
-            event.details ? JSON.stringify(event.details) : null
+            event.details ? JSON.stringify(event.details) : null,
+            event.timestamp ?? null
         ]
     )
 }
