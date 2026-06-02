@@ -1,10 +1,75 @@
 import { rateLimit, type Options } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import IORedis from "ioredis";
+import type { Request, Response, NextFunction } from "express";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
+
+// ── Health-probe bypass ──────────────────────────────────────────────────────
+// Probe paths that must never be subject to rate-limiting.
+const PROBE_PATHS = new Set(["/health", "/ready", "/readiness", "/metrics"]);
+
+// Loopback addresses accepted as "trusted" without a secret.
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"]);
+
+/**
+ * HEALTH_PROBE_SECRET — optional shared secret that external probes (e.g.
+ * Kubernetes liveness/readiness probes running outside the node) can present
+ * via the `X-Probe-Secret` request header to bypass rate limiting.
+ *
+ * Leave unset (or empty) to restrict the bypass to loopback-only.
+ */
+const PROBE_SECRET = process.env.HEALTH_PROBE_SECRET ?? "";
+
+/**
+ * Returns true when the request is a trusted internal health probe that should
+ * be exempt from ALL rate limiters.
+ *
+ * A request qualifies when:
+ *   1. The path is one of the known probe paths, AND
+ *   2. EITHER the source IP is a loopback address
+ *      OR a non-empty HEALTH_PROBE_SECRET is configured and the
+ *      `X-Probe-Secret` header matches it exactly.
+ *
+ * This keeps the bypass narrow: public traffic on probe paths still goes
+ * through normal rate limiting if it comes from a non-loopback IP without
+ * the secret.
+ */
+export function isTrustedHealthProbe(req: Request): boolean {
+  if (!PROBE_PATHS.has(req.path)) return false;
+
+  const ip = req.ip ?? req.socket?.remoteAddress ?? "";
+  if (LOOPBACK.has(ip)) {
+    logger.debug("[RATE-LIMIT] Probe bypass: loopback source", {
+      path: req.path,
+      ip,
+    });
+    return true;
+  }
+
+  if (PROBE_SECRET.length > 0) {
+    const supplied = req.headers["x-probe-secret"];
+    if (typeof supplied === "string" && supplied === PROBE_SECRET) {
+      logger.debug("[RATE-LIMIT] Probe bypass: valid X-Probe-Secret", {
+        path: req.path,
+        ip,
+      });
+      return true;
+    }
+
+    // Secret configured but header missing or wrong — fall through to normal
+    // rate limiting so public traffic on probe paths is not accidentally exempt.
+    logger.debug("[RATE-LIMIT] Probe bypass denied: secret mismatch", {
+      path: req.path,
+      ip,
+      headerPresent: "x-probe-secret" in req.headers,
+    });
+  }
+
+  return false;
+}
 
 // Rate limiting configuration from environment
 const GLOBAL_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000;
@@ -117,19 +182,21 @@ function createKeyGenerator(prefix: string) {
   };
 }
 
-// Skip rate limiting for health checks and internal requests
+// ---------------------------------------------------------------------------
+// Legacy isProbePath kept for any external callers, but the authoritative
+// guard for rate-limit skipping is now isTrustedHealthProbe().
+// ---------------------------------------------------------------------------
+/** @internal Use isTrustedHealthProbe() in middleware skip functions. */
 function isProbePath(path: string): boolean {
-    return path === '/health' || path === '/ready' || path === '/readiness' || path === '/metrics'
+  return PROBE_PATHS.has(path);
 }
 
 function skipSuccessfulRequests(
-  req: import("express").Request,
-  res: import("express").Response,
+  req: Request,
+  res: Response,
 ): boolean {
-  // Skip health checks
-  if (isProbePath(req.path)) {
-    return true;
-  }
+  // Trusted health probes bypass all rate limiting.
+  if (isTrustedHealthProbe(req)) return true;
 
   // In test environment, don't skip any requests to ensure rate limiting works
   if (process.env.NODE_ENV === "test") {
@@ -162,7 +229,7 @@ export const burstProtectionLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("burst"),
-  skip: (req) => isProbePath(req.path),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Write operations rate limiter - stricter limits for mutating operations
@@ -174,6 +241,7 @@ export const writeRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("write"),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Write burst protection - prevent rapid write attempts
@@ -185,7 +253,7 @@ export const writeBurstLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("write-burst"),
-  skip: (req) => isProbePath(req.path),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Authentication rate limiter - protect login/refresh endpoints
@@ -197,7 +265,7 @@ export const authRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("auth"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Critical operations rate limiter - for rebalancing and high-value operations
@@ -209,7 +277,7 @@ export const criticalRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("critical"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Admin operations rate limiter - protect admin endpoints
@@ -221,7 +289,7 @@ export const adminRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("admin"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Composite middleware for write operations (combines write + burst protection)

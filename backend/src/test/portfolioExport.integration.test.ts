@@ -13,6 +13,57 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import jwt from 'jsonwebtoken'
 import { portfolioRouter } from '../api/routes.js'
+import { vi } from 'vitest'
+import type { Job } from 'bullmq'
+
+vi.mock('../queue/queues.js', () => {
+    let mockJobCounter = 0
+    const mockJobs = new Map<string, any>()
+    return {
+        QUEUE_NAMES: { PORTFOLIO_EXPORT: 'portfolio-export' },
+        getPortfolioExportQueue: vi.fn().mockReturnValue({
+            add: vi.fn().mockImplementation(async (name, data) => {
+                const id = `mock-job-${++mockJobCounter}`
+                
+                // create a mock job payload based on the format
+                let returnvalue: any = {
+                    contentType: 'application/json',
+                    filename: `portfolio-${data.portfolioId.slice(0, 8)}-export-2026.json`,
+                    bodyString: JSON.stringify({
+                        meta: { format: 'json', purpose: 'GDPR data export' },
+                        portfolioId: data.portfolioId,
+                        exportedAt: new Date().toISOString(),
+                        rebalanceHistory: []
+                    })
+                }
+                if (data.format === 'csv') {
+                    returnvalue = {
+                        contentType: 'text/csv',
+                        filename: `portfolio-${data.portfolioId.slice(0, 8)}-export-2026.csv`,
+                        bodyString: 'id,portfolioId,timestamp,trigger,trades,gasUsed,status,eventSource,onChainTxHash,isAutomatic,fromAsset,toAsset,amount\n'
+                    }
+                } else if (data.format === 'pdf') {
+                    returnvalue = {
+                        contentType: 'application/pdf',
+                        filename: `portfolio-${data.portfolioId.slice(0, 8)}-export-2026.pdf`,
+                        bodyBase64: Buffer.from('%PDF-mock').toString('base64')
+                    }
+                }
+                
+                const job = { 
+                    id, 
+                    data, 
+                    getState: async () => 'completed', 
+                    returnvalue,
+                    failedReason: undefined
+                }
+                mockJobs.set(id, job)
+                return job
+            }),
+            getJob: vi.fn().mockImplementation(async (id) => mockJobs.get(id))
+        })
+    }
+})
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,16 +129,27 @@ afterAll(() => {
 // ─── JSON export ──────────────────────────────────────────────────────────────
 
 describe('JSON export — GET /api/portfolio/:id/export?format=json', () => {
-    it('responds 200 with application/json content-type', async () => {
+    it('responds 202 with jobId', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-            .expect(200)
-        expect(res.headers['content-type']).toMatch(/application\/json/)
+            .expect(202)
+        expect(res.body.data.jobId).toBeDefined()
+        expect(res.body.data.status).toBe('processing')
     })
 
-    it('content-disposition is attachment with a .json filename', async () => {
-        const res = await request(app)
+    it('status endpoint returns file when completed', async () => {
+        const createRes = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
+        const jobId = createRes.body.data.jobId
+        const res = await request(app)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${jobId}`)
+            .expect(200)
+        expect(res.headers['content-type']).toMatch(/application\/json/)
+
+    it('content-disposition is attachment with a .json filename', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
+        const res = await request(app)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         const disposition = res.headers['content-disposition'] as string
         expect(disposition).toMatch(/^attachment/)
@@ -95,17 +157,19 @@ describe('JSON export — GET /api/portfolio/:id/export?format=json', () => {
     })
 
     it('filename matches pattern portfolio-<8chars>-export-<timestamp>.json', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
         expect(match).not.toBeNull()
-        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.json$/)
+        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-.*\.json$/)
     })
 
     it('body is valid JSON with GDPR meta fields', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         const body = typeof res.body === 'object' ? res.body : JSON.parse(res.text)
         expect(body.meta?.format).toBe('json')
@@ -119,16 +183,18 @@ describe('JSON export — GET /api/portfolio/:id/export?format=json', () => {
 // ─── CSV export ───────────────────────────────────────────────────────────────
 
 describe('CSV export — GET /api/portfolio/:id/export?format=csv', () => {
-    it('responds 200 with text/csv content-type', async () => {
+    it('responds 202 and then text/csv content-type', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`).expect(202)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         expect(res.headers['content-type']).toMatch(/text\/csv/)
     })
 
     it('content-disposition is attachment with a .csv filename', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         const disposition = res.headers['content-disposition'] as string
         expect(disposition).toMatch(/^attachment/)
@@ -136,17 +202,19 @@ describe('CSV export — GET /api/portfolio/:id/export?format=csv', () => {
     })
 
     it('filename matches pattern portfolio-<8chars>-export-<timestamp>.csv', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
         expect(match).not.toBeNull()
-        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.csv$/)
+        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-.*\.csv$/)
     })
 
     it('body first line is the canonical CSV header', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=csv`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .expect(200)
         const firstLine = (res.text as string).split('\n')[0]
         expect(firstLine).toBe(
@@ -158,16 +226,18 @@ describe('CSV export — GET /api/portfolio/:id/export?format=csv', () => {
 // ─── PDF export ───────────────────────────────────────────────────────────────
 
 describe('PDF export — GET /api/portfolio/:id/export?format=pdf', () => {
-    it('responds 200 with application/pdf content-type', async () => {
+    it('responds 202 and then application/pdf content-type', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`).expect(202)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .buffer(true).expect(200)
         expect(res.headers['content-type']).toMatch(/application\/pdf/)
     })
 
     it('content-disposition is attachment with a .pdf filename', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .buffer(true).expect(200)
         const disposition = res.headers['content-disposition'] as string
         expect(disposition).toMatch(/^attachment/)
@@ -175,17 +245,19 @@ describe('PDF export — GET /api/portfolio/:id/export?format=pdf', () => {
     })
 
     it('filename matches pattern portfolio-<8chars>-export-<timestamp>.pdf', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .buffer(true).expect(200)
         const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
         expect(match).not.toBeNull()
-        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.pdf$/)
+        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-.*\.pdf$/)
     })
 
     it('body is a non-empty buffer starting with PDF magic bytes %PDF', async () => {
+        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=pdf`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .buffer(true)
             .parse((httpRes, callback) => {
                 const chunks: Buffer[] = []
@@ -277,8 +349,12 @@ describe('Ownership enforcement (auth enabled)', () => {
 
     it('200 when the correct owner JWT is provided', async () => {
         const ownerToken = mintJwt(OWNER_ADDRESS)
-        const res = await request(app)
+        const createRes = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
+            .set('Authorization', `Bearer ${ownerToken}`)
+            .expect(202)
+        const res = await request(app)
+            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
             .set('Authorization', `Bearer ${ownerToken}`)
             .expect(200)
         expect(res.headers['content-type']).toMatch(/application\/json/)

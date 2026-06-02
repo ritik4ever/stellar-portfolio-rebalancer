@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, Map};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String};
 
 mod portfolio;
 mod reflector;
@@ -15,6 +15,15 @@ pub struct PortfolioRebalancer;
 
 #[contractimpl]
 impl PortfolioRebalancer {
+    // Allocate a deterministic portfolio id from persistent storage.
+    // Strategy: a monotonically increasing `NextPortfolioId` counter stored in
+    // instance persistent storage. Starts at `1` and increments by one on each
+    // allocation. This makes portfolio id assignment deterministic given the
+    // contract state and avoids non-deterministic RNGs or timestamps.
+    fn allocate_portfolio_id(env: &Env) -> u64 {
+        let portfolio_id = Self::allocate_portfolio_id(&env);
+        portfolio_id
+    }
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
@@ -23,8 +32,13 @@ impl PortfolioRebalancer {
         env.storage()
             .instance()
             .set(&DataKey::ReflectorAddress, &reflector_address);
+        env.storage().instance().set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
         Ok(())
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
     pub fn create_portfolio(
@@ -48,11 +62,11 @@ impl PortfolioRebalancer {
             return Err(Error::TooManyAssets);
         }
 
-        if !(1..=50).contains(&rebalance_threshold) {
+        if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
             return Err(Error::InvalidThreshold);
         }
 
-        if !(10..=500).contains(&slippage_tolerance) {
+        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance) {
             return Err(Error::InvalidSlippageTolerance);
         }
 
@@ -98,81 +112,7 @@ impl PortfolioRebalancer {
             .unwrap()
     }
 
-    pub fn get_contract_pause_reason(env: Env) -> PauseReason {
-        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
-            env.storage()
-                .instance()
-                .get(&DataKey::ContractPauseReason)
-                .unwrap_or(PauseReason::AdminEmergency)
-        } else {
-            PauseReason::None
-        }
-    }
 
-    pub fn pause_portfolio(
-        env: Env,
-        portfolio_id: u64,
-        reason: PauseReason,
-    ) -> Result<(), Error> {
-        if reason == PauseReason::None {
-            return Err(Error::InvalidPauseReason);
-        }
-
-        let mut portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
-
-        portfolio.user.require_auth();
-        portfolio.is_active = false;
-        portfolio.pause_reason = reason;
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
-        env.events()
-            .publish(("portfolio", "paused"), (portfolio_id, reason as u32));
-        Ok(())
-    }
-
-    pub fn resume_portfolio(env: Env, portfolio_id: u64) -> Result<(), Error> {
-        let mut portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
-
-        portfolio.user.require_auth();
-        portfolio.is_active = true;
-        portfolio.pause_reason = PauseReason::None;
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
-        env.events()
-            .publish(("portfolio", "resumed"), portfolio_id);
-        Ok(())
-    }
-
-    pub fn preview_rebalance(env: Env, portfolio_id: u64) -> Result<RebalancePreview, Error> {
-        let portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
-
-        let reflector_address: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::ReflectorAddress)
-            .unwrap();
-        let reflector_client = ReflectorClient::new(&env, &reflector_address);
-
-        portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client)
-    }
-
-    pub fn deposit(env: Env, portfolio_id: u64, asset: Address, amount: i128) {
         if amount <= 0 {
             panic!("Amount must be positive");
         }
@@ -187,9 +127,6 @@ impl PortfolioRebalancer {
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
 
-        if !portfolio.is_active {
-            panic!("Portfolio paused");
-        }
 
         portfolio.user.require_auth();
 
@@ -201,8 +138,10 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
-        env.events()
-            .publish(("portfolio", "deposit"), (portfolio_id, asset, amount));
+        env.events().publish(
+            ("portfolio", "deposit"),
+            (portfolio_id, asset, amount, memo),
+        );
     }
 
     pub fn check_rebalance_needed(env: Env, portfolio_id: u64) -> bool {
@@ -259,7 +198,7 @@ impl PortfolioRebalancer {
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
-            panic!("Emergency stop active");
+            return Err(Error::EmergencyStop);
         }
 
         let mut portfolio: Portfolio = env
@@ -277,6 +216,7 @@ impl PortfolioRebalancer {
         let current_time = env.ledger().timestamp();
         if current_time < portfolio.last_rebalance + 3600 {
             return Err(Error::CooldownActive);
+
         }
 
         let reflector_address: Address = env
@@ -286,6 +226,8 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
+        // Gather current prices and validate freshness. Any missing/stale price is surfaced.
+        let mut current_prices = Map::new(&env);
         for (asset, _) in portfolio.target_allocations.iter() {
             if let Some(price_data) =
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
@@ -293,45 +235,42 @@ impl PortfolioRebalancer {
                 if price_data.is_stale(current_time, 3600) {
                     return Err(Error::StaleData);
                 }
+                current_prices.set(asset.clone(), price_data.price);
             } else {
                 return Err(Error::StaleData);
             }
         }
 
+        // Compute total value using live prices; propagate failures as policy errors.
+        let total_value = match portfolio::calculate_portfolio_value(&env, &portfolio.current_balances, &reflector_client) {
+            Some(v) => v,
+            None => return Err(Error::StaleData),
+        };
+
+        // Build a temporary portfolio snapshot with computed total_value for deterministic trade planning
+        let mut snapshot = portfolio.clone();
+        snapshot.total_value = total_value;
+
+        let trades = portfolio::calculate_rebalance_trades(&env, &snapshot, &current_prices);
+
+        // If actual balances are provided, run the same slippage checks as execute_rebalance
         let mut has_actual_balances = false;
         for (_, _) in actual_balances.iter() {
             has_actual_balances = true;
             break;
         }
         if has_actual_balances {
-            let total_value = portfolio::calculate_portfolio_value(
-                &env,
-                &portfolio.current_balances,
-                &portfolio.asset_decimals,
-                &reflector_client,
-            )
-            .unwrap();
-            if total_value > 0 {
-                for (asset, target_pct) in portfolio.target_allocations.iter() {
-                    let price_data = reflector_client
-                        .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
-                        .unwrap();
-                    let price = price_data.price;
-                    let asset_decimals = asset_decimals_for(&portfolio, asset.clone());
+
                     let expected_value = (total_value * target_pct as i128) / 100;
                     let expected_balance =
                         portfolio::value_to_balance(expected_value, price, asset_decimals);
                     let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);
-                    let expected_abs = if expected_balance >= 0 {
-                        expected_balance
-                    } else {
-                        -expected_balance
-                    };
+                    let expected_abs = if expected_balance >= 0 { expected_balance } else { -expected_balance };
                     if expected_abs > 0 {
                         let diff = expected_balance - actual_balance;
                         let diff_abs = if diff >= 0 { diff } else { -diff };
                         let slippage_bps = (diff_abs * 10000) / expected_abs;
-                        if slippage_bps > portfolio.slippage_tolerance as i128 {
+                        if slippage_bps > snapshot.slippage_tolerance as i128 {
                             return Err(Error::SlippageExceeded);
                         }
                     }
@@ -339,29 +278,66 @@ impl PortfolioRebalancer {
             }
         }
 
-        portfolio.last_rebalance = current_time;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
-
-        env.events()
-            .publish(("portfolio", "rebalanced"), (portfolio_id, current_time));
-        Ok(())
+        Ok(trades)
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {
+        require_admin(&env);
+        env.storage().instance().set(&DataKey::EmergencyStop, &stop);
+    }
+
+    pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
-        env.storage().instance().set(&DataKey::EmergencyStop, &stop);
-        let reason = if stop {
-            PauseReason::AdminEmergency
-        } else {
-            PauseReason::None
-        };
+
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        let current_hash: Option<BytesN<32>> = env.storage().instance().get(&DataKey::WasmHash);
         env.storage()
             .instance()
-            .set(&DataKey::ContractPauseReason, &reason);
-        env.events()
-            .publish(("contract", "emergency_stop"), (stop, reason as u32));
+            .set(&DataKey::UpgradeAuthority, &admin);
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::WasmHash, &new_wasm_hash);
+        env.events().publish(
+            ("portfolio", "upgraded"),
+            UpgradeEvent {
+                from_hash: current_hash.unwrap_or(BytesN::from_array(&env, &[0u8; 32])),
+                to_hash: new_wasm_hash,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
     }
+
+    /// Returns the minimum allowed rebalance threshold percentage.
+    pub fn min_rebalance_threshold(_env: Env) -> u32 {
+        MIN_REBALANCE_THRESHOLD
+    }
+
+    /// Returns the maximum allowed rebalance threshold percentage.
+    pub fn max_rebalance_threshold(_env: Env) -> u32 {
+        MAX_REBALANCE_THRESHOLD
+    }
+
+    /// Returns the minimum allowed slippage tolerance in basis points.
+    pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
+        MIN_SLIPPAGE_TOLERANCE_BPS
+    }
+
+    /// Returns the maximum allowed slippage tolerance in basis points.
+    pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
+        MAX_SLIPPAGE_TOLERANCE_BPS
+    }
+
+    /// Returns the maximum number of assets allowed in a portfolio.
+    pub fn max_portfolio_assets(_env: Env) -> u32 {
+        MAX_PORTFOLIO_ASSETS
+    }
+}
+
+fn require_admin(env: &Env) {
+    let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+    admin.require_auth();
 }

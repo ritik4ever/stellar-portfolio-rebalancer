@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js'
 import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWorker.js'
 import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnapshotWorker.js'
 import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyCleanupWorker.js'
+import { notificationService } from '../services/notificationService.js'
 
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
 const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
@@ -87,6 +88,44 @@ export async function startQueueScheduler(): Promise<void> {
         analyticsSnapshot: ANALYTICS_SNAPSHOT_CRON,
         idempotencyCleanup: IDEMPOTENCY_CLEANUP_CRON,
     })
+
+    // Schedule daily digest at 08:00 local time
+    const scheduleDaily = () => {
+        const now = new Date()
+        const next = new Date(now)
+        next.setHours(8, 0, 0, 0)
+        if (next <= now) next.setDate(next.getDate() + 1)
+        const ms = next.getTime() - now.getTime()
+        setTimeout(async () => {
+            try { await notificationService.processDigests('daily') } catch (e) { logger.error('Daily digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            setInterval(async () => { try { await notificationService.processDigests('daily') } catch (e) { logger.error('Daily digest failed', { error: e instanceof Error ? e.message : String(e) }) } }, 24 * 60 * 60 * 1000)
+        }, ms)
+    }
+
+    // Schedule weekly digest on Monday at 09:00 local time
+    const scheduleWeekly = () => {
+        const now = new Date()
+        const next = new Date(now)
+        next.setHours(9, 0, 0, 0)
+        // set to next Monday
+        const day = next.getDay()
+        const daysUntilMonday = ((1 - day) + 7) % 7 || 7
+        next.setDate(next.getDate() + daysUntilMonday)
+        if (next <= now) next.setDate(next.getDate() + 7)
+        const ms = next.getTime() - now.getTime()
+        setTimeout(async () => {
+            try { await notificationService.processDigests('weekly') } catch (e) { logger.error('Weekly digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            setInterval(async () => { try { await notificationService.processDigests('weekly') } catch (e) { logger.error('Weekly digest failed', { error: e instanceof Error ? e.message : String(e) }) } }, 7 * 24 * 60 * 60 * 1000)
+        }, ms)
+    }
+
+    try {
+        scheduleDaily()
+        scheduleWeekly()
+        logger.info('[SCHEDULER] Digest timers scheduled (daily, weekly)')
+    } catch (e) {
+        logger.error('Failed to schedule digest timers', { error: e instanceof Error ? e.message : String(e) })
+    }
 }
 
 /**
