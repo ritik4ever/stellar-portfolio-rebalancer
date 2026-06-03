@@ -14,6 +14,7 @@ It covers:
 - Queue worker setup and expectations
 - Frontend E2E tests with Playwright
 - Contract build and deploy steps
+- Key repo terms and glossary definitions
 - Common setup failures and fixes
 - Changelog workflow (`npm run changelog:update`)
 - Architecture Decision Records (ADRs) at [docs/adr/](docs/adr/README.md)
@@ -27,9 +28,21 @@ For a quick overview of the API contract see [API.md](API.md). Background servic
 
 1. **Check existing issues** or [create a new one](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/new/choose) using our issue templates
 2. Fork the repository and create a feature branch: `git checkout -b feature/your-feature`
-3. Follow the setup guide in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
-4. Make your changes and ensure all tests pass: `cd backend && npm test && cd ../frontend && npm test`
-5. Open a pull request targeting `main` (reference the issue with "Closes #123")
+3. Review the key project terms in [docs/GLOSSARY.md](docs/GLOSSARY.md)
+4. Follow the setup guide in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+5. Make your changes and ensure all tests pass: `cd backend && npm test && cd ../frontend && npm test`
+6. Open a pull request targeting `main` (reference the issue with "Closes #123")
+
+## Terminology
+
+Read [docs/GLOSSARY.md](docs/GLOSSARY.md) early in your onboarding process. It explains the language used by the backend, frontend, and Soroban contract interface, including:
+
+- `Portfolio` / `portfolio_id`
+- `Target allocation`, `Rebalance threshold`, `Slippage tolerance`
+- `Reflector oracle`
+- `Emergency stop` and `Cooldown period`
+
+This helps contributors complete the workflow without needing to read source code first.
 
 > **Before you open a PR**, review the [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md) guide to understand which CI checks must pass before your PR can be merged.
 
