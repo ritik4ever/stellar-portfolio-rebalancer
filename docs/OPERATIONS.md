@@ -33,14 +33,14 @@ For comprehensive queue monitoring, dashboard guidance, and operational workflow
 
 ### Durable cursor
 
-The indexer persists two keys in the `kv_store` table:
+The indexer persists its resume state in the `contract_event_indexer_state` table. The `kv_store` keys remain populated as legacy compatibility mirrors only.
 
 | Key                                   | Purpose                                              |
 | ------------------------------------- | ---------------------------------------------------- |
 | `soroban_event_indexer.cursor`        | Soroban RPC paging token for incremental event fetch |
 | `soroban_event_indexer.latest_ledger` | Last known ledger sequence from RPC response         |
 
-The cursor is written only after a batch completes successfully. If the process crashes mid-batch the same events are re-fetched on restart; this is safe because rebalance history rows are keyed by UUID and duplicates do not affect correctness.
+The cursor is written after each fetched page is processed and again when a sync succeeds. If the process crashes mid-page, that page can be re-fetched on restart; on-chain rebalance history rows store `on_chain_paging_token` with a unique index so replayed events are treated idempotently instead of duplicating history.
 
 **Startup resume logic:**
 
@@ -51,7 +51,7 @@ The cursor is written only after a batch completes successfully. If the process 
 ### Inspecting indexer position
 
 - **API:** `GET /api/v1/indexer/cursor` returns stored cursor, latest ledger, last successful/failed sync timestamps, and errors.
-- **SQL:** `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'`
+- **SQL:** `SELECT * FROM contract_event_indexer_state WHERE name = 'soroban_event_indexer'` (legacy mirrors are also visible with `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'`).
 
 ### Re-sync and backfill
 

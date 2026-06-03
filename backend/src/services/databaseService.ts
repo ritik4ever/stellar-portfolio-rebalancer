@@ -73,9 +73,27 @@ interface RebalanceHistoryRow {
   gas_used: string;
   status: string;
   is_automatic: number;
+  event_source?: string | null;
+  on_chain_confirmed?: number | null;
+  on_chain_event_type?: string | null;
+  on_chain_tx_hash?: string | null;
+  on_chain_ledger?: number | null;
+  on_chain_contract_id?: string | null;
+  on_chain_paging_token?: string | null;
+  is_simulated?: number | null;
   risk_alerts: string | null;
   error: string | null;
   details: string | null;
+}
+
+export interface IndexerCursorState {
+  name: string;
+  cursor?: string;
+  latestLedger?: number;
+  updatedAt?: string;
+  lastSuccessfulSyncAt?: string;
+  lastFailedSyncAt?: string;
+  lastError?: string;
 }
 
 interface ConsentAuditRow {
@@ -148,6 +166,14 @@ CREATE TABLE IF NOT EXISTS rebalance_history (
     gas_used      TEXT NOT NULL,
     status        TEXT NOT NULL,
     is_automatic  INTEGER NOT NULL DEFAULT 0,
+    event_source  TEXT NOT NULL DEFAULT 'offchain',
+    on_chain_confirmed INTEGER NOT NULL DEFAULT 0,
+    on_chain_event_type TEXT,
+    on_chain_tx_hash TEXT,
+    on_chain_ledger INTEGER,
+    on_chain_contract_id TEXT,
+    on_chain_paging_token TEXT,
+    is_simulated INTEGER NOT NULL DEFAULT 0,
     risk_alerts   TEXT,
     error         TEXT,
     details       TEXT,
@@ -159,6 +185,20 @@ CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id
 
 CREATE INDEX IF NOT EXISTS idx_rebalance_history_portfolio_id_timestamp
     ON rebalance_history (portfolio_id, timestamp);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_history_on_chain_paging_token
+    ON rebalance_history (on_chain_paging_token)
+    WHERE on_chain_paging_token IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS contract_event_indexer_state (
+    name                    TEXT PRIMARY KEY,
+    cursor                  TEXT,
+    latest_ledger           INTEGER,
+    updated_at              TEXT NOT NULL,
+    last_successful_sync_at TEXT,
+    last_failed_sync_at     TEXT,
+    last_error              TEXT
+);
 
 CREATE TABLE IF NOT EXISTS price_snapshots (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,7 +458,11 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
 }
 
 function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
-  const details = safeJsonParse(row.details, undefined, `event(${row.id}).details`);
+  const details = safeJsonParse<Record<string, any> | undefined>(
+    row.details,
+    undefined,
+    `event(${row.id}).details`,
+  );
   return {
     id: row.id,
     portfolioId: row.portfolio_id,
@@ -438,6 +482,21 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
     actor: details?.actor,
     source: details?.source,
     triggerMetadata: details?.triggerMetadata,
+    eventSource:
+      (row.event_source as RebalanceEvent["eventSource"]) ?? undefined,
+    onChainConfirmed:
+      row.on_chain_confirmed === undefined || row.on_chain_confirmed === null
+        ? undefined
+        : row.on_chain_confirmed === 1,
+    onChainEventType: row.on_chain_event_type ?? undefined,
+    onChainTxHash: row.on_chain_tx_hash ?? undefined,
+    onChainLedger: row.on_chain_ledger ?? undefined,
+    onChainContractId: row.on_chain_contract_id ?? undefined,
+    onChainPagingToken: row.on_chain_paging_token ?? undefined,
+    isSimulated:
+      row.is_simulated === undefined || row.is_simulated === null
+        ? undefined
+        : row.is_simulated === 1,
     details,
   };
 }
@@ -842,9 +901,7 @@ export class DatabaseService {
   // Asset registry (configurable assets)
   // ──────────────────────────────────────────
 
-  listAssets(
-    enabledOnly: boolean = true,
-  ): Array<{
+  listAssets(enabledOnly: boolean = true): Array<{
     symbol: string;
     name: string;
     contractAddress?: string;
@@ -886,9 +943,7 @@ export class DatabaseService {
     }
   }
 
-  getAssetBySymbol(
-    symbol: string,
-  ):
+  getAssetBySymbol(symbol: string):
     | {
         symbol: string;
         name: string;
@@ -1146,7 +1201,10 @@ export class DatabaseService {
   hasFullConsent(userId: string): boolean {
     const c = this.getConsent(userId);
     return Boolean(
-      c?.active && c.termsAcceptedAt && c.privacyAcceptedAt && c.cookieAcceptedAt,
+      c?.active &&
+      c.termsAcceptedAt &&
+      c.privacyAcceptedAt &&
+      c.cookieAcceptedAt,
     );
   }
 
@@ -1199,13 +1257,17 @@ export class DatabaseService {
    * Returns the number of deleted rows.
    */
   purgeOldConsentAuditEvents(retentionDays: number): number {
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+      Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const result = this.db
       .prepare("DELETE FROM consent_audit_events WHERE timestamp < ?")
       .run(cutoff);
     const count = result.changes;
     if (count > 0) {
-      logger.info(`[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`);
+      logger.info(
+        `[DB] Purged ${count} consent audit event(s) older than ${retentionDays} day(s)`,
+      );
     }
     return count;
   }
@@ -1214,7 +1276,9 @@ export class DatabaseService {
     // Verify a recent backup before destructive user data deletion
     this.verifyBackupExists();
     this.db.prepare("DELETE FROM legal_consent WHERE user_id = ?").run(userId);
-    this.db.prepare("DELETE FROM consent_audit_events WHERE user_id = ?").run(userId);
+    this.db
+      .prepare("DELETE FROM consent_audit_events WHERE user_id = ?")
+      .run(userId);
     const portfolios = this.db
       .prepare<
         [string],
@@ -1275,7 +1339,9 @@ export class DatabaseService {
         ...(eventData.details ?? {}),
         ...(eventData.actor !== undefined && { actor: eventData.actor }),
         ...(eventData.source !== undefined && { source: eventData.source }),
-        ...(eventData.triggerMetadata !== undefined && { triggerMetadata: eventData.triggerMetadata }),
+        ...(eventData.triggerMetadata !== undefined && {
+          triggerMetadata: eventData.triggerMetadata,
+        }),
       };
 
       const event: RebalanceEvent = {
