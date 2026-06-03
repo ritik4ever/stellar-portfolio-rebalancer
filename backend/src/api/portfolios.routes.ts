@@ -6,8 +6,7 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js';
-import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js';
+
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
@@ -29,14 +28,7 @@ const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 
-const mapRebalanceOptions = (body: unknown): ExecuteRebalanceOptions => {
-    const options = (body as { options?: { slippageOverrides?: Record<string, number> } } | undefined)?.options
-    return {
-        tradeSlippageOverrides: options?.slippageOverrides
-    }
-}
 
-portfoliosRouter.post('/portfolio', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
         const parsed = createPortfolioSchema.safeParse(req.body)
         if (!parsed.success) {
@@ -414,39 +406,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', requireJwtWhenEnabled, ...protectedCriticalLimiter, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
 
-        const portfolio = await stellarService.getPortfolio(portfolioId)
-        if (!portfolio) {
-            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        }
-
-        const authConfig = getAuthConfig()
-        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
-            return fail(res, 403, 'FORBIDDEN', 'You can only dry-run your own portfolio')
-        }
-
-        const result = await stellarService.dryRunRebalance(portfolioId, mapRebalanceOptions(req.body))
-        return ok(res, { result })
-    } catch (error) {
-        const message = getErrorMessage(error)
-        logger.error('[ERROR] Rebalance dry-run failed', { error: getErrorObject(error), portfolioId: req.params.id })
-
-        if (message.toLowerCase().includes('not found')) {
-            return fail(res, 404, 'NOT_FOUND', message)
-        }
-
-        return fail(res, 500, 'INTERNAL_ERROR', message)
-    }
-})
-
-// Manual portfolio rebalance
-portfoliosRouter.post('/portfolio/:id/rebalance', requireJwtWhenEnabled, ...protectedCriticalLimiter, idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 

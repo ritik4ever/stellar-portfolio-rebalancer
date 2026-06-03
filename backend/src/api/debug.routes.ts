@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { blockDebugInProduction } from '../middleware/debugGate.js'
 import { requireAdmin } from '../middleware/auth.js'
-import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { validateRequest } from '../middleware/validate.js'
 import { debugTestNotificationSchema } from './validation.js'
 import { notificationService } from '../services/notificationService.js'
@@ -21,7 +20,7 @@ const reflectorService = new ReflectorService()
  * Debug-only + admin-gated endpoint for sending a single test notification.
  * This keeps test-notification behavior explicit and isolated from production routes.
  */
-debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdmin, adminRateLimiter, validateRequest(debugTestNotificationSchema), async (req: Request, res: Response) => {
+debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdmin, validateRequest(debugTestNotificationSchema), async (req: Request, res: Response) => {
     try {
         const userId = (req.body.userId ?? req.user?.address) as string | undefined
         const normalizedEventType = (req.body.eventType ?? 'rebalance') as 'rebalance' | 'circuitBreaker' | 'priceMovement' | 'riskChange'

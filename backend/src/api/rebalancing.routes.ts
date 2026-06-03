@@ -7,7 +7,6 @@ import { contractEventIndexerService } from '../services/contractEventIndexer.js
 import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
-import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
 import { ok, fail } from '../utils/apiResponse.js'
 
@@ -101,7 +100,7 @@ rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, async (req: 
     }
 })
 
-rebalancingRouter.post('/rebalance/history/sync-onchain', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+rebalancingRouter.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request, res: Response) => {
     try {
         const result = await contractEventIndexerService.syncOnce()
         return ok(res, {
@@ -291,7 +290,7 @@ rebalancingRouter.get('/auto-rebalancer/status', async (req: Request, res: Respo
     }
 })
 
-rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -308,7 +307,7 @@ rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter,
     }
 })
 
-rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, adminRateLimiter, (req: Request, res: Response) => {
+rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -325,7 +324,7 @@ rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, adminRateLimiter, 
     }
 })
 
-rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')

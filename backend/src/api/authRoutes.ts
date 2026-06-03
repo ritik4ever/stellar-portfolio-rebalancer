@@ -10,7 +10,6 @@ import {
     getRecentAuthAuditEvents
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
-import { authRateLimiter } from '../middleware/rateLimit.js'
 import { validateRequest } from '../middleware/validate.js'
 import { loginSchema, refreshTokenSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
@@ -27,7 +26,7 @@ const router = Router()
  * Body: { address: string }
  * Response: { challenge: string }  — sign this exact string (UTF-8) with the wallet
  */
-router.post('/challenge', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/challenge', async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -53,16 +52,7 @@ router.post('/challenge', authRateLimiter, async (req: Request, res: Response) =
  *   signature — base64-encoded Ed25519 signature over the challenge string
  *               returned by POST /api/auth/challenge
  */
-function extractMetadata(req: Request): RefreshTokenMetadata {
-    return {
-        device: req.headers['x-device-id'] as string || undefined,
-        platform: req.headers['x-platform'] as string || undefined,
-        userAgent: req.headers['user-agent'] || undefined,
-        ipAddress: req.ip || req.socket?.remoteAddress || undefined,
-    }
-}
 
-router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -94,7 +84,7 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/refresh', authRateLimiter, validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
+router.post('/refresh', validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
