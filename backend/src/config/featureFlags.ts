@@ -10,6 +10,7 @@ export interface FeatureFlags {
     allowDemoBalanceFallback: boolean
     enableDemoDbSeed: boolean
     allowPublicUserPortfoliosInDemo: boolean
+    enableIssuerMetadata: boolean
 }
 
 let cachedOverrides: Partial<FeatureFlags> | null = null
@@ -89,6 +90,7 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
     const allowDemoBalanceFallback = parseBoolean(env.ALLOW_DEMO_BALANCE_FALLBACK, demoMode)
     const enableDemoDbSeed = parseBoolean(env.ENABLE_DEMO_DB_SEED, demoMode)
     const allowPublicUserPortfoliosInDemo = parseBoolean(env.ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO, false)
+    const enableIssuerMetadata = parseBoolean(env.ENABLE_ISSUER_METADATA, true)
 
     const flags: FeatureFlags = {
         demoMode,
@@ -97,7 +99,8 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
         allowMockPriceHistory,
         allowDemoBalanceFallback,
         enableDemoDbSeed,
-        allowPublicUserPortfoliosInDemo
+        allowPublicUserPortfoliosInDemo,
+        enableIssuerMetadata
     }
 
     const overrideFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : ''
@@ -131,7 +134,8 @@ export const getPublicFeatureFlags = (env: NodeJS.ProcessEnv = process.env): Rec
         ALLOW_MOCK_PRICE_HISTORY: flags.allowMockPriceHistory,
         ALLOW_DEMO_BALANCE_FALLBACK: flags.allowDemoBalanceFallback,
         ENABLE_DEMO_DB_SEED: flags.enableDemoDbSeed,
-        ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: flags.allowPublicUserPortfoliosInDemo
+        ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: flags.allowPublicUserPortfoliosInDemo,
+        ENABLE_ISSUER_METADATA: flags.enableIssuerMetadata
     }
 }
 

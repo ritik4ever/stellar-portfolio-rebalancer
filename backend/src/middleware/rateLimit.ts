@@ -1,27 +1,14 @@
 import { rateLimit } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import IORedis from "ioredis";
+import type { Request, Response, NextFunction } from "express";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
 import { validateStartupConfigOrThrow } from "../config/startupConfig.js";
 
-let config: any;
-try {
-  config = validateStartupConfigOrThrow();
-} catch (e) {
-  config = {
-    rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000,
-    rateLimitMax: Number(process.env.RATE_LIMIT_MAX) || 100,
-    rateLimitWriteMax: Number(process.env.RATE_LIMIT_WRITE_MAX) || 10,
-    rateLimitAuthMax: Number(process.env.RATE_LIMIT_AUTH_MAX) || 5,
-    rateLimitCriticalMax: Number(process.env.RATE_LIMIT_CRITICAL_MAX) || 3,
-    rateLimitBurstWindowMs: Number(process.env.RATE_LIMIT_BURST_WINDOW_MS) || 10 * 1000,
-    rateLimitBurstMax: Number(process.env.RATE_LIMIT_BURST_MAX) || 20,
-    rateLimitWriteBurstMax: Number(process.env.RATE_LIMIT_WRITE_BURST_MAX) || 3,
-  };
-}
+
 
 // Rate limiting configuration from startupConfig
 const GLOBAL_WINDOW_MS = config.rateLimitWindowMs;
@@ -133,24 +120,21 @@ function createKeyGenerator(prefix: string) {
   };
 }
 
-// Skip rate limiting for health checks and internal requests
+// ---------------------------------------------------------------------------
+// Legacy isProbePath kept for any external callers, but the authoritative
+// guard for rate-limit skipping is now isTrustedHealthProbe().
+// ---------------------------------------------------------------------------
+/** @internal Use isTrustedHealthProbe() in middleware skip functions. */
 function isProbePath(path: string): boolean {
-  return (
-    path === "/health" ||
-    path === "/ready" ||
-    path === "/readiness" ||
-    path === "/metrics"
-  );
+
 }
 
 function skipSuccessfulRequests(
-  req: import("express").Request,
-  res: import("express").Response,
+  req: Request,
+  res: Response,
 ): boolean {
-  // Skip health checks
-  if (isProbePath(req.path)) {
-    return true;
-  }
+  // Trusted health probes bypass all rate limiting.
+  if (isTrustedHealthProbe(req)) return true;
 
   // In test environment, don't skip any requests to ensure rate limiting works
   if (process.env.NODE_ENV === "test") {
@@ -182,7 +166,7 @@ export const burstProtectionLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("burst"),
-  skip: (req) => isProbePath(req.path),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 export const writeRateLimiter = rateLimit({
@@ -193,6 +177,7 @@ export const writeRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("write"),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 export const writeBurstLimiter = rateLimit({
@@ -203,7 +188,7 @@ export const writeBurstLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("write-burst"),
-  skip: (req) => isProbePath(req.path),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 export const authRateLimiter = rateLimit({
@@ -214,7 +199,7 @@ export const authRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("auth"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 export const criticalRateLimiter = rateLimit({
@@ -225,7 +210,7 @@ export const criticalRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("critical"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 export const adminRateLimiter = rateLimit({
@@ -236,7 +221,7 @@ export const adminRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("admin"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
 // Composite middleware definitions

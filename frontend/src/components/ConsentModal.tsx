@@ -76,6 +76,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             {' '}(disclaimers, liability, smart contract risks).
                         </span>
                     </label>
+
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input
                             type="checkbox"
@@ -96,6 +97,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                             {' '}(GDPR/CCPA compliant).
                         </span>
                     </label>
+
                     <label className="flex items-start gap-3 cursor-pointer">
                         <input
                             type="checkbox"
@@ -116,12 +118,14 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                         </span>
                     </label>
                 </div>
+
                 {error && (
                     <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm flex items-center gap-2">
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />
                         {error}
                     </div>
                 )}
+
                 <div className="mt-6 flex justify-end">
                     <button
                         type="button"

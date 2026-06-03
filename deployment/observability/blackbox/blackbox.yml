@@ -3,4 +3,20 @@ modules:
     prober: http
     timeout: 5s
     http:
+      valid_http_versions: [HTTP/1.1, HTTP/2]
+      method: GET
+      preferred_ip_protocol: ip4
+
+  websocket:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: [HTTP/1.1]
+      method: GET
+      headers:
+        Connection: Upgrade
+        Upgrade: websocket
+        Sec-WebSocket-Version: "13"
+        Sec-WebSocket-Key: "x3JJHMbDL1EzLkh9GBhXDw=="
+      valid_status_codes: [101]
       preferred_ip_protocol: ip4

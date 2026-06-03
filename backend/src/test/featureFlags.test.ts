@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getFeatureFlags, isFeatureFlagEnabled, clearFeatureFlagsCache } from '../config/featureFlags.js'
-import { validateStartupConfigOrThrow, logStartupSubsystems } from '../config/startupConfig.js'
+
 import { logger } from '../utils/logger.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -110,6 +109,24 @@ describe('featureFlags', () => {
         process.env = { ...process.env, ...REQUIRED_STARTUP_ENV }
         const config = validateStartupConfigOrThrow(process.env)
         expect(config.consentAuditRetentionDays).toBe(365)
+    })
+
+    it('parses notification delivery backoff from environment', () => {
+        process.env = {
+            ...process.env,
+            ...REQUIRED_STARTUP_ENV,
+            WEBHOOK_RETRY_COUNT: '2',
+            EMAIL_MAX_ATTEMPTS: '4',
+        }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.notificationDelivery.webhook.maxAttempts).toBe(3)
+        expect(config.notificationDelivery.email.maxAttempts).toBe(4)
+
+        const summary = buildStartupSummary(config)
+        expect(summary.notificationDelivery).toMatchObject({
+            email: { maxAttempts: 4 },
+            webhook: { maxAttempts: 3 },
+        })
     })
 
     it('parses METRICS_ALLOWLIST from environment', () => {

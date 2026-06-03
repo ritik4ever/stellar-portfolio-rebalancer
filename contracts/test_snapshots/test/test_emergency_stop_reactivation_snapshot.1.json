@@ -30,10 +30,12 @@
                   ]
                 },
                 {
+
                   "u32": 5
                 },
                 {
                   "u32": 50
+
                 }
               ]
             }
@@ -100,6 +102,7 @@
                     "hi": 0,
                     "lo": 100
                   }
+
                 }
               ]
             }
@@ -198,6 +201,7 @@
                   "map": [
                     {
                       "key": {
+
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -234,6 +238,7 @@
                     },
                     {
                       "key": {
+
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
@@ -242,6 +247,7 @@
                     },
                     {
                       "key": {
+
                         "symbol": "slippage_tolerance"
                       },
                       "val": {
@@ -332,6 +338,7 @@
                         "key": {
                           "vec": [
                             {
+
                               "symbol": "EmergencyStop"
                             }
                           ]
@@ -652,10 +659,12 @@
                   ]
                 },
                 {
+
                   "u32": 5
                 },
                 {
                   "u32": 50
+
                 }
               ]
             }
@@ -673,10 +682,7 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
-              },
-              {
-                "string": "created"
+
               }
             ],
             "data": {
@@ -842,6 +848,7 @@
                     "hi": 0,
                     "lo": 100
                   }
+
                 }
               ]
             }
@@ -859,10 +866,7 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
-              },
-              {
-                "string": "deposit"
+
               }
             ],
             "data": {
@@ -952,6 +956,7 @@
               "map": [
                 {
                   "key": {
+
                     "symbol": "current_balances"
                   },
                   "val": {
@@ -988,6 +993,7 @@
                 },
                 {
                   "key": {
+
                     "symbol": "rebalance_threshold"
                   },
                   "val": {
@@ -996,6 +1002,7 @@
                 },
                 {
                   "key": {
+
                     "symbol": "slippage_tolerance"
                   },
                   "val": {

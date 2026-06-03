@@ -39,7 +39,8 @@ consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (r
             privacyAcceptedAt: consent?.privacyAcceptedAt ?? null,
             cookieAcceptedAt: consent?.cookieAcceptedAt ?? null,
             revokedAt: consent?.revokedAt ?? null,
-            active: consent?.active ?? false
+            active: consent?.active ?? false,
+            documentVersion: consent?.documentVersion ?? null
         })
     } catch (error) {
         logger.error('[ERROR] Consent status failed', { error: getErrorObject(error) })
@@ -57,6 +58,7 @@ consentRouter.post('/consent/grant', requireJwtWhenEnabled, idempotencyMiddlewar
             terms: req.body.terms,
             privacy: req.body.privacy,
             cookies: req.body.cookies,
+            documentText: req.body.documentText,
             ...meta
         })
         const consent = databaseService.getConsent(userId)
@@ -69,6 +71,7 @@ consentRouter.post('/consent/grant', requireJwtWhenEnabled, idempotencyMiddlewar
             cookieAcceptedAt: consent?.cookieAcceptedAt ?? null,
             revokedAt: consent?.revokedAt ?? null,
             active: consent?.active ?? false,
+            documentVersion: consent?.documentVersion ?? null,
             ipAddress: meta.ipAddress ?? null
         })
     } catch (error) {
@@ -83,14 +86,15 @@ consentRouter.post('/consent/revoke', requireJwtWhenEnabled, idempotencyMiddlewa
         const userId = resolveConsentUserId(req, req.body.userId)
         if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         const meta = consentRequestMeta(req)
-        databaseService.revokeConsent(userId, meta)
+        databaseService.revokeConsent(userId, { ...meta, documentText: req.body.documentText })
         const consent = databaseService.getConsent(userId)
         return ok(res, {
             message: 'Consent revoked',
             accepted: false,
             userId,
             revokedAt: consent?.revokedAt ?? null,
-            active: consent?.active ?? false
+            active: consent?.active ?? false,
+            documentVersion: consent?.documentVersion ?? null
         })
     } catch (error) {
         logger.error('[ERROR] Revoke consent failed', { error: getErrorObject(error) })
@@ -116,9 +120,10 @@ consentRouter.get('/consent/audit', requireJwtWhenEnabled, validateQuery(consent
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
 consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
     try {
-        const { userId, terms, privacy, cookies } = req.body
-        databaseService.recordConsent(userId, { terms, privacy, cookies, ...consentRequestMeta(req) })
-        return ok(res, { message: 'Consent recorded', accepted: true })
+        const { userId, terms, privacy, cookies, documentText } = req.body
+        databaseService.recordConsent(userId, { terms, privacy, cookies, documentText, ...consentRequestMeta(req) })
+        const consent = databaseService.getConsent(userId)
+        return ok(res, { message: 'Consent recorded', accepted: true, documentVersion: consent?.documentVersion ?? null })
     } catch (error) {
         logger.error('[ERROR] Record consent failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))

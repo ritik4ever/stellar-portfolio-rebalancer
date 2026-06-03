@@ -16,6 +16,23 @@ vi.mock('../services/stellar.js', () => {
     })
     StellarService.prototype.checkRebalanceNeeded = vi.fn().mockResolvedValue(true)
     StellarService.prototype.executeRebalance = vi.fn().mockResolvedValue({ trades: 2, gasUsed: '0.01 XLM' })
+    StellarService.prototype.dryRunRebalance = vi.fn().mockResolvedValue({
+        portfolioId: 'portfolio-drifting',
+        canExecute: true,
+        overallStatus: 'ready',
+        trigger: 'Threshold exceeded (8.2%)',
+        estimatedTrades: [],
+        skippedTrades: [],
+        skippedAssets: [],
+        guardrails: {
+            riskManagement: { allowed: true, reason: 'OK' },
+            cooldown: { allowed: true, reason: 'OK' },
+            marketConditions: { allowed: true, reason: 'OK' },
+            rebalanceRequired: { allowed: true, reason: 'OK' },
+        },
+        feeEstimate: { totalFeeXlm: 0, totalFeeUsd: 0, xlmPriceUsd: 0.35 },
+        estimatedTotalSlippageBps: 0,
+    })
     return { StellarService }
 })
 
@@ -66,12 +83,9 @@ vi.mock('../services/notificationService.js', () => ({
     notificationService: { notify: vi.fn().mockResolvedValue(undefined) },
 }))
 
-vi.mock('../services/rebalanceLock.js', () => ({
-    rebalanceLockService: {
-        acquireLock: vi.fn().mockResolvedValue(true),
-        releaseLock: vi.fn().mockResolvedValue(true),
-        isLocked: vi.fn().mockResolvedValue(false),
-    },
+vi.mock('../queue/workers/workerRuntime.js', () => ({
+    acquireWorkerLock: vi.fn().mockResolvedValue(true),
+    releaseWorkerLock: vi.fn().mockResolvedValue(true),
 }))
 
 vi.mock('../queue/queues.js', () => ({
@@ -163,6 +177,20 @@ describe('AutoRebalancer Pipeline Integration', () => {
                 isAutomatic: true,
             })
         )
+    })
+
+    it('dryRunPortfolioRebalance delegates to stellar without executing or recording history', async () => {
+        const { AutoRebalancerService } = await import('../services/autoRebalancer.js')
+        const service = new AutoRebalancerService()
+
+        const result = await service.dryRunPortfolioRebalance('portfolio-drifting')
+
+        expect(StellarService.prototype.dryRunRebalance).toHaveBeenCalledWith('portfolio-drifting', {})
+        expect(StellarService.prototype.executeRebalance).not.toHaveBeenCalled()
+        expect(rebalanceHistoryService.recordRebalanceEvent).not.toHaveBeenCalled()
+        expect(result.guardrails).toBeDefined()
+        expect(result.estimatedTrades).toBeDefined()
+        expect(result.skippedAssets).toBeDefined()
     })
 
     it('should simulate a portfolio within threshold and verify no rebalance occurs', async () => {

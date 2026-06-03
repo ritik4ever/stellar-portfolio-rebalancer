@@ -101,7 +101,7 @@ assetsRouter.get('/admin/rate-limits/metrics', requireAdmin, (req: Request, res:
 assetsRouter.post('/admin/assets', requireAdmin, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
-        assetRegistryService.add(
+        await assetRegistryService.add(
             symbol,
             name,
             {
@@ -167,16 +167,15 @@ assetsRouter.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, 
     }
 })
 
-/** Admin: enable/disable asset */
-assetsRouter.patch('/admin/assets/:symbol', requireAdmin, idempotencyMiddleware, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
+
     try {
         const symbol = req.params.symbol
-        const { enabled } = req.body
+        const { enabled, quarantined } = req.body
         const prior = assetRegistryService.getBySymbol(symbol)
-        const updated = assetRegistryService.setEnabled(symbol, enabled)
-        if (!updated) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
-        const asset = assetRegistryService.getBySymbol(symbol)
-        if (prior) {
+        if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        if (enabled !== undefined) {
+            assetRegistryService.setEnabled(symbol, enabled)
             logAudit('asset_registry_asset_updated', {
                 domain: 'asset_registry',
                 actorPublicKey: req.adminPublicKey,
@@ -186,9 +185,65 @@ assetsRouter.patch('/admin/assets/:symbol', requireAdmin, idempotencyMiddleware,
                 newValue: enabled
             })
         }
+
+        if (quarantined !== undefined) {
+            assetRegistryService.setQuarantined(symbol, quarantined)
+            logAudit('asset_registry_asset_updated', {
+                domain: 'asset_registry',
+                actorPublicKey: req.adminPublicKey,
+                symbol: prior.symbol,
+                field: 'quarantined',
+                previousValue: prior.isQuarantined,
+                newValue: quarantined
+            })
+        }
+
+        const asset = assetRegistryService.getBySymbol(symbol)
         return ok(res, { asset })
     } catch (error) {
-        logger.error('[ERROR] Admin set asset enabled failed', { error: getErrorObject(error) })
+        logger.error('[ERROR] Admin set asset attributes failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: refresh specific asset source */
+assetsRouter.post('/admin/assets/:symbol/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol
+        const prior = assetRegistryService.getBySymbol(symbol)
+        if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        const success = await assetRegistryService.refreshAssetSource(symbol)
+        const asset = assetRegistryService.getBySymbol(symbol)
+
+        logAudit('asset_registry_source_refreshed', {
+            domain: 'asset_registry',
+            actorPublicKey: req.adminPublicKey,
+            symbol,
+            success
+        })
+
+        return ok(res, { symbol, success, asset })
+    } catch (error) {
+        logger.error('[ERROR] Admin refresh asset failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: batch refresh all asset sources */
+assetsRouter.post('/admin/assets/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const results = await assetRegistryService.refreshAllAssetSources()
+
+        logAudit('asset_registry_batch_refreshed', {
+            domain: 'asset_registry',
+            actorPublicKey: req.adminPublicKey,
+            count: Object.keys(results).length
+        })
+
+        return ok(res, { results })
+    } catch (error) {
+        logger.error('[ERROR] Admin batch refresh failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
