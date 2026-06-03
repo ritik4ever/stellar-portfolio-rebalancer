@@ -1,22 +1,82 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { walletManager } from '../utils/walletManager'
 import { WalletAdapter } from '../utils/walletAdapters'
+import { getConfiguredNetwork, detectWalletNetwork } from '../utils/networkDetection'
+import { NetworkMismatchBanner } from './NetworkMismatchBanner'
+import { runBootDiagnostics, type BootCheck } from '../app/walletBoot'
+import BootDiagnosticsPanel from './BootDiagnosticsPanel'
+import { api, ENDPOINTS } from '../config/api'
 
 interface WalletSelectorProps {
     onConnect: (publicKey: string) => void
     onError: (error: string) => void
 }
 
+interface NetworkMismatchState {
+    configured: string
+    detected: string
+    walletType: string
+}
+
 export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onError }) => {
     const [connecting, setConnecting] = useState<string | null>(null)
     const [availableWallets, setAvailableWallets] = useState<WalletAdapter[]>([])
+    const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
+    const [showDiagnostics, setShowDiagnostics] = useState(false)
+    const [autoReconnect, setAutoReconnect] = useState<boolean>(walletManager.getAutoReconnect())
+    const [networkMismatch, setNetworkMismatch] = useState<NetworkMismatchState | null>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         const wallets = walletManager.getAvailableWallets()
         setAvailableWallets(wallets)
+        runChecks()
     }, [])
 
+    useEffect(() => {
+        if (availableWallets.length > 0 && containerRef.current) {
+            const firstButton = containerRef.current.querySelector<HTMLButtonElement>('button')
+            firstButton?.focus()
+        }
+    }, [availableWallets])
+
+    const runChecks = async () => {
+        setBootChecks([
+            { id: 'wallet-detection', label: 'Wallet extension', status: 'loading' },
+            { id: 'api-reachability', label: 'API reachability', status: 'loading' },
+        ])
+        const result = await runBootDiagnostics({
+            checkWallets: () => {
+                const wallets = walletManager.getAvailableWallets()
+                return wallets.length > 0
+            },
+            checkApi: async () => {
+                try {
+                    await api.get(ENDPOINTS.HEALTH)
+                    return true
+                } catch {
+                    return false
+                }
+            },
+        })
+        setBootChecks(result.checks)
+    }
+
     const handleConnect = async (walletType: string) => {
+        setNetworkMismatch(null)
+        const configuredNetwork = getConfiguredNetwork()
+
+        const detected = await detectWalletNetwork(walletType)
+        if (detected && configuredNetwork !== 'unknown' && detected !== configuredNetwork) {
+            setNetworkMismatch({
+                configured: configuredNetwork,
+                detected,
+                walletType,
+            })
+            onError(`Network mismatch: wallet on ${detected}, app expects ${configuredNetwork}`)
+            return
+        }
+
         setConnecting(walletType)
         try {
             const publicKey = await walletManager.connect(walletType as any)
@@ -40,31 +100,106 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
         }
     }
 
+    const toggleAutoReconnect = () => {
+        const next = !autoReconnect
+        setAutoReconnect(next)
+        walletManager.setAutoReconnect(next)
+    }
+
     if (availableWallets.length === 0) {
         return (
-            <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800">
-                <p className="text-yellow-800 dark:text-yellow-300 text-sm">
-                    No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.
-                </p>
+            <div>
+                <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800" role="alert">
+                    <p className="text-yellow-800 dark:text-yellow-300 text-sm">
+                        No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.
+                    </p>
+                </div>
+                <div className="mt-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                    <button
+                        type="button"
+                        onClick={() => setShowDiagnostics(!showDiagnostics)}
+                        className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    >
+                        {showDiagnostics ? 'Hide' : 'Show'} startup diagnostics
+                    </button>
+                    {showDiagnostics ? (
+                        <BootDiagnosticsPanel
+                            checks={bootChecks}
+                            onRetry={runChecks}
+                            className="mt-2"
+                        />
+                    ) : null}
+                </div>
             </div>
         )
     }
 
     return (
-        <div className="space-y-3">
-            {availableWallets.map((wallet) => (
+        <div className="space-y-3" ref={containerRef} role="group" aria-label="Available wallets">
+            {networkMismatch && (
+                <NetworkMismatchBanner
+                    configuredNetwork={networkMismatch.configured as any}
+                    walletNetwork={networkMismatch.detected as any}
+                    onDismiss={() => setNetworkMismatch(null)}
+                />
+            )}
+            <p className="text-sm text-gray-600 dark:text-gray-400" id="wallet-selector-label">
+                Select a wallet to connect
+            </p>
+            {availableWallets.map((wallet, index) => (
                 <button
                     key={wallet.type}
                     onClick={() => handleConnect(wallet.type)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handleConnect(wallet.type)
+                        }
+                    }}
                     disabled={connecting === wallet.type}
-                    className="w-full flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:text-gray-200"
+                    aria-describedby={connecting === wallet.type ? 'connecting-description' : undefined}
+                    aria-label={`Connect to ${wallet.name}`}
+                    className="wallet-selector-btn w-full flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:text-gray-200"
                 >
                     <span className="font-medium">{wallet.name}</span>
                     {connecting === wallet.type && (
-                        <span className="text-sm text-blue-600">Connecting...</span>
+                        <span className="text-sm text-blue-600" id="connecting-description">Connecting...</span>
                     )}
                 </button>
             ))}
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={autoReconnect}
+                    aria-label="Auto-reconnect on page refresh"
+                    onClick={toggleAutoReconnect}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${autoReconnect ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                    <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${autoReconnect ? 'translate-x-[18px]' : 'translate-x-[3px]'}`}
+                    />
+                </button>
+                <label className="text-xs text-gray-500 dark:text-gray-400 select-none">
+                    Auto-reconnect on page refresh
+                </label>
+            </div>
+            <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+                <button
+                    type="button"
+                    onClick={() => setShowDiagnostics(!showDiagnostics)}
+                    className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                >
+                    {showDiagnostics ? 'Hide' : 'Show'} startup diagnostics
+                </button>
+                {showDiagnostics ? (
+                    <BootDiagnosticsPanel
+                        checks={bootChecks}
+                        onRetry={runChecks}
+                        className="mt-2"
+                    />
+                ) : null}
+            </div>
         </div>
     )
 }

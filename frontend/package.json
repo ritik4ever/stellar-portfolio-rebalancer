@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:visual": "PLAYWRIGHT_VISUAL_BASELINES=1 playwright test --project=visual-regression"
   },
   "dependencies": {
     "@sentry/react": "^9.14.0",
@@ -38,6 +39,7 @@
     "@vitejs/plugin-react": "^4.1.0",
     "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.4.16",
+    "esbuild": "^0.28.0",
     "jsdom": "^26.1.0",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5",

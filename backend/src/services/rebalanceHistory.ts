@@ -15,6 +15,9 @@ export interface RebalanceEvent {
     isAutomatic?: boolean
     riskAlerts?: any[]
     error?: string
+    actor?: 'user' | 'system' | 'admin' | 'scheduler'
+    source?: 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance'
+    triggerMetadata?: Record<string, unknown>
     eventSource?: 'offchain' | 'simulated' | 'onchain'
     onChainConfirmed?: boolean
     onChainEventType?: string
@@ -68,6 +71,9 @@ export class RebalanceHistoryService {
         prices?: PricesMap
         /** Stored portfolio record. Must have `allocations` as a `Record<string, number>`. */
         portfolio?: { allocations: Record<string, number> }
+        actor?: RebalanceEvent['actor']
+        source?: RebalanceEvent['source']
+        triggerMetadata?: Record<string, unknown>
         eventSource?: RebalanceEvent['eventSource']
         onChainConfirmed?: boolean
         onChainEventType?: string
@@ -122,6 +128,10 @@ export class RebalanceHistoryService {
             }
         }
 
+        // Infer actor/source from trigger when not explicitly provided
+        const actor = eventData.actor ?? (eventData.isAutomatic ? 'system' : 'user')
+        const source = eventData.source ?? (eventData.isAutomatic ? 'auto_rebalance' : 'dashboard')
+
         // Record event in database
         const event = databaseService.recordRebalanceEvent({
             portfolioId: eventData.portfolioId,
@@ -134,6 +144,9 @@ export class RebalanceHistoryService {
             error: eventData.error,
             details,
             eventSource,
+            actor,
+            source,
+            triggerMetadata: eventData.triggerMetadata,
             onChainConfirmed: eventData.onChainConfirmed,
             onChainEventType: eventData.onChainEventType,
             onChainTxHash: eventData.onChainTxHash,
@@ -145,7 +158,9 @@ export class RebalanceHistoryService {
 
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
             eventId: event.id,
-            isAutomatic: eventData.isAutomatic ?? false
+            isAutomatic: eventData.isAutomatic ?? false,
+            actor,
+            source
         })
         return event
     }

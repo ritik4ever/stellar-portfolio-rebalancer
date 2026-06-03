@@ -39,6 +39,20 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'visual-regression',
+      testMatch: [
+        /auth\.spec\.ts/,
+        /portfolio-create\.spec\.ts/,
+        /rebalance-history\.spec\.ts/,
+      ],
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1366, height: 900 },
+        deviceScaleFactor: 1,
+        screenshot: 'on',
+      },
+    },
     // For this issue, we will mostly rely on Chromium, but we can enable others if needed.
     // {
     //   name: 'firefox',

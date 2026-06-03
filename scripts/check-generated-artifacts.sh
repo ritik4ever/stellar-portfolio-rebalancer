@@ -1,5 +1,27 @@
 #!/usr/bin/env bash
-set -euo pipefail
+#
+# check-generated-artifacts.sh
+#
+# Pre-merge guard for generated outputs. It enforces two things:
+#
+#   A. Runtime/build artifacts must never be committed (databases, coverage,
+#      Playwright reports, test-results, etc.).
+#   B. Generated docs/code outputs must be FRESH — i.e. regenerating them from
+#      source produces no diff. Today that means backend/openapi.json must match
+#      what `npm run openapi:export` produces from backend/src/openapi/spec.ts.
+#
+# Usage:
+#   scripts/check-generated-artifacts.sh [<base-ref>]
+#     <base-ref>   git ref to diff against (default: origin/main)
+#
+# Environment:
+#   SKIP_OPENAPI_FRESHNESS=1   skip the OpenAPI regenerate-and-diff check
+#                              (the blocklist check still runs)
+#
+# Exit 0 when everything is clean; exit 1 when a runtime artifact is committed
+# or a generated file is stale. Failures print the exact remediation command.
+
+set -uo pipefail
 
 BASE_REF="${1:-origin/main}"
 
@@ -18,6 +40,9 @@ if [[ -z "${CHANGED_FILES}" ]]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# Part A — block committed runtime/build artifacts
+# ---------------------------------------------------------------------------
 OFFENDING_FILES=()
 while IFS= read -r file; do
   [[ -z "${file}" ]] && continue
@@ -27,17 +52,64 @@ while IFS= read -r file; do
 done <<< "${CHANGED_FILES}"
 
 if [[ "${#OFFENDING_FILES[@]}" -gt 0 ]]; then
-  echo "Generated/runtime artifacts are not allowed in tracked changes:"
-  printf '%s\n' "${OFFENDING_FILES[@]}"
+  echo "✗ Generated/runtime artifacts are not allowed in tracked changes:"
+  printf '  %s\n' "${OFFENDING_FILES[@]}"
+  echo "  Remove them from the PR (they should be git-ignored)."
   exit 1
 fi
 
-if [[ "${CHANGED_FILES}" == *"backend/openapi.json"* ]]; then
-  if [[ "${CHANGED_FILES}" != *"backend/src/api/spec.ts"* ]]; then
-    echo "Detected change to backend/openapi.json without backend/src/api/spec.ts."
-    echo "If this file is generated, regenerate from source or exclude it from the PR."
+# ---------------------------------------------------------------------------
+# Part B — verify generated OpenAPI export is fresh (no drift from source)
+# ---------------------------------------------------------------------------
+SPEC_SOURCE="backend/src/openapi/spec.ts"
+SPEC_EXPORT="backend/openapi.json"
+
+needs_openapi_check=false
+case "${CHANGED_FILES}" in
+  *"${SPEC_EXPORT}"*) needs_openapi_check=true ;;
+esac
+case "${CHANGED_FILES}" in
+  *"${SPEC_SOURCE}"*) needs_openapi_check=true ;;
+esac
+
+if [[ "${needs_openapi_check}" == true && "${SKIP_OPENAPI_FRESHNESS:-0}" != "1" ]]; then
+  if command -v npm >/dev/null 2>&1 && [[ -d backend/node_modules ]]; then
+    echo "Verifying ${SPEC_EXPORT} is freshly generated from ${SPEC_SOURCE}…"
+    if ! ( cd backend && npm run --silent openapi:export ); then
+      echo "✗ Failed to regenerate ${SPEC_EXPORT} (npm run openapi:export errored)."
+      exit 1
+    fi
+    if ! git diff --quiet -- "${SPEC_EXPORT}"; then
+      echo "✗ ${SPEC_EXPORT} is out of date with ${SPEC_SOURCE}."
+      echo "  Run: cd backend && npm run openapi:export   then commit the regenerated file."
+      git --no-pager diff --stat -- "${SPEC_EXPORT}" || true
+      exit 1
+    fi
+    echo "✓ ${SPEC_EXPORT} is fresh."
+  else
+    echo "… Backend dependencies not installed; skipping OpenAPI freshness regeneration."
+    echo "  Verify locally with: cd backend && npm ci && npm run spec:check"
+    echo "  (CI installs deps so the 'Generated Artifact Guard' job runs this check.)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Part C — enforce API change notes when route/schema changes materially
+# ---------------------------------------------------------------------------
+if [[ "${needs_openapi_check}" == true ]]; then
+  echo "API definition changes detected. Verifying change notes are provided…"
+  has_notes=false
+  case "${CHANGED_FILES}" in
+    *"API.md"*) has_notes=true ;;
+    *"CHANGELOG.md"*) has_notes=true ;;
+  esac
+
+  if [[ "${has_notes}" == false ]]; then
+    echo "✗ API changes require documentation updates."
+    echo "  Please update API.md and/or CHANGELOG.md to document the route/schema updates."
     exit 1
   fi
+  echo "✓ API change notes verified."
 fi
 
 echo "Generated artifact guard passed."

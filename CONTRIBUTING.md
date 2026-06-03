@@ -17,6 +17,8 @@ It covers:
 - Key repo terms and glossary definitions
 - Common setup failures and fixes
 - Changelog workflow (`npm run changelog:update`)
+- Architecture Decision Records (ADRs) at [docs/adr/](docs/adr/README.md)
+
 
 For a quick overview of the API contract see [API.md](API.md). Background services and troubleshooting are covered in [docs/OPERATIONS.md](docs/OPERATIONS.md). Feature flags are summarized in [docs/FEATURE_FLAGS.md](docs/FEATURE_FLAGS.md), and Soroban event shapes for the indexer are in [docs/CONTRACT_EVENTS.md](docs/CONTRACT_EVENTS.md).
 
@@ -41,6 +43,8 @@ Read [docs/GLOSSARY.md](docs/GLOSSARY.md) early in your onboarding process. It e
 - `Emergency stop` and `Cooldown period`
 
 This helps contributors complete the workflow without needing to read source code first.
+
+> **Before you open a PR**, review the [Branch Protection & Required Checks](docs/BRANCH_PROTECTION.md) guide to understand which CI checks must pass before your PR can be merged.
 
 ## Issue Templates
 

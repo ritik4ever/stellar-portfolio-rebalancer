@@ -24,7 +24,19 @@ CREATE TABLE IF NOT EXISTS rebalance_events (
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_portfolio ON rebalance_events(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_timestamp ON rebalance_events(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_rebalance_events_source ON rebalance_events(event_source, timestamp DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_events_chain_token ON rebalance_events(on_chain_paging_token);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rebalance_events_chain_token
+    ON rebalance_events(on_chain_paging_token)
+    WHERE on_chain_paging_token IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS contract_event_indexer_state (
+    name VARCHAR(128) PRIMARY KEY,
+    cursor VARCHAR(512),
+    latest_ledger BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_successful_sync_at TIMESTAMPTZ,
+    last_failed_sync_at TIMESTAMPTZ,
+    last_error TEXT
+);
 
 CREATE TABLE IF NOT EXISTS analytics_snapshots (
     id SERIAL PRIMARY KEY,
@@ -65,3 +77,21 @@ CREATE TABLE IF NOT EXISTS notification_logs (
 
 CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_notification_logs_created_at ON notification_logs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS portfolio_drafts (
+    id VARCHAR(64) PRIMARY KEY,
+    user_address VARCHAR(256) NOT NULL,
+    label VARCHAR(256),
+    allocations JSONB NOT NULL DEFAULT '{}',
+    threshold REAL NOT NULL DEFAULT 5,
+    slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
+    strategy VARCHAR(32) NOT NULL DEFAULT 'threshold',
+    strategy_config JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+    published_portfolio_id VARCHAR(64)
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_user ON portfolio_drafts(user_address, expires_at DESC);
+CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_expires ON portfolio_drafts(expires_at);

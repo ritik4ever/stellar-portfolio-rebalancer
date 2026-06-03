@@ -7,6 +7,7 @@ on:
     paths:
       - 'contracts/**'
       - '.github/workflows/contract-smoke.yml'
+      - 'docs/CONTRIBUTING.md'
   push:
     branches:
       - main
@@ -14,6 +15,7 @@ on:
     paths:
       - 'contracts/**'
       - '.github/workflows/contract-smoke.yml'
+      - 'docs/CONTRIBUTING.md'
 
 jobs:
   soroban-testnet-smoke:
@@ -54,9 +56,57 @@ jobs:
       - name: Install Soroban CLI
         run: cargo install --locked soroban-cli
 
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+
+      - name: Audit Rust dependencies
+        working-directory: ./contracts
+        run: |
+          cargo generate-lockfile
+          cargo deny check
+
       - name: Build contract wasm
         working-directory: ./contracts
         run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Run benchmarks
+        working-directory: ./contracts
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo test benchmark_ -- --nocapture > bench_output.txt || true
+          python3 -c '
+          import json
+          lines = [line.strip() for line in open("bench_output.txt") if "BENCHMARK_RESULT|" in line]
+          records = []
+          with open("bench_summary.md", "w") as f:
+              f.write("## Benchmark Results\n")
+              f.write("| Benchmark | CPU | Baseline CPU | Δ CPU | Mem | Baseline Mem | Δ Mem |\n")
+              f.write("|-----------|-----|--------------|-------|-----|--------------|-------|\n")
+              for line in lines:
+                  parts = line.split("|")
+                  name, cpu, base_cpu, mem, base_mem = parts[1], int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5])
+                  cpu_diff = (cpu - base_cpu) / base_cpu * 100
+                  mem_diff = (mem - base_mem) / base_mem * 100
+                  f.write(f"| `{name}` | {cpu:,} | {base_cpu:,} | {cpu_diff:+.2f}% | {mem:,} | {base_mem:,} | {mem_diff:+.2f}% |\n")
+                  records.append({"benchmark": name, "cpu": cpu, "baseline_cpu": base_cpu, "mem": mem, "baseline_mem": base_mem})
+          with open("bench_results.json", "w") as f:
+              json.dump(records, f, indent=2)
+          '
+          cat bench_summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload machine-readable benchmark JSON
+        uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: bench-results-json
+          path: contracts/bench_results.json
+
+      - name: Post benchmark summary
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          header: benchmark
+          path: contracts/bench_summary.md
 
       - name: Deploy and initialize on testnet
         working-directory: ./contracts

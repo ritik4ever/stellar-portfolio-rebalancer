@@ -1,6 +1,6 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
-.PHONY: build test bench clean deploy-testnet deploy-mainnet setup-testnet
+
 
 # Default target
 all: build
@@ -8,6 +8,7 @@ all: build
 # Build the contract
 build:
 	cargo build --target wasm32-unknown-unknown --release
+	@$(MAKE) hash
 
 # Build with optimization
 build-optimized:
@@ -17,6 +18,30 @@ build-optimized:
 	else \
 		echo "Soroban CLI not found. Install it for optimization."; \
 	fi
+	@$(MAKE) hash
+
+# Calculate WASM hash
+hash:
+	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm ]; then \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Release):    " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Release):    " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+		else \
+			echo -n "WASM Hash (Release):    " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | awk '{print $$NF}'; \
+		fi; \
+	else \
+		echo "WASM target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm not found. Build it first."; \
+	fi
+	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm ]; then \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Optimized):  " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			echo -n "WASM Hash (Optimized):  " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+		else \
+			echo -n "WASM Hash (Optimized):  " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | awk '{print $$NF}'; \
+		fi; \
+	fi
 
 # Run tests
 test:
@@ -25,6 +50,16 @@ test:
 # Run gas/cost benchmarks
 bench:
 	cargo test benchmark_
+
+# Run benchmarks and emit JSON output for CI diffing
+bench-json:
+	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	awk '/^BENCHMARK_RESULT\|/ {split($$0, a, "|"); printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", a[2], a[3], a[4], a[5], a[6]}' | \
+	jq -s '.' > bench_results.json 2>/dev/null || \
+	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	grep '^BENCHMARK_RESULT|' | \
+	sed 's/^BENCHMARK_RESULT|//' | \
+	awk -F'|' '{printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", $$1, $$2, $$3, $$4, $$5}' > bench_results.json
 
 # Clean build artifacts
 clean:
@@ -132,6 +167,15 @@ setup-testnet:
 	@echo "  3) Deploy: soroban contract deploy --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm --source deployer --network testnet"
 	@echo "  For more commands, see docs/soroban-cookbook.md"
 
+# Snapshot diff: compare two snapshot directories or files
+# Usage: make snapshot-diff BEFORE=<path> AFTER=<path> [ARGS=--json]
+snapshot-diff:
+	@if [ -z "$(BEFORE)" ] || [ -z "$(AFTER)" ]; then \
+		echo "Usage: make snapshot-diff BEFORE=<before-dir-or-file> AFTER=<after-dir-or-file> [ARGS=--json]"; \
+		exit 1; \
+	fi
+	node ../scripts/snapshot-diff.mjs $(BEFORE) $(AFTER) $(ARGS)
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -145,4 +189,12 @@ help:
 	@echo "  init-contract   - Initialize deployed contract"
 	@echo "  install-tools   - Install required tools"
 	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
-	@echo "  help            - Show this help message"
+
+# Contract release checklist
+release-checklist:
+	@echo "Release checklist: ../docs/RELEASE_CHECKLIST.md"
+	@echo "Contract release steps:"
+	@echo "  1) Build the WASM artifact with 'make build'"
+	@echo "  2) Confirm the contract SBOM and attestation are present in CI"
+	@echo "  3) Hand off backend deploy steps to the release owner"
+	@echo "  4) Verify post-release health checks before closing the release"

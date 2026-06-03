@@ -1,5 +1,9 @@
 import { browserPriceService } from '../services/browserPriceService'
-import { getAccessToken, refresh } from '../services/authService'
+import {
+    announceAuthSessionExpired,
+    getAccessToken,
+    refresh,
+} from '../services/authService'
 import {
     debugLog,
     getFrontendDebugConfig,
@@ -37,6 +41,12 @@ export class ApiClientError extends Error {
         this.code = code
         this.details = details
     }
+}
+
+function getErrorCode(body: unknown): string | undefined {
+    if (!body || typeof body !== 'object') return undefined
+    const error = (body as { error?: { code?: unknown } }).error
+    return typeof error?.code === 'string' ? error.code : undefined
 }
 
 const getBaseUrl = (): string => {
@@ -126,6 +136,7 @@ export const API_CONFIG = {
             `${API_RESOURCE_ROOT}/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
         PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-estimate`,
+        PORTFOLIO_REBALANCE_PLAN: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-plan`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
         PORTFOLIO_ANALYTICS: (id: string, days: number) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
@@ -143,8 +154,14 @@ export const API_CONFIG = {
         RISK_CHECK: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/check/${portfolioId}`,
         NOTIFICATIONS_PREFERENCES: `${API_RESOURCE_ROOT}/notifications/preferences`,
         NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
-        NOTIFICATIONS_UNSUBSCRIBE: (userId: string) =>
-            `${API_RESOURCE_ROOT}/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
+        NOTIFICATIONS_UNSUBSCRIBE: (userId: string, reason?: string) => {
+            const params = new URLSearchParams({ userId })
+            const trimmedReason = reason?.trim()
+            if (trimmedReason) {
+                params.set('reason', trimmedReason)
+            }
+            return `${API_RESOURCE_ROOT}/notifications/unsubscribe?${params.toString()}`
+        },
         NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/notifications/test`,
         NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/notifications/test-all`,
         TEST_CORS: '/test/cors',
@@ -280,15 +297,22 @@ export const apiRequest = async <T>(
             })
         }
 
-        if (response.status === 401 && retryCount === 0 && isApiRequest) {
-            const refreshed = await refresh()
-            if (refreshed) {
-                return apiRequest<T>(endpoint, options, retryCount + 1)
-            }
-        }
-
         if (isApiRequest) {
             const envelope = body as ApiEnvelope<T>
+
+            if (response.status === 401 && retryCount === 0) {
+                const refreshed = await refresh()
+                if (refreshed) {
+                    return apiRequest<T>(endpoint, options, retryCount + 1)
+                }
+
+                announceAuthSessionExpired({
+                    message: envelope.error?.message || 'Your session expired. Sign in again to continue.',
+                    source: endpoint,
+                    status: response.status,
+                    code: envelope.error?.code || getErrorCode(body) || 'UNAUTHORIZED',
+                })
+            }
 
             if (!response.ok || !envelope.success || envelope.data === null) {
                 const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`
@@ -374,6 +398,12 @@ export const downloadPortfolioExport = async (
     if (res.status === 401) {
         const refreshed = await refresh()
         if (refreshed) return downloadPortfolioExport(portfolioId, format)
+        announceAuthSessionExpired({
+            message: 'Your session expired while exporting. Sign in again to retry.',
+            source: `export:${portfolioId}`,
+            status: 401,
+            code: 'UNAUTHORIZED',
+        })
         throw new ApiClientError('Unauthorized', 401, 'UNAUTHORIZED')
     }
 

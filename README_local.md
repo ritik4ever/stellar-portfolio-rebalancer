@@ -60,6 +60,30 @@ cd backend && npm run dev
 cd frontend && npm run dev
 ```
 
+Before trusting a new backend environment or deployment, run the startup sweep:
+
+```bash
+cd backend && npm run startup:self-test
+```
+
+It validates config, database, queues, and provider connectivity using the same backend entrypoint without starting the HTTP server.
+
+### Docker Compose
+
+You can also run the stack using Docker Compose:
+
+```bash
+docker compose -f deployment/docker-compose.yml up --build
+docker compose -f deployment/docker-compose.yml --profile full-stack up --build
+docker compose -f deployment/docker-compose.yml --profile observability up --build
+```
+
+The default invocation starts the minimal app stack. Add `--profile full-stack` when you want Redis and PostgreSQL, and add `--profile observability` when you want Prometheus, Grafana, Loki, Alertmanager, Promtail, and Blackbox Exporter.
+
+If you want the backend to talk to the PostgreSQL and Redis services in `full-stack`, set the matching `DATABASE_URL` or `PG*` env vars before you launch the stack.
+
+> **Note:** The `docker-compose.yml` includes sensible resource limits for each service to ensure reproducibility and prevent runaway resource consumption. If you need more resources, you can override them in a `docker-compose.override.yml` file.
+
 ## Usage
 
 - **Connect Wallet**: Connect your Stellar wallet
@@ -73,4 +97,12 @@ cd frontend && npm run dev
 - **Backend**: Node.js API with real-time monitoring
 - **Frontend**: React with TypeScript and Tailwind CSS
 - **Oracle**: Reflector price feeds for accurate pricing
- 
+
+## Realtime WebSocket Protocol
+
+- Clients open a WebSocket connection to the configured `WEBSOCKET_URL` with `userId` in the query string.
+- The backend sends a `CONNECTION_ACK` message with protocol version, heartbeat interval, and reconnect policy.
+- Clients must send a `SUBSCRIBE` request to confirm they are ready to receive live updates.
+- The backend responds with `SUBSCRIBED`, including `heartbeatIntervalMs` and `reconnectPolicy`.
+- The server emits `HEARTBEAT` events regularly so both sides agree on liveness and reconnect expectations.
+

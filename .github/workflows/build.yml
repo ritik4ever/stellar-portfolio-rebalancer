@@ -3,6 +3,12 @@ name: Build
 on:
   pull_request:
 
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,14 +21,22 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      - name: Prepare artifact workspace
+        run: mkdir -p artifacts/sbom
+
       - name: Build frontend
         working-directory: frontend
         run: |
           npm ci
           npm run build
 
+      - name: Package frontend bundle
+        working-directory: frontend
+        run: tar -czf ../artifacts/frontend-dist.tar.gz dist
+
       - name: Build backend
         working-directory: backend
         run: |
           npm ci
           npm run build
+
