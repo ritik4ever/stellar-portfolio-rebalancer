@@ -1,4 +1,8 @@
 import { getFeatureFlags, type FeatureFlags } from "./featureFlags.js";
+import {
+  parseNotificationDeliveryConfig,
+  type NotificationDeliveryConfig,
+} from "./notificationDeliveryConfig.js";
 import { logger } from "../utils/logger.js";
 
 export interface StartupConfig {
@@ -15,15 +19,7 @@ export interface StartupConfig {
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
-  queueStartupRetries: number;
-  queueStartupInitialDelayMs: number;
-  queueStartupMaxDelayMs: number;
-  // Cache tuning configuration
-  cacheDurationMs: number;
-  priceDataMaxAgeSeconds: number;
-  minRequestIntervalMs: number;
-  featureFlagsFile?: string;
-  webhookSigningSecret?: string;
+
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -230,45 +226,7 @@ export function validateStartupConfigOrThrow(
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
-  // Cache tuning configuration
-  const cacheDurationMsRaw = (env.CACHE_DURATION_MS || "").trim();
-  let cacheDurationMs = nodeEnv === "production" ? 600000 : 300000; // 10 min vs 5 min default
-  if (cacheDurationMsRaw) {
-    const parsed = Number.parseInt(cacheDurationMsRaw, 10);
-    if (!Number.isInteger(parsed) || parsed < 1000) {
-      errors.push(
-        `CACHE_DURATION_MS '${cacheDurationMsRaw}' must be an integer >= 1000 (1 second minimum).`,
-      );
-    } else {
-      cacheDurationMs = parsed;
-    }
-  }
 
-  const priceDataMaxAgeSecondsRaw = (env.PRICE_DATA_MAX_AGE || "").trim();
-  let priceDataMaxAgeSeconds = 600; // 10 minutes default
-  if (priceDataMaxAgeSecondsRaw) {
-    const parsed = Number.parseInt(priceDataMaxAgeSecondsRaw, 10);
-    if (!Number.isInteger(parsed) || parsed < 60) {
-      errors.push(
-        `PRICE_DATA_MAX_AGE '${priceDataMaxAgeSecondsRaw}' must be an integer >= 60.`,
-      );
-    } else {
-      priceDataMaxAgeSeconds = parsed;
-    }
-  }
-
-  const minRequestIntervalMsRaw = (env.MIN_REQUEST_INTERVAL_MS || "").trim();
-  let minRequestIntervalMs = 90000; // 1.5 minutes default
-  if (minRequestIntervalMsRaw) {
-    const parsed = Number.parseInt(minRequestIntervalMsRaw, 10);
-    if (!Number.isInteger(parsed) || parsed < 1000) {
-      errors.push(
-        `MIN_REQUEST_INTERVAL_MS '${minRequestIntervalMsRaw}' must be an integer >= 1000.`,
-      );
-    } else {
-      minRequestIntervalMs = parsed;
-    }
-  }
 
   if (errors.length > 0) {
     const numberedErrors = errors
@@ -309,11 +267,7 @@ export function validateStartupConfigOrThrow(
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
-    cacheDurationMs,
-    priceDataMaxAgeSeconds,
-    minRequestIntervalMs,
-    featureFlagsFile,
-    webhookSigningSecret,
+
   };
 }
 
@@ -356,6 +310,21 @@ export function buildStartupSummary(
     webhookSigning: config.webhookSigningSecret ? "enabled" : "disabled",
     readinessCacheTtlMs: config.readinessCacheTtlMs,
     consentAuditRetentionDays: config.consentAuditRetentionDays,
+    notificationDelivery: {
+      email: {
+        maxAttempts: config.notificationDelivery.email.maxAttempts,
+        initialBackoffMs: config.notificationDelivery.email.initialBackoffMs,
+        maxBackoffMs: config.notificationDelivery.email.maxBackoffMs,
+        backoffMultiplier: config.notificationDelivery.email.backoffMultiplier,
+      },
+      webhook: {
+        maxAttempts: config.notificationDelivery.webhook.maxAttempts,
+        initialBackoffMs: config.notificationDelivery.webhook.initialBackoffMs,
+        maxBackoffMs: config.notificationDelivery.webhook.maxBackoffMs,
+        backoffMultiplier: config.notificationDelivery.webhook.backoffMultiplier,
+        requestTimeoutMs: config.notificationDelivery.webhook.requestTimeoutMs,
+      },
+    },
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       allowFallbackPrices: config.featureFlags.allowFallbackPrices,

@@ -68,6 +68,7 @@ describe("NotificationService", () => {
 
   describe("EmailProvider - SMTP failure handling", () => {
     it("does not crash the service when SMTP sendMail throws", async () => {
+      process.env.EMAIL_MAX_ATTEMPTS = "1";
       getPrefsSpy.mockReturnValue(emailPrefs);
       mockNodemailerTransporter.sendMail.mockRejectedValue(new Error("SMTP connection refused"));
 
@@ -77,22 +78,38 @@ describe("NotificationService", () => {
       await expect(service.notify(payload)).resolves.toBeUndefined();
     });
 
-    it("logs failed notification to notification_logs when SMTP fails", async () => {
+    it("retries email delivery with backoff before logging failed", async () => {
+      process.env.EMAIL_MAX_ATTEMPTS = "2";
+      process.env.EMAIL_INITIAL_BACKOFF_MS = "500";
+
       getPrefsSpy.mockReturnValue(emailPrefs);
-      const smtpError = new Error("SMTP server not reachable");
-      mockNodemailerTransporter.sendMail.mockRejectedValue(smtpError);
+      mockNodemailerTransporter.sendMail
+        .mockRejectedValueOnce(new Error("SMTP server not reachable"))
+        .mockRejectedValueOnce(new Error("SMTP server not reachable"));
 
       const service = new NotificationService();
-      const payload: NotificationPayload = { ...basePayload };
+      const notifyPromise = service.notify({ ...basePayload });
 
-      await service.notify(payload);
+      const expectation = expect(notifyPromise).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(500);
+      await expectation;
 
+      expect(mockNodemailerTransporter.sendMail).toHaveBeenCalledTimes(2);
+      expect(logOutcomeSpy).toHaveBeenCalledWith(
+        "test-user",
+        "email",
+        "rebalance",
+        "retried",
+        expect.stringContaining("SMTP server not reachable"),
+        expect.objectContaining({ attempt: 1, backoffDelayMs: 500 }),
+      );
       expect(logOutcomeSpy).toHaveBeenCalledWith(
         "test-user",
         "email",
         "rebalance",
         "failed",
-        expect.stringContaining("SMTP server not reachable")
+        expect.stringContaining("SMTP server not reachable"),
+        expect.objectContaining({ attempt: 2 }),
       );
     });
 
@@ -143,7 +160,9 @@ describe("NotificationService", () => {
         "test-user",
         "email",
         "rebalance",
-        "sent"
+        "sent",
+        undefined,
+        expect.objectContaining({ attempt: 1 }),
       );
     });
 
@@ -210,6 +229,53 @@ describe("NotificationService", () => {
   });
 
   describe("WebhookProvider - failure handling", () => {
+    it("retries webhook delivery with exponential backoff before failing", async () => {
+      process.env.WEBHOOK_RETRY_COUNT = "1";
+      process.env.WEBHOOK_RETRY_DELAY = "1000";
+      process.env.WEBHOOK_BACKOFF_MULTIPLIER = "2";
+
+      getPrefsSpy.mockReturnValue({
+        userId: "webhook-user",
+        emailEnabled: false,
+        webhookEnabled: true,
+        webhookUrl: "https://hooks.example/notify",
+        events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
+      });
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 503 })
+        .mockResolvedValueOnce({ ok: true, status: 200 });
+
+      vi.stubGlobal("fetch", fetchMock);
+
+      const service = new NotificationService();
+      const notifyPromise = service.notify({ ...basePayload, userId: "webhook-user" });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await notifyPromise;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(logOutcomeSpy).toHaveBeenCalledWith(
+        "webhook-user",
+        "webhook",
+        "rebalance",
+        "retried",
+        expect.stringContaining("503"),
+        expect.objectContaining({ attempt: 1, backoffDelayMs: 1000 }),
+      );
+      expect(logOutcomeSpy).toHaveBeenCalledWith(
+        "webhook-user",
+        "webhook",
+        "rebalance",
+        "sent",
+        undefined,
+        expect.objectContaining({ attempt: 2 }),
+      );
+
+      vi.unstubAllGlobals();
+    });
+
     it("logs skipped when webhook is disabled", async () => {
       getPrefsSpy.mockReturnValue({
         userId: "webhook-user",

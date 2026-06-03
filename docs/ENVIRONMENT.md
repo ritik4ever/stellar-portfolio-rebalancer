@@ -68,8 +68,14 @@ This document is the canonical reference for `backend/.env.example`.
 | `SMTP_FROM` | email | No | `noreply@stellarportfolio.com` | Default sender address for outgoing email. |
 | `ADMIN_PUBLIC_KEYS` | CSV | No | empty | Admin addresses allowed to hit privileged endpoints. |
 | `WEBHOOK_TIMEOUT` | integer (ms) | No | `5000` | Outgoing webhook timeout. |
-| `WEBHOOK_RETRY_COUNT` | integer | No | `1` | Number of webhook retries. |
-| `WEBHOOK_RETRY_DELAY` | integer (ms) | No | `1000` | Delay between webhook retries. |
+| `WEBHOOK_RETRY_COUNT` | integer | No | `1` | Webhook retries after first failure (total attempts = `1 +` this value). |
+| `WEBHOOK_RETRY_DELAY` | integer (ms) | No | `1000` | Initial backoff before the first webhook retry. |
+| `WEBHOOK_MAX_BACKOFF_MS` | integer (ms) | No | `60000` | Cap for exponential webhook retry delay. |
+| `WEBHOOK_BACKOFF_MULTIPLIER` | number | No | `2` | Exponential multiplier for webhook retries (≥ 1). |
+| `EMAIL_MAX_ATTEMPTS` | integer | No | `3` | Total email delivery attempts (including first try). |
+| `EMAIL_INITIAL_BACKOFF_MS` | integer (ms) | No | `1000` | Initial backoff before the first email retry. |
+| `EMAIL_MAX_BACKOFF_MS` | integer (ms) | No | `30000` | Cap for exponential email retry delay. |
+| `EMAIL_BACKOFF_MULTIPLIER` | number | No | `2` | Exponential multiplier for email retries (≥ 1). |
 | `NOTIFICATION_RATE_LIMIT_PER_HOUR` | integer | No | `10` | Hourly notification cap per user. |
 | `CORS_ORIGINS` | CSV URLs | No | localhost list | Allowed browser origins for CORS. |
 | `LOG_LEVEL` | enum | No | `info` | Application log level. |

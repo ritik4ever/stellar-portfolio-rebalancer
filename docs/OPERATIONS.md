@@ -70,6 +70,16 @@ The script requires `ADMIN_REINDEX_KEY` to be set (matches the env var on the se
 
 The indexer uses bounded exponential backoff when the Soroban RPC is unreachable. It tracks last successful sync time, last failed sync time, and a ring buffer of recent error summaries. These are exposed through the `/api/v1/indexer/cursor` and `/ready` endpoints so operators can tell whether the indexer is healthy, catching up, or stuck.
 
+## Notification delivery backoff
+
+Email and webhook providers use explicit backoff policies from `backend/src/config/notificationDeliveryConfig.ts`, validated at startup and summarized in the startup log under `notificationDelivery`.
+
+- **Logs:** `notification_logs` rows include `attempt_number` and `backoff_delay_ms` when a retry is scheduled or a delivery completes.
+- **Tuning:** Increase `EMAIL_MAX_ATTEMPTS` or `WEBHOOK_RETRY_COUNT` for flaky SMTP or webhook endpoints; raise `*_MAX_BACKOFF_MS` to spread retries during outages.
+- **Failure triage:** Search logs for `Notification delivery failed; scheduling backoff retry` or `Notification delivery exhausted retries`. Query recent rows: `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`.
+
+See [NOTIFICATIONS.md](./NOTIFICATIONS.md) for the full environment variable table.
+
 ## Health vs readiness
 
 | Endpoint                        | Purpose                                                                                                                                                                              |
