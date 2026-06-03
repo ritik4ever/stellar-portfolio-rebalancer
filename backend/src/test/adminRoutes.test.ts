@@ -5,6 +5,7 @@ import { Keypair } from '@stellar/stellar-sdk'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { issuerMetadataService } from '../services/issuerMetadataService.js'
 
 function makeAdminHeaders(kp: Keypair) {
     const msg = Date.now().toString()
@@ -137,6 +138,32 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 .set({ ...makeAdminHeaders(adminKp), 'Idempotency-Key': `admin-add-${Date.now()}` })
                 .send({ symbol: 'ADMTEST', name: 'Admin Test Asset' })
             expect([201, 400, 409]).toContain(res.status) // auth passed, business logic decides outcome
+        })
+
+        it('creates an asset with issuer metadata if issuerAccount is provided', async () => {
+            const mockMetadata = {
+                org_name: 'Stellar Foundation',
+                org_description: 'Stellar test network asset',
+                org_url: 'https://stellar.org'
+            }
+            const getMetadataSpy = vi
+                .spyOn(issuerMetadataService, 'getMetadata')
+                .mockResolvedValue(mockMetadata)
+
+            const symbol = 'META'
+            const res = await request(app)
+                .post('/api/admin/assets')
+                .set({ ...makeAdminHeaders(adminKp), 'Idempotency-Key': `admin-add-meta-${Date.now()}` })
+                .send({
+                    symbol,
+                    name: 'Metadata Asset',
+                    issuerAccount: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+                })
+
+            expect(res.status).toBe(201)
+            expect(getMetadataSpy).toHaveBeenCalledWith('GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5')
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.asset.issuerMetadata).toEqual(mockMetadata)
         })
     })
 

@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import {
   dbSaveNotificationPreferences,
@@ -5,6 +6,8 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbSaveDigestEvent,
+  dbGetAndDeleteDigestEventsBefore,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
@@ -22,7 +25,7 @@ import { deliverWithBackoff } from "./notificationDelivery.js";
 
 export interface NotificationPayload {
   userId: string;
-  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange";
+  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
   message: string;
   data?: any;
@@ -52,13 +55,7 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
-      dbLogNotificationOutcome(
-        payload.userId,
-        "webhook",
-        payload.eventType,
-        "skipped",
-        "Webhook disabled or no URL provided",
-      );
+
       return;
     }
 
@@ -72,44 +69,7 @@ class WebhookProvider implements NotificationProvider {
       userId: payload.userId,
     };
 
-    await deliverWithBackoff(
-      {
-        provider: "webhook",
-        userId: payload.userId,
-        eventType: payload.eventType,
-        policy,
-      },
-      async () => {
-        const controller = new AbortController();
-        const timeoutMs = policy.requestTimeoutMs ?? 5000;
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-        try {
-          const response = await fetch(preferences.webhookUrl!, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "User-Agent": "StellarPortfolioRebalancer/1.0",
-            },
-            body: JSON.stringify(webhookPayload),
-            signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            throw new Error(`Webhook returned status ${response.status}`);
-          }
-
-          logger.info("Webhook notification sent successfully", {
-            url: preferences.webhookUrl,
-            event: payload.eventType,
-            userId: payload.userId,
-            maxAttempts: policy.maxAttempts,
-          });
-        } finally {
-          clearTimeout(timeoutId);
-        }
-      },
-    );
   }
 }
 
@@ -350,13 +310,14 @@ export class NotificationService {
       return;
     }
 
-    if (!preferences.events[payload.eventType]) {
+
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,
       });
       return;
     }
+
 
     const promises = this.providers.map(async (provider) => {
       try {
@@ -374,6 +335,109 @@ export class NotificationService {
     });
 
     await Promise.allSettled(promises);
+  }
+
+  /**
+   * Process queued digest events for a given mode ('daily'|'weekly').
+   * This will retrieve events up to now, group by user, and send a single digest per user
+   * if the user's preference matches the requested mode. Events for users who don't
+   * match are re-queued.
+   */
+  async processDigests(mode: 'daily' | 'weekly'): Promise<void> {
+    const cutoff = new Date().toISOString()
+    const events = dbGetAndDeleteDigestEventsBefore(cutoff)
+
+    const byUser: Record<string, typeof events> = {}
+    for (const ev of events) {
+      byUser[ev.user_id] = byUser[ev.user_id] || []
+      byUser[ev.user_id].push(ev)
+    }
+
+    for (const [userId, userEvents] of Object.entries(byUser)) {
+      try {
+        const prefs = this.getPreferences(userId)
+        if (!prefs) {
+          logger.info('Skipping digest for user without preferences', { userId })
+          continue
+        }
+
+        if ((prefs as any).digestMode !== mode) {
+          // Re-queue events (preserve them for the correct schedule)
+          for (const ev of userEvents) {
+            dbSaveDigestEvent(ev.user_id, ev.event_type, ev.title, ev.message, ev.data ? JSON.parse(ev.data) : undefined)
+          }
+          continue
+        }
+
+        // Build digest payload
+        const digestTitle = `${mode.charAt(0).toUpperCase() + mode.slice(1)} Digest (${userEvents.length} events)`
+        const digestMessage = userEvents
+          .map((e) => `- [${e.event_type}] ${e.title} (${e.created_at})\n${e.message}`)
+          .join('\n\n')
+
+        const payload: NotificationPayload = {
+          userId,
+          eventType: 'digest',
+          title: digestTitle,
+          message: digestMessage,
+          data: { events: userEvents.map((e) => ({ eventType: e.event_type, title: e.title, message: e.message, data: e.data ? JSON.parse(e.data) : undefined, timestamp: e.created_at })) },
+          timestamp: new Date().toISOString(),
+        }
+
+        // Send digest through providers
+        const promises = this.providers.map(async (provider) => {
+          try {
+            await provider.send(payload, prefs)
+          } catch (error) {
+            logger.error('Failed to send digest via provider', { provider: provider.constructor.name, userId, error: error instanceof Error ? error.message : String(error) })
+          }
+        })
+        await Promise.allSettled(promises)
+      } catch (error) {
+        logger.error('Error processing digest for user', { userId, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  }
+
+  /**
+   * Verify an incoming webhook callback signature.
+   * Expects the X-Signature-256 header in the format `sha256=<hex>`.
+   * Uses timing-safe comparison to prevent timing attacks.
+   */
+  static verifyCallbackSignature(
+    rawBody: string,
+    signatureHeader: string | undefined,
+    secret: string | undefined,
+  ): boolean {
+    if (!signatureHeader || !secret) {
+      logger.warn("Webhook callback verification skipped: missing signature or secret");
+      return false;
+    }
+
+    const prefix = "sha256=";
+    if (!signatureHeader.startsWith(prefix)) {
+      logger.warn("Webhook callback verification failed: invalid signature format");
+      return false;
+    }
+
+    const receivedSig = signatureHeader.slice(prefix.length);
+    if (!/^[a-f0-9]{64}$/i.test(receivedSig)) {
+      logger.warn("Webhook callback verification failed: malformed signature hex");
+      return false;
+    }
+
+    const hmac = createHmac("sha256", secret);
+    hmac.update(rawBody, "utf8");
+    const expectedSig = hmac.digest("hex");
+
+    try {
+      return timingSafeEqual(
+        Buffer.from(receivedSig, "hex"),
+        Buffer.from(expectedSig, "hex"),
+      );
+    } catch {
+      return false;
+    }
   }
 
   getAllPreferences(): NotificationPreferences[] {

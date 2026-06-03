@@ -83,12 +83,9 @@ vi.mock('../services/notificationService.js', () => ({
     notificationService: { notify: vi.fn().mockResolvedValue(undefined) },
 }))
 
-vi.mock('../services/rebalanceLock.js', () => ({
-    rebalanceLockService: {
-        acquireLock: vi.fn().mockResolvedValue(true),
-        releaseLock: vi.fn().mockResolvedValue(true),
-        isLocked: vi.fn().mockResolvedValue(false),
-    },
+vi.mock('../queue/workers/workerRuntime.js', () => ({
+    acquireWorkerLock: vi.fn().mockResolvedValue(true),
+    releaseWorkerLock: vi.fn().mockResolvedValue(true),
 }))
 
 vi.mock('../queue/queues.js', () => ({

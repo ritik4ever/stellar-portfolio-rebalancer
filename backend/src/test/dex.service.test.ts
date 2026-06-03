@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Horizon, Asset, Networks } from "@stellar/stellar-sdk";
+import { Horizon, Asset, Networks, Keypair } from "@stellar/stellar-sdk";
 import {
   StellarDEXService,
   DEXTradeRequest,
@@ -535,7 +535,69 @@ describe("StellarDEXService", () => {
     });
   });
 
-  // ── Price limit calculation tests ────────────────────────────────────────
+  // ── ExecutionExplanation tests ───────────────────────────────────────────
+
+  describe("ExecutionExplanation in executeRebalanceTrades", () => {
+    const MOCK_KEYPAIR = Keypair.random();
+
+    function setupOrderbookMock(spreadBps: number, liquidityAmount: number) {
+      const bid = 0.185;
+      const ask = bid / (1 - spreadBps / 10000);
+      const orderbook = createOrderbook(
+        [{ price: bid, amount: liquidityAmount }],
+        [{ price: ask, amount: liquidityAmount }],
+      );
+      const mockCall = vi.fn().mockResolvedValue(orderbook);
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: mockCall,
+      } as any);
+    }
+
+    it("happy path: explanation has correct shape and rationale", async () => {
+      setupOrderbookMock(50, 5000);
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
+        id: MOCK_KEYPAIR.publicKey(),
+        sequence: "1",
+        incrementSequenceNumber: () => {},
+      } as any);
+      vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({ hash: "abc123" } as any);
+      vi.spyOn(service["server"], "offers").mockReturnValue({
+        forAccount: () => ({ limit: () => ({ call: vi.fn().mockResolvedValue({ records: [] }) }) }),
+      } as any);
+      vi.spyOn(service as any, "tryGetAverageTradePrice").mockResolvedValue(0.185);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "t1", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { rollbackOnFailure: false }
+      );
+
+      expect(result.explanation).toBeDefined();
+      expect(typeof result.explanation.routeLength).toBe("number");
+      expect(typeof result.explanation.estimatedSlippage).toBe("number");
+      expect(Array.isArray(result.explanation.skippedAlternatives)).toBe(true);
+      expect(result.explanation.rationale.length).toBeGreaterThan(0);
+    });
+
+    it("failure case: explanation includes failureReason when spread exceeds max", async () => {
+      setupOrderbookMock(2000, 5000); // 2000 bps spread
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "t1", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { maxSpreadBps: 100, rollbackOnFailure: false }
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.explanation.failureReason).toBeDefined();
+      expect(result.explanation.failureReason).toContain("bps");
+      expect(result.explanation.rationale).toBeTruthy();
+    });
+  });
 
   describe("Price limit calculations", () => {
     it("should calculate correct price limit for various slippage tolerances", () => {

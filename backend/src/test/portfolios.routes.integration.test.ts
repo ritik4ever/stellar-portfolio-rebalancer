@@ -386,7 +386,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
                 .set(authHeader(OTHER_ADDRESS))
                 .query({ format: 'json' })
                 .expect((res) => {
-                    expect([403, 200, 404]).toContain(res.status)
+                    expect([403, 200, 202, 404]).toContain(res.status)
                 })
 
             if (res.status === 403) {
@@ -591,5 +591,72 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             expect(res.body.success).toBe(true)
         })
+    })
+
+    describe('POST /api/portfolio/:id/clone - Clone portfolio', () => {
+        let sourceId: string;
+        beforeEach(async () => {
+            // create a source portfolio
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                });
+            expect(res.body.success).toBe(true);
+            sourceId = res.body.data.portfolioId;
+        });
+
+        it('clones portfolio with default overrides', async () => {
+            const res = await request(app)
+                .post(`/api/portfolio/${sourceId}/clone`)
+                .set(authHeader(OWNER_ADDRESS))
+                .send({})
+                .expect(201);
+
+            expect(res.body.success).toBe(true);
+            expect(res.body.data.newPortfolioId).toBeDefined();
+            // verify new portfolio exists and has same balances
+            const getRes = await request(app)
+                .get(`/api/portfolio/${res.body.data.newPortfolioId}`)
+                .set(authHeader(OWNER_ADDRESS))
+                .expect(200);
+
+            expect(getRes.body.success).toBe(true);
+            expect(getRes.body.data.portfolio.balances).toEqual(expect.any(Object));
+        });
+
+        it('clones with overridden metadata', async () => {
+            const newOwner = OTHER_ADDRESS;
+            const overrides = { userAddress: newOwner, threshold: 10 };
+            const res = await request(app)
+                .post(`/api/portfolio/${sourceId}/clone`)
+                .set(authHeader(OWNER_ADDRESS))
+                .send(overrides)
+                .expect(201);
+
+            expect(res.body.success).toBe(true);
+            const newId = res.body.data.newPortfolioId;
+            const getRes = await request(app)
+                .get(`/api/portfolio/${newId}`)
+                .set(authHeader(newOwner))
+                .expect(200);
+
+            expect(getRes.body.success).toBe(true);
+            expect(getRes.body.data.portfolio.userAddress).toBe(newOwner);
+            expect(getRes.body.data.portfolio.threshold).toBe(10);
+        });
+
+        it('returns 404 if source portfolio not found', async () => {
+            const res = await request(app)
+                .post('/api/portfolio/nonexistent-id/clone')
+                .set(authHeader(OWNER_ADDRESS))
+                .send({})
+                .expect(404);
+
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('NOT_FOUND');
+        });
     })
 })

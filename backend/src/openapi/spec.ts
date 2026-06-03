@@ -190,7 +190,7 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Event recorded', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -207,6 +207,102 @@ const spec: Record<string, any> = {
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
+        },
+        '/api/rebalance/summary/{portfolioId}': {
+            get: {
+                tags: ['Rebalance history'],
+                summary: 'Get rebalance readiness summary',
+                description: 'Single-call summary of all preconditions for manual rebalance: system readiness, drift, slippage, risk, and data freshness. Provides actionable guidance before execution.',
+                parameters: [{ name: 'portfolioId', in: 'path', required: true, schema: { type: 'string' }, description: 'Portfolio ID to check' }],
+                responses: {
+                    '200': {
+                        description: 'Readiness summary with all preconditions',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolioId: { type: 'string' },
+                                                timestamp: { type: 'string', format: 'date-time' },
+                                                readiness: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        systemReady: { type: 'boolean' },
+                                                        canExecute: { type: 'boolean' },
+                                                        status: { type: 'string', enum: ['ready', 'not_ready'] },
+                                                        checks: { type: 'object' }
+                                                    }
+                                                },
+                                                drift: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        needsRebalance: { type: 'boolean' },
+                                                        maxDriftPercent: { type: 'number' },
+                                                        threshold: { type: 'number' },
+                                                        exceedsThreshold: { type: 'boolean' }
+                                                    }
+                                                },
+                                                slippage: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        maxSlippagePercent: { type: 'number' },
+                                                        estimatedSlippageBps: { type: 'integer' }
+                                                    }
+                                                },
+                                                risk: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        allowed: { type: 'boolean' },
+                                                        reasonCode: { type: 'string' },
+                                                        overallRiskLevel: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+                                                        alerts: { type: 'array' }
+                                                    }
+                                                },
+                                                dataFreshness: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        ageSeconds: { type: 'integer' },
+                                                        isStale: { type: 'boolean' },
+                                                        priceCount: { type: 'integer' }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                        meta: {
+                                            type: 'object',
+                                            properties: {
+                                                canExecute: { type: 'boolean' },
+                                                needsRebalance: { type: 'boolean' },
+                                                riskLevel: { type: 'string' }
+                                            }
+                                        }
+                                    }
+                                },
+                                example: {
+                                    success: true,
+                                    data: {
+                                        portfolioId: 'pf-123',
+                                        readiness: { systemReady: true, canExecute: true, status: 'ready' },
+                                        drift: { needsRebalance: true, maxDriftPercent: 6.2, threshold: 5, exceedsThreshold: true },
+                                        slippage: { maxSlippagePercent: 1, estimatedSlippageBps: 100 },
+                                        risk: { allowed: true, reasonCode: 'OK', overallRiskLevel: 'low', alerts: [] },
+                                        dataFreshness: { ageSeconds: 45, isStale: false, priceCount: 4 }
+                                    },
+                                    meta: { canExecute: true, needsRebalance: true, riskLevel: 'low' }
+                                }
+                            }
+                        }
+                    },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+                }
+            }
         },
         '/api/portfolio': {
             post: {
@@ -264,7 +360,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -331,7 +427,7 @@ const spec: Record<string, any> = {
                     },
                     '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -851,7 +947,7 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Preferences saved', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -864,7 +960,7 @@ const spec: Record<string, any> = {
                 parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Preferences or null', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -877,7 +973,7 @@ const spec: Record<string, any> = {
                 parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Unsubscribed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -941,9 +1037,82 @@ const spec: Record<string, any> = {
                 description: 'Admin API key or bearer token',
             },
         },
+        examples: {
+            ValidationError: {
+                summary: 'Validation error',
+                value: {
+                    success: false,
+                    data: null,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Invalid request payload',
+                        details: [
+                            { field: 'allocations', message: 'Allocations must sum to 100%' },
+                        ],
+                    },
+                    timestamp: '2025-01-01T00:00:00.000Z',
+                },
+            },
+            QueryValidationError: {
+                summary: 'Query parameter validation error',
+                value: {
+                    success: false,
+                    data: null,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Invalid query parameters',
+                        details: [
+                            { field: 'limit', message: 'Number must be less than or equal to 500' },
+                        ],
+                    },
+                    timestamp: '2025-01-01T00:00:00.000Z',
+                },
+            },
+        },
         schemas: {
-            ApiEnvelope: { type: 'object' },
-            ApiError: { type: 'object' },
+            ApiEnvelope: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { nullable: true },
+                    error: { nullable: true, $ref: '#/components/schemas/ApiErrorBody' },
+                    timestamp: { type: 'string', format: 'date-time' },
+                    meta: { type: 'object', additionalProperties: true },
+                },
+            },
+            ApiErrorBody: {
+                type: 'object',
+                required: ['code', 'message'],
+                properties: {
+                    code: { type: 'string', example: 'VALIDATION_ERROR' },
+                    message: { type: 'string', example: 'Invalid request payload' },
+                    details: {
+                        nullable: true,
+                        oneOf: [
+                            {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        field: { type: 'string' },
+                                        message: { type: 'string' },
+                                    },
+                                },
+                            },
+                            { type: 'object' },
+                        ],
+                    },
+                },
+            },
+            ApiError: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: false },
+                    data: { nullable: true, example: null },
+                    error: { $ref: '#/components/schemas/ApiErrorBody' },
+                    timestamp: { type: 'string', format: 'date-time' },
+                },
+            },
             Portfolio: { type: 'object' },
             PriceData: { type: 'object' },
             RiskMetrics: { type: 'object' },
@@ -968,6 +1137,7 @@ const spec: Record<string, any> = {
                     webhookEnabled: { type: 'boolean' },
                     webhookUrl: { type: 'string', format: 'uri', pattern: '^https?://', description: 'Required when webhookEnabled is true. Must use http or https.' },
                     events: { $ref: '#/components/schemas/NotificationEventsInput' },
+                    digestMode: { type: 'string', enum: ['immediate','daily','weekly'], description: 'Delivery mode for notifications: immediate (per-event), daily digest, or weekly digest.' },
                 },
             },
         },

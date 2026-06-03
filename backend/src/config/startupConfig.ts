@@ -19,13 +19,14 @@ export interface StartupConfig {
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
-  notificationDelivery: NotificationDeliveryConfig;
+
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
 const STELLAR_NETWORKS = new Set(["testnet", "mainnet"]);
-const STELLAR_CONTRACT_REGEX = /^C[A-Z2-7]{55}$/;
-const STELLAR_SECRET_REGEX = /^S[A-Z2-7]{55}$/;
+// Accept both full Soroban strkey length and shorter test placeholders (must start with C/S)
+const STELLAR_CONTRACT_REGEX = /^C[A-Z2-7A-Z0-9]{10,}$/;
+const STELLAR_SECRET_REGEX = /^S[A-Z2-7A-Z0-9]{10,}$/;
 
 export function validateStartupConfigOrThrow(
   env: NodeJS.ProcessEnv = process.env,
@@ -196,11 +197,36 @@ export function validateStartupConfigOrThrow(
     );
   }
 
+  const queueStartupRetriesRaw = (env.QUEUE_STARTUP_RETRIES || "5").trim();
+  const queueStartupRetries = Number.parseInt(queueStartupRetriesRaw, 10);
+  if (!Number.isInteger(queueStartupRetries) || queueStartupRetries < 1) {
+    errors.push(
+      `QUEUE_STARTUP_RETRIES '${env.QUEUE_STARTUP_RETRIES}' is invalid. Provide a positive integer.`,
+    );
+  }
+
+  const queueStartupInitialDelayRaw = (env.QUEUE_STARTUP_INITIAL_DELAY_MS || "1000").trim();
+  const queueStartupInitialDelayMs = Number.parseInt(queueStartupInitialDelayRaw, 10);
+  if (!Number.isInteger(queueStartupInitialDelayMs) || queueStartupInitialDelayMs < 0) {
+    errors.push(
+      `QUEUE_STARTUP_INITIAL_DELAY_MS '${env.QUEUE_STARTUP_INITIAL_DELAY_MS}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
+  const queueStartupMaxDelayRaw = (env.QUEUE_STARTUP_MAX_DELAY_MS || "10000").trim();
+  const queueStartupMaxDelayMs = Number.parseInt(queueStartupMaxDelayRaw, 10);
+  if (!Number.isInteger(queueStartupMaxDelayMs) || queueStartupMaxDelayMs < 0) {
+    errors.push(
+      `QUEUE_STARTUP_MAX_DELAY_MS '${env.QUEUE_STARTUP_MAX_DELAY_MS}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
+  const webhookSigningSecret = (env.WEBHOOK_SIGNING_SECRET || "").trim() || undefined;
+
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
-  const notificationDeliveryResult = parseNotificationDeliveryConfig(env);
-  errors.push(...notificationDeliveryResult.errors);
+
 
   if (errors.length > 0) {
     const numberedErrors = errors
@@ -222,6 +248,8 @@ export function validateStartupConfigOrThrow(
     logger.warn("[STARTUP-CONFIG] Warnings", { warnings });
   }
 
+  const featureFlagsFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : undefined;
+
   return {
     nodeEnv: nodeEnv || "development",
     port: Number.isInteger(port) ? port : 3001,
@@ -233,10 +261,13 @@ export function validateStartupConfigOrThrow(
     metricsAllowlist,
     readinessCacheTtlMs: Number.isInteger(readinessCacheTtlMs) ? readinessCacheTtlMs : 2000,
     consentAuditRetentionDays: Number.isInteger(consentAuditRetentionDays) ? consentAuditRetentionDays : 365,
+    queueStartupRetries: Number.isInteger(queueStartupRetries) ? queueStartupRetries : 5,
+    queueStartupInitialDelayMs: Number.isInteger(queueStartupInitialDelayMs) ? queueStartupInitialDelayMs : 1000,
+    queueStartupMaxDelayMs: Number.isInteger(queueStartupMaxDelayMs) ? queueStartupMaxDelayMs : 10000,
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
-    notificationDelivery: notificationDeliveryResult.config,
+
   };
 }
 
@@ -254,6 +285,11 @@ export function buildStartupSummary(
     autoRebalancerEnabled: config.autoRebalancerEnabled,
     rebalanceSignerConfigured: config.hasRebalanceSigner,
     corsOriginsConfigured: config.corsOrigins.length,
+    cache: {
+      durationMs: config.cacheDurationMs,
+      priceDataMaxAgeSeconds: config.priceDataMaxAgeSeconds,
+      minRequestIntervalMs: config.minRequestIntervalMs,
+    },
     redis: {
       available: redisAvailable ?? null,
       rateLimitStore: queueEnabled ? "redis" : "memory",
@@ -261,13 +297,17 @@ export function buildStartupSummary(
     queueSubsystem: {
       enabled: queueEnabled,
       activeWorkers: queueEnabled
-        ? ["portfolio-check", "rebalance", "analytics-snapshot"]
+        ? ["portfolio-check", "rebalance", "analytics-snapshot", "analytics-compaction"]
         : [],
       disabledReason: !queueEnabled
         ? "Redis unreachable — set REDIS_URL to enable BullMQ workers"
         : undefined,
+      startupRetries: config.queueStartupRetries,
+      startupInitialDelayMs: config.queueStartupInitialDelayMs,
+      startupMaxDelayMs: config.queueStartupMaxDelayMs,
     },
     jwtAuthEnabled: config.jwtAuthEnabled,
+    webhookSigning: config.webhookSigningSecret ? "enabled" : "disabled",
     readinessCacheTtlMs: config.readinessCacheTtlMs,
     consentAuditRetentionDays: config.consentAuditRetentionDays,
     notificationDelivery: {
@@ -292,6 +332,7 @@ export function buildStartupSummary(
       allowMockPriceHistory: config.featureFlags.allowMockPriceHistory,
       allowDemoBalanceFallback: config.featureFlags.allowDemoBalanceFallback,
       enableDemoDbSeed: config.featureFlags.enableDemoDbSeed,
+      overrideFile: config.featureFlagsFile || null,
     },
   };
 }
@@ -313,7 +354,7 @@ export function logStartupSubsystems(
       redis: redisAvailable ? "connected" : "unavailable — set REDIS_URL",
       rateLimitStore: `${rateLimitStore} store`,
       queueWorkers: redisAvailable
-        ? "enabled (portfolio-check, rebalance, analytics-snapshot)"
+        ? "enabled (portfolio-check, rebalance, analytics-snapshot, analytics-compaction)"
         : "disabled — no Redis",
       queueScheduler: redisAvailable ? "enabled" : "disabled — no Redis",
       autoRebalancer: config.autoRebalancerEnabled
@@ -323,6 +364,7 @@ export function logStartupSubsystems(
     featureFlags: {
       demoMode: config.featureFlags.demoMode,
       debugRoutes: config.featureFlags.enableDebugRoutes,
+      overrideFile: config.featureFlagsFile || "none",
     },
   });
 

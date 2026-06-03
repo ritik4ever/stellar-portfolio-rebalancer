@@ -6,6 +6,7 @@ export interface NotificationPreferencesRow {
     email_address: string | null
     webhook_enabled: number
     webhook_url: string | null
+    digest_mode: string | null
     event_rebalance: number
     event_circuit_breaker: number
     event_price_movement: number
@@ -20,6 +21,7 @@ export interface NotificationPreferences {
     emailAddress?: string
     webhookEnabled: boolean
     webhookUrl?: string
+    digestMode?: 'immediate' | 'daily' | 'weekly'
     events: {
         rebalance: boolean
         circuitBreaker: boolean
@@ -49,6 +51,7 @@ function ensureNotificationTable() {
             email_address TEXT,
             webhook_enabled INTEGER NOT NULL DEFAULT 0,
             webhook_url TEXT,
+            digest_mode TEXT NOT NULL DEFAULT 'immediate',
             event_rebalance INTEGER NOT NULL DEFAULT 1,
             event_circuit_breaker INTEGER NOT NULL DEFAULT 1,
             event_price_movement INTEGER NOT NULL DEFAULT 1,
@@ -90,6 +93,7 @@ function rowToPreferences(r: NotificationPreferencesRow): NotificationPreference
         emailAddress: r.email_address || undefined,
         webhookEnabled: r.webhook_enabled === 1,
         webhookUrl: r.webhook_url || undefined,
+        digestMode: r.digest_mode ? (r.digest_mode as 'immediate' | 'daily' | 'weekly') : 'immediate',
         events: {
             rebalance: r.event_rebalance === 1,
             circuitBreaker: r.event_circuit_breaker === 1,
@@ -108,6 +112,7 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
     db.prepare(`
         INSERT INTO notification_preferences 
             (user_id, email_enabled, email_address, webhook_enabled, webhook_url, 
+             digest_mode,
              event_rebalance, event_circuit_breaker, event_price_movement, event_risk_change,
              created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -116,6 +121,7 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
             email_address = excluded.email_address,
             webhook_enabled = excluded.webhook_enabled,
             webhook_url = excluded.webhook_url,
+            digest_mode = excluded.digest_mode,
             event_rebalance = excluded.event_rebalance,
             event_circuit_breaker = excluded.event_circuit_breaker,
             event_price_movement = excluded.event_price_movement,
@@ -127,6 +133,7 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
         preferences.emailAddress || null,
         preferences.webhookEnabled ? 1 : 0,
         preferences.webhookUrl || null,
+        preferences.digestMode || 'immediate',
         preferences.events.rebalance ? 1 : 0,
         preferences.events.circuitBreaker ? 1 : 0,
         preferences.events.priceMovement ? 1 : 0,
@@ -134,6 +141,78 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
         now,
         now
     )
+}
+
+// Digest queue table and helpers
+export interface NotificationDigestEventRow {
+    id: number
+    user_id: string
+    event_type: string
+    title: string
+    message: string
+    data: string | null
+    created_at: string
+}
+
+export function dbSaveDigestEvent(userId: string, eventType: string, title: string, message: string, data?: any): void {
+    ensureNotificationTable()
+    const db = getDb()
+    const now = new Date().toISOString()
+
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS notification_digest_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            data TEXT,
+            created_at TEXT NOT NULL
+        );
+    `).run()
+
+    db.prepare(`
+        INSERT INTO notification_digest_events (user_id, event_type, title, message, data, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(userId, eventType, title, message, data ? JSON.stringify(data) : null, now)
+}
+
+export function dbGetAndDeleteDigestEventsBefore(cutoffIso: string): NotificationDigestEventRow[] {
+    ensureNotificationTable()
+    const db = getDb()
+
+    // Ensure table exists
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS notification_digest_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            data TEXT,
+            created_at TEXT NOT NULL
+        );
+    `).run()
+
+    const rows = db.prepare<[], any>(`
+        SELECT * FROM notification_digest_events WHERE created_at <= ? ORDER BY created_at ASC
+    `).all(cutoffIso)
+
+    const ids = rows.map((r: any) => r.id)
+    if (ids.length > 0) {
+        const placeholders = ids.map(() => '?').join(',')
+        db.prepare(`DELETE FROM notification_digest_events WHERE id IN (${placeholders})`).run(...ids)
+    }
+
+    return rows.map((r: any) => ({
+        id: r.id,
+        user_id: r.user_id,
+        event_type: r.event_type,
+        title: r.title,
+        message: r.message,
+        data: r.data,
+        created_at: r.created_at,
+    }))
 }
 
 export function dbGetNotificationPreferences(userId: string): NotificationPreferences | undefined {
