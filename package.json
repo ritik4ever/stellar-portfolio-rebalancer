@@ -44,10 +44,10 @@
     "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
+    "concurrently": "^10.0.3",
     "conventional-changelog-cli": "^5.0.0",
-    "jsdom": "^26.1.0",
-    "vitest": "^4.0.18"
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.8"
   },
   "engines": {
     "node": ">=20.19.0",
