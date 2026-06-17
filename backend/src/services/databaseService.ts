@@ -1,3 +1,4 @@
+import { validateSqlitePragmas, logSqliteValidationReport } from "../db/sqliteValidation.js"
 import Database from "better-sqlite3";
 
 import type { RebalanceEvent } from "./rebalanceHistory.js";
@@ -517,6 +518,8 @@ export class DatabaseService {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.exec(SCHEMA_SQL);
+    const pragmaReport = validateSqlitePragmas(this.db, dbPath);
+    logSqliteValidationReport(pragmaReport);
     this._migrateSchema();
 
     // Seed demo data on first run (empty portfolios table)
