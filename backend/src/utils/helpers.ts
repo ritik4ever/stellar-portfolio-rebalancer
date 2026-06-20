@@ -21,7 +21,7 @@ export function parseOptionalBoolean(value: unknown): boolean | undefined {
 
 export function stableStringify(obj: unknown): string {
     if (obj === null || typeof obj !== 'object') {
-        return JSON.stringify(obj);
+        return JSON.stringify(obj) ?? 'null';
     }
     if (Array.isArray(obj)) {
         return `[${obj.map(stableStringify).join(',')}]`;
