@@ -11,6 +11,7 @@ import { ok, fail } from '../utils/apiResponse.js'
 import { ReflectorService } from '../services/reflector.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
+import { redactObject } from '../utils/secretRedactor.js'
 
 export const debugRouter = Router()
 
@@ -35,14 +36,15 @@ debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdm
         await notificationService.notify(buildTestNotificationPayload(userId, normalizedEventType))
 
         logger.info('Debug test notification sent', { userId, eventType: normalizedEventType })
-        return ok(res, {
+        const response = {
             message: 'Test notification sent successfully',
             eventType: normalizedEventType,
             sentTo: {
                 email: preferences.emailEnabled ? preferences.emailAddress : null,
                 webhook: preferences.webhookEnabled ? preferences.webhookUrl : null
             }
-        })
+        }
+        return ok(res, redactObject(response))
     } catch (error) {
         logger.error('Failed to send debug test notification', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -69,15 +71,16 @@ debugRouter.get('/debug/coingecko-test', blockDebugInProduction, async (req: Req
 
         logger.info('[DEBUG] Test URL', { testUrl })
 
-        const response = await fetch(testUrl, { headers })
-        const data = await response.json()
+        const fetchResponse = await fetch(testUrl, { headers })
+        const data = await fetchResponse.json()
 
-        return ok(res, {
+        const response = {
             apiKeySet: !!apiKey,
             testUrl,
-            responseStatus: response.status,
+            responseStatus: fetchResponse.status,
             responseData: data
-        })
+        }
+        return ok(res, redactObject(response))
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
             stack: error instanceof Error ? error.stack : String(error)
@@ -97,12 +100,13 @@ debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, async (req:
 
         const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
 
-        return ok(res, {
+        const response = {
             cacheCleared: true,
             cacheStatusAfterClear: cacheStatus,
             freshPrices: prices,
             feedMeta
-        })
+        }
+        return ok(res, redactObject(response))
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
@@ -115,7 +119,7 @@ debugRouter.get('/debug/reflector-test', blockDebugInProduction, async (req: Req
         const testResult = await reflectorService.testApiConnectivity()
         const cacheStatus = reflectorService.getCacheStatus()
 
-        return ok(res, {
+        const response = {
             apiConnectivityTest: testResult,
             cacheStatus,
             environment: {
@@ -123,7 +127,8 @@ debugRouter.get('/debug/reflector-test', blockDebugInProduction, async (req: Req
                 apiKeySet: !!global.process.env.COINGECKO_API_KEY,
                 apiKeyLength: global.process.env.COINGECKO_API_KEY?.length || 0
             }
-        })
+        }
+        return ok(res, redactObject(response))
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
@@ -131,14 +136,15 @@ debugRouter.get('/debug/reflector-test', blockDebugInProduction, async (req: Req
 
 debugRouter.get('/debug/env', blockDebugInProduction, async (req: Request, res: Response) => {
     try {
-        return ok(res, {
+        const response = {
             environment: global.process.env.NODE_ENV,
             apiKeySet: !!global.process.env.COINGECKO_API_KEY,
             autoRebalancerEnabled: !!autoRebalancer,
             autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
             enableAutoRebalancer: global.process.env.ENABLE_AUTO_REBALANCER,
             port: global.process.env.PORT
-        })
+        }
+        return ok(res, redactObject(response))
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
@@ -156,13 +162,14 @@ debugRouter.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (re
         const statistics = await autoRebalancer.getStatistics()
         const portfolioCount = await portfolioStorage.getPortfolioCount()
 
-        return ok(res, {
+        const response = {
             autoRebalancerAvailable: true,
             status,
             statistics,
             portfolioCount,
             testTimestamp: new Date().toISOString()
-        })
+        }
+        return ok(res, redactObject(response))
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
             autoRebalancerAvailable: false
