@@ -111,41 +111,40 @@ export async function issueTokens(
   address: string,
   metadata?: RefreshTokenMetadata | null,
 ): Promise<AuthTokens> {
-interface TokenCreationResult extends AuthTokens {
-  refreshId: string;
-}
+ interface TokenCreationResult extends AuthTokens {
+   refreshId: string;
+ }
 
-async function createTokensForUser(address: string): Promise<TokenCreationResult> {
-  const accessToken = generateAccessToken(address);
-  const refreshId = generateRefreshTokenId();
-  const refreshToken = jwt.sign(
-    { sub: address, type: "refresh", jti: refreshId } as TokenPayload & {
-      jti: string;
-    },
-    getJwtSecret(),
-    { expiresIn: REFRESH_EXPIRY_SEC },
-  );
-  const expiresAt = new Date(Date.now() + REFRESH_EXPIRY_SEC * 1000);
-  await createRefreshToken(refreshId, address, refreshToken, expiresAt, metadata);
-  return {
-    accessToken,
-    refreshToken,
-    expiresIn: ACCESS_EXPIRY_SEC,
-    refreshExpiresIn: REFRESH_EXPIRY_SEC,
-    refreshId,
-  };
-}
+ async function createTokensForUser(address: string): Promise<TokenCreationResult> {
+   const accessToken = generateAccessToken(address);
+   const refreshId = generateRefreshTokenId();
+   const refreshToken = jwt.sign(
+     { sub: address, type: "refresh", jti: refreshId } as TokenPayload & {
+       jti: string;
+     },
+     getJwtSecret(),
+     { expiresIn: REFRESH_EXPIRY_SEC },
+   );
+   const expiresAt = new Date(Date.now() + REFRESH_EXPIRY_SEC * 1000);
+   await createRefreshToken(refreshId, address, refreshToken, expiresAt, metadata);
+   return {
+     accessToken,
+     refreshToken,
+     expiresIn: ACCESS_EXPIRY_SEC,
+     refreshExpiresIn: REFRESH_EXPIRY_SEC,
+     refreshId,
+   };
+ }
 
-export async function issueTokens(address: string): Promise<AuthTokens> {
-  const result = await createTokensForUser(address);
-  recordAuthAuditEvent({
-    action: "login",
-    userAddress: address,
-    timestamp: new Date().toISOString(),
-    sessionId: result.refreshId,
-  });
-  const { refreshId, ...tokens } = result;
-  return tokens;
+ const result = await createTokensForUser(address);
+ recordAuthAuditEvent({
+   action: "login",
+   userAddress: address,
+   timestamp: new Date().toISOString(),
+   sessionId: result.refreshId,
+ });
+ const { refreshId, ...tokens } = result;
+ return tokens;
 }
 
 export function verifyAccessToken(token: string): TokenPayload | null {

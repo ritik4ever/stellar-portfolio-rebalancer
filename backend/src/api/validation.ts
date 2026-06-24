@@ -225,6 +225,10 @@ export const rebalanceHistoryQuerySchema = z.object({
         (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
         z.number().int().min(1).max(500).optional()
     ),
+    offset: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(0).optional()
+    ),
     source: z.enum(['offchain', 'simulated', 'onchain']).optional(),
     startTimestamp: z.string().optional(),
     endTimestamp: z.string().optional(),

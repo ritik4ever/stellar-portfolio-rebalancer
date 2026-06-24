@@ -176,8 +176,9 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 | ------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
 | `JWT_SECRET`             | Required for auth (≥32 chars) | Signs access and refresh tokens — never falls back to a built-in value |
 | `JWT_ACCESS_EXPIRY_SEC`  | No (default: 900)             | Access token TTL in seconds                                            |
-| `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800)          | Refresh token TTL in seconds                                           |
-| `ADMIN_PUBLIC_KEYS`      | Yes for admin routes          | Comma-separated Stellar public keys                                    |
+ | `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800)          | Refresh token TTL in seconds                                           |
+ | `JWT_CLOCK_SKEW_SEC`     | No (default: 0)               | Allow issued-at/expiry tolerance for distributed deployments            |
+ | `ADMIN_PUBLIC_KEYS`      | Yes for admin routes          | Comma-separated Stellar public keys                                    |
 
 **Rules enforced at startup:**
 
@@ -662,6 +663,7 @@ Major architectural decisions and their rationales are captured in **[docs/adr/]
 - [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
 
+- [Wallet bug report template](https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/.github/ISSUE_TEMPLATE/wallet_bug_report.md) — Structured reproduction details for wallet issues
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design

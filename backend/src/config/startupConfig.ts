@@ -19,7 +19,15 @@ export interface StartupConfig {
   metricsAllowlist: string[];
   readinessCacheTtlMs: number;
   consentAuditRetentionDays: number;
-
+  queueStartupRetries: number;
+  queueStartupInitialDelayMs: number;
+  queueStartupMaxDelayMs: number;
+  webhookSigningSecret?: string;
+  featureFlagsFile?: string;
+  cacheDurationMs: number;
+  priceDataMaxAgeSeconds: number;
+  minRequestIntervalMs: number;
+  notificationDelivery: NotificationDeliveryConfig;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -197,6 +205,14 @@ export function validateStartupConfigOrThrow(
     );
   }
 
+  const jwtClockSkewSecRaw = (env.JWT_CLOCK_SKEW_SEC || '0').trim();
+  const jwtClockSkewSec = Number.parseInt(jwtClockSkewSecRaw, 10);
+  if (!Number.isInteger(jwtClockSkewSec) || jwtClockSkewSec < 0) {
+    errors.push(
+      `JWT_CLOCK_SKEW_SEC '${env.JWT_CLOCK_SKEW_SEC}' is invalid. Provide a non-negative integer.`,
+    );
+  }
+
   const queueStartupRetriesRaw = (env.QUEUE_STARTUP_RETRIES || "5").trim();
   const queueStartupRetries = Number.parseInt(queueStartupRetriesRaw, 10);
   if (!Number.isInteger(queueStartupRetries) || queueStartupRetries < 1) {
@@ -222,6 +238,12 @@ export function validateStartupConfigOrThrow(
   }
 
   const webhookSigningSecret = (env.WEBHOOK_SIGNING_SECRET || "").trim() || undefined;
+
+  const cacheDurationMs = Number.parseInt((env.CACHE_DURATION_MS || "30000").trim(), 10) || 30000
+  const priceDataMaxAgeSeconds = Number.parseInt((env.PRICE_DATA_MAX_AGE_SECONDS || "120").trim(), 10) || 120
+  const minRequestIntervalMs = Number.parseInt((env.MIN_REQUEST_INTERVAL_MS || "1000").trim(), 10) || 1000
+
+  const notificationDelivery = parseNotificationDeliveryConfig(env).config;
 
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
@@ -267,7 +289,12 @@ export function validateStartupConfigOrThrow(
     hasRebalanceSigner: !!signerSecret,
     jwtAuthEnabled,
     featureFlags,
-
+    webhookSigningSecret,
+    featureFlagsFile,
+    cacheDurationMs,
+    priceDataMaxAgeSeconds,
+    minRequestIntervalMs,
+    notificationDelivery,
   };
 }
 
