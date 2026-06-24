@@ -519,6 +519,9 @@ export class DatabaseService {
     this.db.exec(SCHEMA_SQL);
     this._migrateSchema();
 
+    // Validate and log SQLite pragma settings
+    this._validatePragmas(dbPath);
+
     // Seed demo data on first run (empty portfolios table)
     const count = (
       this.db.prepare("SELECT COUNT(*) as cnt FROM portfolios").get() as {
@@ -534,7 +537,53 @@ export class DatabaseService {
     logger.info("[DB] SQLite database ready", { dbPath });
   }
 
+  private _validatePragmas(dbPath: string): void {
+    const pragmas = [
+      { name: "journal_mode", expected: "wal", critical: true },
+      { name: "foreign_keys", expected: "1", critical: true },
+      { name: "synchronous", expected: "normal", critical: false },
+      { name: "cache_size", expected: null, critical: false },
+      { name: "locking_mode", expected: "normal", critical: false },
+    ];
 
+    const results: Record<string, { current: string; expected: string | null; status: string }> = {};
+
+    for (const pragma of pragmas) {
+      try {
+        const row = this.db
+          .prepare(`PRAGMA ${pragma.name}`)
+          .get() as { [key: string]: string };
+        const current = row[pragma.name];
+        const expected = pragma.expected;
+        const status = expected ? (current.toLowerCase() === expected.toLowerCase() ? "ok" : "warning") : "info";
+
+        results[pragma.name] = { current, expected, status };
+
+        if (status === "warning" && pragma.critical) {
+          logger.warn(
+            `[DB] Critical pragma mismatch: ${pragma.name} is '${current}' but expected '${expected}'. This may cause data integrity or concurrency issues.`,
+            { pragma: pragma.name, current, expected, dbPath },
+          );
+        } else if (status === "warning" && !pragma.critical) {
+          logger.info(
+            `[DB] Pragma suboptimal: ${pragma.name} is '${current}' but recommended is '${expected}'. Consider tuning for better performance.`,
+            { pragma: pragma.name, current, expected, dbPath },
+          );
+        }
+      } catch (err) {
+        logger.error(`[DB] Failed to read pragma ${pragma.name}`, { error: String(err) });
+      }
+    }
+
+    // Log summary of pragma validation
+    const warnings = Object.values(results).filter((r) => r.status === "warning");
+    if (warnings.length > 0) {
+      logger.warn(
+        `[DB] SQLite pragma validation complete with ${warnings.length} warning(s). Review logs above for actionable steps.`,
+        { dbPath, results },
+      );
+    } else {
+      logger.info("[DB] SQLite pragma validation passed", { dbPath, results });
     }
   }
 
@@ -595,9 +644,6 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
-
-
-    }
   }
 
   private _seedDefaultAssets(): void {
