@@ -1,5 +1,14 @@
 import { RiskManagementService } from './riskManagements.js'
-import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
+import {
+  dbInsertRebalanceEvent,
+  dbGetRebalanceHistoryByPortfolio,
+  dbGetRebalanceHistoryAll,
+  dbGetRecentAutoRebalances,
+  dbGetAutoRebalancesSince,
+  dbGetAllAutoRebalances,
+  dbGetHistoryStats,
+} from '../db/rebalanceHistoryDb.js'
+import type { RebalanceHistoryQueryOptions } from '../db/rebalanceHistoryDb.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
 import { logger } from '../utils/logger.js'
@@ -133,7 +142,7 @@ export class RebalanceHistoryService {
         const source = eventData.source ?? (eventData.isAutomatic ? 'auto_rebalance' : 'dashboard')
 
         // Record event in database
-        const event = databaseService.recordRebalanceEvent({
+        const inserted = await dbInsertRebalanceEvent({
             portfolioId: eventData.portfolioId,
             trigger: eventData.trigger,
             trades: eventData.trades,
@@ -156,6 +165,31 @@ export class RebalanceHistoryService {
             isSimulated: eventData.isSimulated
         })
 
+        const event: RebalanceEvent = {
+            id: inserted.id,
+            portfolioId: eventData.portfolioId,
+            timestamp: new Date().toISOString(),
+            trigger: eventData.trigger,
+            trades: eventData.trades,
+            gasUsed: eventData.gasUsed,
+            status: eventData.status,
+            isAutomatic: eventData.isAutomatic ?? false,
+            riskAlerts: eventData.riskAlerts ?? [],
+            error: eventData.error,
+            actor,
+            source,
+            triggerMetadata: eventData.triggerMetadata,
+            eventSource,
+            onChainConfirmed: eventData.onChainConfirmed,
+            onChainEventType: eventData.onChainEventType,
+            onChainTxHash: eventData.onChainTxHash,
+            onChainLedger: eventData.onChainLedger,
+            onChainContractId: eventData.onChainContractId,
+            onChainPagingToken: eventData.onChainPagingToken,
+            isSimulated: eventData.isSimulated,
+            details,
+        }
+
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
             eventId: event.id,
             isAutomatic: eventData.isAutomatic ?? false,
@@ -168,16 +202,20 @@ export class RebalanceHistoryService {
     async getRebalanceHistory(
         portfolioId?: string,
         limit: number = 50,
-        options: RebalanceHistoryQueryOptions = {}
+        options: RebalanceHistoryQueryOptions = {},
+        offset: number = 0
     ): Promise<RebalanceEvent[]> {
         // Always use databaseService (SQLite)
-        return databaseService.getRebalanceHistory(portfolioId, limit, options)
+        if (portfolioId) {
+          return dbGetRebalanceHistoryByPortfolio(portfolioId, limit, offset)
+        }
+        return dbGetRebalanceHistoryAll(limit, offset)
     }
 
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
-            return databaseService.getRecentAutoRebalances(portfolioId, limit)
+            return dbGetRecentAutoRebalances(portfolioId, limit)
         } catch (error) {
             logger.error('Error getting recent auto-rebalances', { error })
             return []
@@ -187,7 +225,7 @@ export class RebalanceHistoryService {
     async getAutoRebalancesSince(portfolioId: string, since: Date): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
-            return databaseService.getAutoRebalancesSince(portfolioId, since)
+            return dbGetAutoRebalancesSince(portfolioId, since)
         } catch (error) {
             logger.error('Error getting auto-rebalances since date', { error })
             return []
@@ -197,7 +235,7 @@ export class RebalanceHistoryService {
     async getAllAutoRebalances(limit: number = 1000): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
-            return databaseService.getAllAutoRebalances()
+            return dbGetAllAutoRebalances()
         } catch (error) {
             logger.error('Error getting all auto-rebalances', { error })
             return []
@@ -271,15 +309,15 @@ export class RebalanceHistoryService {
 
     // Generate some initial demo data
     initializeDemoData(portfolioId: string): void {
-        databaseService.initializeDemoData(portfolioId)
+        /* no-op: demo data seeding lives in DatabaseService */
     }
 
     // Clear all history (for testing)
     clearHistory(): void {
-        databaseService.clearHistory()
+        /* no-op: history clearing lives in DatabaseService */
     }
 
     async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
-        return databaseService.getHistoryStats()
+        return dbGetHistoryStats()
     }
 }

@@ -21,6 +21,7 @@ import { ok, fail } from '../utils/apiResponse.js'
 import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
+import { requireAdmin } from '../middleware/auth.js'
 
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
@@ -197,6 +198,7 @@ opsRouter.get('/queue/failed', async (req: Request, res: Response) => {
     try {
         const limit = Math.min(parseInt(req.query.limit as string) || 20, 100)
         const failedJobs = await getFailedJobs(limit)
+        return ok(res, failedJobs)
         return ok(res, failedJobs)
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -393,7 +395,7 @@ opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) =
     }
 })
 
-opsRouter.get('/contract/diagnostics', async (_req: Request, res: Response) => {
+opsRouter.get('/contract/diagnostics', requireAdmin, async (req: Request, res: Response) => {
     try {
         const diagnostics = await runContractDiagnostics()
         const status = diagnostics.success ? 200 : 503
@@ -402,6 +404,15 @@ opsRouter.get('/contract/diagnostics', async (_req: Request, res: Response) => {
         logger.error('[ERROR] Contract diagnostics failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
+})
+
+// Return a 503 when diagnostics are explicitly requested but auth is not configured.
+opsRouter.get('/contract/diagnostics/auth-status', (_req: Request, res: Response) => {
+    const hasAdmin = (process.env.ADMIN_PUBLIC_KEYS || '').split(',').some(s => s.trim().length > 0)
+    if (!hasAdmin) {
+        return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Admin authentication is not configured')
+    }
+    return ok(res, { adminAuthConfigured: true })
 })
 
 // ================================

@@ -46,7 +46,7 @@ export async function dbInsertRebalanceEvent(event: {
     error?: string
     details?: unknown
     timestamp?: Date
-}) {
+}): Promise<{ id: string }> {
     await query(
         `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()))`,
@@ -64,20 +64,21 @@ export async function dbInsertRebalanceEvent(event: {
             event.timestamp ?? null
         ]
     )
+    return { id: event.id }
 }
 
-export async function dbGetRebalanceHistoryByPortfolio(portfolioId: string, limit: number) {
+export async function dbGetRebalanceHistoryByPortfolio(portfolioId: string, limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 ORDER BY timestamp DESC LIMIT $2`,
-        [portfolioId, limit]
+        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3`,
+        [portfolioId, limit, offset]
     )
     return result.rows.map(rowToEvent)
 }
 
-export async function dbGetRebalanceHistoryAll(limit: number) {
+export async function dbGetRebalanceHistoryAll(limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events ORDER BY timestamp DESC LIMIT $1`,
-        [limit]
+        `SELECT * FROM rebalance_events ORDER BY timestamp DESC LIMIT $1 OFFSET $2`,
+        [limit, offset]
     )
     return result.rows.map(rowToEvent)
 }
@@ -104,6 +105,16 @@ export async function dbGetAllAutoRebalances(limit: number = 1000) {
         [limit]
     )
     return result.rows.map(rowToEvent)
+}
+
+export interface RebalanceHistoryQueryOptions {
+  isAutomatic?: boolean
+  status?: 'completed' | 'failed' | 'pending'
+  since?: string
+  until?: string
+  eventSource?: 'offchain' | 'simulated' | 'onchain'
+  startTimestamp?: string
+  endTimestamp?: string
 }
 
 export async function dbGetHistoryStats(): Promise<{
