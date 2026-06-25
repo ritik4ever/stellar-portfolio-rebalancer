@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import {
   dbSaveNotificationPreferences,
@@ -5,11 +6,18 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbSaveDigestEvent,
+  dbGetAndDeleteDigestEventsBefore,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
 import { normalizeNotificationPreferences } from "./notificationPreferences.js";
+import {
+  getNotificationDeliveryConfig,
+  type NotificationDeliveryConfig,
+} from "../config/notificationDeliveryConfig.js";
+import { deliverWithBackoff } from "./notificationDelivery.js";
 
 // ─────────────────────────────────────────────
 // Types
@@ -17,7 +25,7 @@ import { normalizeNotificationPreferences } from "./notificationPreferences.js";
 
 export interface NotificationPayload {
   userId: string;
-  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange";
+  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
   message: string;
   data?: any;
@@ -40,19 +48,18 @@ interface NotificationProvider {
 // ─────────────────────────────────────────────
 
 class WebhookProvider implements NotificationProvider {
-  private readonly TIMEOUT_MS = 5000;
-  private readonly MAX_RETRIES = 1;
+  constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}
 
   async send(
     payload: NotificationPayload,
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
-      // Log as 'skipped' since the webhook preconditions were not met
-      dbLogNotificationOutcome(payload.userId, 'webhook', payload.eventType, 'skipped', 'Webhook disabled or no URL provided');
+
       return;
     }
 
+    const policy = this.deliveryConfig.webhook;
     const webhookPayload = {
       event: payload.eventType,
       title: payload.title,
@@ -62,62 +69,7 @@ class WebhookProvider implements NotificationProvider {
       userId: payload.userId,
     };
 
-    await this.sendWithRetry(preferences.webhookUrl, webhookPayload, 0);
-  }
 
-  private async sendWithRetry(
-    url: string,
-    payload: any,
-    attempt: number,
-  ): Promise<void> {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "StellarPortfolioRebalancer/1.0",
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`Webhook returned status ${response.status}`);
-      }
-
-      logger.info("Webhook notification sent successfully", {
-        url,
-        event: payload.event,
-        userId: payload.userId,
-      });
-      // Capture successful delivery outcome payload
-      dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'sent');
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      logger.error("Webhook notification failed", {
-        url,
-        attempt: attempt + 1,
-        error: errorMessage,
-      });
-
-      // Retry once prior to total failure assertion
-      if (attempt < this.MAX_RETRIES) {
-        // Track the intermittent failure state as 'retried'
-        dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'retried', errorMessage);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        await this.sendWithRetry(url, payload, attempt + 1);
-      } else {
-        // Log final failure out to the DB if the max retries parameter is exceeded
-        dbLogNotificationOutcome(payload.userId, 'webhook', payload.event, 'failed', errorMessage);
-        throw error;
-      }
-    }
   }
 }
 
@@ -126,17 +78,16 @@ class WebhookProvider implements NotificationProvider {
 // ─────────────────────────────────────────────
 
 class EmailProvider implements NotificationProvider {
-  private transporter: any = null;
+  private transporter: nodemailer.Transporter | null = null;
 
-  constructor() {
+  constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {
     this.initializeTransporter();
   }
 
   private initializeTransporter() {
-    // Check for email configuration
     const emailConfig = {
       host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || "587"),
+      port: parseInt(process.env.SMTP_PORT || "587", 10),
       secure: process.env.SMTP_SECURE === "true",
       auth: {
         user: process.env.SMTP_USER,
@@ -149,17 +100,16 @@ class EmailProvider implements NotificationProvider {
       port: emailConfig.port,
       user: emailConfig.auth.user,
       hasPass: !!emailConfig.auth.pass,
-      passLength: emailConfig.auth.pass?.length || 0,
+      maxAttempts: this.deliveryConfig.email.maxAttempts,
+      initialBackoffMs: this.deliveryConfig.email.initialBackoffMs,
     });
 
-    // Only initialize if configuration exists
     if (emailConfig.host && emailConfig.auth.user && emailConfig.auth.pass) {
       try {
         this.transporter = nodemailer.createTransport(emailConfig);
         logger.info("Email provider initialized with Nodemailer", {
           host: emailConfig.host,
           port: emailConfig.port,
-          user: emailConfig.auth.user,
         });
       } catch (error) {
         logger.error("Failed to initialize email provider", {
@@ -185,19 +135,29 @@ class EmailProvider implements NotificationProvider {
         hasTransporter: !!this.transporter,
         userId: preferences.userId,
       });
-      // Record 'skipped' state if the app SMTP config or the user's config disables email sending
-      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'skipped', 'Email disabled or missing config');
+      dbLogNotificationOutcome(
+        payload.userId,
+        "email",
+        payload.eventType,
+        "skipped",
+        "Email disabled or missing config",
+      );
       return;
     }
 
-    // Use the user's provided email address
     const recipientEmail = preferences.emailAddress;
 
     if (!recipientEmail || !recipientEmail.includes("@")) {
       logger.warn("No valid email address for user", {
         userId: preferences.userId,
       });
-      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'skipped', 'No valid email address');
+      dbLogNotificationOutcome(
+        payload.userId,
+        "email",
+        payload.eventType,
+        "skipped",
+        "No valid email address",
+      );
       return;
     }
 
@@ -209,26 +169,26 @@ class EmailProvider implements NotificationProvider {
       html: this.formatHtmlEmail(payload),
     };
 
-    try {
-      const info = await this.transporter.sendMail(mailOptions);
-      logger.info("Email notification sent successfully", {
-        to: recipientEmail,
-        event: payload.eventType,
+    const policy = this.deliveryConfig.email;
+
+    await deliverWithBackoff(
+      {
+        provider: "email",
         userId: payload.userId,
-        messageId: info.messageId,
-      });
-      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'sent');
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      logger.error("Email notification failed", {
-        to: recipientEmail,
-        error: errorMessage,
-      });
-      // Record failed transmission natively
-      dbLogNotificationOutcome(payload.userId, 'email', payload.eventType, 'failed', errorMessage);
-      throw error;
-    }
+        eventType: payload.eventType,
+        policy,
+      },
+      async () => {
+        const info = await this.transporter!.sendMail(mailOptions);
+        logger.info("Email notification sent successfully", {
+          to: recipientEmail,
+          event: payload.eventType,
+          userId: payload.userId,
+          messageId: info.messageId,
+          maxAttempts: policy.maxAttempts,
+        });
+      },
+    );
   }
 
   private formatTextEmail(payload: NotificationPayload): string {
@@ -284,15 +244,23 @@ Stellar Portfolio Rebalancer
 
 export class NotificationService {
   private providers: NotificationProvider[] = [];
+  private readonly deliveryConfig: NotificationDeliveryConfig;
 
-  constructor() {
-    // Initialize providers
-    this.providers.push(new WebhookProvider());
-    this.providers.push(new EmailProvider());
+  constructor(deliveryConfig: NotificationDeliveryConfig = getNotificationDeliveryConfig()) {
+    this.deliveryConfig = deliveryConfig;
+    this.providers.push(new WebhookProvider(deliveryConfig));
+    this.providers.push(new EmailProvider(deliveryConfig));
 
     logger.info("Notification service initialized", {
       providerCount: this.providers.length,
+      emailMaxAttempts: deliveryConfig.email.maxAttempts,
+      webhookMaxAttempts: deliveryConfig.webhook.maxAttempts,
+      webhookTimeoutMs: deliveryConfig.webhook.requestTimeoutMs,
     });
+  }
+
+  getDeliveryConfig(): NotificationDeliveryConfig {
+    return this.deliveryConfig;
   }
 
   /**
@@ -342,8 +310,7 @@ export class NotificationService {
       return;
     }
 
-    // Check if user wants this event type
-    if (!preferences.events[payload.eventType]) {
+
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,
@@ -351,7 +318,7 @@ export class NotificationService {
       return;
     }
 
-    // Send through all enabled providers (non-blocking)
+
     const promises = this.providers.map(async (provider) => {
       try {
         await provider.send(payload, preferences);
@@ -364,12 +331,113 @@ export class NotificationService {
           eventType: payload.eventType,
           error: errorMessage,
         });
-        // Don't throw - we don't want one provider failure to block others
       }
     });
 
-    // Wait for all providers to complete (but don't block the main flow)
     await Promise.allSettled(promises);
+  }
+
+  /**
+   * Process queued digest events for a given mode ('daily'|'weekly').
+   * This will retrieve events up to now, group by user, and send a single digest per user
+   * if the user's preference matches the requested mode. Events for users who don't
+   * match are re-queued.
+   */
+  async processDigests(mode: 'daily' | 'weekly'): Promise<void> {
+    const cutoff = new Date().toISOString()
+    const events = dbGetAndDeleteDigestEventsBefore(cutoff)
+
+    const byUser: Record<string, typeof events> = {}
+    for (const ev of events) {
+      byUser[ev.user_id] = byUser[ev.user_id] || []
+      byUser[ev.user_id].push(ev)
+    }
+
+    for (const [userId, userEvents] of Object.entries(byUser)) {
+      try {
+        const prefs = this.getPreferences(userId)
+        if (!prefs) {
+          logger.info('Skipping digest for user without preferences', { userId })
+          continue
+        }
+
+        if ((prefs as any).digestMode !== mode) {
+          // Re-queue events (preserve them for the correct schedule)
+          for (const ev of userEvents) {
+            dbSaveDigestEvent(ev.user_id, ev.event_type, ev.title, ev.message, ev.data ? JSON.parse(ev.data) : undefined)
+          }
+          continue
+        }
+
+        // Build digest payload
+        const digestTitle = `${mode.charAt(0).toUpperCase() + mode.slice(1)} Digest (${userEvents.length} events)`
+        const digestMessage = userEvents
+          .map((e) => `- [${e.event_type}] ${e.title} (${e.created_at})\n${e.message}`)
+          .join('\n\n')
+
+        const payload: NotificationPayload = {
+          userId,
+          eventType: 'digest',
+          title: digestTitle,
+          message: digestMessage,
+          data: { events: userEvents.map((e) => ({ eventType: e.event_type, title: e.title, message: e.message, data: e.data ? JSON.parse(e.data) : undefined, timestamp: e.created_at })) },
+          timestamp: new Date().toISOString(),
+        }
+
+        // Send digest through providers
+        const promises = this.providers.map(async (provider) => {
+          try {
+            await provider.send(payload, prefs)
+          } catch (error) {
+            logger.error('Failed to send digest via provider', { provider: provider.constructor.name, userId, error: error instanceof Error ? error.message : String(error) })
+          }
+        })
+        await Promise.allSettled(promises)
+      } catch (error) {
+        logger.error('Error processing digest for user', { userId, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  }
+
+  /**
+   * Verify an incoming webhook callback signature.
+   * Expects the X-Signature-256 header in the format `sha256=<hex>`.
+   * Uses timing-safe comparison to prevent timing attacks.
+   */
+  static verifyCallbackSignature(
+    rawBody: string,
+    signatureHeader: string | undefined,
+    secret: string | undefined,
+  ): boolean {
+    if (!signatureHeader || !secret) {
+      logger.warn("Webhook callback verification skipped: missing signature or secret");
+      return false;
+    }
+
+    const prefix = "sha256=";
+    if (!signatureHeader.startsWith(prefix)) {
+      logger.warn("Webhook callback verification failed: invalid signature format");
+      return false;
+    }
+
+    const receivedSig = signatureHeader.slice(prefix.length);
+    if (!/^[a-f0-9]{64}$/i.test(receivedSig)) {
+      logger.warn("Webhook callback verification failed: malformed signature hex");
+      return false;
+    }
+
+    const hmac = createHmac("sha256", secret);
+    hmac.update(rawBody, "utf8");
+    const expectedSig = hmac.digest("hex");
+
+    try {
+      return timingSafeEqual(
+        Buffer.from(receivedSig, "hex"),
+        Buffer.from(expectedSig, "hex"),
+      );
+    } catch {
+      return false;
+    }
   }
 
   getAllPreferences(): NotificationPreferences[] {
@@ -384,5 +452,4 @@ export class NotificationService {
   }
 }
 
-// Singleton export
 export const notificationService = new NotificationService();

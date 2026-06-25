@@ -4,15 +4,17 @@ import {
     issueTokens,
     refreshTokens,
     logout,
+    revokeDeviceSession,
     issueChallenge,
-    verifyWalletSignature
+    verifyWalletSignature,
+    getRecentAuthAuditEvents
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
-import { authRateLimiter } from '../middleware/rateLimit.js'
 import { validateRequest } from '../middleware/validate.js'
 import { loginSchema, refreshTokenSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
+import type { RefreshTokenMetadata } from '../types/index.js'
 
 const router = Router()
 
@@ -24,7 +26,7 @@ const router = Router()
  * Body: { address: string }
  * Response: { challenge: string }  — sign this exact string (UTF-8) with the wallet
  */
-router.post('/challenge', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/challenge', async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -50,7 +52,7 @@ router.post('/challenge', authRateLimiter, async (req: Request, res: Response) =
  *   signature — base64-encoded Ed25519 signature over the challenge string
  *               returned by POST /api/auth/challenge
  */
-router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
+
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -69,7 +71,8 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
         if (!valid) {
             return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired signature — request a new challenge and sign it with your wallet')
         }
-        const tokens = await issueTokens(trimmed)
+        const metadata = extractMetadata(req)
+        const tokens = await issueTokens(trimmed, metadata)
         return ok(res, {
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
@@ -81,7 +84,7 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/refresh', authRateLimiter, validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
+router.post('/refresh', validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -123,6 +126,12 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
         }
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }

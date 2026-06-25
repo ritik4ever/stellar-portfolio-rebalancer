@@ -68,13 +68,20 @@ This document is the canonical reference for `backend/.env.example`.
 | `SMTP_FROM` | email | No | `noreply@stellarportfolio.com` | Default sender address for outgoing email. |
 | `ADMIN_PUBLIC_KEYS` | CSV | No | empty | Admin addresses allowed to hit privileged endpoints. |
 | `WEBHOOK_TIMEOUT` | integer (ms) | No | `5000` | Outgoing webhook timeout. |
-| `WEBHOOK_RETRY_COUNT` | integer | No | `1` | Number of webhook retries. |
-| `WEBHOOK_RETRY_DELAY` | integer (ms) | No | `1000` | Delay between webhook retries. |
+| `WEBHOOK_RETRY_COUNT` | integer | No | `1` | Webhook retries after first failure (total attempts = `1 +` this value). |
+| `WEBHOOK_RETRY_DELAY` | integer (ms) | No | `1000` | Initial backoff before the first webhook retry. |
+| `WEBHOOK_MAX_BACKOFF_MS` | integer (ms) | No | `60000` | Cap for exponential webhook retry delay. |
+| `WEBHOOK_BACKOFF_MULTIPLIER` | number | No | `2` | Exponential multiplier for webhook retries (≥ 1). |
+| `EMAIL_MAX_ATTEMPTS` | integer | No | `3` | Total email delivery attempts (including first try). |
+| `EMAIL_INITIAL_BACKOFF_MS` | integer (ms) | No | `1000` | Initial backoff before the first email retry. |
+| `EMAIL_MAX_BACKOFF_MS` | integer (ms) | No | `30000` | Cap for exponential email retry delay. |
+| `EMAIL_BACKOFF_MULTIPLIER` | number | No | `2` | Exponential multiplier for email retries (≥ 1). |
 | `NOTIFICATION_RATE_LIMIT_PER_HOUR` | integer | No | `10` | Hourly notification cap per user. |
 | `CORS_ORIGINS` | CSV URLs | No | localhost list | Allowed browser origins for CORS. |
 | `LOG_LEVEL` | enum | No | `info` | Application log level. |
 | `LOG_PRETTY` | boolean | No | `false` | Pretty logs when true; JSON logs when false. |
 | `LOG_DEPLOYMENT_ENV` | string | No | `local` | Extra deployment label for logs/metrics. |
+| `METRICS_ALLOWLIST` | CSV IPs/CIDRs | No | empty | Additional IP ranges allowed to read `/metrics` outside development and test. |
 | `ENABLE_API_LOGGING` | boolean | No | `true` | Enables verbose API request logging. |
 | `DEBUG_PRICE_FEEDS` | boolean | No | `false` | Emits extra market-feed debug logs. |
 | `WS_PORT` | integer | No | `3001` | WebSocket port if not sharing the API server port. |
@@ -87,6 +94,8 @@ This document is the canonical reference for `backend/.env.example`.
 | `RISK_LIQUIDITY_CRITICAL` | number | No | `500` | Critical-liquidity threshold. |
 | `ANALYTICS_SNAPSHOT_INTERVAL` | integer (ms) | No | `300000` | Interval for analytics snapshot jobs. |
 | `MAX_SNAPSHOTS_PER_PORTFOLIO` | integer | No | `1000` | Snapshot retention cap per portfolio. |
+| `READINESS_CACHE_TTL_MS` | integer (ms) | No | `2000` | Cache TTL for the readiness endpoint. |
+| `CONSENT_AUDIT_RETENTION_DAYS` | integer | No | `365` | Retention period for consent audit logs. |
 | `JWT_SECRET` | string | Conditionally | empty | Enables auth when set and length is at least 32 chars. |
 | `JWT_PREVIOUS_SECRET` | string | No | empty | Previous JWT signing secret accepted during key rotation. |
 | `JWT_PREVIOUS_SECRET_GRACE_UNTIL` | ISO date string | No | empty | Timestamp until which the previous JWT secret remains valid. |
@@ -105,6 +114,7 @@ This document is the canonical reference for `backend/.env.example`.
 | `ENABLE_DEMO_DB_SEED` | boolean | No | `true` | Seeds demo DB records at startup. |
 | `DEMO_INITIAL_BALANCE` | number | No | `10000` | Starting demo portfolio value in USD. |
 | `MOCK_EXTERNAL_APIS` | boolean | No | `false` | Mocks outbound provider calls in test/dev flows. |
+| `FEATURE_FLAGS_FILE` | path | No | empty | Path to a local JSON file containing feature flag overrides for staging. |
 | `SOROBAN_RPC_URL` | URL | No | empty | Explicit Soroban RPC endpoint for contract indexer. |
 | `STELLAR_RPC_URL` | URL | No | empty | Backward-compatible alias of `SOROBAN_RPC_URL`. |
 | `SOROBAN_EVENT_INDEXER_INTERVAL_MS` | integer (ms) | No | `15000` | Poll interval for contract event indexing. |
@@ -112,10 +122,12 @@ This document is the canonical reference for `backend/.env.example`.
 | `SOROBAN_EVENT_INDEXER_BOOTSTRAP_WINDOW` | integer | No | `500` | Ledger lookback window on first sync. |
 | `SOROBAN_EVENT_INDEXER_MAX_PAGES` | integer | No | `10` | Max pages fetched per sync cycle. |
 | `CONTRACT_EVENT_SCHEMA_VERSION` | integer | No | `1` | Declares expected contract-event schema version. |
+| `CONSENT_AUDIT_RETENTION_DAYS` | integer (days) | No | `365` | Retention window for consent audit records. |
+| `READINESS_CACHE_TTL_MS` | integer (ms) | No | `2000` | Cache TTL for readiness checks. |
 | `SENTRY_ENABLED` | boolean | No | `false` | Enables backend Sentry integration. |
 | `SENTRY_DSN` | URL | No | empty | Sentry DSN. |
-| `SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. |
-| `SENTRY_RELEASE` | string | No | empty | Sentry release identifier. |
+| `SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. Set this to the deployed tier, not the local shell mode. |
+| `SENTRY_RELEASE` | string | No | empty | Sentry release identifier. Use the full git SHA for the deployed build. |
 | `SENTRY_TRACES_SAMPLE_RATE` | number | No | `0.2` | Sentry traces sample rate (0-1). |
 | `SENTRY_PROFILES_SAMPLE_RATE` | number | No | `0.1` | Sentry profiling sample rate (0-1). |
 | `NEW_RELIC_ENABLED` | boolean | No | `false` | Enables New Relic APM integration. |
@@ -144,8 +156,8 @@ This table is the canonical reference for `frontend/.env.example`.
 | `VITE_ENABLE_BROWSER_PRICE_DEBUG` | boolean | No | `false` | Enables verbose browser price fallback logging and debug price behavior. |
 | `VITE_SENTRY_ENABLED` | boolean | No | `false` | Enables frontend Sentry integration. |
 | `VITE_SENTRY_DSN` | URL | No | empty | Sentry DSN for browser error reporting. |
-| `VITE_SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. |
-| `VITE_SENTRY_RELEASE` | string | No | empty | Sentry release identifier. |
+| `VITE_SENTRY_ENVIRONMENT` | string | No | `development` | Sentry environment tag. Set this to the deployed tier, not the local Vite mode. |
+| `VITE_SENTRY_RELEASE` | string | No | empty | Sentry release identifier. Use the full git SHA for the deployed build. |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | number | No | `0.1` | Frontend Sentry traces sample rate. |
 | `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | number | No | `0` | Sentry replay sample rate for normal sessions. |
 | `VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | number | No | `1` | Sentry replay sample rate after errors. |

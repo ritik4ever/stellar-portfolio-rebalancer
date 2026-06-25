@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calculateRebalanceTrades } from './calculations'
+import { calculateRebalanceTrades, calculateRelativeMovement } from './calculations'
 
 const makePortfolio = (allocations: any[], totalValue = 10000, threshold = 5) => ({
     allocations,
@@ -118,5 +118,31 @@ describe('calculateRebalanceTrades', () => {
         const trades = calculateRebalanceTrades(portfolio)
         // targetValue = 10000 * 0.5 = 5000. diff = 5000 - 6000.00000001 = -1000.00000001
         expect(trades[0].amount).toBeCloseTo(1000.00000001, 8)
+    })
+})
+
+describe('calculateRelativeMovement', () => {
+    it('identifies asset A as leader when A change > B change', () => {
+        const result = calculateRelativeMovement(5, -2)
+        expect(result.leader).toBe('a')
+        expect(result.relativeChange).toBeCloseTo(7)
+    })
+
+    it('identifies asset B as leader when B change > A change', () => {
+        const result = calculateRelativeMovement(-1, 3)
+        expect(result.leader).toBe('b')
+        expect(result.relativeChange).toBeCloseTo(-4)
+    })
+
+    it('returns equal when both changes are the same', () => {
+        const result = calculateRelativeMovement(2.5, 2.5)
+        expect(result.leader).toBe('equal')
+        expect(result.relativeChange).toBe(0)
+    })
+
+    it('handles negative vs negative correctly', () => {
+        const result = calculateRelativeMovement(-1, -5)
+        expect(result.leader).toBe('a')
+        expect(result.relativeChange).toBeCloseTo(4)
     })
 })

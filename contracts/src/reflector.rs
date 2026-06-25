@@ -1,5 +1,8 @@
 use soroban_sdk::{contractclient, contracttype, Address, Env, Symbol, Vec};
 
+/// Maximum age accepted for Reflector price data during rebalance.
+pub const REFLECTOR_PRICE_MAX_AGE_SECONDS: u64 = 3600;
+
 #[contractclient(name = "ReflectorClient")]
 pub trait ReflectorContract {
     fn base(env: Env) -> Asset;
