@@ -144,16 +144,6 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     const error = queryError ? 'Failed to load rebalance history' : null
     const loading = forcedLoading || (isLoading && !data)
 
-    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
-        const date = new Date(timestamp)
-
-        const dateFormatted = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        })
-
-
     const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => ({
         dateFormatted: formatShortDate(timestamp),
         timeFormatted: formatTime(timestamp),
@@ -289,7 +279,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                         ))}
                     </div>
                 </div>
-            </section>
+            </div>
         )
     }
 
@@ -487,7 +477,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                         )
                     })
                 )}
-            </div>
+            </header>
 
             {history.length > 0 && (
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">

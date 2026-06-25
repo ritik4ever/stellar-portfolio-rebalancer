@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
     useRealtimeConnection: vi.fn(),
 }))
 
-vi.mock('../hooks/queries/usePricesQuery', () => ({ usePrices: mocks.usePrices }))
+vi.mock('../hooks/queries/usePricesQuery', () => ({
+    usePrices: mocks.usePrices,
+    formatPriceFeedSummary: vi.fn(() => 'Test prices'),
+}))
 vi.mock('../hooks/queries/useAssetsQuery', () => ({ useAssets: mocks.useAssets }))
 vi.mock('../context/RealtimeConnectionContext', () => ({
     useRealtimeConnection: mocks.useRealtimeConnection,
