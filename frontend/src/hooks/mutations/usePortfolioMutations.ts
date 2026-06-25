@@ -92,11 +92,15 @@ export const useCreatePortfolioMutation = () => {
 
   return useMutation({
     mutationFn: (data: any) => api.post<any>(ENDPOINTS.PORTFOLIO, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+    onSuccess: async (_data: any, variables: any) => {
+      await queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+      // Invalidate portfolio details to ensure pie chart updates immediately
+      if (variables?.portfolioId) {
+        await queryClient.invalidateQueries({ queryKey: portfolioKeys.detail(variables.portfolioId) });
+      }
     },
-    onError: (_error, _variables, _context) => {
-      queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+    onError: async (_error: any, _variables: any, _context: any) => {
+      await queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
     },
   });
 };
@@ -126,7 +130,7 @@ export const useExecuteRebalanceMutation = (portfolioId: string | null) => {
         });
       }
     },
-    onError: (error, _variables, _context) => {
+    onError: (error: any, _variables: any, _context: any) => {
       const failureInfo = parseFailureReason(error);
       const rollbackMessage = buildRollbackMessage(error, "rebalance");
     console.error("[Mutation:ExecuteRebalance] Failed", {

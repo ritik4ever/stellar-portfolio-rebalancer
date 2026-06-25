@@ -7,6 +7,7 @@ import { QueryProvider } from './providers/QueryProvider'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { initializeObservability } from './observability'
 import './styles/globals.css'
+import './i18n'
 
 initializeObservability()
 bootstrapThemeBeforeHydration()
