@@ -2,6 +2,7 @@ import { SorobanRpc } from '@stellar/stellar-sdk'
 import type { PricesMap, PriceData, PriceFeedMeta, PricesFeedPayload } from '../types/index.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
+import { recordCacheTtl } from '../observability/metrics.js'
 import { assetRegistryService } from './assetRegistryService.js'
 
 

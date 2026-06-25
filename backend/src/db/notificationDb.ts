@@ -215,6 +215,24 @@ export function dbGetAndDeleteDigestEventsBefore(cutoffIso: string): Notificatio
     }))
 }
 
+export function dbInitDefaultNotificationPreferences(userId: string): NotificationPreferences {
+    ensureNotificationTable()
+    const defaults: NotificationPreferences = {
+        userId,
+        emailEnabled: false,
+        webhookEnabled: false,
+        digestMode: 'immediate',
+        events: {
+            rebalance: true,
+            circuitBreaker: true,
+            priceMovement: true,
+            riskChange: true,
+        },
+    }
+    dbSaveNotificationPreferences(defaults)
+    return defaults
+}
+
 export function dbGetNotificationPreferences(userId: string): NotificationPreferences | undefined {
     ensureNotificationTable()
     const db = getDb()

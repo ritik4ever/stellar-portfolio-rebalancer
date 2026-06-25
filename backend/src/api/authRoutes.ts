@@ -16,6 +16,15 @@ import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
 import type { RefreshTokenMetadata } from '../types/index.js'
 
+function extractMetadata(req: Request): RefreshTokenMetadata {
+  return {
+    device: req.headers['x-device-id'] as string | undefined,
+    platform: req.headers['x-platform'] as string | undefined,
+    userAgent: req.headers['user-agent'] as string | undefined,
+    ipAddress: req.ip,
+  }
+}
+
 const router = Router()
 
 /**
@@ -52,7 +61,7 @@ router.post('/challenge', async (req: Request, res: Response) => {
  *   signature — base64-encoded Ed25519 signature over the challenge string
  *               returned by POST /api/auth/challenge
  */
-
+router.post('/login', validateRequest(loginSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -126,12 +135,6 @@ router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
         }
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
-    } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }

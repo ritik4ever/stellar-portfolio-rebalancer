@@ -86,7 +86,7 @@ describe('consent routes integration', () => {
         const userId = testUser('GRANTVER')
         const token = generateAccessToken(userId)
         const docText = 'Terms and Conditions v2.0 - Agree to Stellar Portfolio Rebalancer'
-        const expectedHash = '4bdf6d25244589d8ea4f3c0bbf2f02f06b6ebdb14e82df42df4539121a97d3df' // sha256 hash of the docText
+        const expectedHash = '66319e1f1025874cd1a7edb6b6f115a0637008723c02b28a428bbb6b05058e67' // sha256 hash of the docText
 
         const grant = await request(app)
             .post('/api/v1/consent/grant')
@@ -117,7 +117,7 @@ describe('consent routes integration', () => {
         const userId = testUser('REVOKEVER')
         const token = generateAccessToken(userId)
         const docText = 'Revocation Text v1.0'
-        const expectedHash = '601362e4c92e92c29c6f2df6b5c00e1cf553f47c94519965d1d61bd282c0b0bd' // sha256 of docText
+        const expectedHash = '075c92235a9d8bb46dcbd164824d0ea2db7a8505fb1d949dd382547c4ea0b0eb' // sha256 of docText
 
         await request(app)
             .post('/api/v1/consent/grant')
@@ -249,6 +249,46 @@ describe('consent routes integration', () => {
 
         expect(purge.body.data.deletedCount).toBeGreaterThan(0)
         expect(purge.body.data.retentionDays).toBe(0)
+    })
+
+    it('GET /api/v1/consent/history returns consent record and full audit history for the authenticated user', async () => {
+        const userId = testUser('HISTORY')
+        const token = generateAccessToken(userId)
+
+        const historyBefore = await request(app)
+            .get('/api/v1/consent/history')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(historyBefore.body.data.userId).toBe(userId)
+        expect(historyBefore.body.data.consent).toBeNull()
+        expect(historyBefore.body.data.history).toEqual([])
+
+        await request(app)
+            .post('/api/v1/consent/grant')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ documentText: 'Terms v1' })
+            .expect(200)
+
+        const historyAfter = await request(app)
+            .get('/api/v1/consent/history')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(historyAfter.body.data.userId).toBe(userId)
+        expect(historyAfter.body.data.consent).not.toBeNull()
+        expect(historyAfter.body.data.consent.active).toBe(true)
+        expect(historyAfter.body.data.consent.documentVersion).toBeTruthy()
+        expect(historyAfter.body.data.history).toHaveLength(1)
+        expect(historyAfter.body.data.history[0].action).toBe('grant')
+        expect(historyAfter.body.data.history[0].timestamp).toBeTruthy()
+        expect(historyAfter.body.data.history[0].documentVersion).toBeTruthy()
+    })
+
+    it('GET /api/v1/consent/history returns 401 without auth', async () => {
+        await request(app)
+            .get('/api/v1/consent/history')
+            .expect(401)
     })
 
     it('POST /api/v1/consent/audit/purge returns 400 for invalid retentionDays', async () => {

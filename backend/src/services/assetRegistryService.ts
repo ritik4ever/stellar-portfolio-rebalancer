@@ -6,6 +6,9 @@ import {
 } from './assetRegistryValidation.js'
 import { logger } from '../utils/logger.js'
 
+const STALE_POLICY_MS = 5 * 60 * 1000
+const QUARANTINE_POLICY_MS = 30 * 60 * 1000
+
 export interface AssetRecord {
     symbol: string
     name: string

@@ -11,6 +11,7 @@ import {
   handleFinalFailure,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
+import { randomUUID } from "node:crypto";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
@@ -40,9 +41,6 @@ export async function processRebalanceJob(
     }
 
     const lockAcquired = await acquireWorkerLock(portfolioId);
-
-
-    }
 
     const stellarService = new StellarService();
     try {

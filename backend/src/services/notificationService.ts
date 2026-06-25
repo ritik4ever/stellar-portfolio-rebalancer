@@ -8,6 +8,7 @@ import {
   dbGetNotificationLogs,
   dbSaveDigestEvent,
   dbGetAndDeleteDigestEventsBefore,
+  dbInitDefaultNotificationPreferences,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
@@ -277,12 +278,15 @@ export class NotificationService {
   }
 
   /**
-   * Get user preferences
+   * Get user preferences, auto-initializing with defaults if none exist.
    */
   getPreferences(
     userId: string,
-  ): NotificationPreferences | undefined {
-    return dbGetNotificationPreferences(userId);
+  ): NotificationPreferences {
+    const existing = dbGetNotificationPreferences(userId);
+    if (existing) return existing;
+    logger.info('[NOTIFICATION] Initializing default preferences for new user', { userId });
+    return dbInitDefaultNotificationPreferences(userId);
   }
 
   /**
@@ -290,12 +294,10 @@ export class NotificationService {
    */
   unsubscribe(userId: string): void {
     const prefs = this.getPreferences(userId);
-    if (prefs) {
-      prefs.emailEnabled = false;
-      prefs.webhookEnabled = false;
-      dbSaveNotificationPreferences(prefs);
-      logger.info("User unsubscribed from notifications", { userId });
-    }
+    prefs.emailEnabled = false;
+    prefs.webhookEnabled = false;
+    dbSaveNotificationPreferences(prefs);
+    logger.info("User unsubscribed from notifications", { userId });
   }
 
   /**
@@ -303,21 +305,15 @@ export class NotificationService {
    */
   async notify(payload: NotificationPayload): Promise<void> {
     const preferences = this.getPreferences(payload.userId);
-    if (!preferences) {
-      logger.info("No notification preferences found for user", {
-        userId: payload.userId,
-      });
-      return;
-    }
 
-
+    const eventKey = payload.eventType as keyof typeof preferences.events;
+    if (!preferences.events[eventKey]) {
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,
       });
       return;
     }
-
 
     const promises = this.providers.map(async (provider) => {
       try {

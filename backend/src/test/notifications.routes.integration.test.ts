@@ -30,6 +30,8 @@ vi.mock('../middleware/rateLimit.js', () => ({
     criticalRateLimiter: passThroughMiddleware,
     adminRateLimiter: passThroughMiddleware,
     protectedCriticalLimiter: [passThroughMiddleware, passThroughMiddleware],
+    dynamicRateLimiter: passThroughMiddleware,
+    isTrustedHealthProbe: () => false,
     requestMonitoringMiddleware: passThroughMiddleware,
     closeRateLimitStore: vi.fn(),
     getRateLimitStoreType: () => 'memory' as const,
@@ -89,15 +91,20 @@ describe('Notification Preferences API Integration Tests', () => {
     })
 
     describe('GET /api/notifications/preferences - defaults for new user', () => {
-        it('returns null preferences for new user (no pre-existing prefs)', async () => {
+        it('returns default preferences for new user (auto-initialized)', async () => {
             const res = await request(app)
                 .get('/api/notifications/preferences')
                 .query({ userId: TEST_USER })
                 .expect(200)
 
             expect(res.body.success).toBe(true)
-            expect(res.body.data.preferences).toBeNull()
-            expect(res.body.data.message).toContain('No preferences found')
+            expect(res.body.data.preferences).not.toBeNull()
+            expect(res.body.data.preferences.emailEnabled).toBe(false)
+            expect(res.body.data.preferences.webhookEnabled).toBe(false)
+            expect(res.body.data.preferences.events.rebalance).toBe(true)
+            expect(res.body.data.preferences.events.circuitBreaker).toBe(true)
+            expect(res.body.data.preferences.events.priceMovement).toBe(true)
+            expect(res.body.data.preferences.events.riskChange).toBe(true)
         })
 
         it('returns 400 when userId query param is missing', async () => {

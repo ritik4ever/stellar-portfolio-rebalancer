@@ -1,4 +1,7 @@
 import Database from "better-sqlite3";
+import { mkdirSync } from "fs";
+import { dirname, join } from "path";
+import { randomUUID, createHash } from "node:crypto";
 
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
@@ -681,6 +684,33 @@ export class DatabaseService {
       stmt.run(...row, now, now, now);
     }
     logger.info("[DB] Seeded default assets (XLM, USDC, BTC, ETH)");
+  }
+
+  private _withTiming<T>(operation: string, fn: () => T): T {
+    const start = process.hrtime.bigint();
+    try {
+      const result = fn();
+      const end = process.hrtime.bigint();
+      const durationSeconds = Number(end - start) / 1_000_000_000;
+      const durationMs = durationSeconds * 1000;
+
+      dbQueryDuration.observe({ operation, status: "success" }, durationSeconds);
+
+      if (durationMs > SLOW_QUERY_THRESHOLD_MS) {
+        logger.warn("[DB] Slow query detected", {
+          operation,
+          durationMs: durationMs.toFixed(2),
+          thresholdMs: SLOW_QUERY_THRESHOLD_MS,
+        });
+      }
+
+      return result;
+    } catch (err) {
+      const end = process.hrtime.bigint();
+      const durationSeconds = Number(end - start) / 1_000_000_000;
+      dbQueryDuration.observe({ operation, status: "error" }, durationSeconds);
+      throw err;
+    }
   }
 
   // ── Public accessor for backward-compat (routes use portfolioStorage.portfolios.size) ──
@@ -1423,7 +1453,21 @@ export class DatabaseService {
                     (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-
+          )
+          .run(
+            event.id,
+            eventData.portfolioId,
+            event.timestamp,
+            event.trigger,
+            event.reasonCode ?? null,
+            event.trades,
+            event.gasUsed,
+            event.status,
+            event.isAutomatic ? 1 : 0,
+            event.riskAlerts ? JSON.stringify(event.riskAlerts) : null,
+            event.error ?? null,
+            event.details ? JSON.stringify(event.details) : null,
+          );
 
         return event;
       } catch (err) {
@@ -1431,7 +1475,6 @@ export class DatabaseService {
           `Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`,
         );
       }
-    });
   }
 
   getRebalanceHistory(
@@ -1912,6 +1955,8 @@ export class DatabaseService {
       .prepare("DELETE FROM portfolio_drafts WHERE expires_at <= datetime('now')")
       .run();
     return result.changes;
+  }
+
   backup(backupPath?: string): string {
     try {
       const dbPath = process.env.DB_PATH || "./data/portfolio.db";
