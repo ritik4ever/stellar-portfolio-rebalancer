@@ -7,9 +7,10 @@ import { contractEventIndexerService } from '../services/contractEventIndexer.js
 import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireAdmin } from '../middleware/auth.js'
+import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
 import { ok, fail } from '../utils/apiResponse.js'
-import { StellarService } from '../services/stellarService.js'
+import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
@@ -345,6 +346,20 @@ rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, async (req:
 
         return ok(res, { message: 'Force check completed' })
     } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+rebalancingRouter.post('/auto-rebalancer/shadow-check', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        if (!autoRebalancer) {
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
+        }
+
+        const result = await autoRebalancer.shadowCheck()
+        return ok(res, { result })
+    } catch (error) {
+        logger.error('[ERROR] Auto-rebalancer shadow check failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

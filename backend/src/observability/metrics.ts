@@ -1,6 +1,7 @@
 
-
-
+import { Registry, collectDefaultMetrics, Histogram, Counter, Gauge } from 'prom-client';
+import { observabilityConfig } from './config.js';
+import type { Request, Response, NextFunction } from 'express';
 
 const register = new Registry();
 
@@ -183,6 +184,14 @@ const workerStatus = new Gauge({
   registers: [register],
 });
 
+export const dbQueryDuration = new Histogram({
+  name: `${observabilityConfig.metrics.prefix}db_query_duration_seconds`,
+  help: "Database query duration in seconds",
+  labelNames: ["operation", "status"] as const,
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  registers: [register],
+});
+
 const routeLabel = (req: Request): string =>
   req.route?.path || req.path || "unknown";
 
@@ -217,10 +226,7 @@ export const metricsMiddleware = (
 };
 
 export async function getMetricsPayload(): Promise<string> {
-
-}
-
-
+  return register.metrics();
 }
 
 export function recordCacheOperation(operation: "hit" | "miss" | "eviction" | "update", asset: string): void {

@@ -6,6 +6,7 @@ import {
 } from '../services/assetRegistryValidation.js'
 import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
 import { requireAdmin } from '../middleware/auth.js'
+import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest } from '../middleware/validate.js'
 import { adminAddAssetSchema, adminPatchAssetSchema, assetsListQuerySchema } from './validation.js'
@@ -167,7 +168,8 @@ assetsRouter.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, 
     }
 })
 
-
+/** Admin: patch asset attributes */
+assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         const { enabled, quarantined } = req.body

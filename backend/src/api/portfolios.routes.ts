@@ -9,6 +9,7 @@ import { riskManagementService } from '../services/serviceContainer.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
+import { protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
 
 import { getAuthConfig } from '../services/authService.js'
@@ -18,9 +19,19 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { updatePortfolioSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
+import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
+
+function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
+    const options = body?.options
+    return {
+        simulateOnly: options?.simulateOnly,
+        ignoreSafetyChecks: options?.ignoreSafetyChecks,
+        tradeSlippageOverrides: options?.slippageOverrides
+    }
+}
 
 export const portfoliosRouter = Router()
 
@@ -28,24 +39,9 @@ const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 
-
+portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), async (req: Request, res: Response) => {
     try {
-        const parsed = createPortfolioSchema.safeParse(req.body)
-        if (!parsed.success) {
-            const first = parsed.error.issues[0]
-            const message = first?.message ?? 'Validation failed'
-            const fullMessage = parsed.error.issues.some((e) => e.path.join('.') !== '')
-                ? message
-                : req.body?.userAddress == null
-                    ? 'Missing required fields: userAddress, allocations, threshold'
-                    : req.body?.allocations == null
-                        ? 'Missing required fields: allocations, threshold'
-                        : req.body?.threshold == null
-                            ? 'Missing required fields: threshold'
-                            : message
-            return fail(res, 400, 'VALIDATION_ERROR', fullMessage)
-        }
-        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = parsed.data
+        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = req.body
 
         const slippageTolerancePercent = slippageTolerance ?? 1
         const portfolioId = await stellarService.createPortfolio(
@@ -406,7 +402,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-
+portfoliosRouter.post('/portfolio/:id/rebalance', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 

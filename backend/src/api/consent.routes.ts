@@ -130,12 +130,44 @@ consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordCons
     }
 })
 
+/** GDPR: Return full consent history export for the current user (consent records + audit events). */
+consentRouter.get('/consent/history', requireJwtWhenEnabled, (req: Request, res: Response) => {
+    try {
+        const userId = resolveConsentUserId(req)
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        const consent = databaseService.getConsent(userId)
+        const auditEvents = databaseService.getConsentAudit(userId)
+        return ok(res, {
+            userId,
+            consent: consent ? {
+                termsAcceptedAt: consent.termsAcceptedAt,
+                privacyAcceptedAt: consent.privacyAcceptedAt,
+                cookieAcceptedAt: consent.cookieAcceptedAt,
+                revokedAt: consent.revokedAt,
+                active: consent.active,
+                documentVersion: consent.documentVersion,
+            } : null,
+            history: auditEvents.map(e => ({
+                id: e.id,
+                action: e.action,
+                timestamp: e.timestamp,
+                ipAddress: e.ipAddress,
+                userAgent: e.userAgent,
+                documentVersion: e.documentVersion,
+            })),
+        })
+    } catch (error) {
+        logger.error('[ERROR] Consent history failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 /** GDPR: Purge consent audit events older than the configured retention period. */
 consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, (req: Request, res: Response) => {
     try {
-        const retentionDays = parseInt(req.body.retentionDays as string) || parseInt(process.env.CONSENT_AUDIT_RETENTION_DAYS || '365')
-        if (!Number.isInteger(retentionDays) || retentionDays < 1) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'retentionDays must be a positive integer')
+        const retentionDays = req.body.retentionDays !== undefined ? parseInt(req.body.retentionDays as string) : parseInt(process.env.CONSENT_AUDIT_RETENTION_DAYS || '365')
+        if (!Number.isInteger(retentionDays) || retentionDays < 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'retentionDays must be a non-negative integer')
         }
         const deletedCount = databaseService.purgeOldConsentAuditEvents(retentionDays)
         return ok(res, {

@@ -6,6 +6,7 @@ import {
 } from '../db/idempotencyDb.js'
 import { fail } from '../utils/apiResponse.js'
 import { stableStringify } from '../utils/helpers.js'
+import { logger } from '../utils/logger.js'
 
 export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
     const key = req.headers['idempotency-key'] as string | undefined
@@ -34,13 +35,21 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
 
     if (existing) {
         if (existing.requestHash !== requestHash) {
+            logger.warn('[IDEMPOTENCY] Key reuse with different payload', {
+                key,
+                method: req.method,
+                path: req.path,
+                user: requestUser,
+                storedHash: existing.requestHash,
+                newHash: requestHash,
+            })
             // Same key, different payload → reject
             fail(
                 res,
                 409,
                 'CONFLICT',
                 'Idempotency-Key already used with a different request payload',
-                { idempotencyKey: key }
+                { idempotencyKey: key, reason: 'Payload hash mismatch' }
             )
             return
         }

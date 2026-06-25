@@ -11,6 +11,7 @@ export interface FeatureFlags {
     enableDemoDbSeed: boolean
     allowPublicUserPortfoliosInDemo: boolean
     enableIssuerMetadata: boolean
+    enableShadowMode: boolean
 }
 
 let cachedOverrides: Partial<FeatureFlags> | null = null
@@ -51,7 +52,9 @@ export const loadFeatureFlagsOverrides = (filePath: string): Partial<FeatureFlag
             enableDemoDbSeed: 'enableDemoDbSeed',
             ENABLE_DEMO_DB_SEED: 'enableDemoDbSeed',
             allowPublicUserPortfoliosInDemo: 'allowPublicUserPortfoliosInDemo',
-            ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: 'allowPublicUserPortfoliosInDemo'
+            ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: 'allowPublicUserPortfoliosInDemo',
+            enableShadowMode: 'enableShadowMode',
+            ENABLE_SHADOW_MODE: 'enableShadowMode'
         }
 
         for (const [key, value] of Object.entries(data)) {
@@ -91,6 +94,7 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
     const enableDemoDbSeed = parseBoolean(env.ENABLE_DEMO_DB_SEED, demoMode)
     const allowPublicUserPortfoliosInDemo = parseBoolean(env.ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO, false)
     const enableIssuerMetadata = parseBoolean(env.ENABLE_ISSUER_METADATA, true)
+    const enableShadowMode = parseBoolean(env.ENABLE_SHADOW_MODE, false)
 
     const flags: FeatureFlags = {
         demoMode,
@@ -100,7 +104,8 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
         allowDemoBalanceFallback,
         enableDemoDbSeed,
         allowPublicUserPortfoliosInDemo,
-        enableIssuerMetadata
+        enableIssuerMetadata,
+        enableShadowMode
     }
 
     const overrideFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : ''
@@ -135,7 +140,8 @@ export const getPublicFeatureFlags = (env: NodeJS.ProcessEnv = process.env): Rec
         ALLOW_DEMO_BALANCE_FALLBACK: flags.allowDemoBalanceFallback,
         ENABLE_DEMO_DB_SEED: flags.enableDemoDbSeed,
         ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: flags.allowPublicUserPortfoliosInDemo,
-        ENABLE_ISSUER_METADATA: flags.enableIssuerMetadata
+        ENABLE_ISSUER_METADATA: flags.enableIssuerMetadata,
+        ENABLE_SHADOW_MODE: flags.enableShadowMode
     }
 }
 

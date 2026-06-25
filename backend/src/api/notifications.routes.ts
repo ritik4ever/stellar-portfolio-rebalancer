@@ -73,10 +73,6 @@ notificationsRouter.get('/notifications/preferences', requireJwtWhenEnabled, val
 
         const preferences = notificationService.getPreferences(userId)
 
-        if (!preferences) {
-            return ok(res, { preferences: null, message: 'No preferences found for this user' })
-        }
-
         return ok(res, { preferences })
     } catch (error) {
         logger.error('Failed to get notification preferences', { error: getErrorObject(error) })

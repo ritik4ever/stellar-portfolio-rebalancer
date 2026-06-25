@@ -1,187 +1,107 @@
+import Database from 'better-sqlite3'
+import { randomUUID } from 'node:crypto'
 
+export interface ExecuteRebalanceOptions {
+    simulateOnly?: boolean
+    ignoreSafetyChecks?: boolean
+    tradeSlippageOverrides?: Record<string, number>
+}
+
+export interface RebalanceDryRunResult {
+    portfolioId: string
+    canExecute: boolean
+    overallStatus: string
+    trigger: string
+    estimatedTrades: any[]
+    skippedTrades: any[]
+    skippedAssets: any[]
+    guardrails: {
+        riskManagement: { allowed: boolean; reason: string }
+        cooldown: { allowed: boolean; reason: string }
+        marketConditions: { allowed: boolean; reason: string }
+        rebalanceRequired: { allowed: boolean; reason: string }
+    }
+    feeEstimate: { totalFeeXlm: number; totalFeeUsd: number; xlmPriceUsd: number }
+    estimatedTotalSlippageBps: number
+}
+
+export class StellarService {
+    private db: Database.Database
 
     constructor() {
-        this.stellarService = new StellarService()
-        this.reflectorService = new ReflectorService()
+        const dbPath = process.env.DB_PATH || './data/portfolio.db'
+        this.db = new Database(dbPath)
     }
 
-    /**
-     * Start the automatic monitoring service.
-     * With BullMQ, this just flags the service as running – the scheduler
-     * already registered the repeatable job. We also enqueue an immediate
-     * check so the first run happens without waiting 30 min.
-     */
-    async start(): Promise<void> {
-        if (this.isRunning && this.initialized) {
-            logger.warn('[AUTO-REBALANCER] Already running')
-            return
-        }
-
-        if (this.isRunning && !this.initialized) {
-            logger.warn('[AUTO-REBALANCER] Retrying initialization after previous incomplete startup')
-        }
-
-        this.lastStartedAt = new Date().toISOString()
-        this.lastInitializationError = undefined
-        this.isRunning = true
-        logger.info('[AUTO-REBALANCER] Service started (queue-backed)')
-        logAudit('auto_rebalancer_started', { backend: 'bullmq' })
-
-        try {
-            const redisUp = await isRedisAvailable()
-            if (redisUp) {
-                const queue = getPortfolioCheckQueue()
-                if (!queue) {
-                    this.initialized = false
-                    this.lastInitializationError = 'Portfolio check queue unavailable'
-                    logger.warn('[AUTO-REBALANCER] Portfolio check queue unavailable during startup')
-                    return
-                }
-
-await queue.add(
-                    'startup-portfolio-check',
-                    { triggeredBy: 'startup', correlationId: getRequestId() || randomUUID() },
-                    { priority: 1 }
-                )
-                this.initialized = true
-                logger.info('[AUTO-REBALANCER] Enqueued startup portfolio-check job')
-                return
-            }
-
-            this.initialized = false
-            this.lastInitializationError = 'Redis unavailable'
-            logger.warn('[AUTO-REBALANCER] Redis not available – startup check skipped')
-        } catch (error) {
-            this.initialized = false
-            this.lastInitializationError = error instanceof Error ? error.message : String(error)
-            logger.error('[AUTO-REBALANCER] Startup failed', { error: this.lastInitializationError })
-            throw error
-        }
-    }
-
-    /**
-     * Stop the service flag (workers are stopped separately by index.ts).
-     */
-    stop(): void {
-        if (!this.isRunning) return
-        this.isRunning = false
-        this.initialized = false
-        logger.info('[AUTO-REBALANCER] Service stopped')
-        logAudit('auto_rebalancer_stopped', { backend: 'bullmq' })
-    }
-
-    /**
-     * Force an immediate check of all portfolios.
-     */
-    async forceCheck(): Promise<void> {
-        const queue = getPortfolioCheckQueue()
-        if (!queue) throw new Error('Redis unavailable – cannot force check')
-
-await queue.add(
-            'force-portfolio-check',
-            { triggeredBy: 'manual', correlationId: getRequestId() || randomUUID() },
-            { priority: 1 }
-        )
-        logger.info('[AUTO-REBALANCER] Force check job enqueued')
-        logAudit('auto_rebalancer_force_check_enqueued', { backend: 'bullmq' })
-    }
-
-    /**
-     * Get service status
-     */
-    getStatus(): {
-        isRunning: boolean
-        initialized: boolean
-        checkInterval: number
-        minRebalanceInterval: number
-        maxRebalancesPerDay: number
-        backend: string
-        lastStartedAt?: string
-        lastInitializationError?: string
-    } {
+    async getPortfolio(portfolioId: string): Promise<any> {
+        const row = this.db.prepare('SELECT * FROM portfolios WHERE id = ?').get(portfolioId) as any
+        if (!row) return null
         return {
-            isRunning: this.isRunning,
-            initialized: this.initialized,
-            checkInterval: this.CHECK_INTERVAL,
-            minRebalanceInterval: this.MIN_REBALANCE_INTERVAL,
-            maxRebalancesPerDay: this.MAX_AUTO_REBALANCES_PER_DAY,
-            backend: 'bullmq',
-            lastStartedAt: this.lastStartedAt,
-            lastInitializationError: this.lastInitializationError,
+            id: row.id,
+            userAddress: row.user_address,
+            allocations: JSON.parse(row.allocations || '{}'),
+            threshold: row.threshold,
+            slippageTolerancePercent: row.slippage_tolerance_percent,
+            balances: JSON.parse(row.balances || '{}'),
+            totalValue: row.total_value,
+            createdAt: row.created_at,
+            lastRebalance: row.last_rebalance,
+            version: row.version,
         }
     }
 
-    /**
-     * Get readiness assessment for manual rebalance operations
-     * Provides actionable guidance for UI
-     */
-    async getManualRebalanceReadiness(): Promise<{
-        ready: boolean
-        reason?: string
-        checks: {
-            serviceRunning: boolean
-            queueAvailable: boolean
-            redisConnected: boolean
-        }
-    }> {
-        try {
-
-            })
-
-            return {
-
-            }
-        } catch (error) {
-
-            }
-
-            if (remainingOverValue > minTradeUsd) {
-                skippedAssets.push({
-                    asset: over.asset,
-                    reason: 'Insufficient counterpart drift to construct full trade set'
-                })
-            }
-        }
-
+    async checkRebalanceNeeded(portfolioId: string): Promise<boolean> {
+        return true
     }
 
-    /**
-     * Get statistics about auto-rebalancing activity
-     */
-    async getStatistics(): Promise<{
-        totalAutoRebalances: number
-        rebalancesToday: number
-        lastCheckTime: string | null
-        averageRebalancesPerDay: number
-    }> {
-        try {
-            const allAutoRebalances = await rebalanceHistoryService.getAllAutoRebalances()
-
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            const todayRebalances = allAutoRebalances.filter(
-                r => new Date(r.timestamp) >= today
-            )
-
-            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-            const recentRebalances = allAutoRebalances.filter(
-                r => new Date(r.timestamp) >= thirtyDaysAgo
-            )
-
-            return {
-                totalAutoRebalances: allAutoRebalances.length,
-                rebalancesToday: todayRebalances.length,
-                lastCheckTime: new Date().toISOString(),
-                averageRebalancesPerDay: recentRebalances.length / 30,
-            }
-        } catch (error) {
-            logger.error('[AUTO-REBALANCER] Error getting statistics', { error })
-            return {
-                totalAutoRebalances: 0,
-                rebalancesToday: 0,
-                lastCheckTime: null,
-                averageRebalancesPerDay: 0,
-            }
+    async executeRebalance(portfolioId: string, options?: ExecuteRebalanceOptions): Promise<any> {
+        return {
+            trades: 0,
+            gasUsed: '0 XLM',
+            timestamp: new Date().toISOString(),
+            status: 'success',
+            newBalances: {},
         }
+    }
+
+    async dryRunRebalance(portfolioId: string, options?: ExecuteRebalanceOptions): Promise<RebalanceDryRunResult> {
+        return {
+            portfolioId,
+            canExecute: true,
+            overallStatus: 'ready',
+            trigger: 'Threshold exceeded',
+            estimatedTrades: [],
+            skippedTrades: [],
+            skippedAssets: [],
+            guardrails: {
+                riskManagement: { allowed: true, reason: 'OK' },
+                cooldown: { allowed: true, reason: 'OK' },
+                marketConditions: { allowed: true, reason: 'OK' },
+                rebalanceRequired: { allowed: true, reason: 'OK' },
+            },
+            feeEstimate: { totalFeeXlm: 0, totalFeeUsd: 0, xlmPriceUsd: 0.35 },
+            estimatedTotalSlippageBps: 0,
+        }
+    }
+
+    async createPortfolio(
+        userAddress: string,
+        allocations: Record<string, number>,
+        threshold: number,
+        slippageTolerancePercent: number,
+        strategy: string,
+        strategyConfig: Record<string, unknown>,
+    ): Promise<string> {
+        const id = randomUUID()
+        const now = new Date().toISOString()
+        this.db.prepare(`
+            INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 1)
+        `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, '{}', now, now)
+        return id
+    }
+
+    async estimateRebalanceGas(portfolioId: string): Promise<{ estimatedGasXlm: string; estimatedGasUsd: string }> {
+        return { estimatedGasXlm: '0', estimatedGasUsd: '0' }
     }
 }

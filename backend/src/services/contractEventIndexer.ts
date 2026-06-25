@@ -701,7 +701,6 @@ export class ContractEventIndexerService {
             this.isSyncing = false
         }
     }
-  }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
