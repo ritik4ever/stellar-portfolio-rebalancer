@@ -501,22 +501,22 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
-      <div className="max-w-4xl mx-auto px-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-6 sm:py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6">
         {/* ── Page header with back navigation ── */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6 sm:mb-8">
           <div className="flex items-center">
             <button
               onClick={() => onNavigate('dashboard')}
-              className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              className="mr-3 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
                 Create Portfolio
               </h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">
+              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">
                 Set up your automated rebalancing strategy
               </p>
             </div>
@@ -881,9 +881,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                        * to the top of the row so it doesn't jump when an error
                        * message adds height below the inputs.
                        */}
-                      <div className="flex items-start space-x-3">
+                      <div className="flex flex-col sm:flex-row sm:items-start space-y-3 sm:space-y-0 sm:space-x-3">
                         {/* Asset selector with enhanced search and issuer info */}
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Asset
                           </label>
@@ -898,7 +898,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                         </div>
 
                         {/* Percentage input — border and background turn red when invalid */}
-                        <div className="w-28">
+                        <div className="w-full sm:w-28">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Percentage
                           </label>
@@ -935,7 +935,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             type="button"
                             aria-label={`Remove ${allocation.asset} allocation`}
                             onClick={() => removeAllocation(index)}
-                            className="mt-6 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                            className="mt-6 sm:mt-6 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors self-start"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

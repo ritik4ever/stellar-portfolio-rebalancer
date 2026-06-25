@@ -54,6 +54,10 @@ function normalizeError(error: unknown, walletType: WalletType): WalletError {
         return new WalletError('Connection timed out. Please try again', 'TIMEOUT', walletType)
     }
 
+    if (msg.includes('popup') || msg.includes('blocked')) {
+        return new WalletError('Popup was blocked by your browser. Please allow popups for this site and try again.', 'POPUP_BLOCKED', walletType)
+    }
+
     return new WalletError(err.message || 'Wallet connection failed', 'UNKNOWN_ERROR', walletType)
 }
 
