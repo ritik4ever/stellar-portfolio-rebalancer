@@ -243,53 +243,37 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
         )
     }
 
-    //  NEW: Export History as CSV (timestamps + trades + status)
+    //  NEW: Export History as CSV with required columns: date, asset, before_pct, after_pct, amount_traded, fee, slippage
     const exportHistoryCSV = () => {
-        const rows = (history || []).map((event) => ({
-            timestamp: event.timestamp,
-            status: event.status,
-            trigger: event.trigger,
-            tradesCount: event.trades,
-            gasUsed: event.gasUsed,
-            portfolioId: event.portfolioId,
-            eventSource: event.eventSource ?? '',
-            onChainConfirmed: event.onChainConfirmed ? 'true' : 'false',
-            chain: event.details?.chain ?? '',
-            riskLevel: event.details?.riskLevel ?? '',
-            volatilityDetected: event.details?.volatilityDetected ? 'true' : 'false',
-            fromAsset: event.details?.fromAsset ?? '',
-            toAsset: event.details?.toAsset ?? '',
-            amount: event.details?.amount ?? '',
-            performanceImpact: event.details?.performanceImpact ?? '',
-            priceDirection: event.details?.priceDirection ?? '',
-            executionTimeMs: event.details?.executionTime ?? '',
-            reason: event.details?.reason ?? '',
-            totalSlippageBps: event.details?.totalSlippageBps ?? '',
-            slippagePct: event.details?.totalSlippageBps != null ? (event.details.totalSlippageBps / 100).toFixed(2) + '%' : ''
-        }))
+        const rows = (history || []).map((event) => {
+            const date = new Date(event.timestamp)
+            const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD format
+            
+            return {
+                date: dateStr,
+                asset: event.details?.fromAsset || event.details?.toAsset || '',
+                before_pct: '', // Not available in current data structure
+                after_pct: '', // Not available in current data structure
+                amount_traded: event.details?.amount || '',
+                fee: event.gasUsed || event.details?.gasFeeXlm || '',
+                slippage: event.details?.totalSlippageBps != null 
+                    ? (event.details.totalSlippageBps / 100).toFixed(4) + '%' 
+                    : ''
+            }
+        })
 
         const csv = toCSV(rows, [
-            'timestamp',
-            'status',
-            'trigger',
-            'tradesCount',
-            'gasUsed',
-            'portfolioId',
-            'eventSource',
-            'onChainConfirmed',
-            'chain',
-            'riskLevel',
-            'volatilityDetected',
-            'fromAsset',
-            'toAsset',
-            'amount',
-            'performanceImpact',
-            'priceDirection',
-            'executionTimeMs',
-            'reason'
+            'date',
+            'asset',
+            'before_pct',
+            'after_pct',
+            'amount_traded',
+            'fee',
+            'slippage'
         ])
 
-        const filename = `rebalance_history_${portfolioId ?? 'all'}_${new Date().toISOString()}.csv`
+        const today = new Date().toISOString().split('T')[0]
+        const filename = `rebalance_history_${today}.csv`
         downloadCSV(filename, csv)
     }
 
