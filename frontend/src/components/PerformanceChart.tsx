@@ -121,16 +121,20 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
         )
     }
 
-    const chartData = formatChartData
+    const chartData = formatChartData()
     const metrics = performanceSummary?.metrics
     const currentPeriodData = compareMode ? chartData.slice(-days) : chartData
     const previousPeriodData = compareMode && chartData.length > days ? chartData.slice(0, chartData.length - days) : []
     const compareUnavailable = compareMode && previousPeriodData.length < days
 
     return (
-        <section className="space-y-6" aria-labelledby="performance-chart-heading">
+        <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                        {performanceChartCopy.title}
+                    </h2>
+                    <div className="flex items-center space-x-2">
                         <select
                             value={days}
                             onChange={(e) => setDays(Number(e.target.value))}
@@ -354,7 +358,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                     </div>
                 </div>
             )}
-        </section>
+        </div>
     )
 }
 

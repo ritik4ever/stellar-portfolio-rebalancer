@@ -53,11 +53,10 @@ export default defineConfig({
         screenshot: 'on',
       },
     },
-    // For this issue, we will mostly rely on Chromium, but we can enable others if needed.
-    // {
-    //   name: 'firefox',
-    //   use: { ...devices['Desktop Firefox'] },
-    // },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
     // {
     //   name: 'webkit',
     //   use: { ...devices['Desktop Safari'] },

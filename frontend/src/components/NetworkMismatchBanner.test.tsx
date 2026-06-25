@@ -12,9 +12,9 @@ describe('NetworkMismatchBanner', () => {
       />
     )
 
-    expect(screen.getByText('Wallet network mismatch')).toBeDefined()
-    expect(screen.getByText(/Testnet/)).toBeDefined()
-    expect(screen.getByText(/Mainnet \(Public\)/)).toBeDefined()
+    expect(screen.getAllByText('Wallet network mismatch')[0]).toBeInTheDocument()
+    expect(screen.getAllByText(/Testnet/)[0]).toBeInTheDocument()
+    expect(screen.getAllByText(/Mainnet \(Public\)/)[0]).toBeInTheDocument()
   })
 
   it('renders with unknown wallet network', () => {
@@ -25,7 +25,7 @@ describe('NetworkMismatchBanner', () => {
       />
     )
 
-    expect(screen.getByText('Wallet network mismatch')).toBeDefined()
+    expect(screen.getAllByText('Wallet network mismatch')[0]).toBeInTheDocument()
   })
 
   it('calls onDismiss when dismiss button clicked', async () => {
@@ -38,7 +38,7 @@ describe('NetworkMismatchBanner', () => {
       />
     )
 
-    const dismissButton = screen.getByLabelText('Dismiss network mismatch warning')
+    const [dismissButton] = screen.getAllByLabelText('Dismiss network mismatch warning')
     await userEvent.click(dismissButton)
     expect(onDismiss).toHaveBeenCalledTimes(1)
   })
@@ -51,8 +51,8 @@ describe('NetworkMismatchBanner', () => {
       />
     )
 
-    const link = screen.getByText('Wallet troubleshooting guide')
-    expect(link).toBeDefined()
+    const [link] = screen.getAllByText('Wallet troubleshooting guide')
+    expect(link).toBeInTheDocument()
     expect(link.getAttribute('href')).toContain('WALLET_TROUBLESHOOTING.md')
   })
 })

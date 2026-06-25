@@ -4,7 +4,20 @@ interface Trade {
     amount: number
 }
 
+export function calculateRelativeMovement(changeA: number, changeB: number): {
+  leader: 'a' | 'b' | 'equal'
+  relativeChange: number
+} {
+  if (changeA > changeB) return { leader: 'a', relativeChange: changeA - changeB }
+  if (changeB > changeA) return { leader: 'b', relativeChange: changeA - changeB }
+  return { leader: 'equal', relativeChange: 0 }
+}
 
+export function remainingAllocation(
+  allocations: Array<{ percentage: number }>,
+): number {
+  const total = allocations.reduce((sum, a) => sum + a.percentage, 0)
+  return Math.round((100 - total) * 100) / 100
 }
 
 export const calculateRebalanceTrades = (portfolio: any): Trade[] => {

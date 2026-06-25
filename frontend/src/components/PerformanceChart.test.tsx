@@ -21,9 +21,6 @@ vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePerformanceSummary: queryMocks.usePerformanceSummary,
 }));
 
-
-}));
-
 // Mock ThemeContext
 vi.mock("../context/ThemeContext", () => ({
   useTheme: vi.fn(() => ({ isDark: false })),
@@ -79,11 +76,11 @@ describe("PerformanceChart", () => {
       data: null,
       isLoading: false,
       error: null,
+    });
 
     // Reset export mocks
     exportMocks.downloadCSV.mockReset();
     exportMocks.toCSV.mockReturnValue('mocked-csv-content');
-    });
 
     queryMocks.useRebalanceHistory.mockReturnValue({
       data: { history: [] },
@@ -580,6 +577,11 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
+      const chart = screen.getByTestId("line-chart");
+      expect(chart).toBeTruthy();
+      expect(chart.getAttribute("data-chart-length")).toBe("3");
+    });
+  });
 
   describe("CSV Export", () => {
     it("should render export button", () => {
@@ -724,11 +726,6 @@ describe("PerformanceChart", () => {
       // Values should be rounded to 2 decimal places
       expect(csvRows[0].portfolioValue).toBe(1000.12);
       expect(csvRows[1].portfolioValue).toBe(1050.57);
-    });
-  });
-      const chart = screen.getByTestId("line-chart");
-      expect(chart).toBeTruthy();
-      expect(chart.getAttribute("data-chart-length")).toBe("3");
     });
   });
 });

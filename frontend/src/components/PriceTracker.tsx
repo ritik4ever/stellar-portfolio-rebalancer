@@ -1,5 +1,8 @@
-
+import React, { useMemo, useState } from 'react'
+import { ArrowLeftRight, TrendingUp, TrendingDown, Wifi, WifiOff } from 'lucide-react'
 import { useAssets } from '../hooks/queries/useAssetsQuery'
+import { usePrices, formatPriceFeedSummary } from '../hooks/queries/usePricesQuery'
+import type { PriceFeedClientMeta } from '../hooks/queries/usePricesQuery'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 import { calculateRelativeMovement } from '../utils/calculations'
 
@@ -188,7 +191,10 @@ function ComparePanel({ assets, prices, assetA, assetB, onChangeA, onChangeB }: 
 const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
     const { data: assetList = ['XLM', 'BTC', 'ETH', 'USDC'] } = useAssets()
     const { data: priceBundle, isLoading, error: queryError, refetch } = usePrices()
-
+    const { state: realtimeState, reconnectInfo, statusDetail } = useRealtimeConnection()
+    const [compareMode, setCompareMode] = useState(false)
+    const [compareA, setCompareA] = useState('')
+    const [compareB, setCompareB] = useState('')
 
     const prices = useMemo(() => normalizePrices(priceBundle?.prices), [priceBundle?.prices])
     const feedMeta = priceBundle?.feedMeta
