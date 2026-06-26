@@ -23,9 +23,10 @@
         "test:notifications:dev": "node scripts/test-notifications-dev.mjs",
         "openapi:export": "tsx scripts/export-openapi.ts",
         "spec:check": "npm run openapi:export && git diff --exit-code -- openapi.json",
-"snapshots:regenerate": "tsx scripts/regenerate-rebalance-snapshots.ts",
-"replay:verify": "tsx scripts/verify-replay.ts validate",
-"replay:run": "tsx scripts/verify-replay.ts replay",
+        "snapshots:regenerate": "tsx scripts/regenerate-rebalance-snapshots.ts",
+        "replay:verify": "tsx scripts/verify-replay.ts validate",
+        "replay:run": "tsx scripts/verify-replay.ts replay",
+        "sdk:generate": "tsx scripts/generate-sdk.ts",
         "api:validate": "tsx scripts/validate-api-docs.ts",
         "indexer:reindex": "tsx scripts/reindex-events.ts"
     },
@@ -70,6 +71,7 @@
         "supertest": "^6.3.3",
         "tsx": "^4.1.4",
         "typescript": "^5.9.3",
-        "vitest": "^4.0.18"
+        "vitest": "^4.0.18",
+        "openapi-typescript": "^7.8.0"
     }
 }
