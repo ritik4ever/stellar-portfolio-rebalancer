@@ -32,6 +32,9 @@ import {
 import DeveloperDrawer from './components/DeveloperDrawer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
 import { appCopy } from './content/uiCopy'
+import PublicPortfolio from './pages/PublicPortfolio'
+import Shortcuts from './components/Shortcuts'
+import Onboarding, { resetOnboarding } from './components/Onboarding'
 
 function App() {
     const queryClient = useQueryClient()
@@ -64,6 +67,14 @@ function App() {
     const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
     const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
     const settingsDirtyRef = useRef(false)
+
+    const [publicShareHash, setPublicShareHash] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/public\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
 
     useEffect(() => {
         checkWalletConnection()
@@ -308,6 +319,16 @@ function App() {
                 </span>
             ) : null}
             <DeveloperDrawer publicKey={publicKey} />
+            <Shortcuts
+                onNewPortfolio={() => handleNavigate('setup')}
+                onOpenSettings={() => {
+                    if (currentView === 'dashboard') {
+                        resetOnboarding()
+                        window.location.reload()
+                    }
+                }}
+            />
+            <Onboarding />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"
@@ -380,6 +401,8 @@ function App() {
                     doc={legalDoc}
                     onBack={() => handleNavigate('landing')}
                 />
+            ) : publicShareHash ? (
+                <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (
                 <div className="relative">
                     <Landing

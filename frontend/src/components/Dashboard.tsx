@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Settings } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Share2 } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
@@ -20,7 +20,7 @@ import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMuta
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
-import { trackEvent } from '../analytics'
+import { getAccessToken } from '../services/authService'
 import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
@@ -223,6 +223,65 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         StellarWallet.disconnect()
         onNavigate('landing')
     }
+
+    const [shareLink, setShareLink] = useState<string | null>(null)
+    const [showSharePopup, setShowSharePopup] = useState(false)
+    const [shareLinkLoading, setShareLinkLoading] = useState(false)
+    const [shareLinkError, setShareLinkError] = useState<string | null>(null)
+
+    const fetchShareStatus = useCallback(async () => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') return
+        try {
+            const res = await api.get<{ active: boolean; hash?: string }>(ENDPOINTS.PORTFOLIO_SHARE(portfolioData.id))
+            if (res.active && res.hash) {
+                setShareLink(res.hash)
+            } else {
+                setShareLink(null)
+            }
+        } catch {
+            setShareLink(null)
+        }
+    }, [portfolioData])
+
+    React.useEffect(() => {
+        if (showSharePopup) {
+            fetchShareStatus()
+        }
+    }, [showSharePopup, fetchShareStatus])
+
+    const createShareLink = useCallback(async () => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') return
+        setShareLinkLoading(true)
+        setShareLinkError(null)
+        try {
+            const res = await api.post<{ hash: string; active: boolean }>(ENDPOINTS.PORTFOLIO_SHARE(portfolioData.id))
+            setShareLink(res.hash)
+        } catch (err: any) {
+            setShareLinkError(err.message || 'Failed to create share link')
+        } finally {
+            setShareLinkLoading(false)
+        }
+    }, [portfolioData])
+
+    const revokeShareLink = useCallback(async () => {
+        if (!portfolioData?.id || portfolioData.id === 'demo') return
+        setShareLinkLoading(true)
+        setShareLinkError(null)
+        try {
+            await api.delete(ENDPOINTS.PORTFOLIO_SHARE(portfolioData.id))
+            setShareLink(null)
+        } catch (err: any) {
+            setShareLinkError(err.message || 'Failed to revoke share link')
+        } finally {
+            setShareLinkLoading(false)
+        }
+    }, [portfolioData])
+
+    const copyShareLinkToClipboard = useCallback(() => {
+        if (!shareLink) return
+        const url = `${window.location.origin}/public/${shareLink}`
+        navigator.clipboard.writeText(url).catch(() => {})
+    }, [shareLink])
 
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [deleting, setDeleting] = useState(false)
@@ -451,6 +510,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {dashboardCopy.cloneAsNew}
                                     </button>
                                 ) : null}
+                                {portfolioData?.id && portfolioData.id !== 'demo' ? (
+                                    <button type="button" onClick={() => setShowSharePopup(true)}
+                                        className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1">
+                                        <Share2 className="w-4 h-4" aria-hidden />
+                                        {shareLink ? 'Sharing' : 'Share'}
+                                    </button>
+                                ) : null}
                                 <button type="button" onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                                     {dashboardCopy.createPortfolio}
@@ -504,6 +570,79 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Share link modal */}
+            {showSharePopup && (
+                <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <Share2 className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Share Portfolio</h2>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">
+                            Create a public read-only link to share your portfolio allocation and performance.
+                            Your wallet address will be masked.
+                        </p>
+                        {shareLinkError ? (
+                            <p className="text-sm text-red-600 dark:text-red-400 mb-4 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
+                                {shareLinkError}
+                            </p>
+                        ) : null}
+                        {shareLink ? (
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg px-3 py-2.5">
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={`${window.location.origin}/public/${shareLink}`}
+                                        className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white outline-none"
+                                        onClick={(e) => (e.target as HTMLInputElement).select()}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={copyShareLinkToClipboard}
+                                        className="shrink-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-medium transition-colors"
+                                    >
+                                        Copy
+                                    </button>
+                                </div>
+                                <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" />
+                                    Public link is active
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={revokeShareLink}
+                                    disabled={shareLinkLoading}
+                                    className="w-full border border-red-300 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    {shareLinkLoading ? 'Revoking...' : 'Revoke public link'}
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={createShareLink}
+                                disabled={shareLinkLoading}
+                                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                {shareLinkLoading ? (
+                                    <><RefreshCw className="w-4 h-4 animate-spin" />Creating...</>
+                                ) : (
+                                    <><Share2 className="w-4 h-4" />Generate public link</>
+                                )}
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setShowSharePopup(false)}
+                            className="w-full mt-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                        >
+                            Close
+                        </button>
                     </div>
                 </div>
             )}

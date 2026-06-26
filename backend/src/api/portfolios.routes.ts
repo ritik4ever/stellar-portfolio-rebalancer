@@ -141,6 +141,122 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
 })
 
 // ================================
+// PUBLIC SHARE ROUTES
+// ================================
+
+portfoliosRouter.post('/portfolio/:id/share', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only share your own portfolio')
+        }
+
+        const existing = databaseService.getPublicShareByPortfolioId(portfolioId)
+        if (existing && existing.active) {
+            return ok(res, { hash: existing.hash, active: true, url: `/public/${existing.hash}` })
+        }
+
+        if (existing && !existing.active) {
+            const hash = databaseService.createPublicShare(portfolioId, portfolio.userAddress)
+            return ok(res, { hash, active: true, url: `/public/${hash}` })
+        }
+
+        const hash = databaseService.createPublicShare(portfolioId, portfolio.userAddress)
+        return ok(res, { hash, active: true, url: `/public/${hash}` })
+    } catch (error) {
+        logger.error('[ERROR] Create public share failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.delete('/portfolio/:id/share', ...protectedWriteLimiter, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only revoke sharing for your own portfolio')
+        }
+
+        const revoked = databaseService.revokePublicShare(portfolioId)
+        if (!revoked) return fail(res, 404, 'NOT_FOUND', 'No active share found for this portfolio')
+
+        return ok(res, { revoked: true })
+    } catch (error) {
+        logger.error('[ERROR] Revoke public share failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/share/:hash', async (req: Request, res: Response) => {
+    try {
+        const hash = req.params.hash
+        if (!hash) return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+
+        const share = databaseService.getPublicShareByHash(hash)
+        if (!share) return fail(res, 404, 'NOT_FOUND', 'Share link not found')
+
+        if (!share.active) return fail(res, 410, 'GONE', 'This share link has been revoked')
+
+        const portfolio = await portfolioStorage.getPortfolio(share.portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const maskedAddress = share.userAddress.length > 10
+            ? `${share.userAddress.slice(0, 4)}...${share.userAddress.slice(-4)}`
+            : share.userAddress
+
+        return ok(res, {
+            portfolio: {
+                id: share.portfolioId,
+                allocations: portfolio.allocations,
+                totalValue: portfolio.totalValue,
+                threshold: portfolio.threshold,
+                lastRebalance: portfolio.lastRebalance,
+                createdAt: portfolio.createdAt,
+            },
+            owner: { address: maskedAddress },
+            sharedAt: share.createdAt,
+        })
+    } catch (error) {
+        logger.error('[ERROR] Get public share failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/share', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only view sharing status for your own portfolio')
+        }
+
+        const share = databaseService.getPublicShareByPortfolioId(portfolioId)
+        if (!share) return ok(res, { active: false })
+
+        return ok(res, { hash: share.hash, active: share.active, createdAt: share.createdAt, revokedAt: share.revokedAt })
+    } catch (error) {
+        logger.error('[ERROR] Get share status failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
 // DRAFT PORTFOLIO ROUTES
 // ================================
 
