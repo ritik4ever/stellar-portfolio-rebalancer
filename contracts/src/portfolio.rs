@@ -1,5 +1,5 @@
 use crate::types::*;
-use soroban_sdk::{xdr::ToXdr, Address, Env, Map, Vec};
+use soroban_sdk::{symbol_short, xdr::ToXdr, Address, Env, Map, Symbol, Vec};
 
 
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
@@ -255,27 +255,27 @@ pub fn validate_portfolio_storage_footprint(env: &Env, portfolio_id: u64, portfo
 
 pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {
     env.events()
-        .publish(("portfolio", "created"), (portfolio_id, user));
+        .publish((symbol_short!("portfolio"), symbol_short!("created")), (portfolio_id, user));
 }
 
 pub fn emit_portfolio_deposit(env: &Env, portfolio_id: u64, asset: Address, amount: i128) {
     env.events()
-        .publish(("portfolio", "deposit"), (portfolio_id, asset, amount));
+        .publish((symbol_short!("portfolio"), symbol_short!("deposit")), (portfolio_id, asset, amount));
 }
 
 pub fn emit_portfolio_withdraw(env: &Env, portfolio_id: u64, asset: Address, amount: i128) {
     env.events()
-        .publish(("portfolio", "withdraw"), (portfolio_id, asset, amount));
+        .publish((symbol_short!("portfolio"), symbol_short!("withdraw")), (portfolio_id, asset, amount));
 }
 
 pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
     env.events()
-        .publish(("portfolio", "rebalanced"), (portfolio_id, timestamp));
+        .publish((symbol_short!("portfolio"), Symbol::new(env, "rebalanced")), (portfolio_id, timestamp));
 }
 
 pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, timestamp: u64) {
     env.events()
-        .publish(("portfolio", "cooldown_override"), (portfolio_id, admin, timestamp));
+        .publish((symbol_short!("portfolio"), Symbol::new(env, "cooldown_override")), (portfolio_id, admin, timestamp));
 }
 
 pub fn validate_slippage_policy_version(version: u32) -> bool {

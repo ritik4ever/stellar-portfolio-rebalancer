@@ -34,7 +34,8 @@ export const calculateRebalanceTrades = (portfolio: any): Trade[] => {
     const trades: Trade[] = []
 
     for (const asset of portfolio.allocations) {
-        const drift = asset.current - asset.target
+        const targetPercentage = bpsToPercentage(asset.target)
+        const drift = asset.current - targetPercentage
 
         if (Math.abs(drift) > portfolio.threshold) {
             const targetValue = (portfolio.totalValue * asset.target) / ALLOCATION_DENOMINATOR

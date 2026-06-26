@@ -2,7 +2,7 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec};
 
 mod portfolio;
 mod reflector;
@@ -313,7 +313,7 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::Steward(portfolio_id), &new_steward);
         env.events()
-            .publish(("portfolio", "steward_transferred"), (portfolio_id, current_steward, new_steward));
+            .publish((symbol_short!("portfolio"), Symbol::new(&env, "steward_transferred")), (portfolio_id, current_steward, new_steward));
         Ok(())
     }
 

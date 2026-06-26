@@ -1,21 +1,19 @@
 #![cfg(feature = "integration")]
 
 use portfolio_rebalancer::{
-    Asset, AssetValuation, Error, PauseReason, PortfolioRebalancer, PortfolioRebalancerClient,
-    PriceData, ReflectorClient, ALLOCATION_DENOMINATOR, CURRENT_SLIPPAGE_POLICY_VERSION,
-    DEFAULT_ASSET_DECIMALS,
+    AssetValuation, Error, PauseReason, PortfolioRebalancer, PortfolioRebalancerClient,
+    ALLOCATION_DENOMINATOR, CURRENT_SLIPPAGE_POLICY_VERSION, DEFAULT_ASSET_DECIMALS,
 };
 use soroban_sdk::{
-    contract, contractimpl,
     testutils::{Address as _, Ledger},
-    Address, Env, Map, String, Symbol, Vec,
+    Address, Env, Map, String, Vec,
 };
 
 // ── Mock Reflector simulating live Reflector oracle on testnet ──────────
 
 mod mock_reflector {
-    use soroban_sdk::{contract, contractimpl, Env, Symbol, Vec};
     use portfolio_rebalancer::{Asset, PriceData};
+    use soroban_sdk::{contract, contractimpl, Env, Symbol, Vec};
 
     #[contract]
     pub struct TestnetReflector;
@@ -36,7 +34,7 @@ mod mock_reflector {
 
         pub fn lastprice(env: Env, _asset: Asset) -> Option<PriceData> {
             Some(PriceData {
-                price: 50_00000000000000i128, // $50 per unit
+                price: 50_00000000000000i128,
                 timestamp: env.ledger().timestamp(),
             })
         }
@@ -45,28 +43,6 @@ mod mock_reflector {
             Some(50_00000000000000i128)
         }
     }
-}
-
-fn setup_env() -> (Env, PortfolioRebalancerClient<'static>, Address, Address) {
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|li| {
-        li.timestamp = 1_000_000;
-        li.sequence_number = 1;
-    });
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, mock_reflector::TestnetReflector);
-    let admin = Address::generate(&env);
-
-    client.initialize(&admin, &reflector_id);
-
-    // Leak env to get 'static lifetime for the test
-    let env_ref: &'static Env = Box::leak(Box::new(env));
-    let client = PortfolioRebalancerClient::new(env_ref, &contract_id);
-
-    (unsafe { core::ptr::read(env_ref) }, client, admin, reflector_id)
 }
 
 // ── Full rebalance flow ────────────────────────────────────────────────
@@ -88,13 +64,12 @@ fn integration_full_rebalance_flow() {
 
     client.initialize(&admin, &reflector_id);
 
-    // Step 1: Create portfolio with basis-point allocations (50/50 split)
     let asset_a = Address::generate(&env);
     let asset_b = Address::generate(&env);
 
     let mut allocations = Map::new(&env);
-    allocations.set(asset_a.clone(), 5000); // 50.00%
-    allocations.set(asset_b.clone(), 5000); // 50.00%
+    allocations.set(asset_a.clone(), 5000);
+    allocations.set(asset_b.clone(), 5000);
 
     let mut asset_decimals = Map::new(&env);
     asset_decimals.set(asset_a.clone(), DEFAULT_ASSET_DECIMALS);
@@ -110,30 +85,25 @@ fn integration_full_rebalance_flow() {
     );
     assert_eq!(pid, 1);
 
-    // Step 2: Deposit assets creating drift
     client.deposit(&pid, &asset_a, &200_000_000, &String::from_str(&env, "initial"));
     client.deposit(&pid, &asset_b, &100_000_000, &String::from_str(&env, "initial"));
 
-    // Step 3: Check rebalance is needed (66% vs 33% with 5% threshold)
     assert!(client.check_rebalance_needed(&pid));
 
-    // Step 4: Preview rebalance
     let preview = client.preview_rebalance(&pid);
     assert!(preview.rebalance_needed);
     assert!(preview.total_value > 0);
 
-    // Step 5: Execute rebalance (advance time past cooldown)
     env.ledger().with_mut(|li| {
-        li.timestamp = 1_000_000 + 7200;
+        li.timestamp = 1_000_000 + 5000;
     });
 
     let actual_balances = Map::new(&env);
     client.execute_rebalance(&pid, &actual_balances);
 
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.last_rebalance, 1_000_000 + 7200);
+    assert_eq!(portfolio.last_rebalance, 1_000_000 + 5000);
 
-    // Step 6: Get portfolio value in USD (issue #862)
     let valuation = client.get_portfolio_value_usd(&pid);
     assert!(valuation.total_usd_value > 0);
     assert_eq!(valuation.assets.len(), 2);
@@ -154,7 +124,6 @@ fn integration_basis_points_fractional_allocations() {
 
     client.initialize(&admin, &reflector_id);
 
-    // 3-way equal split: 33.33% + 33.33% + 33.34% = 100.00%
     let a1 = Address::generate(&env);
     let a2 = Address::generate(&env);
     let a3 = Address::generate(&env);
@@ -219,20 +188,21 @@ fn integration_rebalance_rejects_corrupted_allocations() {
         &CURRENT_SLIPPAGE_POLICY_VERSION,
     );
 
-    // Corrupt stored allocations
     use portfolio_rebalancer::{DataKey, Portfolio};
-    let mut portfolio: Portfolio = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Portfolio(pid))
-        .unwrap();
-    portfolio.target_allocations.set(asset, 9500); // 95%, not 100%
-    env.storage()
-        .persistent()
-        .set(&DataKey::Portfolio(pid), &portfolio);
+    env.as_contract(&contract_id, || {
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(pid))
+            .unwrap();
+        portfolio.target_allocations.set(asset.clone(), 9500);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(pid), &portfolio);
+    });
 
     env.ledger().with_mut(|li| {
-        li.timestamp = 20_000;
+        li.timestamp = 15_000;
     });
 
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
@@ -258,8 +228,8 @@ fn integration_portfolio_value_usd_returns_correct_structure() {
     let asset_b = Address::generate(&env);
 
     let mut allocations = Map::new(&env);
-    allocations.set(asset_a.clone(), 7000); // 70%
-    allocations.set(asset_b.clone(), 3000); // 30%
+    allocations.set(asset_a.clone(), 7000);
+    allocations.set(asset_b.clone(), 3000);
 
     let mut asset_decimals = Map::new(&env);
     asset_decimals.set(asset_a.clone(), DEFAULT_ASSET_DECIMALS);
@@ -309,12 +279,16 @@ fn integration_emergency_stop_blocks_rebalance() {
 
     client.initialize(&admin, &reflector_id);
 
-    let asset = Address::generate(&env);
+    let asset_a = Address::generate(&env);
+    let asset_b = Address::generate(&env);
+
     let mut allocations = Map::new(&env);
-    allocations.set(asset.clone(), 10000);
+    allocations.set(asset_a.clone(), 5000);
+    allocations.set(asset_b.clone(), 5000);
 
     let mut asset_decimals = Map::new(&env);
-    asset_decimals.set(asset.clone(), DEFAULT_ASSET_DECIMALS);
+    asset_decimals.set(asset_a.clone(), DEFAULT_ASSET_DECIMALS);
+    asset_decimals.set(asset_b.clone(), DEFAULT_ASSET_DECIMALS);
 
     let pid = client.create_portfolio(
         &user,
@@ -325,16 +299,18 @@ fn integration_emergency_stop_blocks_rebalance() {
         &CURRENT_SLIPPAGE_POLICY_VERSION,
     );
 
+    client.deposit(&pid, &asset_a, &200_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset_b, &100_000_000, &String::from_str(&env, ""));
+
     client.set_emergency_stop(&true);
 
     env.ledger().with_mut(|li| {
-        li.timestamp = 20_000;
+        li.timestamp = 15_000;
     });
 
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
     assert_eq!(result, Err(Ok(Error::EmergencyStop)));
 
-    // Lifting emergency stop allows rebalance
     client.set_emergency_stop(&false);
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
     assert!(result.is_ok());

@@ -1537,7 +1537,7 @@ fn test_missing_price_error() {
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
     env.ledger().with_mut(|li| {
-        li.timestamp = 15000;
+        li.timestamp = 20000;
     });
 
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
@@ -1635,7 +1635,7 @@ fn test_execute_rebalance_rejects_paused_portfolio() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|li| {
-        li.timestamp = 15_000;
+        li.timestamp = 20_000;
     });
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
@@ -1968,7 +1968,6 @@ fn test_rebalance_rejects_invalid_allocation_sum() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
-    // Create with valid allocations first
     let mut allocations = Map::new(&env);
     let asset = Address::generate(&env);
     allocations.set(asset.clone(), 10000);
@@ -1981,7 +1980,7 @@ fn test_rebalance_rejects_invalid_allocation_sum() {
             .persistent()
             .get(&DataKey::Portfolio(pid))
             .unwrap();
-        portfolio.target_allocations.set(asset, 9900);
+        portfolio.target_allocations.set(asset.clone(), 9900);
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(pid), &portfolio);
