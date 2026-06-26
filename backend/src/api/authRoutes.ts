@@ -11,7 +11,7 @@ import {
 } from '../services/authService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
 import { validateRequest } from '../middleware/validate.js'
-import { loginSchema, refreshTokenSchema } from './validation.js'
+import { challengeSchema, loginSchema, refreshTokenSchema, logoutSchema, logoutAllSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
 import type { RefreshTokenMetadata } from '../types/index.js'
@@ -35,7 +35,7 @@ const router = Router()
  * Body: { address: string }
  * Response: { challenge: string }  — sign this exact string (UTF-8) with the wallet
  */
-router.post('/challenge', async (req: Request, res: Response) => {
+router.post('/challenge', validateRequest(challengeSchema), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -115,7 +115,7 @@ router.post('/refresh', validateRequest(refreshTokenSchema), async (req: Request
     }
 })
 
-router.post('/logout', requireJwt, async (req: Request, res: Response) => {
+router.post('/logout', requireJwt, validateRequest(logoutSchema), async (req: Request, res: Response) => {
     try {
         const refreshToken = req.body?.refreshToken
         const address = req.user?.address
@@ -126,7 +126,7 @@ router.post('/logout', requireJwt, async (req: Request, res: Response) => {
     }
 })
 
-router.post('/logout-all', requireJwt, async (req: Request, res: Response) => {
+router.post('/logout-all', requireJwt, validateRequest(logoutAllSchema), async (req: Request, res: Response) => {
     try {
         const address = req.user!.address
         const bodyAddress = req.body?.address

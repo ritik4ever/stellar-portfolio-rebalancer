@@ -47,7 +47,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     const app = express()
 
-    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins)
+    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins, config.nodeEnv)
 
     app.use(enforceCorsOriginAllowlist(config.corsOrigins))
     app.use(cors(corsOptions))

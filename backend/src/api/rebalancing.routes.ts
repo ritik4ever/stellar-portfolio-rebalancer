@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
-import { rebalanceHistoryQuerySchema } from './validation.js'
-import { validateQuery } from '../middleware/validate.js'
+import { rebalanceHistoryQuerySchema, recordRebalanceEventSchema, autoRebalancerControlSchema } from './validation.js'
+import { validateRequest, validateQuery } from '../middleware/validate.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
@@ -94,7 +94,7 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
 })
 
 // Record new rebalance event
-rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, async (req: Request, res: Response) => {
+rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, validateRequest(recordRebalanceEventSchema), async (req: Request, res: Response) => {
     try {
         const eventData = req.body
 
