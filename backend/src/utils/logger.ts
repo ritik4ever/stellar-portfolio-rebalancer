@@ -1,6 +1,6 @@
 import pino from 'pino'
 import { redactArgs } from './secretRedactor.js'
-import { getRequestId } from './requestContext.js'
+import { getRequestId, getCorrelationId } from './requestContext.js'
 
 const isProduction = process.env.NODE_ENV === 'production'
 
@@ -16,7 +16,11 @@ const baseLogger = pino({
     },
     mixin() {
         const requestId = getRequestId()
-        return requestId ? { requestId } : {}
+        const correlationId = getCorrelationId()
+        const fields: Record<string, string> = {}
+        if (requestId) fields.requestId = requestId
+        if (correlationId) fields.correlation_id = correlationId
+        return fields
     },
     hooks: {
         logMethod(args, method) {
