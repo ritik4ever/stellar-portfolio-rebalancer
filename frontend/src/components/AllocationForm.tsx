@@ -118,7 +118,7 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                     max="100"
                                     step="0.01"
                                     value={allocation.percentage}
-                                    onChange={(e) => updateAllocation(index, 'percentage', parseFloat(e.target.value) || 0)}
+                                    onChange={(e) => updateAllocation(index, 'percentage', Number.isFinite(Number.parseFloat(e.target.value)) ? Number(Number.parseFloat(e.target.value).toFixed(2)) : 0)}
                                     disabled={disabled}
                                     aria-invalid={!!fieldError}
                                     aria-describedby={fieldError ? `alloc-error-${index}` : undefined}

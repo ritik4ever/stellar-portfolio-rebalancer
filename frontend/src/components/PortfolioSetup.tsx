@@ -913,7 +913,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                               updateAllocation(
                                 index,
                                 'percentage',
-                                parseFloat(e.target.value) || 0,
+                                Number.isFinite(Number.parseFloat(e.target.value))
+                                  ? Number(Number.parseFloat(e.target.value).toFixed(2))
+                                  : 0,
                               )
                             }
                             // Marks the field as invalid for screen readers
