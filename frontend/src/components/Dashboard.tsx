@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Settings } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
@@ -20,6 +20,7 @@ import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMuta
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
+import { trackEvent } from '../analytics'
 import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
@@ -170,6 +171,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const executeRebalance = useCallback(async () => {
         try {
             const result = await executeRebalanceMutation.mutateAsync()
+            trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
             setRebalanceNotice({
                 type: 'success',
                 message: `Rebalance executed successfully. Gas used: ${result.result?.gasUsed || 'N/A'}`,
@@ -401,6 +403,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
 
                     <div className="flex items-center space-x-4">
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('settings')}
+                            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 transition-colors"
+                            aria-label="Settings"
+                            title="Settings"
+                        >
+                            <Settings className="h-5 w-5" aria-hidden />
+                        </button>
                         <ThemeToggle />
                         <LanguageSelector />
                         <div className="flex items-center space-x-2">

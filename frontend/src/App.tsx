@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import PortfolioSetup from './components/PortfolioSetup'
+import Settings from './pages/Settings'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import Legal from './components/Legal'
 import ConsentGate from './components/ConsentGate'
+import { trackPageView, trackEvent } from './analytics'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
@@ -61,6 +63,7 @@ function App() {
 
     const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
     const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
+    const settingsDirtyRef = useRef(false)
 
     useEffect(() => {
         checkWalletConnection()
@@ -145,8 +148,10 @@ function App() {
             }
 
             setPublicKey(pk)
+            trackEvent('wallet_connected')
             if (navigateToDashboard) {
                 setCurrentView('dashboard')
+                trackPageView('dashboard')
             }
             await queryClient.invalidateQueries()
             return true
@@ -241,11 +246,15 @@ function App() {
     }
 
     const handleNavigate = (view: string, legalDocType?: LegalDocType) => {
+        if (currentView === 'settings' && settingsDirtyRef.current && view !== 'settings') {
+            if (!window.confirm('You have unsaved changes in Settings. Leave without saving?')) return
+        }
         setError(null)
         if (legalDocType) setLegalDoc(legalDocType)
         else if (view.startsWith('legal-')) setLegalDoc(view.replace('legal-', '') as LegalDocType)
         else setLegalDoc(null)
         setCurrentView(view)
+        trackPageView(view)
     }
 
     const errorTop = showBackendBanner ? 'top-[4.25rem]' : 'top-4'
@@ -429,6 +438,13 @@ function App() {
                     <PortfolioSetup
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'settings' ? (
+                <ErrorBoundary fallbackTitle="Settings">
+                    <Settings
+                        onNavigate={handleNavigate}
+                        onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
                     />
                 </ErrorBoundary>
             ) : null}
