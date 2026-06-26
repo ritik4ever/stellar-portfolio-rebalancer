@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import PortfolioSetup from './components/PortfolioSetup'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Legal from './components/Legal'
 import ConsentGate from './components/ConsentGate'
 import { walletManager } from './utils/walletManager'
@@ -417,15 +418,19 @@ function App() {
                     ) : null}
                 </div>
             ) : currentView === 'dashboard' ? (
-                <Dashboard
-                    onNavigate={handleNavigate}
-                    publicKey={publicKey}
-                />
+                <ErrorBoundary fallbackTitle="Dashboard">
+                    <Dashboard
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
             ) : currentView === 'setup' ? (
-                <PortfolioSetup
-                    onNavigate={handleNavigate}
-                    publicKey={publicKey}
-                />
+                <ErrorBoundary fallbackTitle="Portfolio Setup">
+                    <PortfolioSetup
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
             ) : null}
         </div>
     )

@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 
 import { logger } from '../utils/logger.js';
+import { ReflectorService } from './reflector.js';
 
 interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
@@ -112,8 +113,32 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
     });
   }, HEARTBEAT_INTERVAL_MS);
 
+  const PRICE_BROADCAST_INTERVAL_MS = 30_000;
+  const reflectorService = new ReflectorService();
+  const priceBroadcastInterval = setInterval(async () => {
+    if (!attachedServer || attachedServer.clients.size === 0) return;
+    try {
+      const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta();
+      const message = JSON.stringify({
+        type: 'PRICE_UPDATE',
+        version: PROTOCOL_VERSION,
+        payload: { prices, feedMeta },
+        timestamp: Date.now(),
+      });
+      attachedServer.clients.forEach((ws) => {
+        const client = ws as ExtWebSocket;
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (!client.isSubscribed) return;
+        ws.send(message);
+      });
+    } catch (err) {
+      logger.warn('[WS] Price broadcast failed', { error: String(err) });
+    }
+  }, PRICE_BROADCAST_INTERVAL_MS);
+
   wss.on('close', () => {
     clearInterval(interval);
+    clearInterval(priceBroadcastInterval);
     attachedServer = null;
   });
 
@@ -182,10 +207,12 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
             });
         }
 
-          type: 'ERROR',
-          payload: `Incompatible version or format. Use v${PROTOCOL_VERSION}`
-        });
-      }
+        } catch (err) {
+          sendWsMessage(ws, {
+            type: 'ERROR',
+            payload: `Incompatible version or format. Use v${PROTOCOL_VERSION}`
+          });
+        }
     });
 
     ws.on('close', (_code, reason) => {
