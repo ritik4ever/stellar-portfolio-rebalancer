@@ -80,9 +80,14 @@ class WebhookProvider implements NotificationProvider {
 
 class EmailProvider implements NotificationProvider {
   private transporter: nodemailer.Transporter | null = null;
+  private warnLogged = false
 
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {
     this.initializeTransporter();
+  }
+
+  isAvailable(): boolean {
+    return this.transporter !== null
   }
 
   private initializeTransporter() {
@@ -116,13 +121,17 @@ class EmailProvider implements NotificationProvider {
         logger.error("Failed to initialize email provider", {
           error: error instanceof Error ? error.message : String(error),
         });
+        this.warnLogged = true
       }
     } else {
-      logger.warn("Email configuration incomplete", {
-        hasHost: !!emailConfig.host,
-        hasUser: !!emailConfig.auth.user,
-        hasPass: !!emailConfig.auth.pass,
-      });
+      if (!this.warnLogged) {
+        logger.warn("Email configuration incomplete - SMTP_PASS, SMTP_HOST, and SMTP_USER are required for email delivery", {
+          hasHost: !!emailConfig.host,
+          hasUser: !!emailConfig.auth.user,
+          hasPass: !!emailConfig.auth.pass,
+        });
+        this.warnLogged = true
+      }
     }
   }
 
@@ -262,6 +271,15 @@ export class NotificationService {
 
   getDeliveryConfig(): NotificationDeliveryConfig {
     return this.deliveryConfig;
+  }
+
+  isEmailTransportAvailable(): boolean {
+    const emailProvider = this.providers.find(
+      (p) => p instanceof EmailProvider
+    ) as EmailProvider | undefined
+    const transporterReady = emailProvider?.isAvailable() ?? false
+    const envConfigPresent = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+    return transporterReady || envConfigPresent
   }
 
   /**

@@ -75,6 +75,14 @@ export async function dbGetRebalanceHistoryByPortfolio(portfolioId: string, limi
     return result.rows.map(rowToEvent)
 }
 
+export async function dbGetRebalanceHistoryCountByPortfolio(portfolioId: string): Promise<number> {
+    const result = await query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM rebalance_events WHERE portfolio_id = $1`,
+        [portfolioId]
+    )
+    return parseInt(result.rows[0]?.count ?? '0', 10)
+}
+
 export async function dbGetRebalanceHistoryAll(limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
         `SELECT * FROM rebalance_events ORDER BY timestamp DESC LIMIT $1 OFFSET $2`,

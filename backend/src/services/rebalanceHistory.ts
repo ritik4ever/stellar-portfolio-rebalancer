@@ -7,6 +7,7 @@ import {
   dbGetAutoRebalancesSince,
   dbGetAllAutoRebalances,
   dbGetHistoryStats,
+  dbGetRebalanceHistoryCountByPortfolio,
 } from '../db/rebalanceHistoryDb.js'
 import type { RebalanceHistoryQueryOptions } from '../db/rebalanceHistoryDb.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
@@ -319,5 +320,9 @@ export class RebalanceHistoryService {
 
     async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
         return dbGetHistoryStats()
+    }
+
+    async getRebalanceHistoryCount(portfolioId: string): Promise<number> {
+        return dbGetRebalanceHistoryCountByPortfolio(portfolioId)
     }
 }

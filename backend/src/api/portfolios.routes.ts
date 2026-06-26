@@ -6,6 +6,7 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
+import { rebalanceHistoryService } from '../services/serviceContainer.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -19,7 +20,7 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
@@ -94,6 +95,9 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         
         try {
             portfolio = await stellarService.getPortfolio(portfolioId)
+            if (!portfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
             
             try {
                 const prices = await reflectorService.getCurrentPrices()
@@ -518,7 +522,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -645,6 +649,42 @@ portfoliosRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res
         return ok(res, { riskHeatmap })
     } catch (error) {
         logger.error('[ERROR] Get portfolio risk diagnostics failed', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/history', validateQuery(portfolioHistoryQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const page = req.query.page as unknown as number ?? 1
+        const pageSize = req.query.page_size as unknown as number ?? 20
+        const sort = (req.query.sort as string) ?? 'desc'
+
+        const total = await rebalanceHistoryService.getRebalanceHistoryCount(portfolioId)
+
+        let historyData
+        if (sort === 'asc') {
+            const ascOffset = Math.max(0, total - page * pageSize)
+            historyData = await rebalanceHistoryService.getRebalanceHistory(portfolioId, pageSize, {}, ascOffset)
+            historyData.reverse()
+        } else {
+            const offset = (page - 1) * pageSize
+            historyData = await rebalanceHistoryService.getRebalanceHistory(portfolioId, pageSize, {}, offset)
+        }
+
+        return ok(res, {
+            total,
+            page,
+            page_size: pageSize,
+            data: historyData
+        })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio history failed', { error: getErrorObject(error), portfolioId: req.params.id })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
