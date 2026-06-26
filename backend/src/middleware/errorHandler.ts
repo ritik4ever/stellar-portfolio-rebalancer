@@ -21,6 +21,8 @@ const getErrorCode = (statusCode: number): string => {
             return 'NOT_FOUND'
         case 409:
             return 'CONFLICT'
+        case 422:
+            return 'VALIDATION_ERROR'
         case 429:
             return 'RATE_LIMITED'
         case 503:
@@ -29,7 +31,6 @@ const getErrorCode = (statusCode: number): string => {
             return 'INTERNAL_ERROR'
     }
 }
-
 export const errorHandler = (
     err: AppError,
     req: Request,
@@ -58,7 +59,7 @@ export const errorHandler = (
                   ...(typeof err.details === 'object' && err.details !== null ? err.details : {}),
                   stack: err.stack
               }
-            : err.details
+            : (err.details ?? null)
     )
 }
 
@@ -77,14 +78,16 @@ export const errorHandler = (
                 res,
                 err.statusCode,
                 getErrorCode(err.statusCode),
-                err.message
+                err.message,
+                null
             )
         } else {
             return fail(
                 res,
                 500,
                 'INTERNAL_ERROR',
-                'Something went wrong!'
+                'Something went wrong!',
+                null
             )
         }
     }
