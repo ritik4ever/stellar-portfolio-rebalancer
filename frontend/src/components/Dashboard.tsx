@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
+import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
@@ -401,6 +402,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
                     <div className="flex items-center space-x-4">
                         <ThemeToggle />
+                        <LanguageSelector />
                         <div className="flex items-center space-x-2">
                             {publicKey && portfolioData?.id && portfolioData.id !== 'demo' ? (
                                 <>
