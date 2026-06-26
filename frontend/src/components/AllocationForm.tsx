@@ -103,9 +103,9 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                     type="range"
                                     min="0"
                                     max="100"
-                                    step="1"
+                                    step="0.01"
                                     value={allocation.percentage}
-                                    onChange={(e) => updateAllocation(index, 'percentage', parseInt(e.target.value, 10))}
+                                    onChange={(e) => updateAllocation(index, 'percentage', parseFloat(e.target.value))}
                                     disabled={disabled}
                                     aria-label={`${allocation.asset} allocation percentage`}
                                     className="w-full accent-blue-600"
@@ -116,9 +116,9 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                     type="number"
                                     min="0"
                                     max="100"
-                                    step="1"
+                                    step="0.01"
                                     value={allocation.percentage}
-                                    onChange={(e) => updateAllocation(index, 'percentage', parseInt(e.target.value, 10) || 0)}
+                                    onChange={(e) => updateAllocation(index, 'percentage', parseFloat(e.target.value) || 0)}
                                     disabled={disabled}
                                     aria-invalid={!!fieldError}
                                     aria-describedby={fieldError ? `alloc-error-${index}` : undefined}

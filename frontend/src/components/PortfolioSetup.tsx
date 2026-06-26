@@ -906,7 +906,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             type="number"
                             min="0"
                             max="100"
-                            step="0.1"
+                            step="0.01"
                             value={allocation.percentage}
                             onChange={(e) =>
                               updateAllocation(

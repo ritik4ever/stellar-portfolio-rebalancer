@@ -24,7 +24,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -250,7 +250,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                             },
                             "val": {
-                              "u32": 100
+                              "u32": 10000
                             }
                           }
                         ]
@@ -583,7 +583,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -625,10 +625,10 @@
           "v0": {
             "topics": [
               {
-                "symbol": "portfolio"
+                "string": "portfolio"
               },
               {
-                "symbol": "created"
+                "string": "created"
               }
             ],
             "data": {
@@ -787,10 +787,10 @@
           "v0": {
             "topics": [
               {
-                "symbol": "portfolio"
+                "string": "portfolio"
               },
               {
-                "symbol": "rebalanced"
+                "string": "rebalanced"
               }
             ],
             "data": {
