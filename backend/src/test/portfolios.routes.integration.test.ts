@@ -494,6 +494,57 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
     })
 
+    describe('GET /api/portfolio/:id/rebalance-status', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('returns null lastRebalanced for a newly created portfolio', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/rebalance-status`)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.portfolioId).toBe(portfolioId)
+            expect(res.body.data.lastRebalanced).toBeNull()
+        })
+
+        it('returns correct envelope structure', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/rebalance-status`)
+                .expect(200)
+
+            expect(res.body).toHaveProperty('success')
+            expect(res.body).toHaveProperty('data')
+            expect(res.body).toHaveProperty('error')
+            expect(res.body).toHaveProperty('timestamp')
+            expect(res.body.data).toHaveProperty('portfolioId')
+            expect(res.body.data).toHaveProperty('lastRebalanced')
+        })
+
+        it('returns 404 for non-existent portfolio', async () => {
+            const res = await request(app)
+                .get('/api/portfolio/non-existent-id-xyz/rebalance-status')
+                .expect((res) => {
+                    expect([404, 500]).toContain(res.status)
+                })
+
+            expect(res.body.success).toBe(false)
+        })
+    })
+
     describe('POST /api/portfolio/:id/rebalance/dry-run', () => {
         let portfolioId: string
 

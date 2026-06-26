@@ -518,6 +518,24 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
+portfoliosRouter.get('/portfolio/:id/rebalance-status', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const lastRebalanced = portfolio.lastRebalance === portfolio.createdAt
+            ? null
+            : portfolio.lastRebalance
+
+        return ok(res, { portfolioId, lastRebalanced })
+    } catch (error) {
+        logger.error('[ERROR] Rebalance status failed', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
