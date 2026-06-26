@@ -15,6 +15,20 @@
                 "resourceType": "script",
                 "budget": 300
               }
+            ],
+            "timings": [
+              {
+                "metric": "largest-contentful-paint",
+                "budget": 2500
+              },
+              {
+                "metric": "first-input-delay",
+                "budget": 100
+              },
+              {
+                "metric": "cumulative-layout-shift",
+                "budget": 0.1
+              }
             ]
           }
         ]
@@ -22,20 +36,29 @@
     },
     "assert": {
       "assertions": {
-        "first-contentful-paint": [
-          "error",
-          {
-            "maxNumericValue": 2000
-          }
-        ],
         "largest-contentful-paint": [
           "error",
           {
-            "maxNumericValue": 3000
+            "maxNumericValue": 2500
+          }
+        ],
+        "max-potential-fid": [
+          "error",
+          {
+            "maxNumericValue": 100
+          }
+        ],
+        "cumulative-layout-shift": [
+          "error",
+          {
+            "maxNumericValue": 0.1
           }
         ],
         "performance-budget": "error"
       }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
     }
   }
 }

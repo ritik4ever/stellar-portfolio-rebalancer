@@ -279,6 +279,22 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_user
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_expires
     ON portfolio_drafts (expires_at);
+
+CREATE TABLE IF NOT EXISTS public_shares (
+    hash            TEXT PRIMARY KEY,
+    portfolio_id    TEXT NOT NULL,
+    user_address    TEXT NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    revoked_at      TEXT,
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_shares_portfolio
+    ON public_shares (portfolio_id);
+
+CREATE INDEX IF NOT EXISTS idx_public_shares_active
+    ON public_shares (active) WHERE active = 1;
 `;
 
 // ─────────────────────────────────────────────
@@ -1955,6 +1971,86 @@ export class DatabaseService {
       .prepare("DELETE FROM portfolio_drafts WHERE expires_at <= datetime('now')")
       .run();
     return result.changes;
+  }
+
+  createPublicShare(portfolioId: string, userAddress: string): string {
+    return this._withTiming("createPublicShare", () => {
+      try {
+        const raw = randomUUID().replace(/-/g, '');
+        const hash = raw.slice(0, 8);
+        const now = new Date().toISOString();
+        this.db
+          .prepare(
+            `INSERT INTO public_shares (hash, portfolio_id, user_address, active, created_at)
+             VALUES (?, ?, ?, 1, ?)`
+          )
+          .run(hash, portfolioId, userAddress, now);
+        return hash;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg.includes('UNIQUE constraint failed')) {
+          return this.createPublicShare(portfolioId, userAddress);
+        }
+        throw new Error(`Failed to create public share for portfolio '${portfolioId}': ${err}`);
+      }
+    });
+  }
+
+  getPublicShareByHash(hash: string): { portfolioId: string; userAddress: string; active: boolean; createdAt: string; revokedAt: string | null } | undefined {
+    return this._withTiming("getPublicShareByHash", () => {
+      try {
+        const row = this.db
+          .prepare<[string], { portfolio_id: string; user_address: string; active: number; created_at: string; revoked_at: string | null }>(
+            "SELECT * FROM public_shares WHERE hash = ?"
+          )
+          .get(hash);
+        if (!row) return undefined;
+        return {
+          portfolioId: row.portfolio_id,
+          userAddress: row.user_address,
+          active: row.active === 1,
+          createdAt: row.created_at,
+          revokedAt: row.revoked_at,
+        };
+      } catch (err) {
+        throw new Error(`Failed to get public share by hash '${hash}': ${err}`);
+      }
+    });
+  }
+
+  getPublicShareByPortfolioId(portfolioId: string): { hash: string; active: boolean; createdAt: string; revokedAt: string | null } | undefined {
+    return this._withTiming("getPublicShareByPortfolioId", () => {
+      try {
+        const row = this.db
+          .prepare<[string], { hash: string; active: number; created_at: string; revoked_at: string | null }>(
+            "SELECT hash, active, created_at, revoked_at FROM public_shares WHERE portfolio_id = ?"
+          )
+          .get(portfolioId);
+        if (!row) return undefined;
+        return {
+          hash: row.hash,
+          active: row.active === 1,
+          createdAt: row.created_at,
+          revokedAt: row.revoked_at,
+        };
+      } catch (err) {
+        throw new Error(`Failed to get public share for portfolio '${portfolioId}': ${err}`);
+      }
+    });
+  }
+
+  revokePublicShare(portfolioId: string): boolean {
+    return this._withTiming("revokePublicShare", () => {
+      try {
+        const now = new Date().toISOString();
+        const result = this.db
+          .prepare("UPDATE public_shares SET active = 0, revoked_at = ? WHERE portfolio_id = ? AND active = 1")
+          .run(now, portfolioId);
+        return result.changes > 0;
+      } catch (err) {
+        throw new Error(`Failed to revoke public share for portfolio '${portfolioId}': ${err}`);
+      }
+    });
   }
 
   backup(backupPath?: string): string {
