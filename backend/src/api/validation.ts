@@ -78,12 +78,25 @@ export const recordRebalanceEventSchema = z.object({
 export const autoRebalancerControlSchema = z.object({}).strict();
 
 // ─── Auth schemas ────────────────────────────────────────────────────────────
-export const loginSchema = z.object({
+export const challengeSchema = z.object({
     address: z.string().min(1, 'address is required').trim()
+}).strict();
+
+export const loginSchema = z.object({
+    address: z.string().min(1, 'address is required').trim(),
+    signature: z.string().min(1, 'signature is required').trim()
 }).strict();
 
 export const refreshTokenSchema = z.object({
     refreshToken: z.string().min(1, 'refreshToken is required')
+}).strict();
+
+export const logoutSchema = z.object({
+    refreshToken: z.string().optional()
+}).strict();
+
+export const logoutAllSchema = z.object({
+    address: z.string().optional()
 }).strict();
 
 // ─── Consent schemas ─────────────────────────────────────────────────────────

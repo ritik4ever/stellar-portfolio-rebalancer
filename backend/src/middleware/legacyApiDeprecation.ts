@@ -6,6 +6,16 @@ const LEGACY_API_SUNSET_DATE = new Date('2026-07-01T00:00:00Z')
 const LEGACY_API_MIGRATION_DOC = '</docs/api-migration-v1.md>; rel="deprecation"'
 const LEGACY_API_MIGRATION_URL = '/docs/api-migration-v1.md'
 
+const DEPRECATED_PATH_PREFIXES = [
+    '/portfolio',
+    '/rebalance',
+    '/notifications',
+    '/consent',
+    '/assets',
+    '/user',
+    '/auto-rebalancer',
+]
+
 const LEGACY_REDIRECTS: Record<string, string> = {
     '/portfolios': '/api/v1/portfolios'
 }
@@ -55,9 +65,8 @@ function getDeprecationMetadata(path: string): DeprecationMetadata {
  */
 function recordDeprecationUsage(req: Request, metadata: DeprecationMetadata): void {
     const daysUntilSunset = Math.ceil(metadata.sunsetSeconds / (24 * 60 * 60))
-    const logLevel = metadata.lastSunsetWarning ? 'warn' : 'info'
-    
-    logger[logLevel]('[DEPRECATION]', {
+
+    logger.warn('[DEPRECATION] Legacy API endpoint accessed', {
         path: req.path,
         method: req.method,
         userAgent: req.get('user-agent'),
@@ -65,7 +74,7 @@ function recordDeprecationUsage(req: Request, metadata: DeprecationMetadata): vo
         daysUntilSunset,
         suggestedAlternative: metadata.suggestedAlternative,
         migrationGuide: metadata.migrationGuide,
-        isLastWeekWarning: metadata.lastSunsetWarning
+        isLastWeekWarning: metadata.lastSunsetWarning,
     })
 }
 
