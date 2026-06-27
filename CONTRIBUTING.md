@@ -63,6 +63,40 @@ We provide templates for common contribution types:
 
 If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for how to label, prioritize, and respond to issues and pull requests.
 
+## Dependency Management
+
+### Renovate Configuration
+
+Dependency updates are managed automatically using [Renovate](https://www.renovatebot.com/). The configuration is in [renovate.json](renovate.json) and covers:
+
+- **npm packages** (root, frontend, backend)
+- **Cargo dependencies** (contracts)
+
+### Update Schedule & Grouping
+
+- **Patch updates**: Grouped into a single weekly batch PR (Monday at 3am UTC)
+- **Minor updates**: Separate PRs (one per package)
+- **Major updates**: Separate PRs (one per package, high priority review)
+- **Node.js versions**: Major and minor only; patch versions handled separately
+- **Rust toolchain**: Managed via rust-toolchain configuration
+
+### Renovate PR Workflow
+
+1. Renovate creates PRs automatically for dependency updates (no manual trigger needed)
+2. CI checks are **required** before merge — all tests and build checks must pass
+3. PRs are labeled and grouped by dependency type for easy review
+4. Security vulnerabilities are prioritized and flagged
+
+### Handling Renovate PRs
+
+When reviewing Renovate PRs:
+- Check the changelog and breaking changes for major version bumps
+- Run tests locally if concerned about compatibility
+- Comment on the PR if issues are found
+- PRs are configured with auto-merge disabled to require explicit approval
+
+Maintainers can also merge PRs directly if CI passes and the update is safe.
+
 ## Changelog Updates
 
 When your changes should be visible to users or contributors, update the changelog before opening a PR:
