@@ -63,6 +63,86 @@ We provide templates for common contribution types:
 
 If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for how to label, prioritize, and respond to issues and pull requests.
 
+## Database Migrations
+
+### Migration System
+
+Migrations use a versioned pattern with `.up.sql` and `.down.sql` file pairs:
+
+```
+backend/src/db/migrations/
+├── 001_initial_schema.up.sql
+├── 001_initial_schema.down.sql
+├── 002_seed_demo_data.up.sql
+├── 002_seed_demo_data.down.sql
+└── manifest.json  # Checksums for integrity verification
+```
+
+### Migration Integrity Testing
+
+Every PR that touches `backend/src/db/migrations/` runs an automated round-trip test to ensure:
+
+1. **Migrations are reversible** - All `.down.sql` files successfully undo changes
+2. **Migrations are idempotent** - Applying migrations again yields the same schema
+3. **Schema state is preserved** - Database schema before and after rollback cycle is identical
+
+**The test procedure:**
+
+```
+Apply migrations → Dump schema → Rollback all → Apply again → Dump schema → Compare
+```
+
+**Local testing:**
+
+```bash
+cd backend
+
+# Apply all migrations
+npm run db:migrate
+
+# Check migration status
+npm run db:migrate -- --status
+
+# Run full round-trip test (slow but thorough)
+npm run test:migrations
+
+# Dump current schema (for manual inspection)
+npm run db:schema:dump
+
+# Rollback last N migrations
+npm run db:migrate -- --rollback 1
+```
+
+**CI behavior:**
+
+- Runs on all PRs and pushes touching migrations
+- Uses fresh PostgreSQL database for clean state
+- Fails immediately if any migration fails
+- Reports schema differences with full diff output
+- If rollback fails, CI stops at that step (fail fast)
+
+**Writing reversible migrations:**
+
+```sql
+-- 003_add_users_table.up.sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+```sql
+-- 003_add_users_table.down.sql
+DROP TABLE users;
+```
+
+**Common issues:**
+
+- **Data loss on rollback**: Down migrations should NOT delete data unless absolutely necessary. Use `DROP IF EXISTS` to be safe.
+- **Circular dependencies**: Avoid foreign key constraints that would break rollback. Use deferred constraints if needed.
+- **Type changes**: Changing column types can be tricky to roll back. Test locally first.
+
 ## Performance Testing
 
 The backend includes automated performance testing using [clinic.js](https://clinicjs.org/) to detect memory leaks and performance regressions.

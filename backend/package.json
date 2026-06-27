@@ -12,6 +12,8 @@
         "db:migrate:status": "tsx src/db/migrate.ts -- --status",
         "db:setup": "tsx src/db/migrate.ts",
         "db:seed:e2e": "tsx src/db/seed.e2e.ts",
+        "db:schema:dump": "node ./scripts/schema-dump.mjs",
+        "test:migrations": "node ./scripts/test-migration-roundtrip.mjs",
 
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
