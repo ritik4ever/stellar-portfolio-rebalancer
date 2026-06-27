@@ -5,6 +5,7 @@ import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
+import { rebalanceHistoryService } from '../services/serviceContainer.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -18,7 +19,7 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
@@ -94,6 +95,9 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         
         try {
             portfolio = await stellarService.getPortfolio(portfolioId)
+            if (!portfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
             
             try {
                 const prices = await reflectorService.getCurrentPrices()
@@ -518,7 +522,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -565,5 +569,4 @@ portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortf
 
 });
 
-// Analytics routes — extracted to analytics.routes.ts
-portfoliosRouter.use(analyticsRouter)
+

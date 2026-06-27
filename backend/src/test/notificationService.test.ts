@@ -175,6 +175,26 @@ describe("NotificationService", () => {
 
       await expect(service.notify(payload)).resolves.toBeUndefined();
     });
+
+    it("reports email transport unavailable when SMTP_PASS is missing", () => {
+      const originalSmptPass = process.env.SMTP_PASS
+      delete process.env.SMTP_PASS
+
+      const service = new NotificationService();
+      expect(service.isEmailTransportAvailable()).toBe(false)
+
+      if (originalSmptPass) process.env.SMTP_PASS = originalSmptPass
+    });
+
+    it("reports email transport available when SMTP config is complete", () => {
+      process.env.SMTP_HOST = "smtp.test.com"
+      process.env.SMTP_PORT = "587"
+      process.env.SMTP_USER = "test@test.com"
+      process.env.SMTP_PASS = "testpass"
+
+      const service = new NotificationService();
+      expect(service.isEmailTransportAvailable()).toBe(true)
+    });
   });
 
   describe("Unsubscribe behavior", () => {

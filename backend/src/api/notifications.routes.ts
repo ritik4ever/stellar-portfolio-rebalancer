@@ -33,6 +33,10 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, idem
         }
         const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress, digestMode } = req.body
 
+        if (emailEnabled && !notificationService.isEmailTransportAvailable()) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Email notification transport is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables.')
+        }
+
         notificationService.subscribe({
             userId,
             emailEnabled,
