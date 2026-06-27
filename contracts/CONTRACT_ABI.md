@@ -8,7 +8,6 @@ Contract source:
 - `contracts/src/reflector.rs`
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
-For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOSSARY.md).
 
 ## Public Functions
 
@@ -176,16 +175,6 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Preconditions / failure behavior:**
   - Does not require portfolio owner authorization and does not mutate persistent storage.
 
-### `get_config_view(env: Env, portfolio_id: u64) -> ConfigView`
-
-- **Purpose:** Snapshot contract-level and portfolio-level configuration into a single debug-friendly view.
-- **Parameters:**
-  - `portfolio_id`: Target portfolio ID to query.
-- **Returns:** `ConfigView` containing administrative, reflector, emergency stop, and portfolio details.
-- **Preconditions / failure behavior:**
-  - Contract must be initialized (panics if admin or reflector keys are missing).
-  - Returns `PortfolioOption::None` if the requested `portfolio_id` does not exist.
-
 ## Error Codes (`contracts/src/types.rs`)
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
@@ -231,4 +220,3 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - Struct with `price: i128` and `timestamp: u64`.
 
 For call builders and generated client bindings, use Soroban CLI/SDK tooling against the compiled WASM artifact.
-

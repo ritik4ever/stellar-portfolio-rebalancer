@@ -327,6 +327,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 20000
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "ReflectorAddress"
                             }
                           ]
@@ -708,7 +720,7 @@
             ],
             "data": {
               "error": {
-                "contract": 16
+                "contract": 18
               }
             }
           }
@@ -729,7 +741,7 @@
               },
               {
                 "error": {
-                  "contract": 16
+                  "contract": 18
                 }
               }
             ],
@@ -754,7 +766,7 @@
               },
               {
                 "error": {
-                  "contract": 16
+                  "contract": 18
                 }
               }
             ],
