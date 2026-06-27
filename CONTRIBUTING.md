@@ -63,6 +63,51 @@ We provide templates for common contribution types:
 
 If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for how to label, prioritize, and respond to issues and pull requests.
 
+## Performance Testing
+
+The backend includes automated performance testing using [clinic.js](https://clinicjs.org/) to detect memory leaks and performance regressions.
+
+### Memory Leak Detection
+
+The CI pipeline runs a 5-minute load test under clinic.js profiling. The test:
+
+1. **Runs for 5 minutes** with 10 concurrent workers making requests
+2. **Profiles heap usage** to track memory growth
+3. **Fails if heap grows > 50MB** during the test run
+4. **Uploads clinic reports** as CI artifacts for analysis
+
+**Local testing:**
+
+```bash
+cd backend
+npm run build
+
+# Baseline run (should pass)
+npm run perf:baseline
+
+# Test memory leak detection (intentional leak, should fail)
+npm run test:memory-leak
+
+# Analyze clinic report
+npm run perf:analyze
+```
+
+**How it works:**
+
+- Clinic.js doctor profile collects heap snapshots and traces throughout the test
+- Baseline runs establish normal heap behavior without memory leaks
+- If heap growth exceeds 50MB, CI fails with detailed profiling data
+- The clinic HTML report includes heap usage graphs for investigation
+
+**To investigate failures:**
+
+1. Download the `clinic-report` artifact from the failed CI run
+2. Open the HTML file in a browser to see detailed heap graphs
+3. Check for:
+   - Rapid heap growth during test duration
+   - Objects not being garbage collected
+   - Circular references or event listener leaks
+
 ## Dependency Management
 
 We use both [Dependabot](https://docs.github.com/en/code-security/dependabot) and [Renovate](https://www.renovatebot.com/) for comprehensive dependency management. Dependabot handles automatic merging while Renovate provides additional features and flexibility.
