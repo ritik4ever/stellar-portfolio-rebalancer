@@ -227,6 +227,7 @@ This target outputs the hash of both the release WASM and the optimized WASM (if
 
 Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
 Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
+Frontend compatibility & capability matrix (what's supported, how the app degrades): [`docs/CONTRACT_CAPABILITY_MATRIX.md`](docs/CONTRACT_CAPABILITY_MATRIX.md)
 
 ### Usage
 
