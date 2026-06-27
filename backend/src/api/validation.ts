@@ -256,3 +256,15 @@ export const debugTestNotificationSchema = z.object({
     userId: z.string().min(1).optional(),
     eventType: z.enum(['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']).optional()
 });
+
+export const portfolioHistoryQuerySchema = z.object({
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).default(20)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
+});

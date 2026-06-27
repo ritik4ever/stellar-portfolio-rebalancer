@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import {
   dbSaveNotificationPreferences,
@@ -19,6 +19,7 @@ import {
   type NotificationDeliveryConfig,
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
+import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 
 // ─────────────────────────────────────────────
 // Types
@@ -56,11 +57,14 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
-
       return;
     }
 
-    const policy = this.deliveryConfig.webhook;
+    const policy = {
+      ...this.deliveryConfig.webhook,
+      maxAttempts: Math.min(this.deliveryConfig.webhook.maxAttempts, 5),
+    };
+
     const webhookPayload = {
       event: payload.eventType,
       title: payload.title,
@@ -70,7 +74,53 @@ class WebhookProvider implements NotificationProvider {
       userId: payload.userId,
     };
 
+    const webhookUrl = preferences.webhookUrl;
 
+    try {
+      await deliverWithBackoff(
+        {
+          provider: "webhook",
+          userId: payload.userId,
+          eventType: payload.eventType,
+          policy,
+        },
+        async () => {
+          const controller = new AbortController();
+          const timeout = policy.requestTimeoutMs || 5000;
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+          try {
+            const response = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Webhook-Event': payload.eventType,
+              },
+              body: JSON.stringify(webhookPayload),
+              signal: controller.signal,
+            });
+
+            if (!response.ok) {
+              throw new Error(`Webhook responded with status ${response.status}`);
+            }
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        },
+      );
+    } catch {
+      const deadLetterItem: DeadLetterItem = {
+        id: randomBytes(16).toString('hex'),
+        payload: webhookPayload,
+        errorMessage: 'Exhausted all webhook retry attempts',
+        attemptsExhausted: policy.maxAttempts,
+        timestamp: new Date().toISOString(),
+        webhookUrl,
+        userId: payload.userId,
+        eventType: payload.eventType,
+      };
+      await webhookDeadLetterQueue.push(deadLetterItem);
+    }
   }
 }
 
@@ -80,9 +130,14 @@ class WebhookProvider implements NotificationProvider {
 
 class EmailProvider implements NotificationProvider {
   private transporter: nodemailer.Transporter | null = null;
+  private warnLogged = false
 
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {
     this.initializeTransporter();
+  }
+
+  isAvailable(): boolean {
+    return this.transporter !== null
   }
 
   private initializeTransporter() {
@@ -116,13 +171,17 @@ class EmailProvider implements NotificationProvider {
         logger.error("Failed to initialize email provider", {
           error: error instanceof Error ? error.message : String(error),
         });
+        this.warnLogged = true
       }
     } else {
-      logger.warn("Email configuration incomplete", {
-        hasHost: !!emailConfig.host,
-        hasUser: !!emailConfig.auth.user,
-        hasPass: !!emailConfig.auth.pass,
-      });
+      if (!this.warnLogged) {
+        logger.warn("Email configuration incomplete - SMTP_PASS, SMTP_HOST, and SMTP_USER are required for email delivery", {
+          hasHost: !!emailConfig.host,
+          hasUser: !!emailConfig.auth.user,
+          hasPass: !!emailConfig.auth.pass,
+        });
+        this.warnLogged = true
+      }
     }
   }
 
@@ -262,6 +321,15 @@ export class NotificationService {
 
   getDeliveryConfig(): NotificationDeliveryConfig {
     return this.deliveryConfig;
+  }
+
+  isEmailTransportAvailable(): boolean {
+    const emailProvider = this.providers.find(
+      (p) => p instanceof EmailProvider
+    ) as EmailProvider | undefined
+    const transporterReady = emailProvider?.isAvailable() ?? false
+    const envConfigPresent = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+    return transporterReady || envConfigPresent
   }
 
   /**

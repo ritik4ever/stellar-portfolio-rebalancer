@@ -17,6 +17,8 @@ export interface PriceFeedMeta {
     staleOrLimited: boolean
     resolutionHint: 'fresh_primary' | 'cached_only' | 'partial_merge' | 'rate_limited_cache' | 'error_recovery_cache' | 'synthetic_fallback'
     assetsCount: number
+    /** Redis oracle cache status for the current request */
+    cacheStatus?: 'redis_hit' | 'redis_miss' | 'redis_unavailable' | 'redis_bypassed'
 }
 
 // Core price data interface

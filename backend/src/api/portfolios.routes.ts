@@ -3,9 +3,9 @@ import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
-import { analyticsService } from '../services/analyticsService.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
+import { rebalanceHistoryService } from '../services/serviceContainer.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -19,10 +19,11 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
+import { analyticsRouter } from './analytics.routes.js'
 
 function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
     const options = body?.options
@@ -94,6 +95,9 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         
         try {
             portfolio = await stellarService.getPortfolio(portfolioId)
+            if (!portfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
             
             try {
                 const prices = await reflectorService.getCurrentPrices()
@@ -518,7 +522,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
+portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -565,86 +569,4 @@ portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortf
 
 });
 
-// ================================
-// ANALYTICS ROUTES
-// ================================
 
-portfoliosRouter.get('/portfolio/:id/analytics', async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-        const days = parseInt(req.query.days as string) || 30
-
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
-
-        const portfolio = portfolioStorage.getPortfolio(portfolioId)
-        if (!portfolio) {
-            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        }
-
-        const analytics = analyticsService.getAnalytics(portfolioId, days)
-
-        return ok(
-            res,
-            {
-                portfolioId,
-                data: analytics
-            },
-            { meta: { count: analytics.length, period: `${days} days` } }
-        )
-    } catch (error) {
-        logger.error('Failed to fetch analytics', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-portfoliosRouter.get('/portfolio/:id/performance-summary', async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
-
-        const portfolio = portfolioStorage.getPortfolio(portfolioId)
-        if (!portfolio) {
-            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        }
-
-        const summary = analyticsService.getPerformanceSummary(portfolioId)
-
-        return ok(res, { portfolioId, ...summary })
-    } catch (error) {
-        logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-portfoliosRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
-
-        let portfolio: any
-        try {
-            portfolio = await stellarService.getPortfolio(portfolioId)
-        } catch (error) {
-            const errMsg = getErrorMessage(error)
-            if (errMsg.includes('Portfolio not found')) {
-                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-            }
-            throw error
-        }
-
-        const prices = await reflectorService.getCurrentPrices()
-        const riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
-
-        return ok(res, { riskHeatmap })
-    } catch (error) {
-        logger.error('[ERROR] Get portfolio risk diagnostics failed', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})

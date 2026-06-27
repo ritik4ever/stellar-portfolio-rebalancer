@@ -65,6 +65,10 @@ describe('Notification Preferences API Integration Tests', () => {
 
     beforeAll(async () => {
         process.env.WEBHOOK_SIGNING_SECRET = 'test-webhook-secret-for-callback-tests-32c!!'
+        process.env.SMTP_HOST = 'smtp.test.com'
+        process.env.SMTP_PORT = '587'
+        process.env.SMTP_USER = 'test@test.com'
+        process.env.SMTP_PASS = 'testpass'
         process.env.NODE_ENV = 'test'
 
         const testDir = join(tmpdir(), `stellar-notif-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -81,6 +85,10 @@ describe('Notification Preferences API Integration Tests', () => {
         }
         delete process.env.DB_PATH
         delete process.env.WEBHOOK_SIGNING_SECRET
+        delete process.env.SMTP_HOST
+        delete process.env.SMTP_PORT
+        delete process.env.SMTP_USER
+        delete process.env.SMTP_PASS
     })
 
     beforeEach(() => {
@@ -215,6 +223,32 @@ describe('Notification Preferences API Integration Tests', () => {
                 .expect(400)
 
             expect(res.body.success).toBe(false)
+        })
+
+        it('returns 503 when email is enabled but SMTP transport is not configured', async () => {
+            const originalSmptPass = process.env.SMTP_PASS
+            delete process.env.SMTP_PASS
+
+            const res = await request(app)
+                .post('/api/notifications/subscribe')
+                .send({
+                    userId: TEST_USER,
+                    emailEnabled: true,
+                    emailAddress: 'test@example.com',
+                    webhookEnabled: false,
+                    events: {
+                        rebalance: true,
+                        circuitBreaker: true,
+                        priceMovement: true,
+                        riskChange: true
+                    }
+                })
+                .expect(503)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE')
+
+            process.env.SMTP_PASS = originalSmptPass
         })
     })
 
