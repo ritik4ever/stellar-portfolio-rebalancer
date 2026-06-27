@@ -117,6 +117,23 @@ class AnalyticsService {
         })
     }
 
+    getAnalyticsInRange(portfolioId: string, from: string, to: string): PortfolioSnapshot[] {
+        const snapshots = this.snapshots.get(portfolioId) || []
+        const fromDate = new Date(from)
+        const toDate = new Date(to)
+
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+            return []
+        }
+
+        return snapshots
+            .filter(snapshot => {
+                const snapshotDate = new Date(snapshot.timestamp)
+                return snapshotDate >= fromDate && snapshotDate <= toDate
+            })
+            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    }
+
     getAggregatedAnalytics(portfolioId: string, interval: 'daily' | 'weekly' | 'monthly', days: number = 30): PortfolioSnapshot[] {
         const snapshots = this.getAnalytics(portfolioId, days)
         if (snapshots.length === 0) return []
@@ -183,7 +200,10 @@ class AnalyticsService {
 
     calculatePerformanceMetrics(portfolioId: string): PerformanceMetrics {
         const snapshots = this.getAnalytics(portfolioId, 90)
+        return this.computeMetricsFromSnapshots(snapshots)
+    }
 
+    computeMetricsFromSnapshots(snapshots: PortfolioSnapshot[]): PerformanceMetrics {
         if (snapshots.length < 2) {
             return {
                 totalReturn: 0,

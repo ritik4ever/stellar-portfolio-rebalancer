@@ -241,6 +241,38 @@ export function recordCacheExpiration(asset: string): void {
   cacheExpirationCounterTotal.inc({ asset });
 }
 
+export function recordPriceFeedResolution(meta: { resolutionHint: string; degraded: boolean; staleOrLimited: boolean }): void {
+  priceFeedResolutionsTotal.inc({
+    resolution_hint: meta.resolutionHint,
+    degraded: String(meta.degraded),
+    stale_or_limited: String(meta.staleOrLimited),
+  });
+}
+
+export function recordReflectorFallbackUsage(reason: string): void {
+  reflectorFallbackUsageTotal.inc({ reason });
+}
+
+export function recordReflectorStalePrice(asset: string): void {
+  reflectorStalePricesTotal.inc({ asset });
+}
+
+export function recordCacheHitRatio(asset: string, ratio: number): void {
+  cacheHitRatioGauge.set({ asset }, ratio);
+}
+
+export function recordCacheAge(asset: string, ageMs: number): void {
+  cacheAgeHistogram.observe({ asset }, ageMs);
+}
+
+export function recordCacheSize(sizeBytes: number): void {
+  cacheSizeGauge.set(sizeBytes);
+}
+
+export function recordCacheEntries(count: number): void {
+  cacheEntriesGauge.set(count);
+}
+
 // ── Auth security event metrics (Issue #423) ─────────────────────────────────
 
 const authSecurityEventsTotal = new Counter({
