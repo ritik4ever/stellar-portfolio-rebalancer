@@ -145,6 +145,7 @@ describe('JSON export — GET /api/portfolio/:id/export?format=json', () => {
             .get(`/api/portfolio/${sharedPortfolioId}/export/status/${jobId}`)
             .expect(200)
         expect(res.headers['content-type']).toMatch(/application\/json/)
+    })
 
     it('content-disposition is attachment with a .json filename', async () => {
         const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)

@@ -13,6 +13,10 @@ pub const MAX_ASSET_DECIMALS: u32 = 18;
 pub const SLIPPAGE_POLICY_VERSION_V1: u32 = 1;
 /// Active on-chain slippage rule format; bump when tolerance math changes.
 pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
+/// Contract version representing the overall deployed logic version.
+pub const CONTRACT_VERSION: u32 = 1;
+/// Contract event schema version matching backend expected schema version.
+pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
 /// Maximum number of assets allowed in a single portfolio (#296).
 ///
 /// Soroban persistent storage entries are bounded by ledger entry size limits.
@@ -66,6 +70,19 @@ pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 /// 500 basis points = 5%. Values above this would allow excessive slippage
 /// that could significantly impact portfolio value.
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractCapabilitySummary {
+    pub version: u32,
+    pub schema_version: u32,
+    pub capability_flags: u32,
+    pub min_rebalance_threshold: u32,
+    pub max_rebalance_threshold: u32,
+    pub min_slippage_tolerance_bps: u32,
+    pub max_slippage_tolerance_bps: u32,
+    pub max_portfolio_assets: u32,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
