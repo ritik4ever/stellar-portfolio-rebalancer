@@ -65,37 +65,56 @@ If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for ho
 
 ## Dependency Management
 
-### Renovate Configuration
+We use both [Dependabot](https://docs.github.com/en/code-security/dependabot) and [Renovate](https://www.renovatebot.com/) for comprehensive dependency management. Dependabot handles automatic merging while Renovate provides additional features and flexibility.
 
-Dependency updates are managed automatically using [Renovate](https://www.renovatebot.com/). The configuration is in [renovate.json](renovate.json) and covers:
+### Dependabot Configuration
+
+Dependabot is configured in [.github/dependabot.yml](.github/dependabot.yml) for:
 
 - **npm packages** (root, frontend, backend)
 - **Cargo dependencies** (contracts)
 
-### Update Schedule & Grouping
+**Update strategy:**
+- **Patch updates**: Auto-approved and auto-merged after CI passes
+- **Minor updates**: Create separate PRs for review (no auto-merge)
+- **Major updates**: Create separate PRs, assigned to maintainers for review (no auto-merge)
+- **Security advisories**: Never auto-merged; always require explicit approval
+
+**Auto-merge workflow:**
+1. Dependabot creates a PR for patch version updates
+2. GitHub Actions workflow validates the update type
+3. Patch updates are auto-approved and auto-merged once CI passes
+4. Major/minor updates and security fixes receive comments and await manual review
+
+### Renovate Configuration
+
+Renovate provides additional features in [renovate.json](renovate.json):
 
 - **Patch updates**: Grouped into a single weekly batch PR (Monday at 3am UTC)
 - **Minor updates**: Separate PRs (one per package)
 - **Major updates**: Separate PRs (one per package, high priority review)
 - **Node.js versions**: Major and minor only; patch versions handled separately
 - **Rust toolchain**: Managed via rust-toolchain configuration
+- **Vulnerability alerts**: Prioritized and labeled for immediate attention
 
-### Renovate PR Workflow
+### Handling Dependency PRs
 
-1. Renovate creates PRs automatically for dependency updates (no manual trigger needed)
-2. CI checks are **required** before merge — all tests and build checks must pass
-3. PRs are labeled and grouped by dependency type for easy review
-4. Security vulnerabilities are prioritized and flagged
+**For patch updates (auto-merged):**
+- Review is automated via CI
+- Merges automatically once tests pass
+- Monitor for any unexpected issues post-merge
 
-### Handling Renovate PRs
-
-When reviewing Renovate PRs:
-- Check the changelog and breaking changes for major version bumps
+**For minor/major updates or security fixes:**
+- Review the changelog and breaking changes
 - Run tests locally if concerned about compatibility
-- Comment on the PR if issues are found
-- PRs are configured with auto-merge disabled to require explicit approval
+- Verify against usage in codebase
+- Approve or request changes
+- Maintainers can merge directly if CI passes
 
-Maintainers can also merge PRs directly if CI passes and the update is safe.
+**Security updates:**
+- Always require explicit review and approval
+- Never auto-merged regardless of CI status
+- Check security advisory details before approving
 
 ## Changelog Updates
 
