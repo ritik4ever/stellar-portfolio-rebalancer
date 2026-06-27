@@ -326,6 +326,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 10000
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "ReflectorAddress"
                             }
                           ]
@@ -645,70 +657,21 @@
           "v0": {
             "topics": [
               {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
-              },
-              {
-                "symbol": "lastprice"
+                "symbol": "log"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "symbol": "Stellar"
+                  "string": "caught panic 'Timestamp drift: too far in the future' from contract function 'Symbol(obj#121)'"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  "u64": 1
+                },
+                {
+                  "map": []
                 }
               ]
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "lastprice"
-              }
-            ],
-            "data": "void"
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "execute_rebalance"
-              }
-            ],
-            "data": {
-              "error": {
-                "contract": 14
-              }
             }
           }
         }
@@ -728,12 +691,12 @@
               },
               {
                 "error": {
-                  "contract": 14
+                  "wasm_vm": "invalid_action"
                 }
               }
             ],
             "data": {
-              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+              "string": "caught error from function"
             }
           }
         }
@@ -753,7 +716,7 @@
               },
               {
                 "error": {
-                  "contract": 14
+                  "wasm_vm": "invalid_action"
                 }
               }
             ],

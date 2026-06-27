@@ -30,12 +30,25 @@
                   ]
                 },
                 {
-
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
                   "u32": 5
                 },
                 {
                   "u32": 50
-
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -102,7 +115,9 @@
                     "hi": 0,
                     "lo": 100
                   }
-
+                },
+                {
+                  "string": ""
                 }
               ]
             }
@@ -201,7 +216,23 @@
                   "map": [
                     {
                       "key": {
-
+                        "symbol": "asset_decimals"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            },
+                            "val": {
+                              "u32": 7
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -238,7 +269,14 @@
                     },
                     {
                       "key": {
-
+                        "symbol": "pause_reason"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
@@ -247,7 +285,14 @@
                     },
                     {
                       "key": {
-
+                        "symbol": "slippage_policy_version"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "slippage_tolerance"
                       },
                       "val": {
@@ -338,7 +383,18 @@
                         "key": {
                           "vec": [
                             {
-
+                              "symbol": "ContractPauseReason"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "EmergencyStop"
                             }
                           ]
@@ -357,6 +413,18 @@
                         },
                         "val": {
                           "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 0
                         }
                       },
                       {
@@ -659,12 +727,25 @@
                   ]
                 },
                 {
-
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
                   "u32": 5
                 },
                 {
                   "u32": 50
-
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -682,7 +763,10 @@
           "v0": {
             "topics": [
               {
-
+                "symbol": "portfolio"
+              },
+              {
+                "symbol": "created"
               }
             ],
             "data": {
@@ -848,7 +932,9 @@
                     "hi": 0,
                     "lo": 100
                   }
-
+                },
+                {
+                  "string": ""
                 }
               ]
             }
@@ -866,7 +952,10 @@
           "v0": {
             "topics": [
               {
-
+                "symbol": "portfolio"
+              },
+              {
+                "symbol": "deposit"
               }
             ],
             "data": {
@@ -956,7 +1045,23 @@
               "map": [
                 {
                   "key": {
-
+                    "symbol": "asset_decimals"
+                  },
+                  "val": {
+                    "map": [
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        },
+                        "val": {
+                          "u32": 7
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "current_balances"
                   },
                   "val": {
@@ -993,7 +1098,14 @@
                 },
                 {
                   "key": {
-
+                    "symbol": "pause_reason"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "rebalance_threshold"
                   },
                   "val": {
@@ -1002,7 +1114,14 @@
                 },
                 {
                   "key": {
-
+                    "symbol": "slippage_policy_version"
+                  },
+                  "val": {
+                    "u32": 1
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "slippage_tolerance"
                   },
                   "val": {

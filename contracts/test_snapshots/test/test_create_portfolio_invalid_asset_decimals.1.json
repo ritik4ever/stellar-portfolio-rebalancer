@@ -279,7 +279,7 @@
             ],
             "data": {
               "error": {
-                "contract": 18
+                "contract": 15
               }
             }
           }
@@ -300,7 +300,7 @@
               },
               {
                 "error": {
-                  "contract": 18
+                  "contract": 15
                 }
               }
             ],
@@ -325,14 +325,14 @@
               },
               {
                 "error": {
-                  "contract": 18
+                  "contract": 15
                 }
               }
             ],
             "data": {
               "vec": [
                 {
-                  "string": "contract call failed"
+                  "string": "contract try_call failed"
                 },
                 {
                   "symbol": "create_portfolio"
@@ -369,31 +369,6 @@
                   ]
                 }
               ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 18
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating error to panic"
             }
           }
         }
