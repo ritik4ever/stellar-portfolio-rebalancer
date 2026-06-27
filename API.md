@@ -462,20 +462,35 @@ Returns the file directly with appropriate `Content-Type` and `Content-Dispositi
 
 ### Portfolio Analytics
 
+Returns daily portfolio values and key performance metrics computed from stored price snapshots and rebalance history.
+
 ```bash
 GET /api/v1/portfolio/{portfolioId}/analytics?days=30
+GET /api/v1/portfolio/{portfolioId}/analytics?from=2025-01-01T00:00:00Z&to=2025-06-01T00:00:00Z
 ```
+
+Query params:
+- `days` (optional): Number of days to look back. Default: 30. Ignored if `from`/`to` are provided.
+- `from` (optional): ISO 8601 start date. Must be before `to`. Future dates rejected.
+- `to` (optional): ISO 8601 end date. Future dates rejected.
 
 Response:
 ```json
 {
   "portfolioId": "portfolio-abc123",
-  "data": [
-    { "date": "2025-01-01", "value": 10000, "change": 0 }
+  "dailyValues": [
+    { "timestamp": "2025-01-01T00:00:00.000Z", "totalValue": 10000, "allocations": { "XLM": 60, "USDC": 40 } }
   ],
-  "meta": { "count": 30, "period": "30 days" }
+  "metrics": {
+    "totalReturnPercent": 5.2,
+    "maxDrawdownPercent": 3.5,
+    "sharpeRatio": 1.8
+  },
+  "dataPoints": 30
 }
 ```
+
+Returns empty `dailyValues: []` and zeroed metrics for portfolios with no history.
 
 ### Performance Summary
 
