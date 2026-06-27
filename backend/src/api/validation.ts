@@ -15,6 +15,8 @@ const strictBoolean = z.preprocess((val) => {
 // Schema for POST /portfolio
 export const createPortfolioSchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),
+    name: z.string().max(256, "name is too long").optional(),
+    description: z.string().max(2000, "description is too long").optional(),
     allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
         (allocations) => {
             const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);

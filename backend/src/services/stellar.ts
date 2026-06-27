@@ -91,13 +91,15 @@ export class StellarService {
         slippageTolerancePercent: number,
         strategy: string,
         strategyConfig: Record<string, unknown>,
+        name?: string,
+        description?: string,
     ): Promise<string> {
         const id = randomUUID()
         const now = new Date().toISOString()
         this.db.prepare(`
-            INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 1)
-        `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, '{}', now, now)
+            INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, name, description)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)
+        `).run(id, userAddress, JSON.stringify(allocations), threshold, slippageTolerancePercent, '{}', now, now, name ?? null, description ?? null)
         return id
     }
 
