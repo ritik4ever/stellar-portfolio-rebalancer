@@ -13,318 +13,413 @@
  * Environment variables:
  *   CHAOS_BACKEND_PORT     - Backend port (default: 3001)
  *   CHAOS_KILL_DELAY_MS    - Delay before kill in ms (default: 500)
- *   CHAOS_STARTUP_TIMEOUT  - Max ms to wait for backend ready (default: 15000)
- *   CHAOS_RESTART_TIMEOUT  - Max ms to wait for backend restart (default: 15000)
+ *   CHAOS_STARTUP_TIMEOUT  - Max ms to wait for backend ready (default: 30000)
+ *   CHAOS_RESTART_TIMEOUT  - Max ms to wait for backend restart (default: 30000)
  *   CHAOS_PORTFOLIO_ID     - Portfolio ID to use (default: auto-detected or demo)
+ *   CHAOS_VERBOSE          - Stream backend stdout/stderr when set
  */
 
-import { spawn, execSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = resolve(__dirname, '..', '..')
 const BACKEND_DIR = resolve(ROOT_DIR, 'backend')
 
-const BACKEND_PORT = parseInt(process.env.CHAOS_BACKEND_PORT ?? '3001', 10)
-const KILL_DELAY_MS = parseInt(process.env.CHAOS_KILL_DELAY_MS ?? '500', 10)
-const STARTUP_TIMEOUT = parseInt(process.env.CHAOS_STARTUP_TIMEOUT ?? '15000', 10)
-const RESTART_TIMEOUT = parseInt(process.env.CHAOS_RESTART_TIMEOUT ?? '15000', 10)
-const BASE_URL = `http://localhost:${BACKEND_PORT}/api`
+const BACKEND_PORT = parseInt(process.env.CHAOS_BACKEND_PORT || '3001', 10)
+const KILL_DELAY_MS = parseInt(process.env.CHAOS_KILL_DELAY_MS || '500', 10)
+const STARTUP_TIMEOUT = parseInt(process.env.CHAOS_STARTUP_TIMEOUT || '30000', 10)
+const RESTART_TIMEOUT = parseInt(process.env.CHAOS_RESTART_TIMEOUT || '30000', 10)
+const BASE_URL = 'http://localhost:' + BACKEND_PORT + '/api'
+const REQUEST_TIMEOUT_MS = parseInt(process.env.CHAOS_REQUEST_TIMEOUT_MS || '5000', 10)
 
-// ─── Logging ────────────────────────────────────────────────────────────────
-
-const log = {
-  info: (msg, data) => {
-    const extra = data ? ` ${JSON.stringify(data)}` : ''
-    console.log(`[CHAOS][${ts()}] INFO  ${msg}${extra}`)
-  },
-  warn: (msg, data) => {
-    const extra = data ? ` ${JSON.stringify(data)}` : ''
-    console.warn(`[CHAOS][${ts()}] WARN  ${msg}${extra}`)
-  },
-  error: (msg, data) => {
-    const extra = data ? ` ${JSON.stringify(data)}` : ''
-    console.error(`[CHAOS][${ts()}] ERROR ${msg}${extra}`)
-  },
-  recovery: (msg, data) => {
-    const extra = data ? ` ${JSON.stringify(data)}` : ''
-    console.log(`[CHAOS][${ts()}] RECOVERY ${msg}${extra}`)
-  },
-  pass: (msg) => console.log(`[CHAOS][${ts()}] ✓ PASS  ${msg}`),
-  fail: (msg) => console.error(`[CHAOS][${ts()}] ✗ FAIL  ${msg}`),
-}
+// ─── Logging ─────────────────────────────────────────────────────────────────
 
 function ts() {
   return new Date().toISOString()
 }
 
-// ─── HTTP helpers ────────────────────────────────────────────────────────────
+const log = {
+  info: function(msg, data) {
+    var extra = data ? ' ' + JSON.stringify(data) : ''
+    console.log('[CHAOS][' + ts() + '] INFO  ' + msg + extra)
+  },
+  warn: function(msg, data) {
+    var extra = data ? ' ' + JSON.stringify(data) : ''
+    console.warn('[CHAOS][' + ts() + '] WARN  ' + msg + extra)
+  },
+  error: function(msg, data) {
+    var extra = data ? ' ' + JSON.stringify(data) : ''
+    console.error('[CHAOS][' + ts() + '] ERROR ' + msg + extra)
+  },
+  recovery: function(msg, data) {
+    var extra = data ? ' ' + JSON.stringify(data) : ''
+    console.log('[CHAOS][' + ts() + '] RECOVERY ' + msg + extra)
+  },
+  pass: function(msg, data) {
+    var extra = data ? ' ' + JSON.stringify(data) : ''
+    console.log('[CHAOS][' + ts() + '] PASS  ' + msg + extra)
+  },
+  fail: function(msg, data) {
+    var extra = data ? ' ' + JSON.stringify(data) : ''
+    console.error('[CHAOS][' + ts() + '] FAIL  ' + msg + extra)
+  },
+}
+
+// ─── HTTP helpers ─────────────────────────────────────────────────────────────
+
+async function fetchJson(path, options) {
+  options = options || {}
+  const controller = new AbortController()
+  const timeout = setTimeout(function() { controller.abort() }, REQUEST_TIMEOUT_MS)
+  try {
+    const res = await fetch(BASE_URL + path, Object.assign({}, options, { signal: controller.signal }))
+    const body = await res.json().catch(function() { return null })
+    return { status: res.status, ok: res.ok, body: body }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 async function httpGet(path) {
-  const res = await fetch(`${BASE_URL}${path}`)
-  const body = await res.json().catch(() => null)
-  return { status: res.status, ok: res.ok, body }
+  return fetchJson(path)
 }
 
-async function httpPost(path, payload = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
+async function httpPost(path, payload) {
+  return fetchJson(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload || {}),
   })
-  const body = await res.json().catch(() => null)
-  return { status: res.status, ok: res.ok, body }
 }
 
-// ─── Backend process management ─────────────────────────────────────────────
+// ─── Backend process management ───────────────────────────────────────────────
 
-let backendProcess = null
+var backendProcess = null
 
-function startBackend() {
-  log.info('Starting backend process', { dir: BACKEND_DIR, port: BACKEND_PORT })
-
-  const env = {
-    ...process.env,
-    NODE_ENV: process.env.NODE_ENV ?? 'development',
-    PORT: String(BACKEND_PORT),
-    // Suppress heavy startup noise unless debugging
-    LOG_LEVEL: process.env.LOG_LEVEL ?? 'warn',
-    LOG_PRETTY: 'false',
+function ensureBackendDependencies() {
+  const nodeModules = resolve(BACKEND_DIR, 'node_modules')
+  if (!existsSync(nodeModules)) {
+    log.error(
+      'Backend node_modules not found. Run `npm run install:backend` first.',
+      { path: nodeModules }
+    )
+    process.exit(1)
   }
+}
+
+/**
+ * Returns the PID of any process currently listening on BACKEND_PORT, or null.
+ * Uses lsof which is available on Linux/macOS.
+ */
+function findPortPid() {
+  try {
+    const result = spawnSync('lsof', ['-ti', ':' + BACKEND_PORT], { encoding: 'utf8' })
+    const raw = (result.stdout || '').trim()
+    if (raw) {
+      const pid = parseInt(raw.split('\n')[0], 10)
+      if (!isNaN(pid)) return pid
+    }
+  } catch (_) {}
+  return null
+}
+
+/**
+ * Kill whatever is listening on BACKEND_PORT by PID.
+ * Returns the killed PID or null.
+ */
+function killPortProcess(signal) {
+  signal = signal || 'SIGKILL'
+  const pid = findPortPid()
+  if (!pid) {
+    log.warn('No process found on port ' + BACKEND_PORT + ' to kill')
+    return null
+  }
+  log.info('Sending ' + signal + ' to PID ' + pid + ' on port ' + BACKEND_PORT)
+  try {
+    process.kill(pid, signal)
+  } catch (err) {
+    log.warn('Kill signal failed', { pid: pid, error: err.message })
+  }
+  return pid
+}
+
+function buildBackendEnv() {
+  // Merge process env with minimum required vars so the backend starts without a .env file
+  return Object.assign({}, process.env, {
+    NODE_ENV: process.env.NODE_ENV || 'development',
+    PORT: String(BACKEND_PORT),
+    LOG_LEVEL: process.env.LOG_LEVEL || 'warn',
+    LOG_PRETTY: 'false',
+    DEMO_MODE: process.env.DEMO_MODE || 'true',
+    STELLAR_HORIZON_URL:
+      process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org',
+    STELLAR_CONTRACT_ADDRESS:
+      process.env.STELLAR_CONTRACT_ADDRESS ||
+      'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    STELLAR_REBALANCE_SECRET:
+      process.env.STELLAR_REBALANCE_SECRET ||
+      'SBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    DB_PATH: process.env.DB_PATH || './data/portfolio.db',
+  })
+}
+
+function spawnBackend() {
+  ensureBackendDependencies()
+  log.info('Spawning backend', { dir: BACKEND_DIR, port: BACKEND_PORT })
 
   const proc = spawn('npm', ['run', 'dev'], {
     cwd: BACKEND_DIR,
-    env,
+    env: buildBackendEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
+    detached: true, // put in its own process group so we can kill the group
   })
 
-  proc.stdout.on('data', (d) => {
-    if (process.env.CHAOS_VERBOSE) process.stdout.write(`[backend] ${d}`)
+  proc.stdout.on('data', function(d) {
+    if (process.env.CHAOS_VERBOSE) process.stdout.write('[backend] ' + d)
   })
-  proc.stderr.on('data', (d) => {
-    if (process.env.CHAOS_VERBOSE) process.stderr.write(`[backend] ${d}`)
+  proc.stderr.on('data', function(d) {
+    if (process.env.CHAOS_VERBOSE) process.stderr.write('[backend] ' + d)
   })
-
-  proc.on('error', (err) => log.error('Backend process error', { error: err.message }))
+  proc.on('error', function(err) {
+    log.error('Backend spawn error', { error: err.message })
+  })
 
   backendProcess = proc
   return proc
+}
+
+function killManagedBackend(signal) {
+  signal = signal || 'SIGKILL'
+  if (backendProcess && backendProcess.exitCode === null) {
+    const pid = backendProcess.pid
+    log.info('Killing managed backend process group', { pid: pid, signal: signal })
+    try {
+      process.kill(-pid, signal) // negative pid targets the process group
+    } catch (_) {
+      try { backendProcess.kill(signal) } catch (_2) {}
+    }
+  }
+  backendProcess = null
 }
 
 async function waitUntilReady(timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const { status, body } = await httpGet('/health')
-      if (status === 200 && body?.status) {
-        log.info('Backend ready', { status: body.status })
+      const result = await httpGet('/health')
+      const s = result.body && result.body.status
+      if (result.status === 200 && (s === 'healthy' || s === 'degraded')) {
+        log.info('Backend ready', { status: s })
         return true
       }
-    } catch {
-      // not yet up — keep polling
+    } catch (_) {
+      // not up yet
     }
     await sleep(300)
   }
   return false
 }
 
-function killBackend(signal = 'SIGKILL') {
-  if (!backendProcess || backendProcess.exitCode !== null) {
-    log.warn('Backend process already exited before kill attempt')
-    return
-  }
-  const pid = backendProcess.pid
-  log.info(`Sending ${signal} to backend`, { pid })
+async function isBackendAlreadyRunning() {
   try {
-    // Kill the process group so child processes (tsx, node) are also terminated
-    process.kill(-backendProcess.pid, signal)
-  } catch {
-    // If process group kill fails, fall back to direct kill
-    try {
-      backendProcess.kill(signal)
-    } catch (err) {
-      log.warn('Kill failed (process may have already exited)', { error: err.message })
-    }
+    const result = await httpGet('/health')
+    return result.status === 200
+  } catch (_) {
+    return false
   }
-  backendProcess = null
 }
 
-// ─── Portfolio helpers ───────────────────────────────────────────────────────
+// ─── Portfolio helpers ────────────────────────────────────────────────────────
 
 async function findOrCreateTestPortfolio() {
-  const portfolioId = process.env.CHAOS_PORTFOLIO_ID
-  if (portfolioId) {
-    log.info('Using provided portfolio ID', { portfolioId })
-    return portfolioId
+  if (process.env.CHAOS_PORTFOLIO_ID) {
+    log.info('Using provided portfolio ID', { portfolioId: process.env.CHAOS_PORTFOLIO_ID })
+    return process.env.CHAOS_PORTFOLIO_ID
   }
 
   // Try to find an existing portfolio
   try {
-    const { body } = await httpGet('/portfolios?limit=1')
-    const first = body?.data?.portfolios?.[0] ?? body?.portfolios?.[0]
-    if (first?.id) {
-      log.info('Using existing portfolio', { portfolioId: first.id })
-      return first.id
+    const result = await httpGet('/portfolios?limit=1')
+    const portfolios =
+      (result.body && result.body.data && result.body.data.portfolios) ||
+      (result.body && result.body.portfolios) ||
+      []
+    if (portfolios.length > 0 && portfolios[0].id) {
+      log.info('Using existing portfolio', { portfolioId: portfolios[0].id })
+      return portfolios[0].id
     }
-  } catch {
-    // fall through to create
-  }
+  } catch (_) {}
 
-  // Create a minimal demo portfolio for the chaos test
+  // Create a minimal demo portfolio
   log.info('Creating demo portfolio for chaos test')
-  const { status, body } = await httpPost('/portfolio', {
+  const result = await httpPost('/portfolio', {
     userAddress: 'GCHAOS0000000000000000000000000000000000000000000000000000',
     allocations: { XLM: 60, USDC: 40 },
     threshold: 5,
     name: 'chaos-test-portfolio',
   })
 
-  if (status === 201 || status === 200) {
-    const id = body?.data?.id ?? body?.id
+  if ((result.status === 201 || result.status === 200) && result.body) {
+    const id = (result.body.data && result.body.data.id) || result.body.id
     if (id) {
       log.info('Demo portfolio created', { portfolioId: id })
       return id
     }
   }
 
-  // Fall back to a well-known demo portfolio ID if the backend is in demo mode
-  log.warn('Could not create portfolio; using demo fallback ID', { status })
-  return 'demo-portfolio-chaos'
+  // Verify whether the well-known demo fallback exists before trusting it
+  const fallbackId = 'demo-portfolio-chaos'
+  const check = await httpGet('/portfolio/' + fallbackId).catch(function() { return { ok: false } })
+  if (check.ok) {
+    log.info('Using verified demo fallback portfolio', { portfolioId: fallbackId })
+    return fallbackId
+  }
+  throw new Error('Could not create or verify a test portfolio (status=' + result.status + ')')
 }
 
 async function fetchPortfolioState(portfolioId) {
   try {
-    const { body } = await httpGet(`/portfolio/${portfolioId}`)
-    return body?.data ?? body ?? null
-  } catch {
+    const result = await httpGet('/portfolio/' + portfolioId)
+    return (result.body && result.body.data) || result.body || null
+  } catch (_) {
     return null
   }
 }
 
 async function fetchRebalanceHistory(portfolioId) {
   try {
-    const { body } = await httpGet(`/rebalance/history?portfolioId=${portfolioId}&limit=5`)
-    return body?.data?.history ?? body?.history ?? []
-  } catch {
+    const result = await httpGet('/rebalance/history?portfolioId=' + portfolioId + '&limit=5')
+    return (
+      (result.body && result.body.data && result.body.data.history) ||
+      (result.body && result.body.history) ||
+      []
+    )
+  } catch (_) {
     return []
   }
 }
 
-// ─── Assertions ──────────────────────────────────────────────────────────────
+// ─── Assertions ───────────────────────────────────────────────────────────────
 
 function assertPortfolioConsistency(portfolioState, label) {
   if (!portfolioState) {
-    // Backend may be in demo mode and not return portfolio state — non-fatal
-    log.warn(`${label}: portfolio state unavailable (demo/not-found); skipping allocation check`)
-    return true
+    log.fail(label + ': portfolio state unavailable; cannot verify allocation consistency')
+    return false
   }
 
-  const allocations = portfolioState.allocations ?? []
-  if (!Array.isArray(allocations) || allocations.length === 0) {
-    log.warn(`${label}: no allocation data to validate`)
-    return true
+  const rawAllocations = portfolioState.allocations
+  const allocations = Array.isArray(rawAllocations)
+    ? rawAllocations
+    : rawAllocations && typeof rawAllocations === 'object'
+      ? Object.entries(rawAllocations).map(function(entry) { return { asset: entry[0], weight: entry[1] } })
+      : []
+
+  if (allocations.length === 0) {
+    log.fail(label + ': no allocation data to validate')
+    return false
   }
 
   let consistent = true
-
-  // Each allocation weight must be a finite number in [0, 100]
-  for (const alloc of allocations) {
+  for (var i = 0; i < allocations.length; i++) {
+    const alloc = allocations[i]
     const weight = typeof alloc.current === 'number' ? alloc.current : alloc.weight
     if (weight == null || !isFinite(weight) || weight < 0 || weight > 100) {
-      log.fail(`${label}: corrupted allocation detected`, { asset: alloc.asset, weight })
+      log.fail(label + ': corrupted allocation detected for ' + alloc.asset + ' weight=' + weight)
       consistent = false
     }
   }
 
-  // Total allocation weight must be ≤ 105 (allow small floating-point drift)
-  const total = allocations.reduce((sum, a) => {
-    const w = typeof a.current === 'number' ? a.current : (a.weight ?? 0)
-    return sum + w
+  const total = allocations.reduce(function(sum, a) {
+    return sum + (typeof a.current === 'number' ? a.current : (a.weight || 0))
   }, 0)
   if (total > 105) {
-    log.fail(`${label}: total allocation > 105% indicating corrupt state`, { total })
+    log.fail(label + ': total allocation ' + total.toFixed(2) + '% > 105% — corrupted state')
     consistent = false
   }
 
   if (consistent) {
-    log.pass(`${label}: portfolio allocations are consistent (total=${total.toFixed(2)}%)`)
+    log.pass(label + ': allocations consistent (total=' + total.toFixed(2) + '%)')
   }
   return consistent
 }
 
 function assertPartialRebalanceLogged(history, label) {
   if (!Array.isArray(history) || history.length === 0) {
-    log.warn(`${label}: no rebalance history available to verify`)
-    return true
-  }
-
-  // At minimum, history should exist and not reference a corrupted final status
-  const lastEntry = history[0]
-  const invalidStatuses = ['corrupted', 'undefined', null]
-  if (invalidStatuses.includes(lastEntry?.status)) {
-    log.fail(`${label}: rebalance history shows invalid status`, { status: lastEntry?.status })
+    log.fail(label + ': no rebalance history found — expected a record of the interrupted rebalance')
     return false
   }
 
-  log.pass(`${label}: rebalance history present and status is valid`, {
-    count: history.length,
-    latestStatus: lastEntry?.status,
-  })
+  const last = history[0]
+  const invalidStatuses = ['corrupted', 'undefined']
+  if (invalidStatuses.indexOf(last && last.status) !== -1 || last.status === null) {
+    log.fail(label + ': rebalance history has invalid status: ' + last.status)
+    return false
+  }
+
+  // Require the most recent entry to reflect that a rebalance actually ran (even if interrupted)
+  const recoveryStatuses = ['partial', 'interrupted', 'recovered', 'failed', 'pending', 'completed']
+  if (recoveryStatuses.indexOf(last.status) === -1) {
+    log.fail(label + ': rebalance status does not reflect recovery behavior', { status: last.status })
+    return false
+  }
+
+  log.pass(label + ': rebalance history valid (count=' + history.length + ', status=' + last.status + ')')
   return true
 }
 
-// ─── Test scenarios ──────────────────────────────────────────────────────────
+// ─── Test scenarios ───────────────────────────────────────────────────────────
 
 async function scenarioKillMidRebalance(portfolioId) {
-  log.info('─── Scenario: kill-mid-rebalance ───────────────────────────────')
-  log.info(`Using portfolioId=${portfolioId}, killDelay=${KILL_DELAY_MS}ms`)
+  log.info('Scenario: kill-mid-rebalance — portfolioId=' + portfolioId + ' killDelay=' + KILL_DELAY_MS + 'ms')
 
-  // 1. Record pre-test state
   const stateBefore = await fetchPortfolioState(portfolioId)
-  log.info('Pre-kill portfolio state captured', {
+  log.info('Pre-kill state captured', {
     hasState: stateBefore != null,
-    allocationCount: stateBefore?.allocations?.length ?? 'n/a',
+    allocations: stateBefore && stateBefore.allocations ? stateBefore.allocations.length : 'n/a',
   })
 
-  // 2. Fire a rebalance request asynchronously (do NOT await — we want to kill mid-flight)
+  // Fire rebalance WITHOUT awaiting — we want it in-flight when we kill
   log.info('Firing rebalance request (not awaited)')
-  const rebalancePromise = httpPost(`/portfolio/${portfolioId}/rebalance`, {
+  const rebalancePromise = httpPost('/portfolio/' + portfolioId + '/rebalance', {
     options: { simulateOnly: false },
-  }).catch((err) => {
-    // Network error expected after kill — not a failure
-    log.info('Rebalance request aborted (expected after kill)', { error: err.message })
+  }).catch(function(err) {
+    log.info('Rebalance connection dropped (expected after kill)', { error: err.message })
     return null
   })
 
-  // 3. Wait the required 500 ms before killing
-  log.info(`Waiting ${KILL_DELAY_MS}ms before kill…`)
+  log.info('Waiting ' + KILL_DELAY_MS + 'ms before kill')
   await sleep(KILL_DELAY_MS)
 
-  // 4. Kill the backend
-  killBackend('SIGKILL')
-  log.recovery('Backend killed; initiating restart', { portfolioId })
+  // Kill — prefer managed process group kill; fall back to port-based kill
+  if (backendProcess && backendProcess.exitCode === null) {
+    killManagedBackend('SIGKILL')
+  } else {
+    killPortProcess('SIGKILL')
+  }
+  log.recovery('Backend killed', { portfolioId: portfolioId })
 
-  // Allow rebalancePromise to settle now that the connection is gone
   await rebalancePromise
 
-  // 5. Restart the backend
-  log.info('Restarting backend process…')
-  startBackend()
+  // Wait a moment for the port to be freed before restarting
+  await sleep(500)
+
+  log.info('Restarting backend…')
+  spawnBackend()
   const restarted = await waitUntilReady(RESTART_TIMEOUT)
   if (!restarted) {
-    log.error('Backend did not come back up within timeout', { timeoutMs: RESTART_TIMEOUT })
+    log.error('Backend did not restart within timeout', { timeoutMs: RESTART_TIMEOUT })
     return false
   }
   log.recovery('Backend restarted successfully')
 
-  // 6. Allow queue workers a moment to drain pending jobs
-  log.info('Waiting for job queue to drain…')
+  // Let queue workers drain any surviving jobs
+  log.info('Waiting 2s for job queue to drain…')
   await sleep(2000)
 
-  // 7. Fetch post-restart state and history
   const stateAfter = await fetchPortfolioState(portfolioId)
   const history = await fetchRebalanceHistory(portfolioId)
 
@@ -333,47 +428,48 @@ async function scenarioKillMidRebalance(portfolioId) {
     historyCount: history.length,
   })
 
-  // 8. Assertions
   const allocationOk = assertPortfolioConsistency(stateAfter, 'post-restart')
   const historyOk = assertPartialRebalanceLogged(history, 'post-restart')
-
   return allocationOk && historyOk
 }
 
 async function scenarioJobQueueDrainsOnRestart(portfolioId) {
-  log.info('─── Scenario: job-queue-drains-on-restart ─────────────────────')
+  log.info('Scenario: job-queue-drains-on-restart')
 
-  // Queue health endpoint — non-fatal if unavailable (Redis may not be running)
+  var ok = true
+
+  // Queue health check — non-fatal when Redis is not running (endpoint may not exist)
   try {
-    const { body } = await httpGet('/queue/health')
-    const queueStatus = body?.data ?? body ?? {}
-    log.info('Queue health after restart', { queueStatus })
-
-    const pendingCount = queueStatus?.waiting ?? queueStatus?.pending ?? 0
-    if (pendingCount === 0) {
-      log.pass('job-queue-drains-on-restart: queue is empty (drained or never enqueued)')
+    const queueResult = await httpGet('/queue/health')
+    if (!queueResult.ok) {
+      log.warn('job-queue-drains-on-restart: queue health endpoint unavailable', { status: queueResult.status })
     } else {
-      log.warn('job-queue-drains-on-restart: queue has pending jobs', { pendingCount })
+      const queueStatus = (queueResult.body && queueResult.body.data) || queueResult.body || {}
+      const pending = queueStatus.waiting || queueStatus.pending || 0
+      if (pending === 0) {
+        log.pass('job-queue-drains-on-restart: queue empty (drained or not used)')
+      } else {
+        log.fail('job-queue-drains-on-restart: ' + pending + ' pending jobs remain after restart', { pending: pending })
+        ok = false
+      }
     }
-  } catch {
-    log.warn('job-queue-drains-on-restart: queue health endpoint unavailable (Redis likely not running)')
+  } catch (_) {
+    log.warn('job-queue-drains-on-restart: queue health endpoint unavailable (Redis may not be running)')
   }
 
-  // Verify the backend itself is healthy (not just alive)
-  const { body } = await httpGet('/health').catch(() => ({ body: null }))
-  const isHealthy = body?.status === 'healthy' || body?.status === 'degraded'
-  if (isHealthy) {
-    log.pass('job-queue-drains-on-restart: backend reports healthy status after restart')
+  const healthResult = await httpGet('/health').catch(function() { return { body: null } })
+  const status = healthResult.body && healthResult.body.status
+  if (status === 'healthy' || status === 'degraded') {
+    log.pass('job-queue-drains-on-restart: backend healthy after restart (status=' + status + ')')
   } else {
-    log.warn('job-queue-drains-on-restart: backend health status is not "healthy"', {
-      status: body?.status,
-    })
+    log.fail('job-queue-drains-on-restart: backend health status is not acceptable', { status: status })
+    ok = false
   }
 
-  return true
+  return ok
 }
 
-// ─── Entry point ─────────────────────────────────────────────────────────────
+// ─── Entry point ──────────────────────────────────────────────────────────────
 
 async function main() {
   log.info('═══════════════════════════════════════════════════════════════')
@@ -382,32 +478,42 @@ async function main() {
 
   const results = { passed: 0, failed: 0 }
 
-  // ── Phase 1: Start backend ──────────────────────────────────────────────
-  log.info('Phase 1: Starting backend…')
-  startBackend()
-  const ready = await waitUntilReady(STARTUP_TIMEOUT)
-  if (!ready) {
-    log.error('Backend failed to start within timeout — aborting chaos test', {
-      timeoutMs: STARTUP_TIMEOUT,
-    })
-    process.exit(1)
+  // Phase 1: Ensure backend is running ────────────────────────────────────────
+  log.info('Phase 1: Ensuring backend is running…')
+  const alreadyUp = await isBackendAlreadyRunning()
+  if (alreadyUp) {
+    log.info('Backend already running on port ' + BACKEND_PORT + ' — will use it')
+  } else {
+    log.info('No backend detected — spawning one…')
+    spawnBackend()
+    const ready = await waitUntilReady(STARTUP_TIMEOUT)
+    if (!ready) {
+      log.error(
+        'Backend failed to start within timeout. ' +
+        'Ensure `cd backend && npm install` has been run and the backend can start, ' +
+        'or start it manually and re-run the chaos test.',
+        { timeoutMs: STARTUP_TIMEOUT }
+      )
+      if (backendProcess) killManagedBackend()
+      process.exit(1)
+    }
   }
-  log.pass('Phase 1: Backend is up and healthy')
+  log.pass('Phase 1: Backend is up')
 
-  // ── Phase 2: Identify test portfolio ────────────────────────────────────
+  // Phase 2: Identify test portfolio ──────────────────────────────────────────
   log.info('Phase 2: Identifying test portfolio…')
   let portfolioId
   try {
     portfolioId = await findOrCreateTestPortfolio()
   } catch (err) {
     log.error('Could not identify or create test portfolio', { error: err.message })
-    killBackend()
+    if (backendProcess) killManagedBackend()
     process.exit(1)
   }
-  log.pass('Phase 2: Test portfolio ready', { portfolioId })
+  log.pass('Phase 2: Test portfolio ready — id=' + portfolioId)
 
-  // ── Phase 3: Scenario — kill mid-rebalance ───────────────────────────────
-  log.info('Phase 3: Running kill-mid-rebalance scenario…')
+  // Phase 3: Kill mid-rebalance ────────────────────────────────────────────────
+  log.info('Phase 3: kill-mid-rebalance scenario…')
   try {
     const ok = await scenarioKillMidRebalance(portfolioId)
     if (ok) {
@@ -419,20 +525,20 @@ async function main() {
     }
   } catch (err) {
     results.failed++
-    log.error('Phase 3: kill-mid-rebalance threw an unexpected error', { error: err.message })
+    log.error('Phase 3: unexpected error', { error: err.message })
   }
 
-  // Backend was restarted inside the scenario; make sure it's still up.
-  const stillReady = await waitUntilReady(5000)
-  if (!stillReady) {
-    log.warn('Backend not responding after scenario; restarting for next scenario…')
-    if (backendProcess) killBackend()
-    startBackend()
+  // Ensure backend is still up for next scenario
+  const stillUp = await isBackendAlreadyRunning()
+  if (!stillUp) {
+    log.warn('Backend not responding after kill scenario — restarting…')
+    if (backendProcess) killManagedBackend()
+    spawnBackend()
     await waitUntilReady(RESTART_TIMEOUT)
   }
 
-  // ── Phase 4: Scenario — queue drains on restart ──────────────────────────
-  log.info('Phase 4: Running job-queue-drains-on-restart scenario…')
+  // Phase 4: Job queue drains on restart ──────────────────────────────────────
+  log.info('Phase 4: job-queue-drains-on-restart scenario…')
   try {
     const ok = await scenarioJobQueueDrainsOnRestart(portfolioId)
     if (ok) {
@@ -444,16 +550,15 @@ async function main() {
     }
   } catch (err) {
     results.failed++
-    log.error('Phase 4: job-queue-drains-on-restart threw an unexpected error', { error: err.message })
+    log.error('Phase 4: unexpected error', { error: err.message })
   }
 
-  // ── Teardown ─────────────────────────────────────────────────────────────
-  log.info('Tearing down backend process…')
-  if (backendProcess) killBackend('SIGTERM')
+  // Teardown ───────────────────────────────────────────────────────────────────
+  log.info('Teardown: stopping managed backend process…')
+  if (backendProcess) killManagedBackend('SIGTERM')
 
-  // ── Summary ──────────────────────────────────────────────────────────────
   log.info('═══════════════════════════════════════════════════════════════')
-  log.info(`Chaos test complete: ${results.passed} passed, ${results.failed} failed`)
+  log.info('Chaos test complete: ' + results.passed + ' passed, ' + results.failed + ' failed')
   log.info('═══════════════════════════════════════════════════════════════')
 
   if (results.failed > 0) {
@@ -461,8 +566,8 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  log.error('Unhandled error in chaos test', { error: err.message, stack: err.stack })
-  if (backendProcess) killBackend()
+main().catch(function(err) {
+  log.error('Unhandled error in chaos test', { error: err.message })
+  if (backendProcess) killManagedBackend()
   process.exit(1)
 })
