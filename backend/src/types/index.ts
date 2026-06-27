@@ -53,6 +53,8 @@ export interface HistoricalPrice {
 export interface Portfolio {
     id: string
     userAddress: string
+    name?: string
+    description?: string
     allocations: Record<string, number>
     threshold: number
     slippageTolerancePercent?: number

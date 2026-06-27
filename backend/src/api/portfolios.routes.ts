@@ -36,13 +36,27 @@ function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
 
 export const portfoliosRouter = Router()
 
+portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
+    try {
+        const search = req.query.search as string || ''
+        const limit = parseInt(req.query.limit as string) || 20
+        const offset = parseInt(req.query.offset as string) || 0
+
+        const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset)
+        return ok(res, { portfolios, limit, offset })
+    } catch (error) {
+        logger.error('[ERROR] Search portfolios failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 
 portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), async (req: Request, res: Response) => {
     try {
-        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = req.body
+        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig, name, description } = req.body
 
         const slippageTolerancePercent = slippageTolerance ?? 1
         const portfolioId = await stellarService.createPortfolio(
@@ -51,7 +65,9 @@ portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), asyn
             threshold,
             slippageTolerancePercent,
             strategy ?? 'threshold',
-            strategyConfig ?? {}
+            strategyConfig ?? {},
+            name,
+            description
         )
         const mode = featureFlags.demoMode ? 'demo' : 'onchain'
         return ok(res, {

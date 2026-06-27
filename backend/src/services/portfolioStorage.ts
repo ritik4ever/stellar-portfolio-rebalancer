@@ -36,12 +36,16 @@ export class PortfolioStorage {
     async createPortfolio(
         userAddress: string,
         allocations: Record<string, number>,
-        threshold: number
+        threshold: number,
+        name?: string,
+        description?: string
     ): Promise<string> {
         const id = randomUUID()
         const portfolio: Portfolio = {
             id,
             userAddress,
+            name,
+            description,
             allocations,
             threshold,
             balances: {},
@@ -51,7 +55,7 @@ export class PortfolioStorage {
             version: 1
         }
         if (isDbConfigured()) {
-            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0)
+            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0, 1, 'threshold', {}, name, description)
         }
         this.cacheSet(portfolio)
         return id
@@ -62,13 +66,17 @@ export class PortfolioStorage {
         allocations: Record<string, number>,
         threshold: number,
         currentBalances: Record<string, number>,
-        slippageTolerance: number = 1
+        slippageTolerance: number = 1,
+        name?: string,
+        description?: string
     ): Promise<string> {
         const id = randomUUID()
         const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
         const portfolio: Portfolio = {
             id,
             userAddress,
+            name,
+            description,
             allocations,
             threshold,
             slippageTolerance: clampSlippageTolerance(slippageTolerance),
@@ -86,7 +94,11 @@ export class PortfolioStorage {
                 threshold,
                 currentBalances,
                 totalValue,
-                portfolio.slippageTolerance ?? 1
+                portfolio.slippageTolerance ?? 1,
+                'threshold',
+                {},
+                name,
+                description
             )
         }
         this.cacheSet(portfolio)
@@ -120,16 +132,37 @@ export class PortfolioStorage {
         if (isDbConfigured()) {
             const ok = await portfolioDb.dbUpdatePortfolio(id, {
                 userAddress: updates.userAddress,
+                name: updates.name,
+                description: updates.description,
                 allocations: updates.allocations,
                 threshold: updates.threshold,
                 balances: updates.balances,
                 totalValue: updates.totalValue,
                 lastRebalance: updates.lastRebalance
             }, expectedVersion)
-            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance)) return false
+            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance ?? updates.name ?? updates.description)) return false
         }
         this.cacheSet(updated)
         return true
+    }
+
+    async searchPortfolios(searchQuery: string, limit: number, offset: number): Promise<Portfolio[]> {
+        if (isDbConfigured()) {
+            const list = await portfolioDb.dbSearchPortfolios(searchQuery, limit, offset)
+            if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
+            return list
+        }
+        
+        let all = Array.from(this.portfolios.values())
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase()
+            all = all.filter(p => 
+                (p.name && p.name.toLowerCase().includes(q)) || 
+                (p.description && p.description.toLowerCase().includes(q))
+            )
+        }
+        all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        return all.slice(offset, offset + limit)
     }
 
     async getAllPortfolios(): Promise<Portfolio[]> {

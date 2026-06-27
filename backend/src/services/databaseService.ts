@@ -150,6 +150,8 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS portfolios (
     id            TEXT PRIMARY KEY,
     user_address  TEXT NOT NULL,
+    name          TEXT,
+    description   TEXT,
     allocations   TEXT NOT NULL,
     threshold     REAL NOT NULL,
     slippage_tolerance_percent REAL NOT NULL DEFAULT 1,
@@ -624,6 +626,18 @@ export class DatabaseService {
         "[DB] Migration: added slippage_tolerance_percent column to portfolios",
       );
     }
+    if (!cols.some((c) => c.name === "name")) {
+      this.db.exec(
+        "ALTER TABLE portfolios ADD COLUMN name TEXT",
+      );
+      logger.info("[DB] Migration: added name column to portfolios");
+    }
+    if (!cols.some((c) => c.name === "description")) {
+      this.db.exec(
+        "ALTER TABLE portfolios ADD COLUMN description TEXT",
+      );
+      logger.info("[DB] Migration: added description column to portfolios");
+    }
     if (!cols.some((c) => c.name === "strategy")) {
       this.db.exec(
         "ALTER TABLE portfolios ADD COLUMN strategy TEXT NOT NULL DEFAULT 'threshold'",
@@ -894,13 +908,15 @@ export class DatabaseService {
             .prepare(
               `
                     UPDATE portfolios
-                    SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
+                    SET user_address = ?, name = ?, description = ?, allocations = ?, threshold = ?, balances = ?,
                         total_value = ?, last_rebalance = ?, version = version + 1
                     WHERE id = ? AND version = ?
                 `,
             )
             .run(
               merged.userAddress,
+              merged.name ?? null,
+              merged.description ?? null,
               JSON.stringify(merged.allocations),
               merged.threshold,
               JSON.stringify(merged.balances),
@@ -959,6 +975,34 @@ export class DatabaseService {
         return rows.map(rowToPortfolio);
       } catch (err) {
         throw new Error(`Failed to retrieve all portfolios: ${err}`);
+      }
+    });
+  }
+
+  searchPortfolios(searchQuery: string, limit: number, offset: number): Portfolio[] {
+    return this._withTiming("searchPortfolios", () => {
+      try {
+        if (!searchQuery) {
+          const rows = this.db
+            .prepare<[number, number], PortfolioRow>(
+              "SELECT * FROM portfolios ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            )
+            .all(limit, offset);
+          return rows.map(rowToPortfolio);
+        }
+
+        const likeQuery = `%${searchQuery}%`;
+        const rows = this.db
+          .prepare<[string, string, number, number], PortfolioRow>(
+            `SELECT * FROM portfolios 
+             WHERE name LIKE ? OR description LIKE ? 
+             ORDER BY created_at DESC 
+             LIMIT ? OFFSET ?`
+          )
+          .all(likeQuery, likeQuery, limit, offset);
+        return rows.map(rowToPortfolio);
+      } catch (err) {
+        throw new Error(`Failed to search portfolios: ${err}`);
       }
     });
   }
