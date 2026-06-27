@@ -190,16 +190,35 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 
 `Error` is declared with `#[repr(u32)]`, so values are stable numeric codes:
 
-| Code | Variant | Returned when |
-|---|---|---|
-| `1` | `InvalidAllocation` | `create_portfolio` receives allocation map that fails validation. |
+| Code | Variant | Description | Recovery Action |
+|------|---------|-------------|-----------------|
+| `1` | `InvalidAllocation` | Target allocation percentages do not sum to 100% or individual allocations are zero. | Verify allocations in your `create_portfolio` call sum to exactly 100. Each asset must have a positive percentage. |
+| `2` | `RebalanceNotNeeded` | No asset drift exceeds the portfolio's configured rebalance threshold. | This is informational — no action needed. Increase the threshold sensitivity if you want more frequent rebalancing. |
+| `3` | `EmergencyStop` | Contract is in emergency stop mode; all state-mutating operations are blocked. | Wait for the admin to disable the emergency stop. Check the `set_emergency_stop` event logs for the reason code. |
+| `4` | `CooldownActive` | A rebalance was executed too recently; the cooldown period has not elapsed. | Wait for the cooldown period to pass (minimum 600 seconds). Check `get_config_view` for the portfolio's cooldown setting. |
+| `5` | `StaleData` | Reflector oracle price data is older than 3600 seconds. | Retry after oracle data refreshes. Verify the Reflector contract address in `get_config_view` is correct and the oracle is operational. |
+| `6` | `ExcessiveDrift` | Computed portfolio drift exceeds the allowed maximum. | Review your target allocations. Consider rebalancing in smaller steps or adjusting the rebalance threshold to a higher value. |
+| `7` | `AlreadyInitialized` | The `initialize` function was called on an already-initialized contract. | No action needed — the contract is already set up. Use `get_config_view` to inspect the current admin and reflector settings. |
+| `8` | `InvalidThreshold` | Rebalance threshold is outside the allowed range (1–50%). | Provide a `rebalance_threshold` between `MIN_REBALANCE_THRESHOLD` (1) and `MAX_REBALANCE_THRESHOLD` (50). |
+| `9` | `InvalidSlippageTolerance` | Slippage tolerance is outside the allowed range (10–500 bps). | Provide a `slippage_tolerance` between `MIN_SLIPPAGE_TOLERANCE_BPS` (10) and `MAX_SLIPPAGE_TOLERANCE_BPS` (500). |
+| `10` | `SlippageExceeded` | Post-trade balances deviated beyond the portfolio's configured slippage tolerance. | Increase `slippage_tolerance` on the portfolio or split the rebalance into smaller trades. Check market liquidity for the affected assets. |
+| `11` | `TooManyAssets` | A portfolio's target allocation map exceeds `MAX_PORTFOLIO_ASSETS` (10). | Reduce the number of assets in the `target_allocations` map to 10 or fewer. |
+| `12` | `InvalidCooldown` | The cooldown duration is outside the allowed range (600–86400 seconds). | Set a cooldown between `MIN_COOLDOWN_SECONDS` (600) and `MAX_COOLDOWN_SECONDS` (86400). |
+| `13` | `AssetNotSupported` | An asset in the portfolio has no price data available from the Reflector oracle. | Verify the asset is listed in the Reflector oracle. Check the asset's contract address or Stellar issuer is correctly specified. |
+| `14` | `MissingPrice` | A required asset price could not be retrieved from the Reflector oracle. | Ensure the Reflector oracle contract is deployed and reachable. Verify the asset key matches the reflector's supported asset list. |
+| `15` | `InvalidAmount` | A deposit or trade amount is zero, negative, or below the minimum trade size (`MIN_TRADE_AMOUNT_STROOPS`). | Provide a positive amount greater than the minimum trade size of 1,000,000 stroops. |
+| `16` | `PortfolioPaused` | The portfolio is in a paused state (user-paused, admin emergency, or circuit breaker). | Check the portfolio's `pause_reason` field via `get_config_view` to determine the cause. Admin can toggle emergency stop; user may need to unpause. |
+| `17` | `InsufficientBalance` | The portfolio's current balance is insufficient for the requested operation. | Deposit additional funds into the portfolio before retrying the operation. Verify `current_balances` via `get_portfolio`. |
+| `18` | `PortfolioStorageFootprintTooLarge` | The serialized portfolio struct exceeds `MAX_PORTFOLIO_STORAGE_BYTES` (3072 bytes). | Reduce the number of assets in the portfolio. Each asset adds to the storage footprint of the `target_allocations`, `current_balances`, and `asset_decimals` maps. |
+| `19` | `UnsupportedSlippagePolicyVersion` | The portfolio's `slippage_policy_version` is not recognized by the current contract version. | Upgrade the contract to a version that supports the portfolio's policy version, or recreate the portfolio with the current `CURRENT_SLIPPAGE_POLICY_VERSION`. |
+| `20` | `InvalidAssetDecimals` | An asset's decimal count exceeds `MAX_ASSET_DECIMALS` (18) or is otherwise invalid. | Verify the asset's decimal configuration. Stellar assets typically use 7 decimals; other assets may use up to 18. |
+| `21` | `PreviewUnavailable` | The simulation path cannot generate a rebalance preview due to missing data. | Ensure the Reflector oracle is returning price data for all portfolio assets. Retry the simulation when oracle data is available. |
+| `22` | `InvariantViolation` | An internal contract invariant was violated — this indicates a bug. | Report this error with the full transaction envelope to the maintainers. Include the portfolio ID, contract version, and triggering operation. |
+| `23` | `WithdrawFailed` | A withdrawal operation could not be completed. | Check that the portfolio has sufficient balance and is not paused. Verify the withdrawal amount does not exceed available balances. |
+| `24` | `PortfolioNotFound` | The requested portfolio ID does not exist in persistent contract storage. | Verify the portfolio ID is correct. Use `get_config_view` to list available portfolios or create a new portfolio with `create_portfolio`. |
+| `25` | `InvalidWithdrawAmount` | The withdrawal amount is zero, negative, or exceeds the available balance for the specified asset. | Provide a positive amount that does not exceed the asset's `current_balance` in the portfolio. Check balances via `get_portfolio`. |
 
-| `7` | `AlreadyInitialized` | `initialize` called after contract already initialized. |
-| `8` | `InvalidThreshold` | `create_portfolio` threshold outside `MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD` (i.e., `1..=50`). |
-| `9` | `InvalidSlippageTolerance` | `create_portfolio` slippage tolerance outside `MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS` (i.e., `10..=500`). |
-| `10` | `SlippageExceeded` | `execute_rebalance` computed slippage above portfolio tolerance. |
-| `11` | `TooManyAssets` | `create_portfolio` target allocation size above `MAX_PORTFOLIO_ASSETS`. |
-| `12` | `UnsupportedAsset` | `execute_rebalance` cannot get Reflector price data for an asset, so callers can distinguish unsupported assets from stale data or allocation validation failures. |
+For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 
 
 ## XDR/Contract Type References

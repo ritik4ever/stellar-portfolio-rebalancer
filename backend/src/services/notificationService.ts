@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { logger } from "../utils/logger.js";
 import {
   dbSaveNotificationPreferences,
@@ -19,6 +19,7 @@ import {
   type NotificationDeliveryConfig,
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
+import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 
 // ─────────────────────────────────────────────
 // Types
@@ -56,11 +57,14 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
-
       return;
     }
 
-    const policy = this.deliveryConfig.webhook;
+    const policy = {
+      ...this.deliveryConfig.webhook,
+      maxAttempts: Math.min(this.deliveryConfig.webhook.maxAttempts, 5),
+    };
+
     const webhookPayload = {
       event: payload.eventType,
       title: payload.title,
@@ -70,7 +74,53 @@ class WebhookProvider implements NotificationProvider {
       userId: payload.userId,
     };
 
+    const webhookUrl = preferences.webhookUrl;
 
+    try {
+      await deliverWithBackoff(
+        {
+          provider: "webhook",
+          userId: payload.userId,
+          eventType: payload.eventType,
+          policy,
+        },
+        async () => {
+          const controller = new AbortController();
+          const timeout = policy.requestTimeoutMs || 5000;
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+          try {
+            const response = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Webhook-Event': payload.eventType,
+              },
+              body: JSON.stringify(webhookPayload),
+              signal: controller.signal,
+            });
+
+            if (!response.ok) {
+              throw new Error(`Webhook responded with status ${response.status}`);
+            }
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        },
+      );
+    } catch {
+      const deadLetterItem: DeadLetterItem = {
+        id: randomBytes(16).toString('hex'),
+        payload: webhookPayload,
+        errorMessage: 'Exhausted all webhook retry attempts',
+        attemptsExhausted: policy.maxAttempts,
+        timestamp: new Date().toISOString(),
+        webhookUrl,
+        userId: payload.userId,
+        eventType: payload.eventType,
+      };
+      await webhookDeadLetterQueue.push(deadLetterItem);
+    }
   }
 }
 

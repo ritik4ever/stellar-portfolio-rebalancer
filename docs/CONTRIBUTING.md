@@ -94,16 +94,13 @@ Then run migrations:
 
 ```bash
 cd backend
-npm run db:migrate          # apply all pending migrations
-npm run db:migrate -- --status # show applied/pending migrations
-npm run db:migrate -- --dry-run # preview without applying
+npm run db:migrate              # apply all pending migrations
+npm run db:migrate:status       # show applied/pending migrations
+npm run db:migrate:rollback     # roll back the last migration batch
+npm run db:migrate:dry-run      # preview SQL without executing
 ```
 
-To roll back the last migration:
-
-```bash
-npm run db:migrate -- --rollback
-```
+The `db:migrate:rollback` command reverts the last applied migration batch. Pass a number to roll back multiple batches (e.g. `-- --rollback 2`). Run `db:migrate:dry-run` to inspect the SQL that would be executed without making changes.
 
 For local SQLite development, leave `DATABASE_URL` unset. You can optionally set `DB_PATH`; otherwise the backend uses `./data/portfolio.db` from inside `backend`.
 
@@ -115,7 +112,9 @@ Start the backend and `DatabaseService` will create the SQLite schema on first r
 
 If you want a fresh local SQLite database, stop the backend and delete `backend/data/portfolio.db`, `backend/data/portfolio.db-wal`, and `backend/data/portfolio.db-shm`. The next backend start recreates the database automatically.
 
-Migration files live in `backend/src/db/migrations/`. Add new PostgreSQL migrations as `NNN_description.up.sql` / `.down.sql`. For SQLite schema changes, update `backend/src/services/databaseService.ts`.
+Migration files live in `backend/src/db/migrations/`. Each migration must have both an `.up.sql` and `.down.sql` file. Add new PostgreSQL migrations as `NNN_description.up.sql` / `.down.sql`. For SQLite schema changes, update `backend/src/services/databaseService.ts`.
+
+Migration state is persisted in the `schema_migrations` table, which tracks the version, name, and timestamp of every applied migration. The `db:migrate:rollback` command reads from this table to determine which batches to revert.
 
 ---
 

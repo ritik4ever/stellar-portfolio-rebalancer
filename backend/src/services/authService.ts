@@ -1,6 +1,6 @@
 
 import jwt from "jsonwebtoken";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Keypair } from "@stellar/stellar-sdk";
 import {
   createRefreshToken,
@@ -11,9 +11,10 @@ import {
   generateRefreshTokenId,
   touchRefreshToken,
 } from "../db/refreshTokenDb.js";
-import { logger } from "../utils/logger.js";
-import type { RefreshTokenMetadata } from "../types/index.js";
 import { logger, logAudit } from "../utils/logger.js";
+import { recordAuthSecurityEvent } from "../observability/metrics.js";
+import { tokenRevocationService } from "./tokenRevocation.js";
+import type { RefreshTokenMetadata } from "../types/index.js";
 
 const ACCESS_EXPIRY_SEC = parseInt(
   process.env.JWT_ACCESS_EXPIRY_SEC || "900",
@@ -161,34 +162,63 @@ export function verifyAccessToken(token: string): TokenPayload | null {
 export async function refreshTokens(
   refreshToken: string,
 ): Promise<AuthTokens | null> {
+  const tokenHash = createHash('sha256').update(refreshToken).digest('hex');
+
   const row = await findRefreshToken(refreshToken);
-  if (!row) return null;
+  if (!row) {
+    const revoked = await tokenRevocationService.isRevoked(tokenHash);
+    if (revoked) {
+      let userAddress = '';
+      try {
+        const decoded = jwt.decode(refreshToken) as TokenPayload & { sub?: string };
+        userAddress = decoded?.sub || 'unknown';
+      } catch { /* ignore decode errors */ }
+      await deleteAllRefreshTokensForUser(userAddress);
+      await tokenRevocationService.revokeAllForUser(userAddress);
+      recordAuthAuditEvent({
+        action: 'revocation',
+        userAddress,
+        timestamp: new Date().toISOString(),
+        details: { reason: 'reused_rotated_token' },
+      });
+      logger.warn('Reused rotated refresh token detected — all sessions revoked', { userAddress });
+    }
+    return null;
+  }
+
   const secret = getJwtSecret();
+  let remainingTtlSec = REFRESH_EXPIRY_SEC;
   try {
     const decoded = jwt.verify(refreshToken, secret) as TokenPayload & {
       jti?: string;
     };
     if (decoded.type !== "refresh") return null;
+    if (decoded.exp) {
+      remainingTtlSec = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
+    }
   } catch {
     await deleteRefreshTokenById(row.id).catch(() => {});
     return null;
   }
+
+  await tokenRevocationService.addRevokedToken(tokenHash, remainingTtlSec);
   await deleteRefreshTokenById(row.id);
+
   const metadata: RefreshTokenMetadata = {
     ...(row.metadata || {}),
     lastUsedAt: new Date().toISOString(),
   };
-  return issueTokens(row.user_address, metadata);
-  const result = await createTokensForUser(row.user_address);
+  const result = await issueTokens(row.user_address, metadata);
+
   recordAuthAuditEvent({
     action: "refresh",
     userAddress: row.user_address,
     timestamp: new Date().toISOString(),
-    sessionId: result.refreshId,
+    sessionId: undefined,
     previousSessionId: row.id,
   });
-  const { refreshId, ...tokens } = result;
-  return tokens;
+
+  return result;
 }
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────
