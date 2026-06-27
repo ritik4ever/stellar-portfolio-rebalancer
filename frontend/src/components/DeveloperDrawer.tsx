@@ -5,6 +5,7 @@ import { API_RESOURCE_ROOT } from '../config/api'
 import { getFrontendDebugConfig } from '../utils/debug'
 import { browserPriceService, type BrowserPriceCacheEntry } from '../services/browserPriceService'
 import { NotificationTest } from './NotificationTest'
+import type { ContractCapabilityReport } from '../lib/contractCapabilities'
 
 const DRAWER_UNLOCK_KEY = 'developer-drawer-unlocked'
 
@@ -20,6 +21,7 @@ export function unlockDeveloperDrawer(): void {
 
 interface DeveloperDrawerProps {
     publicKey: string | null
+    contractCapabilities?: ContractCapabilityReport | null
 }
 
 function formatAge(ms: number | undefined): string {
@@ -28,7 +30,7 @@ function formatAge(ms: number | undefined): string {
     return `${(ms / 1000).toFixed(1)}s`
 }
 
-const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey }) => {
+const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey, contractCapabilities }) => {
     const [open, setOpen] = useState(false)
     const [unlocked, setUnlocked] = useState(isDeveloperDrawerUnlocked)
     const [cacheEntries, setCacheEntries] = useState<BrowserPriceCacheEntry[]>([])
@@ -229,6 +231,23 @@ const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey }) => {
                                 Clear cache
                             </button>
                         </section>
+
+                        {contractCapabilities ? (
+                            <section>
+                                <h3 className="mb-2 font-medium text-gray-900 dark:text-white">
+                                    Contract capabilities
+                                </h3>
+                                <p className="text-gray-700 dark:text-gray-300">
+                                    {contractCapabilities.title}
+                                </p>
+                                <p className="text-gray-500 dark:text-gray-400">
+                                    Writes:{' '}
+                                    {contractCapabilities.writesEnabled ? 'enabled' : 'blocked'} ·
+                                    schema v{contractCapabilities.expectedSchemaVersion} ·{' '}
+                                    {contractCapabilities.availableMethods.length} method(s)
+                                </p>
+                            </section>
+                        ) : null}
 
                         {publicKey ? (
                             <section>

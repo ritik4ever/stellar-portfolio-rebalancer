@@ -3,6 +3,32 @@
  * Resolves issue #856: Missing error handling when Soroban invoke response is empty.
  */
 import { toast } from 'react-hot-toast'; // assuming react-hot-toast or similar is used, or just console.error
+import {
+    blockedWriteFallback,
+    type ContractCapabilityReport,
+} from './contractCapabilities';
+
+/**
+ * Capability-aware wrapper around {@link safeInvoke}. Before invoking a contract
+ * write it consults the startup capability report (issue #834): when the method
+ * is unsupported on the connected deployment, the write is skipped and the
+ * documented fallback message is surfaced instead of failing on-chain.
+ *
+ * Returns `null` when the write is gracefully degraded.
+ */
+export async function capabilityGuardedInvoke(
+    method: string,
+    report: ContractCapabilityReport | null,
+    invokeFn: () => Promise<any>,
+): Promise<any> {
+    const fallback = blockedWriteFallback(report, method);
+    if (fallback) {
+        console.warn(`Skipping contract write "${method}": ${fallback}`);
+        toast?.error?.(`"${method}" is unavailable on this deployment. ${fallback}`);
+        return null;
+    }
+    return safeInvoke(invokeFn);
+}
 
 export async function safeInvoke(invokeFn: () => Promise<any>): Promise<any> {
     try {
