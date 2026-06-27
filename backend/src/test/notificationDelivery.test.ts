@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as notificationDb from "../db/notificationDb.js";
 import { deliverWithBackoff } from "../services/notificationDelivery.js";
+import { webhookDeadLetterQueue } from "../services/webhookDeadLetter.js";
+
+vi.mock("../services/webhookDeadLetter.js", () => ({
+  webhookDeadLetterQueue: {
+    init: vi.fn(() => Promise.resolve()),
+    push: vi.fn(() => Promise.resolve()),
+    list: vi.fn(() => Promise.resolve([])),
+    _resetForTest: vi.fn(),
+  },
+}));
 
 describe("deliverWithBackoff", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -90,6 +100,43 @@ describe("deliverWithBackoff", () => {
       "failed",
       "persistent failure",
       expect.objectContaining({ attempt: 2, maxAttempts: 2 }),
+    );
+  });
+
+  it("retries webhook up to 5 times with exponential backoff", async () => {
+    const execute = vi.fn().mockRejectedValue(new Error("HTTP 503"));
+
+    const promise = deliverWithBackoff(
+      {
+        provider: "webhook",
+        userId: "user-3",
+        eventType: "rebalance",
+        policy: {
+          maxAttempts: 5,
+          initialBackoffMs: 1000,
+          maxBackoffMs: 60000,
+          backoffMultiplier: 2,
+        },
+      },
+      execute,
+    );
+
+    for (let i = 1; i <= 4; i++) {
+      const delay = Math.min(1000 * Math.pow(2, i - 1), 60000);
+      await vi.advanceTimersByTimeAsync(delay);
+    }
+
+    const expectation = expect(promise).rejects.toThrow("HTTP 503");
+    await expectation;
+
+    expect(execute).toHaveBeenCalledTimes(5);
+    expect(logSpy).toHaveBeenCalledWith(
+      "user-3",
+      "webhook",
+      "rebalance",
+      "failed",
+      "HTTP 503",
+      expect.objectContaining({ attempt: 5, maxAttempts: 5 }),
     );
   });
 });
