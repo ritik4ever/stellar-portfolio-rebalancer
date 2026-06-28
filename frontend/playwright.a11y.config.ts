@@ -23,6 +23,6 @@ export default defineConfig({
     command: 'npx vite preview --host 0.0.0.0 --port 3000',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
-    cwd: path.resolve(__dirname),
+    cwd: path.resolve(import.meta.dirname),
   },
 });

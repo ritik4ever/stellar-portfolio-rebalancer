@@ -39,6 +39,7 @@ import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
+import OnboardingChecklist from './components/OnboardingChecklist'
 
 function App() {
     const queryClient = useQueryClient()
@@ -348,6 +349,7 @@ function App() {
                 }}
             />
             <Onboarding />
+            <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"
