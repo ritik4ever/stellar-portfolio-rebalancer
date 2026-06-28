@@ -15,7 +15,7 @@ It covers:
 - Frontend E2E tests with Playwright
 - Contract build and deploy steps
 - Common setup failures and fixes
-- Changelog workflow (`npm run changelog:update`)
+- Commit message and changelog automation
 
 For a quick overview of the API contract see [API.md](API.md). Background services and troubleshooting are covered in [docs/OPERATIONS.md](docs/OPERATIONS.md). Feature flags are summarized in [docs/FEATURE_FLAGS.md](docs/FEATURE_FLAGS.md), and Soroban event shapes for the indexer are in [docs/CONTRACT_EVENTS.md](docs/CONTRACT_EVENTS.md).
 
@@ -46,17 +46,17 @@ We provide templates for common contribution types:
 
 If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for how to label, prioritize, and respond to issues and pull requests.
 
-## Changelog Updates
+## Commit Messages and Changelog Updates
 
-When your changes should be visible to users or contributors, update the changelog before opening a PR:
+Use [Conventional Commits](https://conventionalcommits.org/) for every commit. Pull requests run commitlint in CI, and non-conforming commit messages are blocked before merge.
 
-1. **Automatic generation**: Run `npm run changelog:update` from the repository root to generate entries from conventional commits.
-2. **Manual review**: Review `CHANGELOG.md` and adjust wording/grouping if needed.
-3. **Unreleased section**: Keep newest entries in `## [Unreleased]` until release cut.
-4. **Commit format**: Use [conventional commits](https://conventionalcommits.org/) for automatic changelog generation:
-   - `feat(api): add new endpoint` → Added section
-   - `fix(auth): resolve token issue` → Fixed section
-   - `docs: update examples` → Not included (docs-only)
-   - `BREAKING CHANGE:` in footer → Prominently documented
+Release PRs are generated automatically by release-please after changes land on `main`. The generated PR updates `CHANGELOG.md` from conventional commits and groups release notes into Features, Bug Fixes, Performance, and Breaking Changes.
+
+Examples:
+
+- `feat(api): add new endpoint` -> Features
+- `fix(auth): resolve token issue` -> Bug Fixes
+- `perf(worker): reduce rebalance polling load` -> Performance
+- `feat(api)!: require signed export requests` or a `BREAKING CHANGE:` footer -> Breaking Changes
 
 **Release workflow**: See [CHANGELOG.md](CHANGELOG.md#release-notes-workflow) for the complete release notes process and maintainer responsibilities.
