@@ -76,10 +76,9 @@ Price Data: Reflector + CoinGecko API
 
 Blockchain: Stellar Testnet
 
-
 Quick Start
 Prerequisites
-Node.js 18+
+Node.js >=20.19.0
 
 Rust + Cargo
 
@@ -112,7 +111,6 @@ cp backend/.env.example backend/.env
 
 # Frontend
 cp frontend/.env.example frontend/.env
-
 Edit the .env files with your own configuration (contract addresses, API keys, etc.).
 
 Environment Reference: Full backend environment reference can be found at docs/ENVIRONMENT.md.
@@ -121,7 +119,6 @@ API Versioning: The frontend HTTP client targets /api/v1/* for resource routes b
 
 API Client Examples: Check out the Python API Client Example (or corresponding examples file).
 
-
 Database Setup
 PostgreSQL migrations are available for environments configured with DATABASE_URL or the PGHOST / PGDATABASE / PGUSER variables.
 
@@ -129,7 +126,6 @@ Bash
 cd backend
 npm run db:migrate                 # Apply migrations
 npm run db:migrate -- --dry-run   # Preview migrations
-
 Local Development: For local SQLite development, leave PostgreSQL variables unset and use DB_PATH instead. The default path is backend/data/portfolio.db. The backend creates the database file plus its parent directory automatically on startup. Fresh clones should not include any prebuilt .db, .db-wal, or .db-shm files.
 
 Demo Seeding: SQLite demo data appears only when demo seeding is enabled through ENABLE_DEMO_DB_SEED or via Demo Mode. Otherwise, the local database starts empty and bootstraps from the checked-in schema and seed sources.
@@ -153,7 +149,7 @@ curl -X POST http://localhost:3001/api/v1/notifications/test \
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 
-  Development
+Development
 Start your local development servers:
 
 Terminal 1 - Backend:
@@ -161,11 +157,13 @@ Terminal 1 - Backend:
 Bash
 cd backend
 npm run dev
+
 Terminal 2 - Frontend:
 
 Bash
 cd frontend
 npm run dev
+
 Frontend Local URL: http://localhost:3000
 
 Backend API Local URL: http://localhost:3001
@@ -208,7 +206,6 @@ Contract interface reference (functions, errors, type notes): contracts/CONTRACT
 Common Soroban invoke commands and examples: docs/soroban-cookbook.md
 
 Frontend compatibility & capability matrix (degradation mapping): docs/CONTRACT_CAPABILITY_MATRIX.md
-
 
 Usage
 📸 New to the platform? Check out our Visual Demo Walkthrough with step-by-step screenshots and detailed explanations.
@@ -254,8 +251,6 @@ API Reference
 Canonical: /api/v1/*
 
 Legacy (Deprecated): /api/*
-
-HTTP
 # Create portfolio
 POST /api/v1/portfolio
 Content-Type: application/json
