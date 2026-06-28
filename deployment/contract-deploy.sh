@@ -18,6 +18,7 @@ SOROBAN_RPC_URL="${SOROBAN_RPC_URL:-}"
 SOROBAN_NETWORK_PASSPHRASE="${SOROBAN_NETWORK_PASSPHRASE:-}"
 CONTRACT_ENV_FILE="${CONTRACT_ENV_FILE:-}"
 DEPLOYMENT_SHA="${GITHUB_SHA:-${DEPLOYMENT_SHA:-}}"
+GITHUB_REF_NAME="${GITHUB_REF_NAME:-}"
 
 if [ -z "$DEPLOYMENT_ENVIRONMENT" ]; then
   fail "DEPLOYMENT_ENVIRONMENT is required"
@@ -33,6 +34,10 @@ fi
 
 if [ -z "$REFLECTOR_ADDRESS" ]; then
   fail "REFLECTOR_ADDRESS is required"
+fi
+
+if [ "$DEPLOYMENT_ENVIRONMENT" = "mainnet" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
+  fail "Mainnet deploys must be dispatched from the main branch"
 fi
 
 case "$STELLAR_NETWORK" in
@@ -55,10 +60,10 @@ make -C contracts build-optimized
 print_step "Configuring Soroban network profile"
 soroban network add "$STELLAR_NETWORK" --global \
   --rpc-url "$SOROBAN_RPC_URL" \
-  --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE" || true
+  --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE"
 
 print_step "Loading deployer key"
-soroban keys add ci-deployer --global --secret-key "$STELLAR_SECRET_KEY" || true
+soroban keys add ci-deployer --global --secret-key "$STELLAR_SECRET_KEY"
 ADMIN_ADDRESS="$(soroban keys address ci-deployer --global)"
 
 print_step "Deploying contract to $DEPLOYMENT_ENVIRONMENT ($STELLAR_NETWORK)"
