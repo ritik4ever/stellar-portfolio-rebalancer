@@ -1,521 +1,989 @@
-# Stellar Portfolio Rebalancer — API
+# Stellar Portfolio Rebalancer — API Reference
 
-This document describes the HTTP API for the Stellar Portfolio Rebalancer backend. For full request/response schemas and try-it-now usage, use the **OpenAPI 3.0** spec and **Swagger UI**.
-
-## Quick links
-
-| Resource                          | URL / action                                                                                                                                                                |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Swagger UI** (interactive docs) | [http://localhost:3001/api-docs](http://localhost:3001/api-docs) (when the backend is running on the default port)                                                          |
-| **OpenAPI 3.0 spec (JSON)**       | [http://localhost:3001/api-docs.json](http://localhost:3001/api-docs.json) or `/api-docs/openapi.json` (same document) — use for **Postman** (Import → Link) or other tools |
-| **Postman collection**            | Import the OpenAPI spec: see [Postman collection](#postman-collection) below                                                                                                |
+Complete reference for the Stellar Portfolio Rebalancer HTTP API. All endpoints return JSON and are relative to the base URL.
 
 ## Base URL
 
-- **Development:** `http://localhost:3001` (or the port set by `PORT` on the backend)
-- **Production:** Your deployed backend URL
+| Environment | Base URL |
+|-------------|----------|
+| Development | `http://localhost:3001` |
+| Production | Your deployed backend URL |
 
-All API routes below are relative to the base URL.
+All paths below are relative to the base URL.
 
-### URL versioning
+## API Versioning
 
-| Namespace                                  | Purpose                                                                                                         |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| **`/api/v1/*`**                            | **Canonical** portfolio/API surface. Prefer this for new clients; responses do not include deprecation headers. |
-| **`/api/*`** (same paths, no `v1` segment) | **Legacy** compatibility; the server may attach `Deprecation`, `Sunset`, and `Link` headers (RFC 8594).         |
-| **`/api/auth/*`**                          | JWT login, refresh, and logout — **not** under `/api/v1` (see `backend/src/http/mountApiRoutes.ts`).            |
+| Namespace | Purpose |
+|-----------|---------|
+| `/api/v1/*` | **Current stable version.** New clients should use this namespace. Responses do not include deprecation headers. |
+| `/api/*` | **Legacy compatibility.** May include `Deprecation`, `Sunset`, and `Link` headers per RFC 8594. Migrate to `/api/v1/*`. |
+| `/api/auth/*` | Authentication endpoints (not versioned). See [Authentication](#authentication). |
 
-The **frontend** defaults to `/api/v1` for resource routes via `VITE_API_VERSION` and `API_RESOURCE_ROOT` in `frontend/src/config/api.ts` (see `frontend/.env.example`). Set `VITE_USE_LEGACY_API=true` only for emergency rollback to unversioned `/api/*`.
+- Frontend uses `/api/v1` by default via `VITE_API_VERSION` in `frontend/src/config/api.ts`.
+- Set `VITE_USE_LEGACY_API=true` only for emergency rollback.
+
+### Version Lifecycle
+
+- **Stable:** `/api/v1/*` is the current stable API.
+- **Deprecation:** Legacy `/api/*` routes may be deprecated. When deprecated, responses include `Sunset` header with the retirement date.
+- **Migration:** New features are added to `/api/v1/*` first. Backward-compatible fixes may appear in both namespaces until legacy is retired.
 
 ## Authentication
 
-- Most endpoints are unauthenticated.
-- **Admin-only** endpoints (e.g. auto-rebalancer start/stop, sync-onchain, auto-rebalancer history) require admin auth (e.g. `Authorization` header or project-specific mechanism). See the OpenAPI spec and your deployment config for details.
+JWT authentication is optional and disabled by default. Enable it by setting `JWT_SECRET` in the backend environment.
 
-## Response format
+### Wallet-based Authentication Flow
 
-Success responses use a common envelope:
+1. **Request challenge:**
+   ```bash
+   POST /api/auth/challenge
+   {
+     "address": "GALPHABET..."
+   }
+   ```
 
-```json
-{
-  "success": true,
-  "data": { ... },
-  "error": null,
-  "timestamp": "2025-01-01T00:00:00.000Z",
-  "meta": { ... }
-}
-```
+2. **Sign challenge** with your Stellar wallet private key (Ed25519).
 
-Error responses:
+3. **Login:**
+   ```bash
+   POST /api/auth/login
+   {
+     "address": "GALPHABET...",
+     "signature": "base64-encoded-signature"
+   }
+   ```
+
+4. **Use access token** in subsequent requests:
+   ```bash
+   Authorization: Bearer <access_token>
+   ```
+
+5. **Refresh token** when access token expires:
+   ```bash
+   POST /api/auth/refresh
+   { "refreshToken": "<refresh_token>" }
+   ```
+
+6. **Logout:**
+   ```bash
+   POST /api/auth/logout
+   Authorization: Bearer <access_token>
+   { "refreshToken": "<refresh_token>" }
+   ```
+
+### Protected Endpoints
+
+Most endpoints are public. JWT is required for:
+- `/api/auth/*` endpoints
+- Managing other users' data
+- Admin endpoints (`/api/admin/*`, `/api/debug/*`)
+- Some portfolio operations when auth is enabled and `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is false
+
+### Demo Mode
+
+When `DEMO_MODE=true`, the API operates in a read-only/simulated mode suitable for testing without real Stellar transactions.
+
+## Error Responses
+
+All errors follow this structure:
 
 ```json
 {
   "success": false,
   "data": null,
   "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Human-readable message",
-    "details": { ... }
+    "code": "ERROR_CODE",
+    "message": "Human-readable description",
+    "details": {}
   },
   "timestamp": "2025-01-01T00:00:00.000Z"
 }
 ```
 
+### Error Codes
+
+| Code | HTTP Status | Description | Remediation |
+|------|-------------|-------------|-------------|
+| `VALIDATION_ERROR` | 400 | Invalid request body or parameters | Check request schema |
+| `UNAUTHORIZED` | 401 | Missing or invalid JWT | Obtain valid token |
+| `FORBIDDEN` | 403 | Insufficient permissions | Verify user role/consent |
+| `NOT_FOUND` | 404 | Resource doesn't exist | Verify ID/path params |
+| `CONFLICT` | 409 | Idempotency conflict or state conflict | Retry with same key or resolve state |
+| `RATE_LIMITED` | 429 | Rate limit exceeded | Implement exponential backoff |
+| `SERVICE_UNAVAILABLE` | 503 | Downstream service unavailable | Retry later |
+| `INTERNAL_ERROR` | 500 | Unexpected error | Contact support |
+
+### Rate Limiting
+
+| Tier | Limit | Window |
+|------|-------|--------|
+| Public reads | 100 req | 1 minute |
+| Authenticated | 200 req | 1 minute |
+| Admin writes | 50 req | 1 minute |
+
+Rate limited responses include `Retry-After` header (seconds).
+
 ## Idempotency
 
-Select write endpoints support the `Idempotency-Key` request header. When provided, the server stores the response of the first successful call and returns the same response for any subsequent request that carries the same key, preventing duplicate side effects from client retries.
+Write endpoints support `Idempotency-Key` header (1–255 chars, e.g., UUID). The server caches the first successful response for 24 hours.
 
-### How it works
+- **Same key + same body:** Returns cached response with `Idempotency-Replayed: true`
+- **Same key + different body:** Returns `409 CONFLICT`
+- **Empty/invalid key:** Returns `400 VALIDATION_ERROR`
 
-1. Include an `Idempotency-Key` header (1–255 characters, e.g. a UUID) on any supported `POST` or `PATCH` request.
-2. On the **first** call the server processes the request normally and caches the response (TTL: 24 hours).
-3. On any **repeat** call with the same key _and identical body_, the server returns the cached response with an `Idempotency-Replayed: true` header — no side effects are triggered again.
-4. If the same key is reused with a **different body**, the server returns `409 CONFLICT`.
+Supported endpoints: `POST /api/portfolio`, `POST /api/portfolio/:id/rebalance`, `POST /api/rebalance/history`, `POST /api/notifications/subscribe`, `POST /api/consent`, `POST /api/admin/assets`, `PATCH /api/admin/assets/:symbol`
 
-### Conflict handling
+## Common Response Envelope
 
-| Scenario                    | HTTP Status   | Error code                       |
-| --------------------------- | ------------- | -------------------------------- |
-| Same key, same body (retry) | Cached status | — (`Idempotency-Replayed: true`) |
-| Same key, different body    | `409`         | `CONFLICT`                       |
-| Key is empty or > 255 chars | `400`         | `VALIDATION_ERROR`               |
-
-### Supported endpoints
-
-| Method  | Path                           | Notes                                                                      |
-| ------- | ------------------------------ | -------------------------------------------------------------------------- |
-| `POST`  | `/api/consent`                 | Consent recording — replay is safe; double-submit has no additional effect |
-| `POST`  | `/api/portfolio`               | Portfolio creation — prevents duplicate portfolios on retry                |
-| `POST`  | `/api/portfolio/:id/rebalance` | Rebalance execution — prevents double-execution on retry                   |
-| `POST`  | `/api/rebalance/history`       | Rebalance event recording — prevents duplicate history entries             |
-| `POST`  | `/api/notifications/subscribe` | Notification subscription — idempotent preference upsert                   |
-| `POST`  | `/api/admin/assets`            | Asset registry — prevents duplicate asset creation on retry                |
-| `PATCH` | `/api/admin/assets/:symbol`    | Asset enable/disable — safe to replay the same state change                |
-
-### Example
-
-```http
-POST /api/consent
-Content-Type: application/json
-Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
-
-{
-  "userId": "GABC...",
-  "terms": true,
-  "privacy": true,
-  "cookies": true
-}
-```
-
-A retry with the same `Idempotency-Key` and body returns the cached `200` response immediately. A retry with a different body returns `409 CONFLICT`.
-
-### Key retention and cleanup
-
-Idempotency keys are automatically cleaned up to prevent unbounded table growth:
-
-| Setting             | Value                                       |
-| ------------------- | ------------------------------------------- |
-| **Key TTL**         | 24 hours from creation                      |
-| **Cleanup cadence** | Every 60 minutes (via BullMQ scheduled job) |
-| **Startup cleanup** | Runs once on server startup                 |
-
-Expired keys (older than 24 hours) are permanently deleted during each cleanup cycle. The cleanup job logs the number of removed keys on every run for operational visibility. When Redis is unavailable, the cleanup job is not scheduled; expired keys are still filtered out at query time and will be purged once the scheduler resumes.
-
-## Endpoints overview
-
-### Health and info
-
-- **GET /** — API info, version, feature flags, and endpoint list.
-- **GET /health** — Health check; includes auto-rebalancer status.
-- **GET /ready** — Deep readiness probe covering database, Redis/queues, workers, indexer, and auto-rebalancer startup.
-
-### Portfolio
-
-- **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%. Supports `Idempotency-Key`.
-- **GET /api/portfolio/{id}** — Get portfolio by ID.
-- **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address. When JWT auth is enabled, the token subject must match `:address` (otherwise `403`). In demo mode, public-by-address listing is allowed only when `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is enabled.
-- **GET /api/portfolio/{id}/rebalance-plan** — Get rebalance plan (total value, slippage, prices).
-- **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
-- **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
-- **GET /api/portfolio/{id}/performance-summary** — Performance summary.
-
-### Rebalance history
-
-- **GET /api/rebalance/history** — List rebalance events (query: `portfolioId`, `limit`, `source`, `startTimestamp`, `endTimestamp`, `syncOnChain`).
-- **POST /api/rebalance/history** — Record a rebalance event. Supports `Idempotency-Key`.
-- **POST /api/rebalance/history/sync-onchain** — Sync on-chain rebalance history (admin).
-
-### Risk
-
-- **GET /api/risk/metrics/{portfolioId}** — Risk metrics and recommendations.
-- **GET /api/risk/check/{portfolioId}** — Check if rebalance is allowed (risk check).
-
-### Prices and market
-
-- **GET /api/prices** — Current asset prices (e.g. XLM, BTC, ETH, USDC).
-- **GET /api/prices/enhanced** — Prices with risk/volatility info.
-- **GET /api/market/{asset}/details** — Market details for one asset.
-- **GET /api/market/{asset}/chart** — Price history for charting (query: `days`, default 7).
-
-### Auto-rebalancer
-
-- **GET /api/auto-rebalancer/status** — Status and statistics.
-- **POST /api/auto-rebalancer/start** — Start (admin).
-- **POST /api/auto-rebalancer/stop** — Stop (admin).
-- **POST /api/auto-rebalancer/force-check** — Force check (admin).
-- **GET /api/auto-rebalancer/history** — Auto-rebalance history (admin; query: `portfolioId`, `limit`).
-
-### System and queue
-
-- **GET /api/system/status** — System status (portfolios, history, risk, auto-rebalancer, indexer, feature flags).
-- **GET /api/queue/health** — BullMQ queue health and Redis connectivity.
-
-### Notifications
-
-- **POST /api/notifications/subscribe** — Subscribe (userId, email/webhook, events). Supports `Idempotency-Key`.
-- **GET /api/notifications/preferences** — Get preferences (query: `userId`).
-- **DELETE /api/notifications/unsubscribe** — Unsubscribe (query: `userId`).
-
-## OpenAPI 3.0 specification
-
-The API is described in full by an **OpenAPI 3.0** specification:
-
-- **Served by backend:** When the backend is running, the spec is available at:
-  - **JSON:** `GET /api-docs.json` (alias: `GET /api-docs/openapi.json`)
-- **Swagger UI** at `/api-docs` uses this spec and provides:
-  - All endpoints with descriptions
-  - Request and response schemas
-  - Examples and try-it-now (against the running server)
-
-Third-party integration (e.g. code generation, API gateways, testing) can use the same OpenAPI spec.
-
-## Postman collection
-
-You can use the OpenAPI spec as a Postman collection source:
-
-1. **Import from URL (recommended)**
-   - In Postman: **Import** → **Link**.
-   - Enter: `http://localhost:3001/api-docs.json`
-   - Ensure the backend is running so the URL is reachable.
-
-2. **Import from file**
-   - Export the spec to a file (see below), then in Postman: **Import** → **Upload** and select the JSON file.
-
-**Export spec to file (optional):**
-
-From the backend directory:
-
-```bash
-cd backend
-npm run openapi:export
-```
-
-This writes `backend/openapi.json`. In Postman: **Import** → **Upload** → select `openapi.json`.
-
-### Maintaining Documentation Sync
-
-The **authoritative spec** is `backend/src/openapi/spec.ts` (what Swagger and the server use). The checked-in `backend/openapi.json` is produced from it for Postman and CI diffing. See [backend/docs/openapi.md](backend/docs/openapi.md).
-
-To ensure that `API.md`, `openapi.json`, and `spec.ts` stay aligned, run the validation script below.
-
-**To validate sync:**
-
-```bash
-cd backend
-npm run api:validate
-```
-
-**To refresh generated outputs (if you've changed the API code):**
-
-```bash
-cd backend
-npm run openapi:export
-```
-
-The CI pipeline will fail if documents are out of sync.
-
-## Examples
-
-### Create portfolio
-
-```http
-POST /api/portfolio
-Content-Type: application/json
-
-{
-  "userAddress": "GABC...",
-  "allocations": { "XLM": 40, "BTC": 30, "USDC": 30 },
-  "threshold": 5,
-  "slippageTolerance": 1
-}
-```
-
-### Get current prices
-
-```http
-GET /api/prices
-```
-
-Successful `data` is `{ prices, feedMeta }`: `prices` is a map of assets to quote fields (including optional `source`, `servedFromCache`, `quoteAgeSeconds`, `dataTier`), and `feedMeta` describes resolution path and whether the feed is degraded. The same `feedMeta` shape is included on **GET /api/prices/enhanced** and **GET /api/portfolio/{id}/rebalance-plan** as `priceFeedMeta`.
-
-### Execute rebalance
-
-```http
-POST /api/portfolio/{id}/rebalance
-Content-Type: application/json
-
-{}
-```
-
-or with options:
+Success responses:
 
 ```json
+{
+  "success": true,
+  "data": { /* response payload */ },
+  "error": null,
+  "timestamp": "2025-01-01T00:00:00.000Z",
+  "meta": { /* pagination, counts, etc. */ }
+}
+```
+
+## Testnet Examples
+
+All cURL examples below use the v1 API. Replace `http://localhost:3001` with your testnet backend URL. For demo mode, use any valid Stellar testnet address (e.g., from [Stellar Laboratory](https://laboratory.stellar.org/)).
+
+---
+
+## Health & System
+
+### Health Check
+
+```bash
+GET /api/v1/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+### System Status
+
+```bash
+GET /api/v1/system/status
+```
+
+Response:
+```json
+{
+  "system": {
+    "status": "operational",
+    "uptime": 12345,
+    "timestamp": "2025-01-01T00:00:00.000Z",
+    "version": "1.0.0"
+  },
+  "portfolios": { "total": 42, "active": 42 },
+  "rebalanceHistory": { "total": 128 },
+  "riskManagement": { "circuitBreakers": {}, "enabled": true },
+  "autoRebalancer": { "status": { "isRunning": true } },
+  "services": { "priceFeeds": true, "riskManagement": true },
+  "featureFlags": { "demoMode": false }
+}
+```
+
+### Strategies
+
+```bash
+GET /api/v1/strategies
+```
+
+Response:
+```json
+{
+  "strategies": [
+    { "id": "threshold", "name": "Threshold", "description": "..." },
+    { "id": "periodic", "name": "Periodic", "description": "..." }
+  ]
+}
+```
+
+---
+
+## Portfolio
+
+### Create Portfolio
+
+```bash
+POST /api/v1/portfolio
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "userAddress": "GALPHABET...",
+  "allocations": { "XLM": 40, "BTC": 30, "USDC": 30 },
+  "threshold": 5,
+  "slippageTolerance": 1,
+  "strategy": "threshold"
+}
+```
+
+Response (201):
+```json
+{
+  "success": true,
+  "data": {
+    "portfolioId": "portfolio-abc123",
+    "status": "created",
+    "mode": "onchain"
+  }
+}
+```
+
+Validation:
+- `allocations` must sum to 100%
+- `threshold`: 1–50%
+- `slippageTolerance`: 0.1–5% (optional, default: 1)
+- `strategy`: `threshold` | `periodic` | `volatility` | `custom` (optional, default: `threshold`)
+
+### Get Portfolio
+
+```bash
+GET /api/v1/portfolio/{portfolioId}
+```
+
+Response:
+```json
+{
+  "portfolio": {
+    "id": "portfolio-abc123",
+    "userAddress": "GALPHABET...",
+    "totalValue": 10000.00,
+    "allocations": [
+      { "asset": "XLM", "target": 40, "current": 38.5, "amount": 3500, "balance": 9752, "price": 0.3589 }
+    ],
+    "needsRebalance": false,
+    "lastRebalance": "2025-01-01T00:00:00.000Z",
+    "threshold": 5,
+    "slippageTolerancePercent": 1,
+    "dayChange": 1.2
+  },
+  "riskHeatmap": { /* risk metrics per asset */ }
+}
+```
+
+### List User Portfolios
+
+```bash
+GET /api/v1/user/{address}/portfolios
+```
+
+Response:
+```json
+{
+  "portfolios": [ /* array of portfolio objects */ ]
+}
+```
+
+### Get Rebalance Plan
+
+```bash
+GET /api/v1/portfolio/{portfolioId}/rebalance-plan
+```
+
+Response:
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "totalValue": 10000.00,
+  "maxSlippagePercent": 1,
+  "estimatedSlippageBps": 100,
+  "prices": { "XLM": { "price": 0.3589, "change": -0.5 } },
+  "priceFeedMeta": { /* feed metadata */ }
+}
+```
+
+### Execute Rebalance
+
+```bash
+POST /api/v1/portfolio/{portfolioId}/rebalance
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
 {
   "options": {
     "simulateOnly": false,
-    "ignoreSafetyChecks": false
+    "ignoreSafetyChecks": false,
+    "slippageOverrides": { "XLM": 0.5 }
   }
 }
 ```
 
-For more examples and exact request/response shapes, use **Swagger UI** at `/api-docs` or the **OpenAPI spec** at `/api-docs/openapi.json`.
-
-## Node.js Client Example
-
-Here's a complete Node.js script that demonstrates common API operations:
-
-```javascript
-// stellar-portfolio-client.js
-const https = require("https");
-const http = require("http");
-
-class StellarPortfolioClient {
-  constructor(baseUrl = "http://localhost:3001") {
-    this.baseUrl = baseUrl;
-    this.httpModule = baseUrl.startsWith("https") ? https : http;
-  }
-
-  async request(method, path, body = null, headers = {}) {
-    return new Promise((resolve, reject) => {
-      const url = new URL(path, this.baseUrl);
-      const options = {
-        hostname: url.hostname,
-        port: url.port,
-        path: url.pathname + url.search,
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          ...headers,
-        },
-      };
-
-      const req = this.httpModule.request(options, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (res.statusCode >= 400) {
-              reject(
-                new Error(
-                  `HTTP ${res.statusCode}: ${parsed.error?.message || data}`,
-                ),
-              );
-            } else {
-              resolve(parsed);
-            }
-          } catch (e) {
-            reject(new Error(`Invalid JSON response: ${data}`));
-          }
-        });
-      });
-
-      req.on("error", reject);
-
-      if (body) {
-        req.write(JSON.stringify(body));
-      }
-      req.end();
-    });
-  }
-
-  // Health check
-  async getHealth() {
-    return this.request("GET", "/health");
-  }
-
-  // Get current prices
-  async getPrices() {
-    return this.request("GET", "/api/v1/prices");
-  }
-
-  // Create a portfolio
-  async createPortfolio(
-    userAddress,
-    allocations,
-    threshold,
-    slippageTolerance = 1,
-  ) {
-    const body = {
-      userAddress,
-      allocations,
-      threshold,
-      slippageTolerance,
-    };
-    return this.request("POST", "/api/v1/portfolio", body);
-  }
-
-  // Get portfolio by ID
-  async getPortfolio(portfolioId) {
-    return this.request("GET", `/api/v1/portfolio/${portfolioId}`);
-  }
-
-  // Get rebalance plan
-  async getRebalancePlan(portfolioId) {
-    return this.request(
-      "GET",
-      `/api/v1/portfolio/${portfolioId}/rebalance-plan`,
-    );
-  }
-
-  // Execute rebalance
-  async executeRebalance(portfolioId, options = {}) {
-    return this.request("POST", `/api/v1/portfolio/${portfolioId}/rebalance`, {
-      options,
-    });
-  }
-
-  // Get user portfolios
-  async getUserPortfolios(userAddress) {
-    return this.request("GET", `/api/v1/user/${userAddress}/portfolios`);
-  }
-
-  // Get system status
-  async getSystemStatus() {
-    return this.request("GET", "/api/v1/system/status");
-  }
-}
-
-// Example usage
-async function main() {
-  const client = new StellarPortfolioClient("http://localhost:3001");
-
-  try {
-    console.log("🔍 Checking API health...");
-    const health = await client.getHealth();
-    console.log("✅ API is healthy:", health.status);
-
-    console.log("\n💰 Getting current prices...");
-    const prices = await client.getPrices();
-    console.log("📊 Current prices:", prices.data.prices);
-
-    console.log("\n📈 Getting system status...");
-    const status = await client.getSystemStatus();
-    console.log("🏗️ System status:", {
-      portfolios: status.data.portfolios.total,
-      autoRebalancer: status.data.autoRebalancer.status,
-    });
-
-    // Example: Create a portfolio (uncomment to test)
-    /*
-    const userAddress = 'GABC123...'; // Replace with actual Stellar address
-    const allocations = { XLM: 40, BTC: 30, USDC: 30 };
-    const threshold = 5;
-
-    console.log('\n🎯 Creating portfolio...');
-    const portfolio = await client.createPortfolio(userAddress, allocations, threshold);
-    console.log('✅ Portfolio created:', portfolio.data.id);
-
-    console.log('\n📋 Getting rebalance plan...');
-    const plan = await client.getRebalancePlan(portfolio.data.id);
-    console.log('⚖️ Rebalance plan:', plan.data);
-    */
-  } catch (error) {
-    console.error("❌ Error:", error.message);
-    process.exit(1);
-  }
-}
-
-// Run if called directly
-if (require.main === module) {
-  main();
-}
-
-module.exports = StellarPortfolioClient;
-```
-
-### Running the Example
-
-1. **Save the script** as `stellar-portfolio-client.js`
-2. **Start the backend** (see [Contributing Guide](CONTRIBUTING.md))
-3. **Run the example**:
-   ```bash
-   node stellar-portfolio-client.js
-   ```
-
-### Authentication Example
-
-For JWT-protected endpoints, extend the client with auth methods:
-
-```javascript
-class AuthenticatedClient extends StellarPortfolioClient {
-  constructor(baseUrl) {
-    super(baseUrl);
-    this.accessToken = null;
-  }
-
-  // Add JWT token to requests
-  async request(method, path, body = null, headers = {}) {
-    if (this.accessToken) {
-      headers.Authorization = `Bearer ${this.accessToken}`;
-    }
-    return super.request(method, path, body, headers);
-  }
-
-  // Login with wallet signature (implement based on your auth flow)
-  async login(publicKey, signature, message) {
-    const response = await super.request("POST", "/api/auth/login", {
-      publicKey,
-      signature,
-      message,
-    });
-    this.accessToken = response.data.accessToken;
-    return response;
-  }
-
-  // Refresh token
-  async refreshToken(refreshToken) {
-    const response = await super.request("POST", "/api/auth/refresh", {
-      refreshToken,
-    });
-    this.accessToken = response.data.accessToken;
-    return response;
-  }
-}
-```
-
-### Package.json Integration
-
-Add to your project's `package.json`:
-
+Response:
 ```json
 {
-  "scripts": {
-    "portfolio:status": "node stellar-portfolio-client.js",
-    "portfolio:create": "node -e \"const Client = require('./stellar-portfolio-client'); /* custom logic */\""
-  },
-  "dependencies": {
-    "stellar-portfolio-client": "file:./stellar-portfolio-client.js"
+  "result": {
+    "status": "completed",
+    "txHash": "abc123...",
+    "trades": 3,
+    "gasUsed": "50000"
   }
 }
 ```
 
-### Maintenance Notes
+### Rebalance Estimate
 
-- **Keep in sync**: When API endpoints change, update the client methods accordingly
-- **Error handling**: The client includes basic error handling; extend as needed for your use case
-- **Rate limiting**: The API includes rate limiting; implement retry logic for production use
-- **Idempotency**: Use `Idempotency-Key` headers for write operations to prevent duplicates
-- **Environment**: Update `baseUrl` for different environments (dev/staging/prod)
+```bash
+GET /api/v1/portfolio/{portfolioId}/rebalance-estimate
+```
 
-For complete API documentation, see the [OpenAPI spec](http://localhost:3001/api-docs.json) and [Swagger UI](http://localhost:3001/api-docs).
+Response:
+```json
+{
+  "estimatedGas": "55000",
+  "estimatedCost": "0.05",
+  "canExecute": true
+}
+```
+
+---
+
+## Drafts
+
+### Create Draft
+
+```bash
+POST /api/v1/portfolio/draft
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "userAddress": "GALPHABET...",
+  "allocations": { "XLM": 50, "USDC": 50 },
+  "threshold": 3,
+  "label": "My conservative draft"
+}
+```
+
+Response (201):
+```json
+{
+  "draftId": "draft-xyz789",
+  "status": "draft_created"
+}
+```
+
+### Get Draft
+
+```bash
+GET /api/v1/portfolio/draft/{draftId}
+```
+
+### Update Draft
+
+```bash
+PATCH /api/v1/portfolio/draft/{draftId}
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "allocations": { "XLM": 60, "USDC": 40 },
+  "threshold": 4
+}
+```
+
+### Publish Draft
+
+```bash
+POST /api/v1/portfolio/draft/{draftId}/publish
+Idempotency-Key: <uuid>
+```
+
+Response (201):
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "status": "published"
+}
+```
+
+### Delete Draft
+
+```bash
+DELETE /api/v1/portfolio/draft/{draftId}
+```
+
+### List User Drafts
+
+```bash
+GET /api/v1/user/{address}/drafts
+```
+
+---
+
+## Portfolio Export (GDPR Data Portability)
+
+### Start Export Job
+
+```bash
+GET /api/v1/portfolio/{portfolioId}/export?format=json
+# or format=csv, format=pdf
+```
+
+Response (202):
+```json
+{
+  "jobId": "job-123456",
+  "status": "processing"
+}
+```
+
+### Get Export Status/Result
+
+```bash
+GET /api/v1/portfolio/{portfolioId}/export/status/{jobId}
+```
+
+Response (processing):
+```json
+{
+  "status": "processing",
+  "state": "waiting"
+}
+```
+
+Response (completed):
+Returns the file directly with appropriate `Content-Type` and `Content-Disposition` headers.
+
+---
+
+## Analytics
+
+### Portfolio Analytics
+
+Returns daily portfolio values and key performance metrics computed from stored price snapshots and rebalance history.
+
+```bash
+GET /api/v1/portfolio/{portfolioId}/analytics?days=30
+GET /api/v1/portfolio/{portfolioId}/analytics?from=2025-01-01T00:00:00Z&to=2025-06-01T00:00:00Z
+```
+
+Query params:
+- `days` (optional): Number of days to look back. Default: 30. Ignored if `from`/`to` are provided.
+- `from` (optional): ISO 8601 start date. Must be before `to`. Future dates rejected.
+- `to` (optional): ISO 8601 end date. Future dates rejected.
+
+Response:
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "dailyValues": [
+    { "timestamp": "2025-01-01T00:00:00.000Z", "totalValue": 10000, "allocations": { "XLM": 60, "USDC": 40 } }
+  ],
+  "metrics": {
+    "totalReturnPercent": 5.2,
+    "maxDrawdownPercent": 3.5,
+    "sharpeRatio": 1.8
+  },
+  "dataPoints": 30
+}
+```
+
+Returns empty `dailyValues: []` and zeroed metrics for portfolios with no history.
+
+### Performance Summary
+
+```bash
+GET /api/v1/portfolio/{portfolioId}/performance-summary
+```
+
+Response:
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "totalReturn": 5.2,
+  "annualizedReturn": 12.5,
+  "sharpeRatio": 1.8,
+  "maxDrawdown": -3.5,
+  "volatility": 8.2
+}
+```
+
+### Risk Diagnostics
+
+```bash
+GET /api/v1/portfolio/{portfolioId}/risk-diagnostics
+```
+
+Response:
+```json
+{
+  "riskHeatmap": { /* per-asset risk scores */ }
+}
+```
+
+---
+
+## Rebalance History
+
+### List History
+
+```bash
+GET /api/v1/rebalance/history?portfolioId=portfolio-abc123&limit=50&source=onchain
+```
+
+Query params:
+- `portfolioId` (optional): Filter by portfolio
+- `limit` (optional): 1–500, default: 50
+- `offset` (optional): Pagination offset
+- `source` (optional): `offchain` | `simulated` | `onchain`
+- `startTimestamp`, `endTimestamp` (optional): ISO 8601
+- `syncOnChain` (optional): `true` to sync on-chain first
+
+Response:
+```json
+{
+  "history": [
+    {
+      "id": "event-1",
+      "portfolioId": "portfolio-abc123",
+      "timestamp": "2025-01-01T00:00:00.000Z",
+      "status": "completed",
+      "trigger": "manual",
+      "trades": 3,
+      "gasUsed": "50000"
+    }
+  ],
+  "pagination": { "limit": 50, "offset": 0, "count": 1 }
+}
+```
+
+### Record Rebalance Event
+
+```bash
+POST /api/v1/rebalance/history
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "portfolioId": "portfolio-abc123",
+  "trigger": "auto",
+  "trades": 2,
+  "gasUsed": "45000",
+  "status": "completed",
+  "isAutomatic": true
+}
+```
+
+### Sync On-Chain History
+
+```bash
+POST /api/v1/rebalance/history/sync-onchain
+```
+
+### Rebalance Summary
+
+```bash
+GET /api/v1/rebalance/summary/{portfolioId}
+```
+
+Response:
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "readiness": {
+    "systemReady": true,
+    "canExecute": true,
+    "checks": { "database": "ready", "queue": "ready", "workers": "ready" }
+  },
+  "drift": { "needsRebalance": true, "maxDriftPercent": 6.5, "exceedsThreshold": true },
+  "slippage": { "maxSlippagePercent": 1, "estimatedSlippageBps": 100 },
+  "risk": { "allowed": true, "overallRiskLevel": "low", "alerts": [] },
+  "dataFreshness": { "ageSeconds": 12, "isStale": false }
+}
+```
+
+---
+
+## Auto-Rebalancer
+
+### Get Status
+
+```bash
+GET /api/v1/auto-rebalancer/status
+```
+
+Response:
+```json
+{
+  "status": { "isRunning": true, "initialized": true },
+  "statistics": { "totalRebalances": 42, "successRate": 0.95 }
+}
+```
+
+### Start/Stop
+
+```bash
+POST /api/v1/auto-rebalancer/start
+POST /api/v1/auto-rebalancer/stop
+```
+
+### Force Check
+
+```bash
+POST /api/v1/auto-rebalancer/force-check
+```
+
+### Dry-Run (Admin)
+
+```bash
+POST /api/v1/auto-rebalancer/dry-run/{portfolioId}
+```
+
+### Auto-Rebalance History
+
+```bash
+GET /api/v1/auto-rebalancer/history?portfolioId=portfolio-abc123&limit=20
+```
+
+---
+
+## Risk
+
+### Risk Metrics
+
+```bash
+GET /api/v1/risk/metrics/{portfolioId}
+```
+
+Response:
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "riskMetrics": {
+    "volatility": 0.15,
+    "concentrationRisk": 0.32,
+    "liquidityRisk": 0.08,
+    "var95": -0.025
+  },
+  "recommendations": [ "Reduce concentration in XLM" ],
+  "circuitBreakers": { "volatility": { "isTriggered": false } }
+}
+```
+
+### Risk Check
+
+```bash
+GET /api/v1/risk/check/{portfolioId}
+```
+
+Response:
+```json
+{
+  "portfolioId": "portfolio-abc123",
+  "allowed": true,
+  "reason": null,
+  "riskMetrics": { /* ... */ }
+}
+```
+
+---
+
+## Prices & Market
+
+### Current Prices
+
+```bash
+GET /api/v1/prices
+```
+
+Response:
+```json
+{
+  "prices": {
+    "XLM": { "price": 0.3589, "change": -0.5, "timestamp": 1706880000, "source": "coingecko" }
+  },
+  "feedMeta": { "degraded": false, "sources": ["coingecko"] }
+}
+```
+
+### Enhanced Prices
+
+```bash
+GET /api/v1/prices/enhanced
+```
+
+Response:
+```json
+{
+  "prices": {
+    "XLM": { "price": 0.3589, "change": -0.5, "riskAlerts": [], "volatilityLevel": "low" }
+  },
+  "riskAlerts": [],
+  "feedMeta": { /* ... */ }
+}
+```
+
+### Market Details
+
+```bash
+GET /api/v1/market/{asset}/details
+```
+
+### Price Chart
+
+```bash
+GET /api/v1/market/{asset}/chart?days=7
+```
+
+Response:
+```json
+{
+  "asset": "XLM",
+  "data": [ { "timestamp": 1706880000, "price": 0.35 } ],
+  "timeframe": "7d",
+  "dataPoints": 168
+}
+```
+
+---
+
+## Assets
+
+### List Assets
+
+```bash
+GET /api/v1/assets?enabledOnly=true&page=1&limit=20&sortBy=symbol&order=asc
+```
+
+Query params:
+- `enabledOnly` (optional): `true` to show only enabled assets
+- `code` / `search` / `q`: Search by symbol/name
+- `issuer`: Filter by issuer address
+- `sortBy`: `symbol` | `name` | `enabled`
+- `order`: `asc` | `desc`
+- `page`, `limit`: Pagination (max 100)
+
+Response:
+```json
+{
+  "assets": [
+    {
+      "symbol": "XLM",
+      "name": "Stellar Lumens",
+      "enabled": true,
+      "contractAddress": null,
+      "issuerAccount": null,
+      "coingeckoId": "stellar"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 50 }
+}
+```
+
+### Get Asset
+
+```bash
+GET /api/v1/assets/{symbol}
+```
+
+---
+
+## Notifications
+
+### Subscribe
+
+```bash
+POST /api/v1/notifications/subscribe
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "userId": "GALPHABET...",
+  "emailEnabled": true,
+  "emailAddress": "user@example.com",
+  "webhookEnabled": false,
+  "webhookUrl": null,
+  "digestMode": false,
+  "events": ["rebalance", "priceMovement"]
+}
+```
+
+### Get Preferences
+
+```bash
+GET /api/v1/notifications/preferences?userId=GALPHABET...
+```
+
+### Unsubscribe
+
+```bash
+DELETE /api/v1/notifications/unsubscribe?userId=GALPHABET...&reason=no-longer-needed
+```
+
+### Notification Logs
+
+```bash
+GET /api/v1/notifications/logs?userId=GALPHABET...
+```
+
+---
+
+## Consent (GDPR)
+
+### Get Consent Status
+
+```bash
+GET /api/v1/consent/status?userId=GALPHABET...
+```
+
+Response:
+```json
+{
+  "accepted": true,
+  "termsAcceptedAt": "2025-01-01T00:00:00.000Z",
+  "privacyAcceptedAt": "2025-01-01T00:00:00.000Z",
+  "active": true
+}
+```
+
+### Grant Consent
+
+```bash
+POST /api/v1/consent/grant
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "userId": "GALPHABET...",
+  "terms": true,
+  "privacy": true,
+  "cookies": true,
+  "documentText": "v2025.01"
+}
+```
+
+### Revoke Consent
+
+```bash
+POST /api/v1/consent/revoke
+Content-Type: application/json
+Idempotency-Key: <uuid>
+
+{
+  "userId": "GALPHABET..."
+}
+```
+
+### Consent Audit Log
+
+```bash
+GET /api/v1/consent/audit?userId=GALPHABET...
+```
+
+### Delete User Data (GDPR Erasure)
+
+```bash
+DELETE /api/v1/user/{address}/data
+Authorization: Bearer <access_token>
+```
+
+---
+
+## Admin
+
+> Admin routes require `Authorization: Bearer <admin_token>` and `ADMIN_PUBLIC_KEYS` to include your address.
+
+### List All Assets (Including Disabled)
+
+```bash
+GET /api/v1/admin/assets
+Authorization: Bearer <admin_token>
+```
+
+### Add Asset
+
+```bash
+POST /api/v1/admin/assets
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "symbol": "NEW",
+  "name": "New Asset",
+  "contractAddress": "C...",
+  "issuerAccount": "G...",
+  "coingeckoId": "new-asset"
+}
+```
+
+### Update Asset
+
+```bash
+PATCH /api/v1/admin/assets/{symbol}
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "quarantined": false
+}
+```
+
+### Remove Asset
+
+```bash
+DELETE /api/v1/admin/assets/{symbol}
+Authorization: Bearer <admin_token>
+```
+
+---
+
+## Debug
+
+> Debug routes are disabled in production (`NODE_ENV=production`).
+
+### Test Notification
+
+```bash
+POST /api/v1/debug/notifications/test
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "userId": "GALPHABET...",
+  "eventType": "rebalance"
+}
+```
+
+### Force Fresh Prices
+
+```bash
+GET /api/v1/debug/force-fresh-prices
+Authorization: Bearer <admin_token>
+```
+
+### Env Info
+
+```bash
+GET /api/v1/debug/env
+Authorization: Bearer <admin_token>
+```
+
+---
+
+## OpenAPI & Tools
+
+- **Swagger UI:** `http://localhost:3001/api-docs`
+- **OpenAPI JSON:** `http://localhost:3001/api-docs.json`
+- **Postman:** Import from URL above or `backend/openapi.json` after running `npm run openapi:export`
+
+## Maintenance
+
+- **Authoritative spec:** `backend/src/openapi/spec.ts`
+- **Generated artifacts:** `backend/openapi.json`
+- **Validate sync:** `cd backend && npm run api:validate`
+- **Export:** `cd backend && npm run openapi:export`
+
+CI fails if docs are out of sync.

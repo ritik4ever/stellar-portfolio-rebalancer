@@ -1,22 +1,21 @@
-import { rateLimit, type Options } from "express-rate-limit";
+import { rateLimit } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import IORedis from "ioredis";
+import type { Request, Response, NextFunction } from "express";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
 
-// Rate limiting configuration from environment
-const GLOBAL_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000;
-const GLOBAL_MAX = Number(process.env.RATE_LIMIT_MAX) || 100;
-const WRITE_MAX = Number(process.env.RATE_LIMIT_WRITE_MAX) || 10;
-const AUTH_MAX = Number(process.env.RATE_LIMIT_AUTH_MAX) || 5;
-const CRITICAL_MAX = Number(process.env.RATE_LIMIT_CRITICAL_MAX) || 3;
+const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
+const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
+const WRITE_MAX = parseInt(process.env.RATE_LIMIT_WRITE_MAX || "", 10) || 20;
+const AUTH_MAX = parseInt(process.env.RATE_LIMIT_AUTH_MAX || "", 10) || 10;
+const CRITICAL_MAX = parseInt(process.env.RATE_LIMIT_CRITICAL_MAX || "", 10) || 5;
 
-const BURST_WINDOW_MS =
-  Number(process.env.RATE_LIMIT_BURST_WINDOW_MS) || 10 * 1000;
-const BURST_MAX = Number(process.env.RATE_LIMIT_BURST_MAX) || 20;
-const WRITE_BURST_MAX = Number(process.env.RATE_LIMIT_WRITE_BURST_MAX) || 3;
+const BURST_WINDOW_MS = parseInt(process.env.RATE_LIMIT_BURST_WINDOW_MS || "", 10) || 1000;
+const BURST_MAX = parseInt(process.env.RATE_LIMIT_BURST_MAX || "", 10) || 5;
+const WRITE_BURST_MAX = parseInt(process.env.RATE_LIMIT_WRITE_BURST_MAX || "", 10) || 3;
 
 let redisClient: IORedis | undefined;
 
@@ -117,19 +116,35 @@ function createKeyGenerator(prefix: string) {
   };
 }
 
-// Skip rate limiting for health checks and internal requests
+// ---------------------------------------------------------------------------
+// Legacy isProbePath kept for any external callers, but the authoritative
+// guard for rate-limit skipping is now isTrustedHealthProbe().
+// ---------------------------------------------------------------------------
+/** @internal Use isTrustedHealthProbe() in middleware skip functions. */
 function isProbePath(path: string): boolean {
-    return path === '/health' || path === '/ready' || path === '/readiness' || path === '/metrics'
+  return ["/health", "/ready", "/readiness", "/metrics"].includes(path);
+}
+
+function isTrustedHealthProbe(req: Request): boolean {
+  const path = req.path || "";
+  if (!isProbePath(path)) return false;
+
+  const ip = req.ip || "";
+  const loopbacks = ["::1", "127.0.0.1", "::ffff:127.0.0.1", "localhost"];
+  if (loopbacks.includes(ip)) return true;
+
+  const secret = process.env.HEALTH_PROBE_SECRET || "";
+  if (secret && req.headers["x-probe-secret"] === secret) return true;
+
+  return false;
 }
 
 function skipSuccessfulRequests(
-  req: import("express").Request,
-  res: import("express").Response,
+  req: Request,
+  res: Response,
 ): boolean {
-  // Skip health checks
-  if (isProbePath(req.path)) {
-    return true;
-  }
+  // Trusted health probes bypass all rate limiting.
+  if (isTrustedHealthProbe(req)) return true;
 
   // In test environment, don't skip any requests to ensure rate limiting works
   if (process.env.NODE_ENV === "test") {
@@ -140,7 +155,7 @@ function skipSuccessfulRequests(
   return res.statusCode < 400;
 }
 
-// Global rate limiter - applies to all requests
+// Core rate limiters (exported for backward compatibility)
 export const globalRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
   limit: GLOBAL_MAX,
@@ -153,7 +168,6 @@ export const globalRateLimiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
 });
 
-// Burst protection - very short window to prevent rapid-fire attacks
 export const burstProtectionLimiter = rateLimit({
   windowMs: BURST_WINDOW_MS,
   limit: BURST_MAX,
@@ -162,10 +176,9 @@ export const burstProtectionLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("burst"),
-  skip: (req) => isProbePath(req.path),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
-// Write operations rate limiter - stricter limits for mutating operations
 export const writeRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
   limit: WRITE_MAX,
@@ -174,9 +187,9 @@ export const writeRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("write"),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
-// Write burst protection - prevent rapid write attempts
 export const writeBurstLimiter = rateLimit({
   windowMs: BURST_WINDOW_MS,
   limit: WRITE_BURST_MAX,
@@ -185,10 +198,9 @@ export const writeBurstLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("write-burst"),
-  skip: (req) => isProbePath(req.path),
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
-// Authentication rate limiter - protect login/refresh endpoints
 export const authRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
   limit: AUTH_MAX,
@@ -197,10 +209,9 @@ export const authRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("auth"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
-// Critical operations rate limiter - for rebalancing and high-value operations
 export const criticalRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
   limit: CRITICAL_MAX,
@@ -209,10 +220,9 @@ export const criticalRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("critical"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
-// Admin operations rate limiter - protect admin endpoints
 export const adminRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
   limit: AUTH_MAX,
@@ -221,17 +231,117 @@ export const adminRateLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: true,
   store: makeStore("admin"),
-  skip: () => false,
+  skip: (req) => isTrustedHealthProbe(req),
 });
 
-// Composite middleware for write operations (combines write + burst protection)
+// Composite middleware definitions
 export const protectedWriteLimiter = [writeBurstLimiter, writeRateLimiter];
-
-// Composite middleware for critical operations (combines critical + burst protection)
 export const protectedCriticalLimiter = [
   burstProtectionLimiter,
   criticalRateLimiter,
 ];
+
+// Central Route-Policy Config Map
+export const RATE_LIMIT_ROUTE_POLICIES = {
+  "POST /api/auth/challenge": "auth",
+  "POST /api/auth/login": "auth",
+  "POST /api/auth/refresh": "auth",
+
+  "POST /api/v1/notifications/subscribe": "protectedWrite",
+  "DELETE /api/v1/notifications/unsubscribe": "write",
+
+  "POST /api/v1/portfolio": "protectedWrite",
+  "POST /api/v1/portfolio/:id/rebalance": "protectedCritical",
+
+  "POST /api/v1/rebalance/history/sync-onchain": "admin",
+  "POST /api/v1/auto-rebalancer/start": "admin",
+  "POST /api/v1/auto-rebalancer/stop": "admin",
+  "POST /api/v1/auto-rebalancer/force-check": "admin",
+
+  "POST /api/v1/debug/notifications/test": "admin",
+
+  "POST /api/v1/consent/grant": "protectedWrite",
+  "POST /api/v1/consent/revoke": "protectedCritical",
+  "POST /api/v1/consent": "protectedWrite",
+  "POST /api/v1/consent/audit/purge": "protectedCritical",
+  "DELETE /api/v1/user/:address/data": "protectedCritical",
+
+  "POST /api/v1/admin/assets": "admin",
+  "DELETE /api/v1/admin/assets/:symbol": "admin",
+  "PATCH /api/v1/admin/assets/:symbol": "admin",
+} as const;
+
+// Cache mapping of policy names to actual middleware arrays or handlers
+const limiters: Record<string, import("express").RequestHandler | import("express").RequestHandler[]> = {
+  global: globalRateLimiter,
+  auth: authRateLimiter,
+  write: writeRateLimiter,
+  writeBurst: writeBurstLimiter,
+  critical: criticalRateLimiter,
+  burst: burstProtectionLimiter,
+  admin: adminRateLimiter,
+  protectedWrite: protectedWriteLimiter,
+  protectedCritical: protectedCriticalLimiter,
+};
+
+// Compile route configuration keys to fast RegExp matchers that support legacy routes (without v1)
+const routePatternMatchers = Object.entries(RATE_LIMIT_ROUTE_POLICIES).map(([routeKey, policyName]) => {
+  const [method, pathPattern] = routeKey.split(" ");
+  let normalizedPattern = pathPattern;
+  if (pathPattern.startsWith("/api/v1/")) {
+    normalizedPattern = "/api/(?:v1/)?" + pathPattern.slice(8);
+  }
+  const regexStr = "^" + normalizedPattern
+    .replace(/\/:[a-zA-Z0-9_]+/g, "/[^/]+")
+    .replace(/\//g, "\\/") + "\\/?$";
+  return {
+    method,
+    regex: new RegExp(regexStr, "i"),
+    policyName,
+  };
+});
+
+// Dynamic per-route rate limiter middleware
+export const dynamicRateLimiter = (
+  req: import("express").Request,
+  res: import("express").Response,
+  next: import("express").NextFunction,
+): void => {
+  const path = req.path;
+  const method = req.method;
+
+  if (isProbePath(path)) {
+    return next();
+  }
+
+  // Find matching policy in map
+  const matcher = routePatternMatchers.find(
+    (m) => m.method === method && m.regex.test(path),
+  );
+
+  const policyName = matcher ? matcher.policyName : "global";
+  const limiter = limiters[policyName];
+
+  if (!limiter) {
+    return next();
+  }
+
+  if (Array.isArray(limiter)) {
+    let index = 0;
+    const runNext = (err?: any): void => {
+      if (err) return next(err);
+      if (index < limiter.length) {
+        const middleware = limiter[index++];
+        middleware(req, res, runNext);
+      } else {
+        next();
+      }
+    };
+    runNext();
+  } else {
+    limiter(req, res, next);
+  }
+};
 
 // Middleware to record successful requests for monitoring
 export const requestMonitoringMiddleware = (
@@ -258,7 +368,5 @@ export async function closeRateLimitStore(): Promise<void> {
 }
 
 export function getRateLimitStoreType(): "redis" | "memory" {
-  // getCachedRedisAvailability() returns the result of probeRedis() from
-  // index.ts — by the time this is called at startup, the probe has run.
   return getCachedRedisAvailability() === true ? "redis" : "memory";
 }

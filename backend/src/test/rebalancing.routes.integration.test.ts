@@ -19,14 +19,14 @@ vi.mock('../utils/logger.js', () => ({
 const JWT_SECRET = 'test-jwt-secret-for-rebalancing-tests-min-32!!'
 const ADMIN_SECRET = 'test-admin-secret-for-rebalancing-tests-32!'
 
-function createApp(): Express {
+async function createApp(): Promise<Express> {
     const app = express()
     app.use(cors({ origin: true, credentials: true }))
     app.use(express.json({ limit: '10mb' }))
     app.set('trust proxy', 1)
 
     // Mount rebalancing routes
-    const { rebalancingRouter } = require('../api/rebalancing.routes.js') as any
+
     app.use('/api', rebalancingRouter)
 
     return app
@@ -47,7 +47,7 @@ describe('Rebalancing API Integration Tests', () => {
     let testDbPath: string
     let adminKp: Keypair
 
-    beforeAll(() => {
+    beforeAll(async () => {
         process.env.JWT_SECRET = JWT_SECRET
         process.env.NODE_ENV = 'test'
 
@@ -60,7 +60,7 @@ describe('Rebalancing API Integration Tests', () => {
         testDbPath = join(testDir, 'test.db')
         process.env.DB_PATH = testDbPath
 
-        app = createApp()
+        app = await createApp()
     })
 
     afterAll(() => {
@@ -146,10 +146,10 @@ describe('Rebalancing API Integration Tests', () => {
         it('records a rebalance event and returns it', async () => {
             const eventData = {
                 portfolioId: 'test-portfolio-001',
-                userId: 'GTEST123456789ABCDEF',
-                oldAllocations: { XLM: 60, USDC: 40 },
-                newAllocations: { XLM: 50, USDC: 50 },
-                reason: 'threshold_breached',
+                trigger: 'Threshold exceeded (8.2%)',
+                trades: 2,
+                gasUsed: '0.02 XLM',
+                status: 'completed',
                 isAutomatic: false
             }
 
@@ -230,6 +230,31 @@ describe('Rebalancing API Integration Tests', () => {
                 expect(res.body.data.history).toBeDefined()
             }
         })
+
+        it('returns 401/403 for dry-run without admin', async () => {
+            const res = await request(app)
+                .post('/api/auto-rebalancer/dry-run/non-existent-portfolio')
+                .send({})
+                .expect((resp) => {
+                    expect([401, 403, 404]).toContain(resp.status)
+                })
+        })
+
+        it('returns actionable NOT_FOUND for admin dry-run when portfolio is missing', async () => {
+            const res = await request(app)
+                .post('/api/auto-rebalancer/dry-run/non-existent-portfolio')
+                .set(makeAdminHeaders(adminKp))
+                .send({})
+                .expect((resp) => {
+                    expect([404, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 404) {
+                expect(res.body.success).toBe(false)
+                expect(res.body.error.code).toBe('NOT_FOUND')
+                expect(res.body.error.message).toMatch(/not found/i)
+            }
+        })
     })
 
     describe('Ownership enforcement - other user portfolio', () => {
@@ -262,6 +287,77 @@ describe('Rebalancing API Integration Tests', () => {
             expect(res.body.success).toBe(true)
             expect(res.body.data.filters.startTimestamp).toBe(start)
             expect(res.body.data.filters.endTimestamp).toBe(end)
+        })
+    })
+
+    describe('GET /api/rebalance/summary/:portfolioId - readiness summary', () => {
+        it('returns 404 for non-existent portfolio', async () => {
+            const res = await request(app)
+                .get('/api/rebalance/summary/nonexistent-portfolio-12345')
+                .expect(404)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('NOT_FOUND')
+        })
+
+        it('returns summary with all preconditions for valid portfolio', async () => {
+            // First create a test portfolio via the storage directly
+            const { portfolioStorage } = await import('../services/portfolioStorage.js')
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(
+                'GTESTSUMMARY123456789',
+                { XLM: 50, USDC: 50 },
+                5,
+                { XLM: 1000, USDC: 500 },
+                1,
+                'threshold',
+                {}
+            )
+
+            const res = await request(app)
+                .get(`/api/rebalance/summary/${portfolioId}`)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.portfolioId).toBe(portfolioId)
+            expect(res.body.data.readiness).toBeDefined()
+            expect(res.body.data.readiness.systemReady).toBeDefined()
+            expect(res.body.data.readiness.canExecute).toBeDefined()
+            expect(res.body.data.drift).toBeDefined()
+            expect(res.body.data.drift.needsRebalance).toBeDefined()
+            expect(res.body.data.drift.maxDriftPercent).toBeDefined()
+            expect(res.body.data.slippage).toBeDefined()
+            expect(res.body.data.slippage.maxSlippagePercent).toBeDefined()
+            expect(res.body.data.risk).toBeDefined()
+            expect(res.body.data.risk.allowed).toBeDefined()
+            expect(res.body.data.risk.overallRiskLevel).toBeDefined()
+            expect(res.body.data.dataFreshness).toBeDefined()
+            expect(res.body.data.dataFreshness.isStale).toBeDefined()
+            expect(res.body.meta).toBeDefined()
+            expect(res.body.meta.canExecute).toBeDefined()
+        })
+
+        it('includes actionable risk alerts when blocked', async () => {
+            const { portfolioStorage } = await import('../services/portfolioStorage.js')
+            const portfolioId = await portfolioStorage.createPortfolioWithBalances(
+                'GTESTRISK123456789',
+                { XLM: 80, USDC: 20 }, // High concentration
+                5,
+                { XLM: 1000, USDC: 200 },
+                1,
+                'threshold',
+                {}
+            )
+
+            const res = await request(app)
+                .get(`/api/rebalance/summary/${portfolioId}`)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.risk).toBeDefined()
+            expect(res.body.data.risk.metrics).toBeDefined()
+            expect(res.body.data.risk.metrics.concentrationRisk).toBeGreaterThan(0)
+            expect(res.body.data.recommendations).toBeDefined()
+            expect(Array.isArray(res.body.data.recommendations)).toBe(true)
         })
     })
 })

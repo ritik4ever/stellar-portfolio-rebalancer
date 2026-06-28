@@ -1,26 +1,46 @@
-import type { Job } from 'bullmq'
-import { Worker } from 'bullmq'
-import { logger, logAudit } from '../../utils/logger.js'
-import { rebalanceLockService } from '../../services/rebalanceLock.js'
-import { StellarService } from '../../services/stellar.js'
-import { rebalanceHistoryService } from '../../services/serviceContainer.js'
-import { notificationService } from '../../services/notificationService.js'
-import { getConnectionOptions } from '../connection.js'
-import type { RebalanceJobData } from '../queues.js'
-import {
-    createWorkerRuntimeStatus,
-    markWorkerFailed,
-    markWorkerJobCompleted,
-    markWorkerJobFailed,
-    markWorkerReady,
-    markWorkerStarting,
-    markWorkerStopped,
-    snapshotWorkerRuntimeStatus,
-    type WorkerRuntimeStatus,
-} from './workerRuntime.js'
 
-let worker: Worker | null = null
-const runtimeStatus = createWorkerRuntimeStatus('rebalance', 3)
+import {
+  createWorkerRuntimeStatus,
+  markWorkerFailed,
+  markWorkerJobCompleted,
+  markWorkerJobFailed,
+  markWorkerReady,
+  markWorkerStarting,
+  markWorkerStopped,
+  snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
+  type WorkerRuntimeStatus,
+} from "./workerRuntime.js";
+import { randomUUID } from "node:crypto";
+import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
+
+let worker: Worker | null = null;
+const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
+
+function broadcastJobCompletion(jobId: string, portfolioId: string, triggeredBy: string | undefined, data: Record<string, unknown>) {
+  broadcastPortfolioEvent({
+    portfolioId,
+    event: "rebalance_completed",
+    data: {
+      jobId,
+      triggeredBy: triggeredBy || "unknown",
+      ...data,
+    },
+  });
+}
+
+function broadcastJobFailure(jobId: string, portfolioId: string, triggeredBy: string | undefined, error: string, attemptsMade: number) {
+  broadcastPortfolioEvent({
+    portfolioId,
+    event: "rebalance_failed",
+    data: {
+      jobId,
+      triggeredBy: triggeredBy || "unknown",
+      error,
+      attemptsMade,
+    },
+  });
+}
 
 /**
  * Core processor: executes a single portfolio rebalance.
@@ -30,115 +50,120 @@ export async function processRebalanceJob(
   job: Job<RebalanceJobData>,
 ): Promise<void> {
   const { portfolioId, triggeredBy, correlationId } = job.data;
+  const requestId = correlationId ?? randomUUID();
 
-  logger.info("[WORKER:rebalance] Executing rebalance", {
-    jobId: job.id,
-    portfolioId,
-    triggeredBy,
-    correlationId,
-  });
-  if (triggeredBy === "auto") {
-    logAudit("auto_rebalance_started", {
-      portfolioId,
+  return runWithRequestContext({ requestId }, async () => {
+    logger.info("[WORKER:rebalance] Executing rebalance", {
       jobId: job.id,
-    });
-  }
-
-  const lockAcquired = await rebalanceLockService.acquireLock(portfolioId);
-
-  if (!lockAcquired) {
-    logger.info("[WORKER:rebalance] Rebalance already in progress. Aborting.", {
       portfolioId,
-    });
-    return;
-  }
-
-  const stellarService = new StellarService();
-  try {
-    const portfolio = await stellarService.getPortfolio(portfolioId);
-    const rebalanceResult = await stellarService.executeRebalance(portfolioId);
-
-    await rebalanceHistoryService.recordRebalanceEvent({
-      portfolioId,
-      trigger:
-        triggeredBy === "auto" ? "Automatic Rebalancing" : "Manual Rebalancing",
-      trades: rebalanceResult.trades ?? 0,
-      gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
-      status: "completed",
-      isAutomatic: triggeredBy === "auto",
-    });
-
-    try {
-      await notificationService.notify({
-        userId: portfolio.userAddress,
-        eventType: "rebalance",
-        title: "Portfolio Rebalanced",
-        message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
-        data: {
-          portfolioId,
-          trades: rebalanceResult.trades,
-          gasUsed: rebalanceResult.gasUsed,
-          trigger: triggeredBy,
-        },
-        timestamp: new Date().toISOString(),
-      });
-    } catch (notifyErr) {
-      logger.error("[WORKER:rebalance] Notification failed (non-fatal)", {
-        portfolioId,
-        error:
-          notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
-      });
-    }
-
-    logger.info("[WORKER:rebalance] Rebalance completed", {
-      portfolioId,
-      trades: rebalanceResult.trades,
+      triggeredBy,
+      correlationId,
     });
     if (triggeredBy === "auto") {
-      logAudit("auto_rebalance_completed", {
+      logAudit("auto_rebalance_started", {
         portfolioId,
         jobId: job.id,
-        trades: rebalanceResult.trades ?? 0,
-        status: "completed",
       });
     }
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
 
+    const lockAcquired = await acquireWorkerLock(portfolioId);
+
+    const stellarService = new StellarService();
     try {
+      const portfolio = await stellarService.getPortfolio(portfolioId);
+      const rebalanceResult =
+        await stellarService.executeRebalance(portfolioId);
+
       await rebalanceHistoryService.recordRebalanceEvent({
         portfolioId,
-        trigger: `Automatic Rebalancing (Failed – attempt ${job.attemptsMade + 1})`,
-        trades: 0,
-        gasUsed: "0 XLM",
-        status: "failed",
+        trigger:
+          triggeredBy === "auto"
+            ? "Automatic Rebalancing"
+            : "Manual Rebalancing",
+        trades: rebalanceResult.trades ?? 0,
+        gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        status: "completed",
         isAutomatic: triggeredBy === "auto",
-        error: errorMessage,
       });
-    } catch (histErr) {
-      logger.error("[WORKER:rebalance] Failed to record failure event", {
-        histErr,
-      });
-    }
 
-    logger.error("[WORKER:rebalance] Rebalance failed", {
-      portfolioId,
-      error: errorMessage,
-      attemptsMade: job.attemptsMade,
-    });
-    if (triggeredBy === "auto") {
-      logAudit("auto_rebalance_failed", {
+      try {
+        await notificationService.notify({
+          userId: portfolio.userAddress,
+          eventType: "rebalance",
+          title: "Portfolio Rebalanced",
+          message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
+          data: {
+            portfolioId,
+            trades: rebalanceResult.trades,
+            gasUsed: rebalanceResult.gasUsed,
+            trigger: triggeredBy,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      } catch (notifyErr) {
+        logger.error("[WORKER:rebalance] Notification failed (non-fatal)", {
+          portfolioId,
+          error:
+            notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+        });
+      }
+
+      logger.info("[WORKER:rebalance] Rebalance completed", {
         portfolioId,
-        jobId: job.id,
+        trades: rebalanceResult.trades,
+      });
+      broadcastJobCompletion(job.id || "unknown", portfolioId, triggeredBy, {
+        trades: rebalanceResult.trades ?? 0,
+        gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        timestamp: new Date().toISOString(),
+      });
+      if (triggeredBy === "auto") {
+        logAudit("auto_rebalance_completed", {
+          portfolioId,
+          jobId: job.id,
+          trades: rebalanceResult.trades ?? 0,
+          status: "completed",
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      try {
+        await rebalanceHistoryService.recordRebalanceEvent({
+          portfolioId,
+          trigger: `Automatic Rebalancing (Failed – attempt ${job.attemptsMade + 1})`,
+          trades: 0,
+          gasUsed: "0 XLM",
+          status: "failed",
+          isAutomatic: triggeredBy === "auto",
+          error: errorMessage,
+        });
+      } catch (histErr) {
+        logger.error("[WORKER:rebalance] Failed to record failure event", {
+          histErr,
+        });
+      }
+
+      logger.error("[WORKER:rebalance] Rebalance failed", {
+        portfolioId,
         error: errorMessage,
         attemptsMade: job.attemptsMade,
       });
-    }
+      broadcastJobFailure(job.id || "unknown", portfolioId, triggeredBy, errorMessage, job.attemptsMade);
+      if (triggeredBy === "auto") {
+        logAudit("auto_rebalance_failed", {
+          portfolioId,
+          jobId: job.id,
+          error: errorMessage,
+          attemptsMade: job.attemptsMade,
+        });
+      }
 
-    throw err;
-  } finally {
-    await rebalanceLockService.releaseLock(portfolioId);
-  }
+      throw err;
+    } finally {
+      await releaseWorkerLock(portfolioId);
+    }
+  });
 }
 
 export function startRebalanceWorker(): Worker | null {
@@ -175,19 +200,29 @@ export function startRebalanceWorker(): Worker | null {
     });
 
   worker.on("completed", (j: Job) => {
+    markWorkerJobCompleted(runtimeStatus);
     logger.info("[WORKER:rebalance] Job completed", {
       jobId: j.id,
       portfolioId: j.data.portfolioId,
     });
+    broadcastJobCompletion(j.id || "unknown", j.data.portfolioId, j.data.triggeredBy, {
+      timestamp: new Date().toISOString(),
+    });
   });
 
   worker.on("failed", (j: Job | undefined, err: Error) => {
+    if (j) {
+      markWorkerJobFailed(runtimeStatus, err);
+    }
     logger.error("[WORKER:rebalance] Job failed", {
       jobId: j?.id,
       portfolioId: j?.data.portfolioId,
       error: err.message,
       attemptsMade: j?.attemptsMade,
     });
+    if (j) {
+      void handleFinalFailure(j, err);
+    }
   });
 
   logger.info("[WORKER:rebalance] Worker started (concurrency=3)");

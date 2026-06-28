@@ -17,6 +17,8 @@ export interface PriceFeedMeta {
     staleOrLimited: boolean
     resolutionHint: 'fresh_primary' | 'cached_only' | 'partial_merge' | 'rate_limited_cache' | 'error_recovery_cache' | 'synthetic_fallback'
     assetsCount: number
+    /** Redis oracle cache status for the current request */
+    cacheStatus?: 'redis_hit' | 'redis_miss' | 'redis_unavailable' | 'redis_bypassed'
 }
 
 // Core price data interface
@@ -51,6 +53,8 @@ export interface HistoricalPrice {
 export interface Portfolio {
     id: string
     userAddress: string
+    name?: string
+    description?: string
     allocations: Record<string, number>
     threshold: number
     slippageTolerancePercent?: number
@@ -63,6 +67,18 @@ export interface Portfolio {
     lastRebalance: string
     version: number
 }
+
+export type RebalanceTrigger = 'auto' | 'manual' | 'system'
+
+export type RebalanceReasonCode =
+    | 'THRESHOLD_EXCEEDED'
+    | 'SCHEDULED_REBALANCE'
+    | 'VOLATILITY_CIRCUIT_BREAKER'
+    | 'MANUAL_USER_REQUEST'
+    | 'RISK_MITIGATION'
+    | 'ON_CHAIN_SYNC'
+    | 'SYSTEM_FORCED'
+    | 'OTHER'
 
 // Rebalance strategy types
 export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
@@ -85,6 +101,15 @@ export interface UIAllocation {
     current?: number
 }
 
+// Refresh token session metadata for transparent session management
+export interface RefreshTokenMetadata {
+    device?: string
+    platform?: string
+    userAgent?: string
+    ipAddress?: string
+    lastUsedAt?: string
+}
+
 // Thrown when an update targets a stale portfolio version
 export class ConflictError extends Error {
     readonly currentVersion: number
@@ -95,12 +120,22 @@ export class ConflictError extends Error {
     }
 }
 
+// Thrown when a destructive database operation lacks a recent backup
+export class BackupVerificationError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'BackupVerificationError'
+    }
+}
+
+
 // Rebalance event interface
 export interface RebalanceEvent {
     id: string
     portfolioId: string
     timestamp: string
     trigger: string
+    reasonCode?: RebalanceReasonCode
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
@@ -182,10 +217,22 @@ export interface ApiResponse<T = any> {
     meta?: Record<string, unknown>
 }
 
+export interface RiskHeatmapDiagnostic {
+    score: number
+    level: 'low' | 'medium' | 'high'
+}
+
+export interface RiskHeatmap {
+    concentration: RiskHeatmapDiagnostic
+    volatility: RiskHeatmapDiagnostic
+    drawdown: RiskHeatmapDiagnostic
+}
+
 export interface PortfolioApiResponse extends ApiResponse {
     portfolio?: Portfolio
     prices?: PricesMap
     riskMetrics?: RiskMetrics
+    riskHeatmap?: RiskHeatmap
 }
 
 export interface RebalanceHistoryResponse extends ApiResponse {
@@ -259,6 +306,27 @@ export interface SystemStatus {
 // Additional utility types
 export type AssetCode = 'XLM' | 'BTC' | 'ETH' | 'USDC'
 
+// Metadata about an asset issuer retrieved from stellar.toml
+export interface IssuerMetadata {
+    org_name?: string
+    description?: string
+    homepage_url?: string
+    cert_url?: string
+    org_url?: string
+    org_logo?: string
+    org_description?: string
+    version?: string
+}
+
+export interface ParsedAssetCreatePayload {
+    symbol: string
+    name: string
+    contractAddress?: string
+    issuerAccount?: string
+    coingeckoId?: string
+    issuerMetadata?: IssuerMetadata
+}
+
 export interface RebalanceRequest {
     portfolioId: string
     userAddress: string
@@ -281,6 +349,7 @@ export interface RebalanceResult {
     failureReasons?: string[]
     rollback?: RebalanceRollback
     totalSlippageBps?: number
+    explanation?: ExecutionExplanation
 }
 
 export interface RebalanceExecutionTrade {
@@ -308,4 +377,23 @@ export interface RebalanceRollback {
     success: boolean
     rolledBackTrades: number
     failures: string[]
+}
+
+export interface IdempotencyRecord {
+    key: string
+    requestHash: string
+    method: string
+    path: string
+    statusCode: number
+    responseBody: string
+    createdAt: string
+    expiresAt: string
+}
+
+export interface ExecutionExplanation {
+    routeLength: number
+    estimatedSlippage: number
+    skippedAlternatives: string[]
+    rationale: string
+    failureReason?: string
 }

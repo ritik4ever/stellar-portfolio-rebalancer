@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import PortfolioSetup from './components/PortfolioSetup'
+import Settings from './pages/Settings'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Legal from './components/Legal'
 import ConsentGate from './components/ConsentGate'
+import { trackPageView, trackEvent } from './analytics'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
@@ -12,16 +15,30 @@ import {
     isAuthServiceUnavailable,
     resolveConsentAcceptedNavigation,
     runWalletReconnectBoot,
+    runBootDiagnostics,
+    type BootCheck,
 } from './app/walletBoot'
+import BootDiagnosticsPanel from './components/BootDiagnosticsPanel'
 import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
 import BackendCapabilitiesBanner from './components/BackendCapabilitiesBanner'
+import StartupSplash from './components/StartupSplash'
 import { useReadinessReport } from './hooks/useReadinessReport'
 import {
     onAuthSessionExpired,
     onAuthSessionRestored,
 } from './services/authService'
+import DeveloperDrawer from './components/DeveloperDrawer'
+import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
+import {
+    detectContractCapabilities,
+    type ContractCapabilityReport,
+} from './lib/contractCapabilities'
+import { appCopy } from './content/uiCopy'
+import PublicPortfolio from './pages/PublicPortfolio'
+import Shortcuts from './components/Shortcuts'
+import Onboarding, { resetOnboarding } from './components/Onboarding'
 
 function App() {
     const queryClient = useQueryClient()
@@ -34,13 +51,76 @@ function App() {
     const [sessionRecovery, setSessionRecovery] = useState<string | null>(null)
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
-    const { notices, loadError, loading: readinessLoading } = useReadinessReport()
+    const { notices, loadError, loading: readinessLoading, bootReady } = useReadinessReport()
+    const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
+    const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
+    const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
+    const [contractCapabilities, setContractCapabilities] =
+        useState<ContractCapabilityReport | null>(null)
 
     const showBackendBanner = loadError || notices.length > 0
-    const contentTopPad = showBackendBanner ? 'pt-14' : 'pt-4'
+    const showApiCompatibilityBanner =
+        !apiCompatibilityDismissed &&
+        apiCompatibility !== null &&
+        apiCompatibility.severity !== 'ok'
+    const contentTopPad =
+        showBackendBanner && showApiCompatibilityBanner
+            ? 'pt-28'
+            : showBackendBanner || showApiCompatibilityBanner
+              ? 'pt-14'
+              : 'pt-4'
+
+    const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
+    const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
+    const settingsDirtyRef = useRef(false)
+
+    const [publicShareHash, setPublicShareHash] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/public\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
 
     useEffect(() => {
         checkWalletConnection()
+        runBootDiagnostics({
+            checkWallets: () => {
+                const wallets = walletManager.getAvailableWallets()
+                return wallets.length > 0
+            },
+            checkApi: async () => {
+                try {
+                    await api.get(ENDPOINTS.HEALTH)
+                    return true
+                } catch {
+                    return false
+                }
+            },
+        }).then((result) => setBootChecks(result.checks))
+    }, [])
+
+    useEffect(() => {
+        const controller = new AbortController()
+        setApiCompatibilityLoading(true)
+        void checkApiCompatibility(controller.signal).then((result) => {
+            setApiCompatibility(result)
+            setApiCompatibilityLoading(false)
+        })
+        return () => controller.abort()
+    }, [])
+
+    // Lightweight contract capability detection: confirm the deployment supports
+    // the documented methods before any write is attempted (issue #834).
+    useEffect(() => {
+        const controller = new AbortController()
+        void detectContractCapabilities(controller.signal).then((report) => {
+            setContractCapabilities(report)
+            if (report.severity !== 'ok') {
+                console.warn(`[contract] ${report.title}: ${report.message}`)
+            }
+        })
+        return () => controller.abort()
     }, [])
 
     useEffect(() => {
@@ -98,8 +178,10 @@ function App() {
             }
 
             setPublicKey(pk)
+            trackEvent('wallet_connected')
             if (navigateToDashboard) {
                 setCurrentView('dashboard')
+                trackPageView('dashboard')
             }
             await queryClient.invalidateQueries()
             return true
@@ -194,14 +276,22 @@ function App() {
     }
 
     const handleNavigate = (view: string, legalDocType?: LegalDocType) => {
+        if (currentView === 'settings' && settingsDirtyRef.current && view !== 'settings') {
+            if (!window.confirm('You have unsaved changes in Settings. Leave without saving?')) return
+        }
         setError(null)
         if (legalDocType) setLegalDoc(legalDocType)
         else if (view.startsWith('legal-')) setLegalDoc(view.replace('legal-', '') as LegalDocType)
         else setLegalDoc(null)
         setCurrentView(view)
+        trackPageView(view)
     }
 
     const errorTop = showBackendBanner ? 'top-[4.25rem]' : 'top-4'
+
+    if (!bootReady) {
+        return <StartupSplash loading={readinessLoading} loadError={loadError} />
+    }
 
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
@@ -212,6 +302,52 @@ function App() {
                 loading={readinessLoading}
                 belowRealtimeBar={false}
             />
+            {showApiCompatibilityBanner && apiCompatibility ? (
+                <div
+                    className={`fixed left-0 right-0 z-40 border-b px-4 py-3 text-sm ${
+                        showBackendBanner ? 'top-14' : 'top-0'
+                    } ${
+                        apiCompatibility.severity === 'error'
+                            ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/80 dark:text-red-100'
+                            : 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-100'
+                    }`}
+                    role="alert"
+                >
+                    <div className="mx-auto flex max-w-7xl items-start justify-between gap-4">
+                        <div>
+                            <p className="font-semibold">{apiCompatibility.title}</p>
+                            <p className="mt-1 opacity-90">{apiCompatibility.message}</p>
+                            <p className="mt-1 text-xs opacity-75">
+                                Target: {apiCompatibility.configuredOrigin}
+                                {apiCompatibility.configuredApiRoot}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setApiCompatibilityDismissed(true)}
+                            className="shrink-0 rounded px-2 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10"
+                        >
+                            {appCopy.dismiss}
+                        </button>
+                    </div>
+                </div>
+            ) : null}
+            {apiCompatibilityLoading && !apiCompatibility ? (
+                <span className="sr-only" role="status">
+                    {appCopy.checkingApiConfig}
+                </span>
+            ) : null}
+            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} />
+            <Shortcuts
+                onNewPortfolio={() => handleNavigate('setup')}
+                onOpenSettings={() => {
+                    if (currentView === 'dashboard') {
+                        resetOnboarding()
+                        window.location.reload()
+                    }
+                }}
+            />
+            <Onboarding />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"
@@ -221,7 +357,7 @@ function App() {
                     <div className="flex items-start gap-3">
                         <div className="mt-0.5 text-lg">⚠️</div>
                         <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold">Session expired</p>
+                            <p className="text-sm font-semibold">{appCopy.sessionExpiredTitle}</p>
                             <p className="mt-1 text-sm leading-5 opacity-90">{sessionRecovery}</p>
                             {sessionRecoverySource ? (
                                 <p className="mt-1 text-[11px] uppercase tracking-[0.2em] opacity-70">
@@ -235,7 +371,7 @@ function App() {
                                     disabled={isRecoveringSession}
                                     className="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {isRecoveringSession ? 'Reconnecting…' : 'Retry sign-in'}
+                                    {isRecoveringSession ? appCopy.reconnecting : appCopy.retrySignIn}
                                 </button>
                                 <button
                                     type="button"
@@ -245,7 +381,7 @@ function App() {
                                     }}
                                     className="rounded-full border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-100 dark:hover:bg-amber-900/40"
                                 >
-                                    Dismiss
+                                    {appCopy.dismiss}
                                 </button>
                             </div>
                         </div>
@@ -284,24 +420,75 @@ function App() {
                     doc={legalDoc}
                     onBack={() => handleNavigate('landing')}
                 />
+            ) : publicShareHash ? (
+                <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (
-                <Landing
-                    onNavigate={handleNavigate}
-                    onConnectWallet={connectWallet}
-                    onNeedsConsent={handleNeedsConsent}
-                    isConnecting={isConnecting}
-                    publicKey={publicKey}
-                />
+                <div className="relative">
+                    <Landing
+                        onNavigate={handleNavigate}
+                        onConnectWallet={connectWallet}
+                        onNeedsConsent={handleNeedsConsent}
+                        isConnecting={isConnecting}
+                        publicKey={publicKey}
+                    />
+                    {!publicKey ? (
+                        <div className="fixed bottom-4 left-4 z-40 max-w-xs">
+                            <button
+                                type="button"
+                                onClick={() => setShowBootDiagnostics(!showBootDiagnostics)}
+                                className="mb-1 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-xs text-slate-500 shadow-sm backdrop-blur hover:bg-white hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            >
+                                {showBootDiagnostics ? 'Hide' : 'Show'} startup checks
+                            </button>
+                            {showBootDiagnostics ? (
+                                <BootDiagnosticsPanel
+                                    checks={bootChecks}
+                                    onRetry={() => {
+                                        setBootChecks([
+                                            { id: 'wallet-detection', label: 'Wallet extension', status: 'loading' },
+                                            { id: 'api-reachability', label: 'API reachability', status: 'loading' },
+                                        ])
+                                        runBootDiagnostics({
+                                            checkWallets: () => {
+                                                const wallets = walletManager.getAvailableWallets()
+                                                return wallets.length > 0
+                                            },
+                                            checkApi: async () => {
+                                                try {
+                                                    await api.get(ENDPOINTS.HEALTH)
+                                                    return true
+                                                } catch {
+                                                    return false
+                                                }
+                                            },
+                                        }).then((result) => setBootChecks(result.checks))
+                                    }}
+                                />
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
             ) : currentView === 'dashboard' ? (
-                <Dashboard
-                    onNavigate={handleNavigate}
-                    publicKey={publicKey}
-                />
+                <ErrorBoundary fallbackTitle="Dashboard">
+                    <Dashboard
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
             ) : currentView === 'setup' ? (
-                <PortfolioSetup
-                    onNavigate={handleNavigate}
-                    publicKey={publicKey}
-                />
+                <ErrorBoundary fallbackTitle="Portfolio Setup">
+                    <PortfolioSetup
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'settings' ? (
+                <ErrorBoundary fallbackTitle="Settings">
+                    <Settings
+                        onNavigate={handleNavigate}
+                        onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
+                    />
+                </ErrorBoundary>
             ) : null}
         </div>
     )
