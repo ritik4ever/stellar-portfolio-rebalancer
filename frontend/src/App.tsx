@@ -37,6 +37,7 @@ import {
 } from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
+import EmbedWidget from './pages/EmbedWidget'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 
@@ -77,6 +78,14 @@ function App() {
     const [publicShareHash, setPublicShareHash] = useState<string | null>(() => {
         if (typeof window !== 'undefined') {
             const match = window.location.pathname.match(/^\/public\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
+
+    const [embedPortfolioId, setEmbedPortfolioId] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/embed\/portfolio\/([a-zA-Z0-9-]+)/)
             return match ? match[1] : null
         }
         return null
@@ -420,6 +429,8 @@ function App() {
                     doc={legalDoc}
                     onBack={() => handleNavigate('landing')}
                 />
+            ) : embedPortfolioId ? (
+                <EmbedWidget id={embedPortfolioId} />
             ) : publicShareHash ? (
                 <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (
