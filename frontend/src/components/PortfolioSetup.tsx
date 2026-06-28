@@ -144,7 +144,23 @@ function loadSavedTemplates(userId: string): PortfolioTemplate[] {
     const raw = localStorage.getItem(SAVED_TEMPLATES_KEY(userId));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as PortfolioTemplate[];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (template): template is PortfolioTemplate =>
+            !!template &&
+            typeof template.id === 'string' &&
+            typeof template.name === 'string' &&
+            typeof template.description === 'string' &&
+            typeof template.riskLevel === 'string' &&
+            Array.isArray(template.allocations) &&
+            template.allocations.every(
+              (allocation) =>
+                allocation &&
+                typeof allocation.asset === 'string' &&
+                Number.isFinite(allocation.percentage),
+            ),
+        )
+      : [];
   } catch {
     return [];
   }
@@ -154,7 +170,11 @@ function saveSavedTemplates(
   userId: string,
   templates: PortfolioTemplate[],
 ): void {
-  localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates));
+  try {
+    localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates));
+  } catch {
+    // Saved templates are a convenience feature; ignore storage failures.
+  }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -197,6 +217,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [draftError, setDraftError] = useState<string | null>(null);
   const hasMountedDraftSaver = useRef(false);
   const { data: assets = [], isLoading: assetsLoading } = useAssets();
+
+  useEffect(() => {
+    setSavedTemplates(loadSavedTemplates(publicKey || ''));
+  }, [publicKey]);
 
   const selectableAssets: SuggestionAsset[] = useMemo(() => {
     if (assets.length > 0) return assets;
@@ -356,6 +380,17 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     return null;
   };
 
+  const hasDuplicateAssets = useMemo(() => {
+    const seen = new Set<string>();
+    return allocations.some((allocation) => {
+      const asset = allocation.asset.trim().toUpperCase();
+      if (!asset) return false;
+      if (seen.has(asset)) return true;
+      seen.add(asset);
+      return false;
+    });
+  }, [allocations]);
+
   /** Sum of all current allocation percentages */
   const totalPercentage = allocations.reduce(
     (sum, alloc) => sum + alloc.percentage,
@@ -416,6 +451,17 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     );
 
   const remaining = remainingAllocation(allocations);
+
+  const clampNumber = (
+    rawValue: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number => {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+  };
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -503,7 +549,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    */
   const createPortfolio = async () => {
     // Block submission if any validation check has not passed
-    if (!isValidTotal || hasAnyFieldError) {
+    if (createPortfolioMutation.isPending) {
+      return;
+    }
+
+    if (!isValidTotal || hasAnyFieldError || hasDuplicateAssets) {
       setError('Please fix validation errors before submitting');
       return;
     }
@@ -519,7 +569,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     try {
       const allocationsMap = allocations.reduce(
         (acc, alloc) => {
-          acc[alloc.asset] = alloc.percentage;
+          const assetKey = alloc.asset.trim().toUpperCase();
+          if (acc[assetKey] !== undefined) {
+            throw new Error(`Duplicate asset selected: ${assetKey}`);
+          }
+          acc[assetKey] = alloc.percentage;
           return acc;
         },
         {} as Record<string, number>,
@@ -551,6 +605,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const totalStatus = totalDeviationMessage();
   // Alias so the mobile action bar can reference the same submit handler
   const handleSubmit = createPortfolio;
+  const submitDisabled =
+    !isValidTotal || hasAnyFieldError || hasDuplicateAssets || createPortfolioMutation.isPending;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -562,6 +618,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <div className='flex items-center'>
             <button
               onClick={() => onNavigate('dashboard')}
+              aria-label='Go back to dashboard'
               className='mr-3 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors'
             >
               <ArrowLeft className='w-5 h-5' />
@@ -1145,6 +1202,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     </motion.p>
                   )}
                 </AnimatePresence>
+                {hasDuplicateAssets && (
+                  <p className='mt-1 text-xs text-red-600' role='alert'>
+                    Duplicate assets are not allowed. Select each asset only once.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1197,7 +1259,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       onChange={(e) =>
                         setStrategyConfig((c) => ({
                           ...c,
-                          intervalDays: parseInt(e.target.value) || 7,
+                          intervalDays: clampNumber(e.target.value, 7, 1, 365),
                         }))
                       }
                       className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white'
@@ -1218,8 +1280,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       onChange={(e) =>
                         setStrategyConfig((c) => ({
                           ...c,
-                          volatilityThresholdPct:
-                            parseInt(e.target.value) || 10,
+                          volatilityThresholdPct: clampNumber(
+                            e.target.value,
+                            10,
+                            1,
+                            100,
+                          ),
                         }))
                       }
                       className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white'
@@ -1240,8 +1306,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       onChange={(e) =>
                         setStrategyConfig((c) => ({
                           ...c,
-                          minDaysBetweenRebalance:
-                            parseInt(e.target.value) || 1,
+                          minDaysBetweenRebalance: clampNumber(
+                            e.target.value,
+                            1,
+                            0,
+                            365,
+                          ),
                         }))
                       }
                       className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white'
@@ -1259,7 +1329,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     max='50'
                     value={threshold}
                     onChange={(e) =>
-                      setThreshold(parseInt(e.target.value) || 5)
+                      setThreshold(clampNumber(e.target.value, 5, 1, 50))
                     }
                     className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white'
                   />
@@ -1279,7 +1349,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     step='0.1'
                     value={slippageTolerance}
                     onChange={(e) =>
-                      setSlippageTolerance(parseFloat(e.target.value) || 1)
+                      setSlippageTolerance(clampNumber(e.target.value, 1, 0.1, 5))
                     }
                     className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white'
                   />
@@ -1414,6 +1484,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               {/* Back Button */}
               <button
                 onClick={() => onNavigate('dashboard')}
+                aria-label='Go back to dashboard'
                 className='border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1'
               >
                 <ArrowLeft className='w-4 h-4' />
@@ -1424,6 +1495,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <button
                 type='button'
                 onClick={createPortfolio}
+                disabled={submitDisabled}
                 className='bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1'
               >
                 {createPortfolioMutation.isPending ? (

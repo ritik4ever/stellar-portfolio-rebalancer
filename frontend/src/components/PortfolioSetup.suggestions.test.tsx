@@ -40,6 +40,7 @@ vi.mock('./AssetSelector', () => ({
 }))
 
 const mockMutateAsync = vi.fn()
+let mockIsPending = false
 vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
   buildRollbackMessage: (error: unknown, action = 'portfolio update') => {
     const detail = error instanceof Error ? error.message : 'server rejected the update'
@@ -47,7 +48,7 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
   },
   useCreatePortfolioMutation: () => ({
     mutateAsync: mockMutateAsync,
-    isPending: false,
+    isPending: mockIsPending,
   }),
 }))
 
@@ -83,6 +84,7 @@ describe('PortfolioSetup suggestions integration', () => {
     cleanup()
     localStorage.clear()
     vi.clearAllMocks()
+    mockIsPending = false
   })
 
   it('applies a suggestion to the allocation editor without submitting', () => {
@@ -117,5 +119,34 @@ describe('PortfolioSetup suggestions integration', () => {
     )
 
     expect(screen.queryByText(/reduce concentration risk/i)).toBeNull()
+  })
+
+  it('blocks submission while the mutation is pending', () => {
+    mockIsPending = true
+    renderSetup()
+
+    const createButton = screen.getByRole('button', {
+      name: /create portfolio/i,
+    }) as HTMLButtonElement
+    expect(createButton.disabled).toBe(true)
+
+    fireEvent.click(createButton)
+    expect(mockMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('prevents duplicate asset selections from submitting', () => {
+    renderSetup()
+
+    const rows = screen.getAllByRole('combobox')
+    fireEvent.change(rows[0], { target: { value: 'BTC' } })
+    fireEvent.change(rows[3], { target: { value: 'BTC' } })
+
+    expect(screen.getByText(/duplicate assets are not allowed/i)).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: /create portfolio/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }))
+    expect(mockMutateAsync).not.toHaveBeenCalled()
   })
 })

@@ -406,6 +406,67 @@ describe('PortfolioSetup allocation validation', () => {
     })
   })
 
+  describe('saved templates reload', () => {
+    const anonymousKey = 'portfolio-templates-anonymous'
+
+    it('refreshes saved templates when the connected wallet changes', () => {
+      window.localStorage.setItem(
+        anonymousKey,
+        JSON.stringify([
+          {
+            id: 'saved-a',
+            name: 'Anonymous Template',
+            description: 'Stored for anonymous use',
+            riskLevel: 'medium',
+            allocations: [{ asset: 'XLM', percentage: 100 }],
+          },
+        ]),
+      )
+
+      const { rerender } = render(
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+            })
+          }
+        >
+          <PortfolioSetup onNavigate={vi.fn()} publicKey={null} />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getByText(/anonymous template/i)).toBeTruthy()
+
+      window.localStorage.setItem(
+        'portfolio-templates-GTESTUSER',
+        JSON.stringify([
+          {
+            id: 'saved-b',
+            name: 'Wallet Template',
+            description: 'Stored for a connected wallet',
+            riskLevel: 'low',
+            allocations: [{ asset: 'USDC', percentage: 100 }],
+          },
+        ]),
+      )
+
+      rerender(
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+            })
+          }
+        >
+          <PortfolioSetup onNavigate={vi.fn()} publicKey={'GTESTUSER'} />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByText(/anonymous template/i)).toBeNull()
+      expect(screen.getByText(/wallet template/i)).toBeTruthy()
+    })
+  })
+
   // ── Submit button state ───────────────────────────────────────────────────
 
   describe('submit button state', () => {

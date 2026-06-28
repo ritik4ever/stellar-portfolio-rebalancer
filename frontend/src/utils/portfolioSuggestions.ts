@@ -79,22 +79,21 @@ function normalizeAllocations(
   const total = filtered.reduce((sum, allocation) => sum + allocation.percentage, 0)
   if (filtered.length === 0 || total <= 0) return []
 
-  return filtered.map((allocation, index) => {
-    if (index === filtered.length - 1) {
-      const previous = filtered
-        .slice(0, index)
-        .reduce((sum, row) => sum + row.percentage, 0)
-      return {
-        asset: allocation.asset,
-        percentage: Number((100 - previous).toFixed(1)),
-      }
-    }
+  const normalized = filtered.map((allocation) => ({
+    asset: allocation.asset,
+    percentage: Number(((allocation.percentage / total) * 100).toFixed(1)),
+  }))
 
-    return {
-      asset: allocation.asset,
-      percentage: Number(((allocation.percentage / total) * 100).toFixed(1)),
-    }
-  })
+  const previous = normalized
+    .slice(0, -1)
+    .reduce((sum, row) => sum + row.percentage, 0)
+
+  normalized[normalized.length - 1] = {
+    ...normalized[normalized.length - 1],
+    percentage: Number((100 - previous).toFixed(1)),
+  }
+
+  return normalized
 }
 
 function buildAllocationPreset(
@@ -191,7 +190,11 @@ export function loadDismissedPortfolioSuggestions(
       }
     }
     if (Object.keys(next).length !== Object.keys(parsed).length) {
-      window.localStorage.setItem(storageKey(userId), JSON.stringify(next))
+      try {
+        window.localStorage.setItem(storageKey(userId), JSON.stringify(next))
+      } catch {
+        // Ignore cleanup write failures; the in-memory result is still usable.
+      }
     }
     return next
   } catch {
@@ -203,7 +206,11 @@ export function saveDismissedPortfolioSuggestions(
   userId: string | null | undefined,
   dismissals: SuggestionDismissalState,
 ): void {
-  window.localStorage.setItem(storageKey(userId), JSON.stringify(dismissals))
+  try {
+    window.localStorage.setItem(storageKey(userId), JSON.stringify(dismissals))
+  } catch {
+    // Storage is best-effort only; keep the UI usable if persistence fails.
+  }
 }
 
 export function dismissPortfolioSuggestion(

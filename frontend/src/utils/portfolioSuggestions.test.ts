@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildPortfolioSuggestions,
   dismissPortfolioSuggestion,
@@ -30,9 +30,14 @@ describe('portfolioSuggestions', () => {
       assets,
     )
 
-    expect(suggestions.map((suggestion) => suggestion.id)).toContain(
-      'concentration-diversify',
+    const suggestion = suggestions.find(
+      (entry) => entry.id === 'concentration-diversify',
     )
+
+    expect(suggestion).toBeTruthy()
+    expect(
+      suggestion?.allocations.reduce((sum, row) => sum + row.percentage, 0),
+    ).toBe(100)
   })
 
   it('fires the stablecoin-only rule when the portfolio is fully stablecoins', () => {
@@ -109,5 +114,18 @@ describe('portfolioSuggestions', () => {
 
     const expired = loadDismissedPortfolioSuggestions('user-a', now + ttl + 1)
     expect(expired).toEqual({})
+  })
+
+  it('does not throw when dismissals cannot be persisted', () => {
+    const setItem = vi.spyOn(window.localStorage.__proto__, 'setItem')
+    setItem.mockImplementationOnce(() => {
+      throw new Error('quota exceeded')
+    })
+
+    expect(() =>
+      dismissPortfolioSuggestion('user-a', 'stablecoins-add-growth', Date.now()),
+    ).not.toThrow()
+
+    setItem.mockRestore()
   })
 })
