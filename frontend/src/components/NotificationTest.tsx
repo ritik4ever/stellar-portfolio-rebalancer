@@ -94,7 +94,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                     result: {
                         success: false,
                         message,
-                        sentTo: { email: null, webhook: null },
+                        sentTo: { email: null, webhook: null, telegram: null },
                         timestamp: new Date().toISOString(),
                     },
                     error: message,
@@ -121,7 +121,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                     result: {
                         success: r.success,
                         message: r.success ? 'Test notification sent' : (r.error ?? fallbackError),
-                        sentTo: r.sentTo ?? { email: null, webhook: null },
+                        sentTo: r.sentTo ?? { email: null, webhook: null, telegram: null },
                         timestamp: r.timestamp,
                     },
                     error: r.success ? null : (r.error ?? fallbackError),
@@ -151,7 +151,7 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                 className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-center"
             >
                 <p className="text-sm text-gray-600">
-                    Save at least one notification provider (email or webhook) to send test
+                    Save at least one notification provider (email, webhook, or telegram) to send test
                     notifications.
                 </p>
             </div>
@@ -294,7 +294,8 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
 
                                                 {result.success &&
                                                     (result.sentTo.email ||
-                                                        result.sentTo.webhook) && (
+                                                        result.sentTo.webhook ||
+                                                        result.sentTo.telegram) && (
                                                         <div className="mt-1 ml-5 text-xs text-gray-500 space-y-0.5">
                                                             {result.sentTo.email && (
                                                                 <p>
@@ -312,6 +313,15 @@ export function NotificationTest({ userId, hasConfiguredProvider = true }: Notif
                                                                         Webhook:
                                                                     </span>{' '}
                                                                     {result.sentTo.webhook}
+                                                                </p>
+                                                            )}
+                                                            {result.sentTo.telegram && (
+                                                                <p>
+                                                                    📱{' '}
+                                                                    <span className="font-medium">
+                                                                        Telegram:
+                                                                    </span>{' '}
+                                                                    {result.sentTo.telegram}
                                                                 </p>
                                                             )}
                                                         </div>
