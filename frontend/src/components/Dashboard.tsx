@@ -8,6 +8,7 @@ import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
+import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
@@ -916,6 +917,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 {activeTab === 'analytics' && (
                     <div className="space-y-6">
                         <PerformanceChart portfolioId={portfolioData?.id || null} />
+                        <AllocationHistory portfolioId={portfolioData?.id || null} />
                     </div>
                 )}
 
