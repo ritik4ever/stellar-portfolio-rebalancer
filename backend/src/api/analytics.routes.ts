@@ -129,6 +129,10 @@ analyticsRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res:
             throw error
         }
 
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        }
+
         const prices = await reflectorService.getCurrentPrices()
         const riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
 

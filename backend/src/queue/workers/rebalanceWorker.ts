@@ -22,7 +22,6 @@ import {
   releaseWorkerLock,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
-import { randomUUID } from "node:crypto";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
 
 let worker: Worker | null = null;
