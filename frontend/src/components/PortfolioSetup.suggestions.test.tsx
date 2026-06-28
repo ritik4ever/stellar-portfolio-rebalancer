@@ -7,6 +7,7 @@ import PortfolioSetup from './PortfolioSetup'
 const { cleanup, render } = rtl
 const fireEvent = (rtl as any).fireEvent
 const screen = (rtl as any).screen
+const within = (rtl as any).within
 
 const stripMotionProps = ({
   initial,
@@ -98,7 +99,14 @@ describe('PortfolioSetup suggestions integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^apply$/i }))
 
-    const inputs = screen.getAllByRole('spinbutton') as HTMLInputElement[]
+    const allocationSection = screen
+      .getByRole('heading', { name: /asset allocations/i })
+      .closest('div.bg-white')
+    expect(allocationSection).toBeTruthy()
+
+    const inputs = within(allocationSection as HTMLElement).getAllByRole(
+      'spinbutton',
+    ) as HTMLInputElement[]
     expect(inputs[0].value).toBe('40')
     expect(inputs[1].value).toBe('25')
     expect(inputs[2].value).toBe('20')
