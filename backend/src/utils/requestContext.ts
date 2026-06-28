@@ -3,6 +3,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 export interface RequestContext {
     requestId?: string
     correlationId?: string
+    traceId?: string
+    spanId?: string
 }
 
 const requestContextStorage = new AsyncLocalStorage<RequestContext>()
@@ -18,3 +20,9 @@ export const getRequestId = (): string | undefined =>
 
 export const getCorrelationId = (): string | undefined =>
     requestContextStorage.getStore()?.correlationId
+
+export const getTraceId = (): string | undefined =>
+    requestContextStorage.getStore()?.traceId
+
+export const getSpanId = (): string | undefined =>
+    requestContextStorage.getStore()?.spanId

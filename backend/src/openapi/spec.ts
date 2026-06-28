@@ -4,7 +4,7 @@
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const spec: Record<string, any> = {
-    openapi: '3.0.3',
+    openapi: '3.1.0',
     info: {
         title: 'Stellar Portfolio Rebalancer API',
         description: 'Intelligent portfolio rebalancing service for the Stellar ecosystem using Reflector oracles. Create portfolios, fetch prices, execute rebalances, and manage risk.',
