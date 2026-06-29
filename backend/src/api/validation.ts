@@ -73,7 +73,22 @@ export const recordRebalanceEventSchema = z.object({
     onChainLedger: z.number().int().optional(),
     onChainContractId: z.string().optional(),
     onChainPagingToken: z.string().optional(),
-    isSimulated: strictBoolean.optional()
+    isSimulated: strictBoolean.optional(),
+    feePaid: z.number().min(0).optional(),
+    slippageBps: z.number().min(0).optional(),
+    estimatedSlippageBps: z.number().min(0).optional(),
+    actualSlippageBps: z.number().min(0).optional(),
+    totalSlippageBps: z.number().min(0).optional(),
+    gasFeeXlm: z.number().min(0).optional(),
+    gasFeeUsd: z.number().min(0).optional(),
+    gasPerTradeXlm: z.number().min(0).optional(),
+    gasWarning: strictBoolean.optional(),
+    gasBreakdown: z.array(z.object({
+        tradeId: z.string(),
+        fromAsset: z.string().optional(),
+        toAsset: z.string().optional(),
+        feeXlm: z.number().min(0)
+    })).optional()
 }).strict();
 
 // Auto-Rebalancer control schemas (must be entirely empty payloads)
