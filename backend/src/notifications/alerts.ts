@@ -59,6 +59,7 @@ export async function evaluateUserAlerts(): Promise<void> {
         logger.error('[ALERTS] Failed to evaluate user alerts', {
             error: error instanceof Error ? error.message : String(error)
         });
+        throw error;
     }
 }
 
