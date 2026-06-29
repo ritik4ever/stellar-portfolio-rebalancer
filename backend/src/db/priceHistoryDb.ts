@@ -53,9 +53,6 @@ export async function getMarketMoversData(assets: string[]): Promise<MarketMover
     const pool = getPool()
     if (!pool) return []
     
-    const now = new Date()
-    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-    
     const movers: MarketMoverData[] = []
     
     for (const asset of assets) {
@@ -68,15 +65,17 @@ export async function getMarketMoversData(assets: string[]): Promise<MarketMover
         
         const latest = latestRes.rows[0]
         
-        // Get snapshot closest to 24h ago, must be between 26 hours ago and 22 hours ago
-        const since = new Date(now.getTime() - 26 * 60 * 60 * 1000)
-        const until = new Date(now.getTime() - 22 * 60 * 60 * 1000)
+        // Get snapshot closest to 24h before the latest snapshot we found
+        const latestAt = new Date(latest.recorded_at)
+        const target24hAgo = new Date(latestAt.getTime() - 24 * 60 * 60 * 1000)
+        const since = new Date(latestAt.getTime() - 26 * 60 * 60 * 1000)
+        const until = new Date(latestAt.getTime() - 22 * 60 * 60 * 1000)
         
         const historicalRes = await pool.query<{ price: number, recorded_at: Date }>(
             `SELECT price::float AS price, recorded_at FROM price_history 
              WHERE asset = $1 AND recorded_at >= $2 AND recorded_at <= $3 
              ORDER BY ABS(EXTRACT(EPOCH FROM (recorded_at - $4))) ASC LIMIT 1`,
-            [asset, since, until, twentyFourHoursAgo]
+            [asset, since, until, target24hAgo]
         )
         
         if (historicalRes.rows.length === 0) {
