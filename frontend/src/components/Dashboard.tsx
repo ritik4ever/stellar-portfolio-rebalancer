@@ -519,6 +519,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {shareLink ? 'Sharing' : 'Share'}
                                     </button>
                                 ) : null}
+                                <button type="button" onClick={() => onNavigate('wizard')}
+                                    className="border border-blue-600 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-500 dark:hover:bg-blue-900/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+                                    title="Use step-by-step wizard to create a portfolio">
+                                    ✨ Wizard
+                                </button>
                                 <button type="button" onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                                     {dashboardCopy.createPortfolio}
