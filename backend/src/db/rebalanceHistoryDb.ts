@@ -150,3 +150,128 @@ export async function dbGetHistoryStats(): Promise<{
         autoRebalances: parseInt(autoResult.rows[0]?.count ?? '0', 10)
     }
 }
+
+/**
+ * Filtered, paginated history for a single portfolio (issue #995).
+ *
+ * Maps the public-API filter vocabulary to the DB schema:
+ *   trigger_type='manual'          → is_automatic = false AND trigger NOT ILIKE '%circuit%'
+ *   trigger_type='auto'            → is_automatic = true
+ *   trigger_type='circuit_breaker' → trigger ILIKE '%circuit%'
+ *   status='success'               → status = 'completed'
+ *   status='partial'               → status = 'pending'
+ *   status='failed'                → status = 'failed'
+ *
+ * Response shape (per-item): timestamp, trigger, assets_traded, total_fee, total_slippage, status, error_reason
+ */
+export interface PortfolioRebalanceHistoryFilter {
+    from?: string            // ISO-8601
+    to?: string              // ISO-8601
+    trigger_type?: 'manual' | 'auto' | 'circuit_breaker'
+    status?: 'success' | 'partial' | 'failed'
+    limit: number
+    offset: number
+    sort: 'asc' | 'desc'
+}
+
+export interface PortfolioRebalanceHistoryItem {
+    id: string
+    portfolioId: string
+    timestamp: string
+    trigger: string
+    triggerType: 'manual' | 'auto' | 'circuit_breaker'
+    assetsTrades: number
+    totalFeeXlm: number | null
+    totalFeeUsd: number | null
+    totalSlippageBps: number | null
+    status: 'success' | 'partial' | 'failed'
+    errorReason: string | null
+}
+
+function mapStatus(dbStatus: string): 'success' | 'partial' | 'failed' {
+    if (dbStatus === 'completed') return 'success'
+    if (dbStatus === 'failed')    return 'failed'
+    return 'partial'
+}
+
+function mapTriggerType(trigger: string, isAutomatic: boolean): 'manual' | 'auto' | 'circuit_breaker' {
+    if (trigger.toLowerCase().includes('circuit')) return 'circuit_breaker'
+    if (isAutomatic) return 'auto'
+    return 'manual'
+}
+
+function rowToHistoryItem(r: RebalanceEventRow): PortfolioRebalanceHistoryItem {
+    const details = (typeof r.details === 'object' && r.details !== null
+        ? r.details
+        : {}) as Record<string, unknown>
+
+    return {
+        id: r.id,
+        portfolioId: r.portfolio_id,
+        timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
+        trigger: r.trigger,
+        triggerType: mapTriggerType(r.trigger, r.is_automatic),
+        assetsTrades: r.trades,
+        totalFeeXlm: (details.gasFeeXlm as number | null | undefined) ?? null,
+        totalFeeUsd: (details.gasFeeUsd as number | null | undefined) ?? null,
+        totalSlippageBps: (details.totalSlippageBps as number | null | undefined)
+            ?? (details.actualSlippageBps as number | null | undefined)
+            ?? null,
+        status: mapStatus(r.status),
+        errorReason: r.error ?? null,
+    }
+}
+
+export async function dbGetPortfolioRebalanceHistory(
+    portfolioId: string,
+    filter: PortfolioRebalanceHistoryFilter
+): Promise<{ items: PortfolioRebalanceHistoryItem[]; total: number }> {
+    const params: unknown[] = [portfolioId]
+    const conditions: string[] = ['portfolio_id = $1']
+
+    if (filter.from) {
+        params.push(filter.from)
+        conditions.push(`timestamp >= $${params.length}`)
+    }
+    if (filter.to) {
+        params.push(filter.to)
+        conditions.push(`timestamp <= $${params.length}`)
+    }
+    if (filter.trigger_type === 'auto') {
+        conditions.push('is_automatic = true')
+    } else if (filter.trigger_type === 'manual') {
+        conditions.push('is_automatic = false')
+        conditions.push("trigger NOT ILIKE '%circuit%'")
+    } else if (filter.trigger_type === 'circuit_breaker') {
+        conditions.push("trigger ILIKE '%circuit%'")
+    }
+    if (filter.status === 'success') {
+        conditions.push("status = 'completed'")
+    } else if (filter.status === 'failed') {
+        conditions.push("status = 'failed'")
+    } else if (filter.status === 'partial') {
+        conditions.push("status = 'pending'")
+    }
+
+    const where = conditions.join(' AND ')
+    const order = filter.sort === 'asc' ? 'ASC' : 'DESC'
+
+    // Total count (for pagination metadata)
+    const countResult = await query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM rebalance_events WHERE ${where}`,
+        params
+    )
+    const total = parseInt(countResult.rows[0]?.count ?? '0', 10)
+
+    // Data page
+    params.push(filter.limit, filter.offset)
+    const dataResult = await query<RebalanceEventRow>(
+        `SELECT * FROM rebalance_events WHERE ${where} ORDER BY timestamp ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params
+    )
+
+    return {
+        items: dataResult.rows.map(rowToHistoryItem),
+        total,
+    }
+}
