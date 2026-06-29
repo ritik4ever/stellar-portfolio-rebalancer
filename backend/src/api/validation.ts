@@ -270,3 +270,16 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+// ─── User Preferences schemas ──────────────────────────────────────────────
+export const userPreferencesSchema = z.object({
+    default_threshold: z.number().min(1).max(50).optional(),
+    default_cooldown: z.number().min(0).optional(),
+    preferred_currency: z.string().min(1).optional(),
+    timezone: z.string().min(1).optional(),
+    notification_digest_frequency: z.enum(['immediate', 'daily', 'weekly']).optional()
+}).strict();
+
+export const userPreferencesQuerySchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required")
+});

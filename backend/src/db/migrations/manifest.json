@@ -78,5 +78,13 @@
   {
     "file": "010_consent_audit_lifecycle.down.sql",
     "sha256": "351bae86974db75abfb7508e0cadf3b5695f3c223b93b68a1a6bf97dc3f85caf"
+  },
+  {
+    "file": "013_user_preferences.up.sql",
+    "sha256": "ae290645224918c9648dfdd032443ae4ae6dfe620299e41151ab40d81ae38b8a"
+  },
+  {
+    "file": "013_user_preferences.down.sql",
+    "sha256": "7699eb3709ac6ae6e5fa7cbe44931346d911ea70765b55be8e0938c8e9724251"
   }
 ]
