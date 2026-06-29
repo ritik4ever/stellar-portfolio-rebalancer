@@ -362,3 +362,4 @@ describe('Ownership enforcement (auth enabled)', () => {
         expect(body.meta?.purpose).toBe('GDPR data export')
     })
 })
+})

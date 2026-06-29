@@ -60,7 +60,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     const sendReadiness = async (_req: Request, res: Response) => {
         const report = await buildReadinessReport()
-        res.status(report.status === 'ready' ? 200 : 503).json(report)
+        res.status((report as any).status === 'ready' ? 200 : 503).json(report)
     }
 
     app.get('/readiness', sendReadiness)
@@ -122,14 +122,14 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     initPortfolioFeedWebSocket(portfolioWss)
 
     server.on('upgrade', (request, socket, head) => {
-        const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname
+        const pathname = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`).pathname
 
         if (pathname.startsWith('/ws/portfolio/')) {
-            portfolioWss.handleUpgrade(request, socket, head, (ws) => {
+            portfolioWss.handleUpgrade(request, socket as any, head, (ws) => {
                 portfolioWss.emit('connection', ws, request)
             })
         } else {
-            wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.handleUpgrade(request, socket as any, head, (ws) => {
                 wss.emit('connection', ws, request)
             })
         }
