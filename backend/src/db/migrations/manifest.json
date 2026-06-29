@@ -81,6 +81,7 @@
   },
   {
     "file": "010_consent_audit_lifecycle.down.sql",
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     "sha256": "d8977398dde3e54341c838307c620d8533b4ee7c6e73e50910edd8612e705806"
   },
   {
@@ -110,5 +111,16 @@
   {
     "file": "012_portfolio_search.up.sql",
     "sha256": "98cb9682b01ba4ae16ef965dd72c0269de9549c73060065dd297150ebe5b79ab"
+
+    "sha256": "351bae86974db75abfb7508e0cadf3b5695f3c223b93b68a1a6bf97dc3f85caf"
+  },
+  {
+    "file": "011_rebalance_cost_metrics.up.sql",
+    "sha256": "81de13521ba61016090ca7d20bdb97f758bdb1814a3f52507acb526df7b20776"
+  },
+  {
+    "file": "011_rebalance_cost_metrics.down.sql",
+    "sha256": "5760434f3e48c47c28e4be090296ec9b02b9f5822ead2fb8a337a3f4ba2be8b5"
+
   }
 ]

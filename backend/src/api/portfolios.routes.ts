@@ -160,6 +160,19 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     }
 })
 
+portfoliosRouter.get('/portfolio/:id/cost-summary', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const summary = await rebalanceHistoryService.getCostSummary(portfolioId)
+        return ok(res, summary)
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio cost summary failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 // ================================
 // PUBLIC SHARE ROUTES
 // ================================
@@ -570,6 +583,17 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
             const result = await stellarService.executeRebalance(portfolioId, mapRebalanceOptions(req.body));
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
+
+            await rebalanceHistoryService.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Manual Rebalancing',
+                trades: result.trades ?? 0,
+                gasUsed: result.gasUsed ?? '0 XLM',
+                feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
+                slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
+                status: result.status === 'failed' ? 'failed' : 'completed',
+                isAutomatic: false,
+            });
 
             return ok(res, { result });
         } finally {

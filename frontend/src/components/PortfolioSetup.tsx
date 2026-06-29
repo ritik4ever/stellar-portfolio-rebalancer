@@ -30,6 +30,7 @@ import {
 
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
+import { percentageToBps } from "../utils/calculations";
 
 
 
@@ -330,7 +331,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    * Positive = over-allocated (e.g. +5 means 105% total)
    * Negative = under-allocated (e.g. -10 means 90% total)
    */
-  const deviation = parseFloat((totalPercentage - 100).toFixed(1))
+  const deviation = parseFloat((totalPercentage - 100).toFixed(2))
 
   /**
    * Builds the real-time summary message shown below the allocation list.
@@ -465,7 +466,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     try {
       const allocationsMap = allocations.reduce(
         (acc, alloc) => {
-          acc[alloc.asset] = alloc.percentage
+          acc[alloc.asset] = percentageToBps(alloc.percentage)
           return acc
         },
         {} as Record<string, number>,
@@ -906,13 +907,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             type="number"
                             min="0"
                             max="100"
-                            step="0.1"
+                            step="0.01"
                             value={allocation.percentage}
                             onChange={(e) =>
                               updateAllocation(
                                 index,
                                 'percentage',
-                                parseFloat(e.target.value) || 0,
+                                Number.isFinite(Number.parseFloat(e.target.value))
+                                  ? Number(Number.parseFloat(e.target.value).toFixed(2))
+                                  : 0,
                               )
                             }
                             // Marks the field as invalid for screen readers
@@ -993,7 +996,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           : 'text-yellow-600' // under 100%
                     }`}
                   >
-                    {totalPercentage.toFixed(1)}%
+                    {totalPercentage.toFixed(2)}%
                   </span>
                 </div>
 
@@ -1004,7 +1007,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   aria-valuenow={Math.min(totalPercentage, 100)}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-label={`${totalPercentage.toFixed(1)}% of 100% allocated`}
+                  aria-label={`${totalPercentage.toFixed(2)}% of 100% allocated`}
                 >
                   <div
                     className={`h-full rounded-full transition-all duration-200 ${
@@ -1023,7 +1026,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
                     <span>Remaining:</span>
                     <span className={remaining > 0 ? "text-yellow-600" : "text-red-600"}>
-                      {remaining > 0 ? `+${remaining.toFixed(1)}%` : `${remaining.toFixed(1)}%`}
+                      {remaining > 0 ? `+${remaining.toFixed(2)}%` : `${remaining.toFixed(2)}%`}
                     </span>
                   </div>
                 )}
@@ -1323,7 +1326,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     : "text-red-600 dark:text-red-400"
                 }`}
               >
-                {totalPercentage.toFixed(1)}%
+                {totalPercentage.toFixed(2)}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
                 {allocations.length} asset{allocations.length !== 1 ? "s" : ""}

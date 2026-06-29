@@ -16,6 +16,7 @@ proptest = "1.4.0"
 [features]
 default = []
 testutils = ["soroban-sdk/testutils"]
+integration = []
 
 [profile.release]
 opt-level = "z"
