@@ -19,7 +19,7 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, syncBalanceSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
@@ -584,5 +584,28 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
     }
 
 });
+
+// ================================
+// STELLAR ACCOUNT BALANCE SYNC
+// ================================
+
+portfoliosRouter.post('/account/sync-balance', validateRequest(syncBalanceSchema), async (req: Request, res: Response) => {
+    try {
+        const { address } = req.body
+        
+        logger.info('[BALANCE_SYNC] Syncing account balance', { address })
+        
+        const balanceData = await stellarService.syncAccountBalance(address)
+        
+        return ok(res, {
+            address,
+            balances: balanceData.balances,
+            lastUpdated: balanceData.lastUpdated
+        })
+    } catch (error) {
+        logger.error('[ERROR] Account balance sync failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
 
 

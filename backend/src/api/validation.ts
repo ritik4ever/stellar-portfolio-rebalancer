@@ -270,3 +270,8 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+// ─── Stellar account balance sync schema ───────────────────────────────────────
+export const syncBalanceSchema = z.object({
+    address: z.string().min(1, 'Stellar address is required').regex(/^[G][A-Z0-9]{56}$/, 'Invalid Stellar public key format')
+}).strict();
