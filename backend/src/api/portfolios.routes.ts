@@ -18,11 +18,12 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioExportSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioExportSchema, portfolioRebalanceHistoryQuerySchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
 import { analyticsRouter } from './analytics.routes.js'
+import { dbGetPortfolioRebalanceHistory } from '../db/rebalanceHistoryDb.js'
 
 function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
     const options = body?.options
@@ -170,6 +171,19 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         return ok(res, { portfolio, riskHeatmap })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/cost-summary', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const summary = await rebalanceHistoryService.getCostSummary(portfolioId)
+        return ok(res, summary)
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio cost summary failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -631,6 +645,17 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
+            await rebalanceHistoryService.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Manual Rebalancing',
+                trades: result.trades ?? 0,
+                gasUsed: result.gasUsed ?? '0 XLM',
+                feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
+                slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
+                status: result.status === 'failed' ? 'failed' : 'completed',
+                isAutomatic: false,
+            });
+
             return ok(res, { result });
         } finally {
             await releaseWorkerLock(portfolioId);
@@ -644,5 +669,62 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
     }
 
 });
+
+portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolioRebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
+        }
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId);
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
+        }
+
+        const { from, to, trigger_type, status, page, page_size, sort } = req.query as any;
+
+        const limit = page_size ? parseInt(page_size, 10) : 50;
+        const pageNum = page ? parseInt(page, 10) : 1;
+        const offset = (pageNum - 1) * limit;
+
+        const start = Date.now();
+        const { items, total } = await dbGetPortfolioRebalanceHistory(portfolioId, {
+            from,
+            to,
+            trigger_type,
+            status,
+            limit,
+            offset,
+            sort: sort === 'asc' ? 'asc' : 'desc'
+        });
+        const duration = Date.now() - start;
+
+        // Log warning if query is slow
+        if (duration > 200) {
+            logger.warn('Slow rebalance history query detected', { portfolioId, durationMs: duration, count: items.length });
+        }
+
+        return ok(res, {
+            history: items,
+            pagination: {
+                page: pageNum,
+                pageSize: limit,
+                total,
+                totalPages: Math.ceil(total / limit)
+            },
+            filters: {
+                from: from || null,
+                to: to || null,
+                trigger_type: trigger_type || null,
+                status: status || null
+            }
+        });
+    } catch (error) {
+        logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
 
 

@@ -138,6 +138,7 @@ export const API_CONFIG = {
         PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
         PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-estimate`,
         PORTFOLIO_REBALANCE_PLAN: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-plan`,
+        PORTFOLIO_COST_SUMMARY: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/cost-summary`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
         PORTFOLIO_SHARE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/share`,
         PORTFOLIO_SHARE_VIEW: (hash: string) => `${API_RESOURCE_ROOT}/portfolio/share/${hash}`,

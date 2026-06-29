@@ -1,4 +1,13 @@
-
+import type { Job } from "bullmq";
+import { Worker } from "bullmq";
+import { randomUUID } from "node:crypto";
+import { runWithRequestContext } from "../../utils/requestContext.js";
+import { logger, logAudit } from "../../utils/logger.js";
+import { StellarService } from "../../services/stellar.js";
+import { rebalanceHistoryService } from "../../services/serviceContainer.js";
+import { notificationService } from "../../services/notificationService.js";
+import { getConnectionOptions } from "../connection.js";
+import type { RebalanceJobData } from "../queues.js";
 import {
   createWorkerRuntimeStatus,
   markWorkerFailed,
@@ -9,9 +18,10 @@ import {
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
   handleFinalFailure,
+  acquireWorkerLock,
+  releaseWorkerLock,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
-import { randomUUID } from "node:crypto";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
 
 let worker: Worker | null = null;
@@ -67,6 +77,15 @@ export async function processRebalanceJob(
     }
 
     const lockAcquired = await acquireWorkerLock(portfolioId);
+    if (!lockAcquired) {
+      logger.info(
+        "[WORKER:rebalance] Rebalance already in progress. Aborting.",
+        {
+          portfolioId,
+        },
+      );
+      return;
+    }
 
     const stellarService = new StellarService();
     try {
@@ -82,6 +101,8 @@ export async function processRebalanceJob(
             : "Manual Rebalancing",
         trades: rebalanceResult.trades ?? 0,
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+        slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
       });

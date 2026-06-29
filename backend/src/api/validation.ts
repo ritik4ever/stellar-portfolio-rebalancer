@@ -90,7 +90,22 @@ export const recordRebalanceEventSchema = z.object({
     onChainLedger: z.number().int().optional(),
     onChainContractId: z.string().optional(),
     onChainPagingToken: z.string().optional(),
-    isSimulated: strictBoolean.optional()
+    isSimulated: strictBoolean.optional(),
+    feePaid: z.number().min(0).optional(),
+    slippageBps: z.number().min(0).optional(),
+    estimatedSlippageBps: z.number().min(0).optional(),
+    actualSlippageBps: z.number().min(0).optional(),
+    totalSlippageBps: z.number().min(0).optional(),
+    gasFeeXlm: z.number().min(0).optional(),
+    gasFeeUsd: z.number().min(0).optional(),
+    gasPerTradeXlm: z.number().min(0).optional(),
+    gasWarning: strictBoolean.optional(),
+    gasBreakdown: z.array(z.object({
+        tradeId: z.string(),
+        fromAsset: z.string().optional(),
+        toAsset: z.string().optional(),
+        feeXlm: z.number().min(0)
+    })).optional()
 }).strict();
 
 // Auto-Rebalancer control schemas (must be entirely empty payloads)
@@ -284,3 +299,33 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+/**
+ * Query params for GET /portfolio/:id/rebalance-history
+ *
+ * Supports:
+ *   from          – ISO timestamp lower-bound (inclusive)
+ *   to            – ISO timestamp upper-bound (inclusive)
+ *   trigger_type  – 'manual' | 'auto' | 'circuit_breaker'
+ *   status        – 'success' | 'partial' | 'failed'
+ *   page          – 1-based page number (default 1)
+ *   page_size     – records per page, max 500 (default 50)
+ *   sort          – 'asc' | 'desc' (default 'desc')
+ */
+export const portfolioRebalanceHistoryQuerySchema = z.object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to:   z.string().datetime({ offset: true }).optional(),
+    trigger_type: z.enum(['manual', 'auto', 'circuit_breaker']).optional(),
+    status: z.enum(['success', 'partial', 'failed']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(500).default(50)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
+});
+
+export type PortfolioRebalanceHistoryQuery = z.infer<typeof portfolioRebalanceHistoryQuerySchema>;
