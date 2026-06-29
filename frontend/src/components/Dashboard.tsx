@@ -13,6 +13,8 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import { DriftGaugeGrid } from './DriftGauge'
+import type { DriftGaugeAsset } from './DriftGauge'
 import { API_CONFIG } from '../config/api'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
@@ -130,8 +132,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         allocationData.splice(0, allocationData.length, ...allocationsArray)
     }
 
-    const missingPriceAssets = allocationData.filter((asset: any) => {
-        const row = prices[asset.name]
+    // Build drift gauge data — map target % and live current % per asset.
+    // "current" comes from portfolio allocations when available; falls back to target
+    // so the gauge still renders (showing 0 drift) before live data arrives.
+    const driftGaugeAssets: DriftGaugeAsset[] = allocationData.map((asset: any) => {
+        // portfolioData.allocations may be an array of { asset, target, current } or
+        // an object { assetSymbol: pct }. Resolve current from the raw portfolio data.
+        let current: number = asset.value // default: same as target (0 drift)
+        const rawAlloc = portfolioData?.allocations
+        if (Array.isArray(rawAlloc)) {
+            const match = rawAlloc.find((a: any) => (a.asset ?? a.name) === asset.name)
+            if (match) {
+                current = typeof match.current === 'number' ? match.current : asset.value
+            }
+        }
+        const threshold =
+            typeof (portfolioData as any)?.threshold === 'number'
+                ? (portfolioData as any).threshold
+                : 5 // sane default
+        return { name: asset.name, target: asset.value, current, threshold }
+    })
+
+    const missingPriceAssets = allocationData.filter((asset: any) => {        const row = prices[asset.name]
         return !row || row.price === undefined || row.price === null
     })
     const pricedAssets = allocationData.length - missingPriceAssets.length
@@ -886,6 +908,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     </div>
                                 )}
                             </div>
+
+                            {/* Drift Gauges — live allocation drift per asset */}
+                            {driftGaugeAssets.length > 0 && (
+                                <DriftGaugeGrid assets={driftGaugeAssets} title="Live Allocation Drift" />
+                            )}
 
                             {/* Allocation Chart */}
                             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
