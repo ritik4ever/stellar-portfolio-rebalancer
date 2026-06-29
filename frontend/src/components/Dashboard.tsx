@@ -13,6 +13,8 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import PriceCandlestick from './PriceCandlestick'
+import type { RebalanceEvent as CandlestickRebalanceEvent } from './PriceCandlestick'
 import { API_CONFIG } from '../config/api'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
@@ -38,6 +40,7 @@ type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknow
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+    const [candlestickAsset, setCandlestickAsset] = useState<string>('XLM')
 
     const { isDark } = useTheme()
     const queryClient = useQueryClient()
@@ -962,6 +965,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 {/* Analytics Tab */}
                 {activeTab === 'analytics' && (
                     <div className="space-y-6">
+                        {/* Asset selector for candlestick chart */}
+                        {allocationData.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm text-gray-500 dark:text-gray-400">Price chart:</span>
+                                {allocationData.map((asset: any) => (
+                                    <button
+                                        key={asset.name}
+                                        type="button"
+                                        onClick={() => setCandlestickAsset(asset.name)}
+                                        aria-pressed={candlestickAsset === asset.name}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                                            candlestickAsset === asset.name
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        {asset.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <PriceCandlestick
+                            asset={candlestickAsset}
+                            portfolioCreatedAt={(portfolioData as any)?.createdAt ?? null}
+                            portfolioId={portfolioData?.id ?? null}
+                            onRebalanceClick={(_ev: CandlestickRebalanceEvent) => {}}
+                        />
                         <PerformanceChart portfolioId={portfolioData?.id || null} />
                         <AllocationHistory portfolioId={portfolioData?.id || null} />
                     </div>
