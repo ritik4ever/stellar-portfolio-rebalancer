@@ -285,3 +285,33 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+/**
+ * Query params for GET /portfolio/:id/rebalance-history
+ *
+ * Supports:
+ *   from          – ISO timestamp lower-bound (inclusive)
+ *   to            – ISO timestamp upper-bound (inclusive)
+ *   trigger_type  – 'manual' | 'auto' | 'circuit_breaker'
+ *   status        – 'success' | 'partial' | 'failed'
+ *   page          – 1-based page number (default 1)
+ *   page_size     – records per page, max 500 (default 50)
+ *   sort          – 'asc' | 'desc' (default 'desc')
+ */
+export const portfolioRebalanceHistoryQuerySchema = z.object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to:   z.string().datetime({ offset: true }).optional(),
+    trigger_type: z.enum(['manual', 'auto', 'circuit_breaker']).optional(),
+    status: z.enum(['success', 'partial', 'failed']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(500).default(50)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
+});
+
+export type PortfolioRebalanceHistoryQuery = z.infer<typeof portfolioRebalanceHistoryQuerySchema>;

@@ -1,46 +1,79 @@
-Closes #998
+Closes #995
 
 ## Summary
 
-Implements a 5-step **Portfolio Rebalancing Wizard** at `frontend/src/pages/PortfolioWizard.tsx` that guides users through every stage of portfolio creation — from template selection to Freighter wallet signing — while preserving all entered data during back/forward navigation.
+Implements a paginated, filterable **rebalance history endpoint** at `GET /portfolio/:id/rebalance-history` that returns past rebalance outcomes for a given portfolio, including failed rebalances with error reasons.
 
 ---
 
 ## What was added
 
-### New file: `frontend/src/pages/PortfolioWizard.tsx`
+### New endpoint: `GET /portfolio/:id/rebalance-history`
 
-A self-contained, mobile-responsive wizard page with 5 numbered steps:
+Returns a paginated list of past rebalances for a portfolio. Each record includes:
 
-| Step | Description |
-|------|-------------|
-| **Step 1 – Select Template** | Choose from Conservative Growth, Balanced Growth, Aggressive Alt, or Custom. Selecting a template pre-fills allocations. |
-| **Step 2 – Set Allocations** | Add/remove Stellar assets with the existing `AssetSelector` component. Live `sum` indicator validates the total is exactly 100% before allowing navigation forward. |
-| **Step 3 – Configure Rules** | Drift threshold slider (1–20%), cooldown period (hours), and an auto-rebalance toggle. |
-| **Step 4 – Review & Sign** | Full summary of allocations and rules, wallet connection status, and a "Sign with Freighter" button. |
-| **Step 5 – Success** | Confirms portfolio creation, shows portfolio ID, and offers a shareable public link with one-click copy. |
+| Field | Description |
+|-------|-------------|
+| `timestamp` | ISO-8601 datetime of the rebalance |
+| `trigger` | Raw trigger description |
+| `triggerType` | Normalized: `manual`, `auto`, or `circuit_breaker` |
+| `assetsTrades` | Number of asset trades executed |
+| `totalFeeXlm` | Total gas fee in XLM (null if unavailable) |
+| `totalFeeUsd` | Total gas fee in USD (null if unavailable) |
+| `totalSlippageBps` | Total slippage in basis points (null if unavailable) |
+| `status` | `success`, `partial`, or `failed` |
+| `errorReason` | Error description for failed rebalances (null otherwise) |
 
-**Key acceptance criteria addressed:**
-- ✅ Back/forward navigation preserves all entered data (single React state tree)
-- ✅ Step indicator shows progress at all times
-- ✅ Mobile-friendly across all steps (responsive flex/grid layout, full-width inputs on small screens)
-- ✅ Live allocation sum validation with clear user feedback
-- ✅ Freighter wallet signing via existing `walletManager.signTransaction`
-- ✅ Share link generated and displayed on success
+### Query Parameters (Filters)
 
-### New file: `frontend/src/pages/PortfolioWizard.test.tsx`
+| Param | Type | Description |
+|-------|------|-------------|
+| `from` | ISO-8601 string | Lower-bound timestamp filter (inclusive) |
+| `to` | ISO-8601 string | Upper-bound timestamp filter (inclusive) |
+| `trigger_type` | `manual` \| `auto` \| `circuit_breaker` | Filter by trigger type |
+| `status` | `success` \| `partial` \| `failed` | Filter by rebalance outcome |
+| `page` | integer (default: 1) | Page number |
+| `page_size` | integer (default: 50, max: 500) | Records per page |
+| `sort` | `asc` \| `desc` (default: desc) | Sort order by timestamp |
 
-Comprehensive unit tests covering:
-- Step 1 renders all template cards and advances to Step 2
-- Step 2 shows live allocation sum and disables Next when total ≠ 100%
-- Step 3 allows editing cooldown/threshold values
-- Step 4 triggers `createPortfolioMutation` and generates share link on sign
-- Step 5 shows portfolio ID and share link; "Go to Dashboard" navigates correctly
-- Back/forward navigation preserves entered data
+### Response Shape
 
-### Modified: `frontend/src/App.tsx`
-- Imported `PortfolioWizard`
-- Added `currentView === 'wizard'` render branch wrapped in `ErrorBoundary`
+```json
+{
+  "data": {
+    "history": [ /* PortfolioRebalanceHistoryItem[] */ ],
+    "pagination": {
+      "page": 1,
+      "pageSize": 50,
+      "total": 127,
+      "totalPages": 3
+    },
+    "filters": {
+      "from": null,
+      "to": null,
+      "trigger_type": null,
+      "status": null
+    }
+  }
+}
+```
 
-### Modified: `frontend/src/components/Dashboard.tsx`
-- Added "✨ Wizard" button to the portfolio action bar to surface the new wizard page
+### Acceptance Criteria
+
+- ✅ All rebalance outcomes recorded and returned (success, partial, failed)
+- ✅ Failed rebalances include `errorReason` field with the failure description
+- ✅ Response time monitoring: queries exceeding 200ms are logged as warnings
+- ✅ Paginated with `page`, `page_size`, `total`, `totalPages`
+- ✅ Filterable by `from`, `to`, `trigger_type`, `status`
+
+---
+
+## Files Changed
+
+### New files
+- `backend/src/test/rebalanceHistory.routes.test.ts` — Unit tests covering: 404 for missing portfolio, default pagination, filter passthrough, failed event error reasons, and totalPages calculation.
+
+### Modified files
+- `backend/src/api/portfolios.routes.ts` — Added `GET /portfolio/:id/rebalance-history` route
+- `backend/src/api/validation.ts` — Added `portfolioRebalanceHistoryQuerySchema` with Zod validation for all query parameters
+- `backend/src/db/rebalanceHistoryDb.ts` — Added `dbGetPortfolioRebalanceHistory()` — parameterised SQL query with dynamic WHERE clause construction, COUNT for total, and status/trigger mapping
