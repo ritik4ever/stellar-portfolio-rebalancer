@@ -6,6 +6,7 @@ import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
 import AssetCard from './AssetCard'
+import AssetList from './AssetList'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
 import AllocationHistory from './AllocationHistory'
@@ -783,29 +784,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </div>
                             )}
 
-                            {/* Asset Cards */}
-                            <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                                {loading ? (
-                                    [1, 2, 3].map((i) => (
-                                        <AssetCard key={`skeleton-${i}`} isLoading={true} />
-                                    ))
-                                ) : (
-                                    allocationData.map((asset: any, index: number) => {
-                                        const row = prices[asset.name]
-                                        const priceCard = row
+                            {/* Asset Cards — drag to reorder, order persisted per portfolio */}
+                            <AssetList
+                                portfolioId={portfolioData?.id ?? 'demo'}
+                                assets={allocationData}
+                                prices={Object.fromEntries(
+                                    Object.entries(prices).map(([symbol, row]) => [
+                                        symbol,
+                                        row
                                             ? {
-                                                price: typeof row === 'number' ? row : row.price ?? null,
-                                                change: typeof row === 'number' ? 0 : row.change ?? null,
-                                                source: typeof row === 'object' && row !== null ? (row.source as string | undefined) : undefined,
-                                                quoteAgeSeconds: typeof row === 'object' && row !== null ? (row.quoteAgeSeconds as number | undefined) : undefined,
-                                                servedFromCache: typeof row === 'object' && row !== null ? (row.servedFromCache as boolean | undefined) : undefined,
-                                                dataTier: typeof row === 'object' && row !== null ? (row.dataTier as string | undefined) : undefined,
+                                                price: typeof row === 'number' ? row : (row as any).price ?? null,
+                                                change: typeof row === 'number' ? 0 : (row as any).change ?? null,
+                                                source: typeof row === 'object' && row !== null ? (row as any).source : undefined,
+                                                quoteAgeSeconds: typeof row === 'object' && row !== null ? (row as any).quoteAgeSeconds : undefined,
+                                                servedFromCache: typeof row === 'object' && row !== null ? (row as any).servedFromCache : undefined,
+                                                dataTier: typeof row === 'object' && row !== null ? (row as any).dataTier : undefined,
                                             }
-                                            : undefined
-                                        return <AssetCard key={index} asset={asset} price={priceCard} />
-                                    })
+                                            : undefined,
+                                    ])
                                 )}
-                            </div>
+                                isLoading={loading}
+                            />
 
                             {/* Rebalance History */}
                             <RebalanceHistory portfolioId={portfolioData?.id || null} isLoading={loading} />

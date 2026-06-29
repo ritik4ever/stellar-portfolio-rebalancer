@@ -13,7 +13,8 @@
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:e2e:visual": "PLAYWRIGHT_VISUAL_BASELINES=1 playwright test --project=visual-regression",
+    "test:e2e:visual": "playwright test --project=visual-regression",
+    "test:e2e:visual-update": "playwright test --project=visual-regression --update-snapshots",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
