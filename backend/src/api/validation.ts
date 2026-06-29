@@ -194,6 +194,11 @@ export const portfolioExportQuerySchema = z.object({
     }),
 });
 
+export const portfolioAttributionQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+
 export const rebalanceHistoryQuerySchema = z.object({
   portfolioId: z.string().optional(),
   limit: z.preprocess(
@@ -207,11 +212,14 @@ export const rebalanceHistoryQuerySchema = z.object({
     (v) => (v === "true" ? true : v === "false" ? false : v),
     z.boolean().optional(),
   ),
+<<<<<<< HEAD
 });
 
 export const portfolioAttributionQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
+=======
+>>>>>>> e644caf (Implement portfolio attribution endpoint with snapshot-based per-asset contribution and docs)
 });
 
 // ─── Debug / admin control schemas ───────────────────────────────────────────

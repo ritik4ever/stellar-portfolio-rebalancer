@@ -205,7 +205,6 @@ class AnalyticsService {
       ...Object.keys(startSnapshot.allocations),
       ...Object.keys(endSnapshot.allocations),
     ]);
-
     const contributions: AttributionContribution[] = Array.from(assets)
       .map((asset) => {
         const startWeight = (startSnapshot.allocations[asset] ?? 0) / 100;
