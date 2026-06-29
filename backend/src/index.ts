@@ -114,8 +114,26 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     app.use(apiErrorHandler)
 
     const server = createServer(app)
-    const wss = new WebSocketServer({ server })
+    const wss = new WebSocketServer({ noServer: true })
     initRobustWebSocket(wss)
+
+    const { initPortfolioFeedWebSocket } = await import('./ws/portfolioFeed.js')
+    const portfolioWss = new WebSocketServer({ noServer: true })
+    initPortfolioFeedWebSocket(portfolioWss)
+
+    server.on('upgrade', (request, socket, head) => {
+        const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname
+
+        if (pathname.startsWith('/ws/portfolio/')) {
+            portfolioWss.handleUpgrade(request, socket, head, (ws) => {
+                portfolioWss.emit('connection', ws, request)
+            })
+        } else {
+            wss.handleUpgrade(request, socket, head, (ws) => {
+                wss.emit('connection', ws, request)
+            })
+        }
+    })
 
     const rateLimitStore = getRateLimitStoreType()
     logger.info('[STARTUP] Config fingerprint', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)
