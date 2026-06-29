@@ -42,3 +42,58 @@ export async function pruneOldPriceSnapshots(olderThanDays = 90): Promise<number
     logger.info('[priceHistory] Pruned old snapshots', { deleted, cutoffDays: olderThanDays })
     return deleted
 }
+
+export interface MarketMoverData {
+    asset: string
+    price: number
+    change24h: number
+}
+
+export async function getMarketMoversData(assets: string[]): Promise<MarketMoverData[]> {
+    const pool = getPool()
+    if (!pool) return []
+    
+    const now = new Date()
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    
+    const movers: MarketMoverData[] = []
+    
+    for (const asset of assets) {
+        // Get latest snapshot
+        const latestRes = await pool.query<{ price: number, recorded_at: Date }>(
+            'SELECT price::float AS price, recorded_at FROM price_history WHERE asset = $1 ORDER BY recorded_at DESC LIMIT 1',
+            [asset]
+        )
+        if (latestRes.rows.length === 0) continue
+        
+        const latest = latestRes.rows[0]
+        
+        // Get snapshot closest to 24h ago, must be between 26 hours ago and 22 hours ago
+        const since = new Date(now.getTime() - 26 * 60 * 60 * 1000)
+        const until = new Date(now.getTime() - 22 * 60 * 60 * 1000)
+        
+        const historicalRes = await pool.query<{ price: number, recorded_at: Date }>(
+            `SELECT price::float AS price, recorded_at FROM price_history 
+             WHERE asset = $1 AND recorded_at >= $2 AND recorded_at <= $3 
+             ORDER BY ABS(EXTRACT(EPOCH FROM (recorded_at - $4))) ASC LIMIT 1`,
+            [asset, since, until, twentyFourHoursAgo]
+        )
+        
+        if (historicalRes.rows.length === 0) {
+            continue
+        }
+        
+        const historical = historicalRes.rows[0]
+        const priceDiff = latest.price - historical.price
+        const change24h = historical.price > 0 ? (priceDiff / historical.price) * 100 : 0
+        
+        movers.push({
+            asset,
+            price: latest.price,
+            change24h
+        })
+    }
+    
+    return movers
+}
+

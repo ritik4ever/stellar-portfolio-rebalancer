@@ -13,6 +13,7 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
@@ -907,6 +908,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
+                            <MarketMovers />
                             <PriceTracker />
                         </div>
                     </div>
