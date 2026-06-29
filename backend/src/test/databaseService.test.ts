@@ -1,160 +1,276 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const createTempDbPath = (): string => {
-    const dir = join(tmpdir(), `db-service-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    mkdirSync(dir, { recursive: true })
-    return join(dir, 'portfolio.db')
-}
+  const dir = join(
+    tmpdir(),
+    `db-service-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "portfolio.db");
+};
 
-describe('DatabaseService', () => {
-    let dbPath: string
-    let envBackup: NodeJS.ProcessEnv
+describe("DatabaseService", () => {
+  let dbPath: string;
+  let envBackup: NodeJS.ProcessEnv;
 
-    beforeEach(() => {
-        vi.resetModules()
-        envBackup = { ...process.env }
-        dbPath = createTempDbPath()
-        process.env.DB_PATH = dbPath
-        process.env.ENABLE_DEMO_DB_SEED = 'false'
-        process.env.DEMO_MODE = 'false'
-    })
+  beforeEach(() => {
+    vi.resetModules();
+    envBackup = { ...process.env };
+    dbPath = createTempDbPath();
+    process.env.DB_PATH = dbPath;
+    process.env.ENABLE_DEMO_DB_SEED = "false";
+    process.env.DEMO_MODE = "false";
+  });
 
-    afterEach(() => {
-        process.env = envBackup
-        if (existsSync(dbPath)) {
-            try {
-                rmSync(dbPath, { force: true })
-            } catch {
-                // Windows may briefly hold the file; next test uses a new path
-            }
-        }
-    })
+  afterEach(() => {
+    process.env = envBackup;
+    if (existsSync(dbPath)) {
+      try {
+        rmSync(dbPath, { force: true });
+      } catch {
+        // Windows may briefly hold the file; next test uses a new path
+      }
+    }
+  });
 
-    it('creates and retrieves a portfolio with slippage tolerance', async () => {
-        const { DatabaseService } = await import('../services/databaseService.js')
-        const db = new DatabaseService()
-        try {
-            const id = db.createPortfolio('GUSER1', { XLM: 70, USDC: 30 }, 5, 1.5)
-            const portfolio = db.getPortfolio(id)
+  it("creates and retrieves a portfolio with slippage tolerance", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      const id = db.createPortfolio("GUSER1", { XLM: 70, USDC: 30 }, 5, 1.5);
+      const portfolio = db.getPortfolio(id);
 
-            expect(portfolio).toBeDefined()
-            expect(portfolio?.userAddress).toBe('GUSER1')
-            expect(portfolio?.allocations).toEqual({ XLM: 70, USDC: 30 })
-            expect(portfolio?.threshold).toBe(5)
-            expect((portfolio as any)?.slippageTolerance).toBe(1.5)
-        } finally {
-            db.close()
-        }
-    })
+      expect(portfolio).toBeDefined();
+      expect(portfolio?.userAddress).toBe("GUSER1");
+      expect(portfolio?.allocations).toEqual({ XLM: 70, USDC: 30 });
+      expect(portfolio?.threshold).toBe(5);
+      expect((portfolio as any)?.slippageTolerance).toBe(1.5);
+    } finally {
+      db.close();
+    }
+  });
 
-    it('updates portfolio with optimistic locking and increments version', async () => {
-        const { DatabaseService } = await import('../services/databaseService.js')
-        const { ConflictError } = await import('../types/index.js')
-        const db = new DatabaseService()
-        try {
-            const id = db.createPortfolio('GUSER2', { XLM: 100 }, 5)
-            const initial = db.getPortfolio(id)
-            expect(initial?.version).toBe(1)
+  it("updates portfolio with optimistic locking and increments version", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const { ConflictError } = await import("../types/index.js");
+    const db = new DatabaseService();
+    try {
+      const id = db.createPortfolio("GUSER2", { XLM: 100 }, 5);
+      const initial = db.getPortfolio(id);
+      expect(initial?.version).toBe(1);
 
-            const updated = db.updatePortfolio(
-                id,
-                { threshold: 6, totalValue: 1234, balances: { XLM: 1234 }, lastRebalance: new Date().toISOString() },
-                1
-            )
-            expect(updated).toBe(true)
+      const updated = db.updatePortfolio(
+        id,
+        {
+          threshold: 6,
+          totalValue: 1234,
+          balances: { XLM: 1234 },
+          lastRebalance: new Date().toISOString(),
+        },
+        1,
+      );
+      expect(updated).toBe(true);
 
-            const after = db.getPortfolio(id)
-            expect(after?.threshold).toBe(6)
-            expect(after?.version).toBe(2)
+      const after = db.getPortfolio(id);
+      expect(after?.threshold).toBe(6);
+      expect(after?.version).toBe(2);
 
-            expect(() => {
-                db.updatePortfolio(id, { threshold: 7 }, 1)
-            }).toThrow(ConflictError)
-        } finally {
-            db.close()
-        }
-    })
+      expect(() => {
+        db.updatePortfolio(id, { threshold: 7 }, 1);
+      }).toThrow(ConflictError);
+    } finally {
+      db.close();
+    }
+  });
 
-    it('records rebalance events and returns filtered auto-rebalances', async () => {
-        const { DatabaseService } = await import('../services/databaseService.js')
-        const db = new DatabaseService()
-        try {
-            const id = db.createPortfolio('GUSER3', { XLM: 100 }, 5)
-            db.recordRebalanceEvent({
-                portfolioId: id,
-                trigger: 'Manual Rebalance',
-                trades: 1,
-                gasUsed: '0.01 XLM',
-                status: 'completed',
-                isAutomatic: false,
-                details: { reason: 'manual' }
-            })
-            db.recordRebalanceEvent({
-                portfolioId: id,
-                trigger: 'Automatic Rebalancing',
-                trades: 2,
-                gasUsed: '0.02 XLM',
-                status: 'completed',
-                isAutomatic: true,
-                details: { reason: 'scheduled' }
-            })
+  it("records rebalance events and returns filtered auto-rebalances", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      const id = db.createPortfolio("GUSER3", { XLM: 100 }, 5);
+      db.recordRebalanceEvent({
+        portfolioId: id,
+        trigger: "Manual Rebalance",
+        trades: 1,
+        gasUsed: "0.01 XLM",
+        status: "completed",
+        isAutomatic: false,
+        details: { reason: "manual" },
+      });
+      db.recordRebalanceEvent({
+        portfolioId: id,
+        trigger: "Automatic Rebalancing",
+        trades: 2,
+        gasUsed: "0.02 XLM",
+        status: "completed",
+        isAutomatic: true,
+        details: { reason: "scheduled" },
+      });
 
-            const fullHistory = db.getRebalanceHistory(id, 10)
-            const autos = db.getRecentAutoRebalances(id, 10)
-            const since = db.getAutoRebalancesSince(id, new Date(Date.now() - 60 * 1000))
+      const fullHistory = db.getRebalanceHistory(id, 10);
+      const autos = db.getRecentAutoRebalances(id, 10);
+      const since = db.getAutoRebalancesSince(
+        id,
+        new Date(Date.now() - 60 * 1000),
+      );
 
-            expect(fullHistory).toHaveLength(2)
-            expect(autos).toHaveLength(1)
-            expect(autos[0].isAutomatic).toBe(true)
-            expect(since.length).toBeGreaterThanOrEqual(1)
-        } finally {
-            db.close()
-        }
-    })
+      expect(fullHistory).toHaveLength(2);
+      expect(autos).toHaveLength(1);
+      expect(autos[0].isAutomatic).toBe(true);
+      expect(since.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      db.close();
+    }
+  });
 
-    it('stores and reads indexer state key-value entries', async () => {
-        const { DatabaseService } = await import('../services/databaseService.js')
-        const db = new DatabaseService()
-        try {
-            expect(db.getIndexerState('cursor')).toBeUndefined()
-            db.setIndexerState('cursor', 'abc123')
-            expect(db.getIndexerState('cursor')).toBe('abc123')
-            db.setIndexerState('cursor', 'def456')
-            expect(db.getIndexerState('cursor')).toBe('def456')
-        } finally {
-            db.close()
-        }
-    })
+  it("stores and reads indexer state key-value entries", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      expect(db.getIndexerState("cursor")).toBeUndefined();
+      db.setIndexerState("cursor", "abc123");
+      expect(db.getIndexerState("cursor")).toBe("abc123");
+      db.setIndexerState("cursor", "def456");
+      expect(db.getIndexerState("cursor")).toBe("def456");
 
-    it('ensures portfolio exists without duplicating existing one', async () => {
-        const { DatabaseService } = await import('../services/databaseService.js')
-        const db = new DatabaseService()
-        try {
-            db.ensurePortfolioExists('fixed-id', 'GUSER4')
-            db.ensurePortfolioExists('fixed-id', 'GUSER4')
+      expect(db.getContractEventIndexerState().cursor).toBeUndefined();
+      db.saveContractEventIndexerState({
+        cursor: "page-token-1",
+        latestLedger: 1234,
+        lastSuccessfulSyncAt: "2023-01-01T00:00:00.000Z",
+      });
+      expect(db.getContractEventIndexerState()).toMatchObject({
+        name: "soroban_event_indexer",
+        cursor: "page-token-1",
+        latestLedger: 1234,
+        lastSuccessfulSyncAt: "2023-01-01T00:00:00.000Z",
+      });
+      db.resetContractEventIndexerState(100);
+      expect(db.getContractEventIndexerState()).toMatchObject({
+        name: "soroban_event_indexer",
+        latestLedger: 100,
+      });
+      expect(db.getContractEventIndexerState().cursor).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
 
-            const all = db.getAllPortfolios().filter((p) => p.id === 'fixed-id')
-            expect(all).toHaveLength(1)
-        } finally {
-            db.close()
-        }
-    })
+  it("stores on-chain rebalance metadata and treats paging tokens idempotently", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      db.ensurePortfolioExists("chain-portfolio", "GCHAIN");
+      const first = db.recordRebalanceEvent({
+        portfolioId: "chain-portfolio",
+        trigger: "On-chain Rebalance Executed",
+        trades: 1,
+        gasUsed: "on-chain",
+        status: "completed",
+        eventSource: "onchain",
+        onChainConfirmed: true,
+        onChainEventType: "rebalance_executed",
+        onChainTxHash: "0xabc",
+        onChainLedger: 123,
+        onChainContractId: "CCONTRACT",
+        onChainPagingToken: "token-abc",
+        isSimulated: false,
+      });
+      const replay = db.recordRebalanceEvent({
+        portfolioId: "chain-portfolio",
+        trigger: "On-chain Rebalance Executed",
+        trades: 1,
+        gasUsed: "on-chain",
+        status: "completed",
+        eventSource: "onchain",
+        onChainConfirmed: true,
+        onChainEventType: "rebalance_executed",
+        onChainTxHash: "0xabc",
+        onChainLedger: 123,
+        onChainContractId: "CCONTRACT",
+        onChainPagingToken: "token-abc",
+        isSimulated: false,
+      });
 
-    it('seeds demo data when enabled', async () => {
-        process.env.ENABLE_DEMO_DB_SEED = 'true'
-        process.env.DEMO_MODE = 'true'
+      expect(replay.id).toBe(first.id);
+      const history = db.getRebalanceHistory("chain-portfolio", 10);
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({
+        eventSource: "onchain",
+        onChainConfirmed: true,
+        onChainEventType: "rebalance_executed",
+        onChainTxHash: "0xabc",
+        onChainLedger: 123,
+        onChainContractId: "CCONTRACT",
+        onChainPagingToken: "token-abc",
+        isSimulated: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
 
-        const { DatabaseService } = await import('../services/databaseService.js')
-        const db = new DatabaseService()
-        try {
-            expect(db.getPortfolioCount()).toBeGreaterThan(0)
-            const stats = db.getHistoryStats()
-            expect(stats.totalEvents).toBeGreaterThan(0)
-        } finally {
-            db.close()
-        }
-    })
-})
+  it("ensures portfolio exists without duplicating existing one", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      db.ensurePortfolioExists("fixed-id", "GUSER4");
+      db.ensurePortfolioExists("fixed-id", "GUSER4");
+
+      const all = db.getAllPortfolios().filter((p) => p.id === "fixed-id");
+      expect(all).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("seeds demo data when enabled", async () => {
+    process.env.ENABLE_DEMO_DB_SEED = "true";
+    process.env.DEMO_MODE = "true";
+
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      expect(db.getPortfolioCount()).toBeGreaterThan(0);
+      const stats = db.getHistoryStats();
+      expect(stats.totalEvents).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("purges old consent audit events based on retention days", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      const userId = "GPURGETEST";
+      db.recordConsent(userId, { terms: true, privacy: true, cookies: true });
+      expect(db.getConsentAudit(userId)).toHaveLength(1);
+
+      const deleted = db.purgeOldConsentAuditEvents(0);
+      expect(deleted).toBe(1);
+      expect(db.getConsentAudit(userId)).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("purgeOldConsentAuditEvents returns 0 when no old events exist", async () => {
+    const { DatabaseService } = await import("../services/databaseService.js");
+    const db = new DatabaseService();
+    try {
+      const userId = "GNOOLD";
+      db.recordConsent(userId, { terms: true, privacy: true, cookies: true });
+      expect(db.getConsentAudit(userId)).toHaveLength(1);
+
+      const deleted = db.purgeOldConsentAuditEvents(36500);
+      expect(deleted).toBe(0);
+      expect(db.getConsentAudit(userId)).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+});

@@ -8,27 +8,121 @@
     box-sizing: border-box;
 }
 
+/*
+ * Contrast tokens — establish a legible floor for both themes so that
+ * cards, badges, and low-emphasis text never drop below WCAG AA.
+ * `color-scheme` also keeps native UI (scrollbars, form controls) readable.
+ */
+:root {
+    color-scheme: light;
+    --color-text-base: #111827;   /* gray-900 */
+    --color-text-muted: #4b5563;  /* gray-600 — ~7:1 on white */
+    --color-bg-base: #f9fafb;     /* gray-50 */
+}
+
+:root.dark {
+    color-scheme: dark;
+    --color-text-base: #f9fafb;   /* gray-50 */
+    --color-text-muted: #cbd5e1;  /* slate-300 — ~7:1 on gray-800/900 */
+    --color-bg-base: #111827;     /* gray-900 */
+}
+
 body {
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    color: var(--color-text-base);
+    background-color: var(--color-bg-base);
+}
+
+/* Low-emphasis helper text held to an AA-compliant muted token in both themes. */
+.text-muted-token {
+    color: var(--color-text-muted);
 }
 
 .recharts-tooltip-wrapper {
     outline: none;
 }
 
-/* NEW: Mobile action bar styles */
+/* Focus-visible ring for interactive elements */
+*:focus-visible {
+    outline: none;
+}
+
+.wallet-selector-btn:focus-visible {
+    outline: 2px solid #3B82F6;
+    outline-offset: 2px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .motion-safe\:animate-spin {
+        animation: none !important;
+    }
+
+    .motion-safe\:animate-pulse {
+        animation: none !important;
+    }
+
+    .motion-safe\:transition-transform {
+        transition: none !important;
+    }
+
+    .dashboard-card:hover {
+        transform: none;
+    }
+}
+
+/* Mobile responsive styles */
+@media (max-width: 640px) {
+    body {
+        font-size: 14px;
+    }
+
+    .mobile-action-bar {
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -1px rgba(0, 0, 0, 0.06);
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+}
+
 @media (max-width: 768px) {
-    /* Ensure mobile action bar is always visible above other content */
     .mobile-action-bar {
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
         box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -1px rgba(0, 0, 0, 0.06);
     }
     
-    /* Add safe area padding for devices with home indicators */
     .mobile-action-bar {
         padding-bottom: max(1rem, env(safe-area-inset-bottom));
     }
+}
+
+/* Card hover lift effect */
+.dashboard-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-1px);
+}
+
+/* Responsive table wrapper for horizontal scroll on narrow screens */
+.table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }

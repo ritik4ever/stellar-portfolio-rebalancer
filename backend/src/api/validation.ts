@@ -1,76 +1,61 @@
-import { z } from "zod";
+import { z } from 'zod';
 import {
   notificationEventsSchema,
   notificationPreferencesSchema,
-} from "../services/notificationPreferences.js";
+} from '../services/notificationPreferences.js';
 
 const strictBoolean = z.preprocess((val) => {
-  if (typeof val === "string") {
-    if (val.toLowerCase() === "true") return true;
-    if (val.toLowerCase() === "false") return false;
-  }
-  return val;
+    if (typeof val === 'string') {
+        if (val.toLowerCase() === 'true') return true;
+        if (val.toLowerCase() === 'false') return false;
+    }
+    return val;
 }, z.boolean());
 
 // Schema for POST /portfolio
-export const createPortfolioSchema = z
-  .object({
+export const createPortfolioSchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),
+    name: z.string().max(256, "name is too long").optional(),
+    description: z.string().max(2000, "description is too long").optional(),
     allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
-      (allocations) => {
-        const total = Object.values(allocations).reduce(
-          (sum, val) => sum + val,
-          0,
-        );
-        return Math.abs(total - 100) <= 0.01;
-      },
-      {
-        message: "Allocations must sum to 100%",
-      },
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        {
+            message: "Allocations must sum to 100%",
+        }
     ),
-    threshold: z
-      .number()
-      .min(1, "Threshold must be between 1% and 50%")
-      .max(50, "Threshold must be between 1% and 50%"),
-    slippageTolerance: z
-      .number()
-      .min(0.1, "Slippage tolerance must be between 0.1% and 5%")
-      .max(5, "Slippage tolerance must be between 0.1% and 5%")
-      .optional(),
-    strategy: z
-      .enum(["threshold", "periodic", "volatility", "custom"])
-      .optional(),
-    strategyConfig: z
-      .object({
+    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
+    slippageTolerance: z.number().min(0.1, "Slippage tolerance must be between 0.1% and 5%").max(5, "Slippage tolerance must be between 0.1% and 5%").optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
         intervalDays: z.number().min(1).max(365).optional(),
         volatilityThresholdPct: z.number().min(1).max(100).optional(),
         minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
-      })
-      .optional(),
-  })
-  .strict();
+    }).optional(),
+}).strict();
+
+export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
+    version: z.number().int().min(1, "Version must be a positive integer")
+});
 
 // Schema for POST /portfolio/:id/rebalance
-export const rebalancePortfolioSchema = z
-  .object({
-    options: z
-      .object({
+export const rebalancePortfolioSchema = z.object({
+    options: z.object({
         simulateOnly: strictBoolean.optional(),
         ignoreSafetyChecks: strictBoolean.optional(),
-        slippageOverrides: z.record(z.string(), z.number()).optional(),
-      })
-      .optional(),
-  })
-  .strict(); // Optional, but if body is present, it must strictly match
+        slippageOverrides: z.record(z.string(), z.number()).optional()
+    }).optional()
+}).strict(); // Optional, but if body is present, it must strictly match
 
 // Schema for POST /rebalance/history
-export const recordRebalanceEventSchema = z
-  .object({
+export const recordRebalanceEventSchema = z.object({
     portfolioId: z.string().min(1, "portfolioId is required"),
     trigger: z.string().min(1, "trigger is required"),
     trades: z.number().int().min(0, "trades must be a positive integer"),
     gasUsed: z.string().min(1, "gasUsed is required"),
-    status: z.enum(["completed", "failed", "pending"]),
+    status: z.enum(['completed', 'failed', 'pending']),
 
     // Optional / Extra fields mapped safely from the history service
     isAutomatic: strictBoolean.optional(),
@@ -81,7 +66,7 @@ export const recordRebalanceEventSchema = z
     amount: z.number().optional(),
     prices: z.record(z.string(), z.any()).optional(),
     portfolio: z.any().optional(),
-    eventSource: z.enum(["offchain", "simulated", "onchain"]).optional(),
+    eventSource: z.enum(['offchain', 'simulated', 'onchain']).optional(),
     onChainConfirmed: strictBoolean.optional(),
     onChainEventType: z.string().optional(),
     onChainTxHash: z.string().optional(),
@@ -89,75 +74,84 @@ export const recordRebalanceEventSchema = z
     onChainContractId: z.string().optional(),
     onChainPagingToken: z.string().optional(),
     isSimulated: strictBoolean.optional(),
-  })
-  .strict();
+    feePaid: z.number().min(0).optional(),
+    slippageBps: z.number().min(0).optional(),
+    estimatedSlippageBps: z.number().min(0).optional(),
+    actualSlippageBps: z.number().min(0).optional(),
+    totalSlippageBps: z.number().min(0).optional(),
+    gasFeeXlm: z.number().min(0).optional(),
+    gasFeeUsd: z.number().min(0).optional(),
+    gasPerTradeXlm: z.number().min(0).optional(),
+    gasWarning: strictBoolean.optional(),
+    gasBreakdown: z.array(z.object({
+        tradeId: z.string(),
+        fromAsset: z.string().optional(),
+        toAsset: z.string().optional(),
+        feeXlm: z.number().min(0)
+    })).optional()
+}).strict();
 
 // Auto-Rebalancer control schemas (must be entirely empty payloads)
 export const autoRebalancerControlSchema = z.object({}).strict();
 
 // ─── Auth schemas ────────────────────────────────────────────────────────────
-export const loginSchema = z
-  .object({
-    address: z.string().min(1, "address is required").trim(),
-  })
-  .strict();
+export const challengeSchema = z.object({
+    address: z.string().min(1, 'address is required').trim()
+}).strict();
 
-export const refreshTokenSchema = z
-  .object({
-    refreshToken: z.string().min(1, "refreshToken is required"),
-  })
-  .strict();
+export const loginSchema = z.object({
+    address: z.string().min(1, 'address is required').trim(),
+    signature: z.string().min(1, 'signature is required').trim()
+}).strict();
+
+export const refreshTokenSchema = z.object({
+    refreshToken: z.string().min(1, 'refreshToken is required')
+}).strict();
+
+export const logoutSchema = z.object({
+    refreshToken: z.string().optional()
+}).strict();
+
+export const logoutAllSchema = z.object({
+    address: z.string().optional()
+}).strict();
 
 // ─── Consent schemas ─────────────────────────────────────────────────────────
-export const consentStatusQuerySchema = z
-  .object({
-    userId: z.string().min(1, "userId is required").optional(),
-    user_id: z.string().min(1).optional(),
-  })
-  .refine((data) => !!(data.userId || data.user_id), {
-    message: "userId is required",
-    path: ["userId"],
-  });
+export const consentStatusQuerySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional()
+}).refine(
+    (data) => !!(data.userId || data.user_id),
+    { message: 'userId is required', path: ['userId'] }
+);
 
-export const recordConsentSchema = z
-  .object({
-    userId: z.string().min(1, "userId is required"),
-    terms: z
-      .boolean()
-      .refine((v) => v === true, {
-        message: "You must accept Terms of Service",
-      }),
-    privacy: z
-      .boolean()
-      .refine((v) => v === true, { message: "You must accept Privacy Policy" }),
-    cookies: z
-      .boolean()
-      .refine((v) => v === true, { message: "You must accept Cookie Policy" }),
-  })
-  .strict();
+export const recordConsentSchema = z.object({
+    userId: z.string().min(1, 'userId is required'),
+    terms: z.boolean().refine((v) => v === true, { message: 'You must accept Terms of Service' }),
+    privacy: z.boolean().refine((v) => v === true, { message: 'You must accept Privacy Policy' }),
+    cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' }),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
+}).strict();
 
-export const consentGrantSchema = z
-  .object({
-    userId: z.string().min(1, "userId is required").optional(),
+export const consentGrantSchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
     terms: z.boolean().default(true),
     privacy: z.boolean().default(true),
     cookies: z.boolean().default(true),
-  })
-  .strict()
-  .refine((data) => data.terms && data.privacy && data.cookies, {
-    message: "All consent flags must be accepted",
-    path: ["terms"],
-  });
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
+}).strict().refine(
+    (data) => data.terms && data.privacy && data.cookies,
+    { message: 'All consent flags must be accepted', path: ['terms'] }
+);
 
-export const consentRevokeSchema = z
-  .object({
-    userId: z.string().min(1, "userId is required").optional(),
-  })
-  .strict();
+export const consentRevokeSchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
+}).strict();
 
 export const consentAuditQuerySchema = z.object({
-  userId: z.string().min(1, "userId is required").optional(),
-  user_id: z.string().min(1).optional(),
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional()
 });
 
 // ─── Notification schemas ─────────────────────────────────────────────────────
@@ -165,67 +159,159 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-  userId: z.string().min(1, "userId query parameter is required").optional(),
+    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
-export const adminAddAssetSchema = z
-  .object({
-    symbol: z.string().min(1, "symbol is required").max(20),
-    name: z.string().min(1, "name is required").max(100),
+export const adminAddAssetSchema = z.object({
+    symbol: z.string().min(1, 'symbol is required').max(20),
+    name: z.string().min(1, 'name is required').max(100),
     contractAddress: z.string().optional(),
     issuerAccount: z.string().optional(),
-    coingeckoId: z.string().optional(),
-  })
-  .strict();
+    coingeckoId: z.string().optional()
+}).strict();
 
-export const adminPatchAssetSchema = z
-  .object({
-    enabled: z.boolean(),
-  })
-  .strict();
+export const adminPatchAssetSchema = z.object({
+    enabled: z.boolean().optional(),
+    quarantined: z.boolean().optional()
+}).strict().refine(
+    (data) => data.enabled !== undefined || data.quarantined !== undefined,
+    { message: 'At least one of enabled or quarantined must be provided' }
+);
+
+// Query params for GET /assets — pagination, sorting, and issuer/symbol filters.
+export const assetsListQuerySchema = z.object({
+    enabledOnly: strictBoolean.optional(),
+    // Symbol/name search aliases (kept for backward compatibility).
+    code: z.string().trim().optional(),
+    search: z.string().trim().optional(),
+    q: z.string().trim().optional(),
+    // Filter by issuer account (case-insensitive substring).
+    issuer: z.string().trim().optional(),
+    sortBy: z.enum(['symbol', 'name', 'enabled']).optional(),
+    order: z.enum(['asc', 'desc']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).optional()
+    ),
+    limit: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).optional()
+    )
+});
+
+// ─── Draft portfolio schemas ─────────────────────────────────────────────────
+export const createDraftSchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required"),
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ),
+    threshold: z.number().min(1).max(50),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
+
+export const updateDraftSchema = z.object({
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ).optional(),
+    threshold: z.number().min(1).max(50).optional(),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
 
 // ─── Export / query-param schemas ─────────────────────────────────────────────
 export const portfolioExportQuerySchema = z.object({
-  format: z
-    .enum(["json", "csv", "pdf"])
-    .refine((v) => ["json", "csv", "pdf"].includes(v), {
-      message: "Query parameter format must be one of: json, csv, pdf",
-    }),
-});
-
-export const portfolioAttributionQuerySchema = z.object({
-  from: z.string().optional(),
-  to: z.string().optional(),
+    format: z.enum(['json', 'csv', 'pdf']).refine(
+        (v) => ['json', 'csv', 'pdf'].includes(v),
+        { message: 'Query parameter format must be one of: json, csv, pdf' }
+    )
 });
 
 export const rebalanceHistoryQuerySchema = z.object({
-  portfolioId: z.string().optional(),
-  limit: z.preprocess(
-    (v) => (v !== undefined && v !== "" ? Number(v) : undefined),
-    z.number().int().min(1).max(500).optional(),
-  ),
-  source: z.enum(["offchain", "simulated", "onchain"]).optional(),
-  startTimestamp: z.string().optional(),
-  endTimestamp: z.string().optional(),
-  syncOnChain: z.preprocess(
-    (v) => (v === "true" ? true : v === "false" ? false : v),
-    z.boolean().optional(),
-  ),
-<<<<<<< HEAD
-});
-
-export const portfolioAttributionQuerySchema = z.object({
-  from: z.string().optional(),
-  to: z.string().optional(),
-=======
->>>>>>> e644caf (Implement portfolio attribution endpoint with snapshot-based per-asset contribution and docs)
+    portfolioId: z.string().optional(),
+    limit: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(500).optional()
+    ),
+    offset: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(0).optional()
+    ),
+    source: z.enum(['offchain', 'simulated', 'onchain']).optional(),
+    startTimestamp: z.string().optional(),
+    endTimestamp: z.string().optional(),
+    syncOnChain: z.preprocess(
+        (v) => (v === 'true' ? true : v === 'false' ? false : v),
+        z.boolean().optional()
+    )
 });
 
 // ─── Debug / admin control schemas ───────────────────────────────────────────
 export const debugTestNotificationSchema = z.object({
-  userId: z.string().min(1).optional(),
-  eventType: z
-    .enum(["rebalance", "circuitBreaker", "priceMovement", "riskChange"])
-    .optional(),
+    userId: z.string().min(1).optional(),
+    eventType: z.enum(['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']).optional()
 });
+
+export const portfolioHistoryQuerySchema = z.object({
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).default(20)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
+});
+
+/**
+ * Query params for GET /portfolio/:id/rebalance-history
+ *
+ * Supports:
+ *   from          – ISO timestamp lower-bound (inclusive)
+ *   to            – ISO timestamp upper-bound (inclusive)
+ *   trigger_type  – 'manual' | 'auto' | 'circuit_breaker'
+ *   status        – 'success' | 'partial' | 'failed'
+ *   page          – 1-based page number (default 1)
+ *   page_size     – records per page, max 500 (default 50)
+ *   sort          – 'asc' | 'desc' (default 'desc')
+ */
+export const portfolioRebalanceHistoryQuerySchema = z.object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to:   z.string().datetime({ offset: true }).optional(),
+    trigger_type: z.enum(['manual', 'auto', 'circuit_breaker']).optional(),
+    status: z.enum(['success', 'partial', 'failed']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(500).default(50)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
+});
+
+export type PortfolioRebalanceHistoryQuery = z.infer<typeof portfolioRebalanceHistoryQuerySchema>;

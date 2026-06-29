@@ -86,4 +86,60 @@ describe('rateLimit middleware', () => {
         const { getRateLimitStoreType } = await import('../middleware/rateLimit.js')
         expect(getRateLimitStoreType()).toBe('memory')
     })
+
+    it('dynamicRateLimiter applies auth limit on POST /api/auth/login', async () => {
+        vi.stubEnv('RATE_LIMIT_WINDOW_MS', '60000')
+        vi.stubEnv('RATE_LIMIT_AUTH_MAX', '3')
+        vi.resetModules()
+
+        const { dynamicRateLimiter } = await import('../middleware/rateLimit.js')
+        const app = express()
+        app.use(express.json())
+        app.post('/api/auth/login', dynamicRateLimiter, (_req, res) => {
+            res.json({ ok: true })
+        })
+
+        // 3 requests allowed, 4th throttled
+        await request(app).post('/api/auth/login').send({}).expect(200)
+        await request(app).post('/api/auth/login').send({}).expect(200)
+        await request(app).post('/api/auth/login').send({}).expect(200)
+        const fourth = await request(app).post('/api/auth/login').send({}).expect(429)
+        expect(fourth.headers['x-ratelimit-limit-type']).toBe('authentication')
+    })
+
+    it('dynamicRateLimiter falls back to globalRateLimiter for unmapped routes', async () => {
+        vi.stubEnv('RATE_LIMIT_WINDOW_MS', '60000')
+        vi.stubEnv('RATE_LIMIT_MAX', '2')
+        vi.resetModules()
+
+        const { dynamicRateLimiter } = await import('../middleware/rateLimit.js')
+        const app = express()
+        app.use(express.json())
+        app.get('/unmapped-route', dynamicRateLimiter, (_req, res) => {
+            res.json({ ok: true })
+        })
+
+        await request(app).get('/unmapped-route').expect(200)
+        await request(app).get('/unmapped-route').expect(200)
+        const third = await request(app).get('/unmapped-route').expect(429)
+        expect(third.headers['x-ratelimit-limit-type']).toBe('global')
+    })
+
+    it('dynamicRateLimiter skips rate limiting for health and readiness probes', async () => {
+        vi.stubEnv('RATE_LIMIT_WINDOW_MS', '60000')
+        vi.stubEnv('RATE_LIMIT_MAX', '1')
+        vi.resetModules()
+
+        const { dynamicRateLimiter } = await import('../middleware/rateLimit.js')
+        const app = express()
+        app.use(express.json())
+        app.get('/health', dynamicRateLimiter, (_req, res) => {
+            res.json({ ok: true })
+        })
+
+        // Probes are skipped, so multiple requests will succeed regardless of limit
+        await request(app).get('/health').expect(200)
+        await request(app).get('/health').expect(200)
+        await request(app).get('/health').expect(200)
+    })
 })

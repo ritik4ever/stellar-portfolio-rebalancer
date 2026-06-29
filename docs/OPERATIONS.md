@@ -2,18 +2,27 @@
 
 How background jobs, queues, the contract indexer, and health checks fit together when you run or debug the backend locally or in Docker.
 
+## Queue Operations Monitoring
+
+For comprehensive queue monitoring, dashboard guidance, and operational workflows:
+
+- **Dashboard:** "Queue Operations & Worker Lag" in Grafana (`http://localhost:3003`) — real-time visualization of queue depth, worker lag, failure rates, and drain behavior
+- **Health Check:** `node scripts/queue-health-check.mjs` — programmatic queue health validation for CI/CD pipelines and operational scripts
+- **Workflows & Runbooks:** See [QUEUE_OPERATIONS_WORKFLOW.md](QUEUE_OPERATIONS_WORKFLOW.md) for scenario-based troubleshooting, pre-deployment validation, and incident response procedures
+
 ## Redis and queues
 
 - **BullMQ** drives scheduled work: portfolio checks, rebalance jobs, analytics snapshots, and idempotency key cleanup.
 - **Connection:** `REDIS_URL` (default `redis://localhost:6379`). If Redis is unreachable, `probeRedis()` reports unavailable and the HTTP API still starts; queue-backed features are degraded.
 - **Scheduler:** When Redis is up, `startQueueScheduler()` (from `backend/src/queue/scheduler.ts`) registers repeatable cron jobs and enqueues one-off startup jobs (portfolio check, analytics snapshot, idempotency cleanup).
 - **Queues:** Defined in `backend/src/queue/queues.js` (`portfolio-check`, `rebalance`, `analytics-snapshot`, `idempotency-cleanup`). Without Redis, queue getters return `null` and workers do not attach.
+- **Metrics:** Backend exposes Prometheus metrics at `/metrics`: `stellar_portfolio_queue_jobs`, `stellar_portfolio_queue_worker_lag`, `stellar_portfolio_queue_drain_rate`, `stellar_portfolio_queue_failure_rate`
 
 ## Worker startup
 
 - Worker implementations live under `backend/src/queue/workers/` (`portfolioCheckWorker`, `rebalanceWorker`, `analyticsSnapshotWorker`, `idempotencyCleanupWorker`). Each exposes `start*Worker` / `stop*Worker` and runtime status used by readiness and ops routes.
 - **Important:** The default `npm run dev` / `npm start` entrypoint (`backend/src/index.ts`) registers the **scheduler** when Redis is available; it does **not** automatically spawn BullMQ worker processes. For full queue processing in development you need a process that calls the worker starters (or a dedicated worker entrypoint your deployment provides). Until workers run, jobs accumulate in Redis and `/ready` may report workers as not ready.
-- **Docker Compose:** The `backend` service runs `npm start` only. Ensure `REDIS_URL` points at the `redis` service (e.g. `redis://redis:6379`) if you expect queues to function. The optional `monitoring` profile runs another Node process on a separate port for observability stacks—see `deployment/docker-compose.yml`. Note that the Docker Compose configuration includes predefined resource limits (CPU and memory) for each service to guarantee reproducibility in local and preview environments. You can adjust these in a `docker-compose.override.yml` if necessary.
+- **Docker Compose:** The `backend` service runs `npm start` only. Ensure `REDIS_URL` points at the `redis` service (e.g. `redis://redis:6379`) if you expect queues to function. The optional `observability` profile runs another Node process on a separate port for observability stacks—see `deployment/docker-compose.yml`. Note that the Docker Compose configuration includes predefined resource limits (CPU and memory) for each service to guarantee reproducibility in local and preview environments. You can adjust these in a `docker-compose.override.yml` if necessary.
 
 ## Contract event indexer
 
@@ -24,14 +33,14 @@ How background jobs, queues, the contract indexer, and health checks fit togethe
 
 ### Durable cursor
 
-The indexer persists two keys in the `kv_store` table:
+The indexer persists its resume state in the `contract_event_indexer_state` table. The `kv_store` keys remain populated as legacy compatibility mirrors only.
 
-| Key | Purpose |
-|-----|---------|
-| `soroban_event_indexer.cursor` | Soroban RPC paging token for incremental event fetch |
-| `soroban_event_indexer.latest_ledger` | Last known ledger sequence from RPC response |
+| Key                                   | Purpose                                              |
+| ------------------------------------- | ---------------------------------------------------- |
+| `soroban_event_indexer.cursor`        | Soroban RPC paging token for incremental event fetch |
+| `soroban_event_indexer.latest_ledger` | Last known ledger sequence from RPC response         |
 
-The cursor is written only after a batch completes successfully. If the process crashes mid-batch the same events are re-fetched on restart; this is safe because rebalance history rows are keyed by UUID and duplicates do not affect correctness.
+The cursor is written after each fetched page is processed and again when a sync succeeds. If the process crashes mid-page, that page can be re-fetched on restart; on-chain rebalance history rows store `on_chain_paging_token` with a unique index so replayed events are treated idempotently instead of duplicating history.
 
 **Startup resume logic:**
 
@@ -42,7 +51,7 @@ The cursor is written only after a batch completes successfully. If the process 
 ### Inspecting indexer position
 
 - **API:** `GET /api/v1/indexer/cursor` returns stored cursor, latest ledger, last successful/failed sync timestamps, and errors.
-- **SQL:** `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'`
+- **SQL:** `SELECT * FROM contract_event_indexer_state WHERE name = 'soroban_event_indexer'` (legacy mirrors are also visible with `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'`).
 
 ### Re-sync and backfill
 
@@ -61,19 +70,29 @@ The script requires `ADMIN_REINDEX_KEY` to be set (matches the env var on the se
 
 The indexer uses bounded exponential backoff when the Soroban RPC is unreachable. It tracks last successful sync time, last failed sync time, and a ring buffer of recent error summaries. These are exposed through the `/api/v1/indexer/cursor` and `/ready` endpoints so operators can tell whether the indexer is healthy, catching up, or stuck.
 
+## Notification delivery backoff
+
+Email and webhook providers use explicit backoff policies from `backend/src/config/notificationDeliveryConfig.ts`, validated at startup and summarized in the startup log under `notificationDelivery`.
+
+- **Logs:** `notification_logs` rows include `attempt_number` and `backoff_delay_ms` when a retry is scheduled or a delivery completes.
+- **Tuning:** Increase `EMAIL_MAX_ATTEMPTS` or `WEBHOOK_RETRY_COUNT` for flaky SMTP or webhook endpoints; raise `*_MAX_BACKOFF_MS` to spread retries during outages.
+- **Failure triage:** Search logs for `Notification delivery failed; scheduling backoff retry` or `Notification delivery exhausted retries`. Query recent rows: `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`.
+
+See [NOTIFICATIONS.md](./NOTIFICATIONS.md) for the full environment variable table.
+
 ## Health vs readiness
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /health` | Plain `200` + `ok` — process up (root `index.ts`). |
-| `GET /api/health` | JSON `{ status, timestamp }` — API router health. |
+| Endpoint                        | Purpose                                                                                                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /health`                   | Plain `200` + `ok` — process up (root `index.ts`).                                                                                                                                   |
+| `GET /api/health`               | JSON `{ status, timestamp }` — API router health.                                                                                                                                    |
 | `GET /ready` / `GET /readiness` | Deep probe: database, Redis/queues, worker runtime status, indexer, auto-rebalancer initialization (`backend/src/monitoring/readiness.ts`). Returns `503` when `status !== 'ready'`. |
 
 Use `/health` for load balancer liveness. Use `/ready` before traffic shifts in environments that depend on Redis, workers, or the indexer.
 
 ## Health smoke test
 
-`scripts/health-smoke.sh` probes the key operational surfaces (`/health`, `/api/health`, `/ready`, `/metrics`) and prints a pass/fail summary. Use it after a deploy or during triage against local, staging, or production.
+`scripts/health-smoke.sh` probes the key operational surfaces (`/health`, `/api/health`, `/ready`, `/`, `/api-docs`, `/metrics`) and prints a pass/fail summary. Use it after a deploy or during triage against local, staging, or production.
 
 ```bash
 # From the repository root
@@ -89,11 +108,11 @@ scripts/health-smoke.sh local
 Configure non-local targets and tuning via environment variables:
 
 | Variable            | Purpose                                                    |
-|---------------------|-----------------------------------------------------------|
-| `SMOKE_LOCAL_URL`   | Base URL for `local` (default `http://localhost:3001`)    |
-| `SMOKE_STAGING_URL` | Base URL for `staging` (required when target is `staging`)|
-| `SMOKE_PROD_URL`    | Base URL for `prod` (required when target is `prod`)      |
-| `SMOKE_TIMEOUT`     | Per-request timeout in seconds (default `10`)             |
+| ------------------- | ---------------------------------------------------------- |
+| `SMOKE_LOCAL_URL`   | Base URL for `local` (default `http://localhost:3001`)     |
+| `SMOKE_STAGING_URL` | Base URL for `staging` (required when target is `staging`) |
+| `SMOKE_PROD_URL`    | Base URL for `prod` (required when target is `prod`)       |
+| `SMOKE_TIMEOUT`     | Per-request timeout in seconds (default `10`)              |
 
 **Pass/fail semantics:**
 
@@ -121,6 +140,16 @@ Use GitHub's attestation tooling to verify a downloaded artifact against the rep
 ### Practical limits
 
 This repository does not yet sign the live Docker images created by `deployment/docker-compose.yml`. The current control point is the CI build bundle and its SBOMs. If you move deployment to immutable image publishing later, add image-level attestations at that stage rather than trying to infer provenance from the compose file alone.
+
+## Sentry release tagging
+
+The deploy workflow now derives Sentry metadata automatically from the current git SHA and target environment before any image build starts.
+
+- `scripts/sentry-metadata.mjs` is the single source of truth for the release/environment values.
+- `npm run sentry:metadata -- --deployment production` prints the exact env lines that CI injects.
+- `npm run validate:sentry-metadata` fails fast if the backend and frontend Sentry values drift apart or if the release no longer matches the current commit.
+
+In practice, this means the backend and frontend Sentry events can be traced back to one immutable build identifier and one deployment tier without manual bookkeeping.
 
 ### Release checklist
 
@@ -152,7 +181,158 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
+## Database Backups and Restores
+
+The application supports two database backends: SQLite (for development) and PostgreSQL (for production). Both have automated backup and restore capabilities.
+
+### Backup Operations
+
+#### SQLite Backups
+
+Create a backup of the SQLite database:
+```bash
+cd backend
+npm run db:backup
+```
+
+By default, backups are stored in `backend/data/backups/` with a timestamped filename:
+`portfolio-backup-YYYY-MM-DDTHH-MM-SS-SSS.db`
+
+You can specify a custom backup path:
+```bash
+npm run db:backup -- --path ./custom/path/my-backup.db
+```
+
+#### PostgreSQL Backups
+
+Create a PostgreSQL backup (requires `pg_dump`):
+```bash
+cd backend
+npm run db:backup
+```
+
+Backups are stored in `backend/data/backups/` as SQL dumps. Custom output path:
+```bash
+npm run db:backup -- --output ./custom/path/backup.sql
+```
+
+PostgreSQL backup uses `DATABASE_URL` or `PG*` environment variables (PGHOST, PGPORT, PGUSER, PGDATABASE, PGPASSWORD) to connect.
+
+### Restore Operations
+
+#### SQLite Restores
+
+Restore from a SQLite backup:
+```bash
+cd backend
+npm run db:restore ./path/to/your-backup.db
+```
+
+**Important**: Stop the backend server before restoring. The restore process will close and reopen the database connection.
+
+#### PostgreSQL Restores
+
+Restore from a PostgreSQL backup (requires `psql`):
+```bash
+cd backend
+npm run db:restore ./path/to/your-backup.sql
+```
+
+### Backup Drills
+
+Practice these restore drills to ensure your backup process is reliable:
+
+#### Drill 1: Local SQLite Backup & Restore
+
+1. **Create test data**:
+   ```bash
+   cd backend
+   # Start the backend and create a test portfolio
+   npm run dev
+   # Create a portfolio via API or UI
+   ```
+
+2. **Create backup**:
+   ```bash
+   npm run db:backup
+   ```
+   Note the backup file path.
+
+3. **Modify data**:
+   - Delete or modify the test portfolio
+   - Verify the change is in the database
+
+4. **Restore backup**:
+   ```bash
+   npm run db:restore ./path/to/your-backup.db
+   ```
+
+5. **Verify restore**:
+   - Check that the original portfolio is restored correctly
+
+#### Drill 2: PostgreSQL Backup & Restore (Production-like)
+
+1. **Set up PostgreSQL locally**:
+   ```bash
+   # Using Docker
+   docker run --name stellar-pg -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=stellar -p 5432:5432 -d postgres
+   ```
+
+2. **Configure environment**:
+   ```bash
+   export DATABASE_URL="postgresql://postgres:secret@localhost:5432/stellar"
+   ```
+
+3. **Run migrations**:
+   ```bash
+   cd backend
+   npm run db:migrate
+   ```
+
+4. **Create test data**:
+   - Use the API to create test portfolios and events
+
+5. **Backup**:
+   ```bash
+   npm run db:backup
+   ```
+
+6. **Modify data**:
+   - Make changes to the database
+
+7. **Restore**:
+   ```bash
+   npm run db:restore ./path/to/pg-backup.sql
+   ```
+
+8. **Verify**:
+   - Confirm the original data is restored
+
+### Failure Handling
+
+- The scripts exit with non-zero code on failure, making them suitable for CI/CD pipelines
+- SQLite restore includes safety checks and attempts to reopen the original database if restore fails
+- PostgreSQL restore requires proper permissions and `psql`/`pg_dump` in PATH
+
+### CI/CD Integration
+
+Add backup verification to your CI pipeline:
+```yaml
+# Example GitHub Actions step
+- name: Test backup/restore
+  run: |
+    cd backend
+    npm run db:backup
+    # Verify backup file exists
+    ls -la data/backups/
+```
+
+## Disaster recovery
+
+For detailed, step-by-step procedures to handle incident response, outages, containment, rollbacks, database restoration, and validation across the smart contract, backend, and frontend stacks, refer to the [Disaster Recovery Runbook](DISASTER_RECOVERY.md).
+
 ## Related docs
 
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
 - OpenAPI source of truth: [backend/docs/openapi.md](../backend/docs/openapi.md)
+- Disaster Recovery Runbook: [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)

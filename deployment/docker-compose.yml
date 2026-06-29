@@ -59,21 +59,19 @@ services:
       - METRICS_ENABLED=${METRICS_ENABLED:-true}
       - LOG_DEPLOYMENT_ENV=${LOG_DEPLOYMENT_ENV:-local}
       - ALERT_CONTACT=${ALERT_CONTACT:-platform-oncall}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://portfolio:portfolio@postgres:5432/portfolio}
-      - PGHOST=postgres
-      - PGPORT=5432
-      - PGDATABASE=portfolio
-      - PGUSER=portfolio
-      - PGPASSWORD=portfolio
+      - DB_PATH=${DB_PATH:-/app/data/portfolio.db}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - PGHOST=${PGHOST:-}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-}
+      - PGUSER=${PGUSER:-}
+      - PGPASSWORD=${PGPASSWORD:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     ports:
       - "3001:3001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
     volumes:
       - ./logs:/app/logs
+      - backend_data:/app/data
     deploy:
       resources:
         limits:
@@ -84,6 +82,8 @@ services:
     image: redis:7-alpine
     container_name: portfolio-redis
     restart: unless-stopped
+    profiles:
+      - full-stack
     ports:
       - "6379:6379"
     volumes:
@@ -106,6 +106,8 @@ services:
     image: postgres:15-alpine
     container_name: portfolio-postgres
     restart: unless-stopped
+    profiles:
+      - full-stack
     environment:
       - POSTGRES_DB=portfolio
       - POSTGRES_USER=portfolio
@@ -134,7 +136,7 @@ services:
     container_name: portfolio-monitoring
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["node", "dist/index.js"]
     environment:
       - NODE_ENV=${NODE_ENV:-development}
@@ -160,7 +162,7 @@ services:
     container_name: portfolio-prometheus
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -186,7 +188,7 @@ services:
     container_name: portfolio-alertmanager
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
@@ -206,7 +208,7 @@ services:
     container_name: portfolio-grafana
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -231,7 +233,7 @@ services:
     container_name: portfolio-loki
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["-config.file=/etc/loki/loki-config.yml"]
     volumes:
       - ./observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
@@ -249,7 +251,7 @@ services:
     container_name: portfolio-promtail
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     command: ["-config.file=/etc/promtail/promtail-config.yml"]
     volumes:
       - ./observability/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
@@ -268,7 +270,7 @@ services:
     container_name: portfolio-blackbox
     restart: unless-stopped
     profiles:
-      - monitoring
+      - observability
     volumes:
       - ./observability/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
@@ -281,7 +283,79 @@ services:
           cpus: '0.25'
           memory: 64M
 
+  # Jaeger — OpenTelemetry trace collector and UI.
+  # Start with: docker compose --profile observability up
+  # Access Jaeger UI at http://localhost:16686
+  # OTLP HTTP endpoint at http://localhost:4318 for backend tracing.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: portfolio-jaeger
+    restart: unless-stopped
+    profiles:
+      - observability
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_HTTP_PORT=4318
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Self-hosted Umami analytics — privacy-respecting, cookie-free.
+  # Start with: docker compose --profile analytics up
+  # Access dashboard at http://localhost:3004 (default login: admin / umami)
+  # After first login, create a website and set the site ID in VITE_ANALYTICS_SITE_ID.
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: portfolio-umami
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      - DATABASE_URL=postgresql://umami:umami@umami-db:5432/umami
+      - DATABASE_TYPE=postgresql
+      - APP_SECRET=${UMAMI_APP_SECRET:-change-me-in-production}
+    ports:
+      - "3004:3000"
+    depends_on:
+      - umami-db
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  umami-db:
+    image: postgres:15-alpine
+    container_name: portfolio-umami-db
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      - POSTGRES_DB=umami
+      - POSTGRES_USER=umami
+      - POSTGRES_PASSWORD=umami
+    volumes:
+      - umami_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
 volumes:
+  backend_data:
   redis_data:
   postgres_data:
   prometheus_data:
@@ -289,6 +363,7 @@ volumes:
   loki_data:
   alertmanager_data:
   frontend_logs:
+  umami_data:
 
 networks:
   default:
