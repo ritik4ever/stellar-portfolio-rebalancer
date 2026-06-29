@@ -5,6 +5,7 @@ import { logger } from "../utils/logger.js";
 export const QUEUE_NAMES = {
   PORTFOLIO_CHECK: "portfolio-check",
   REBALANCE: "rebalance",
+  AUTO_REBALANCE_CHECK: "auto-rebalance-check",
   ANALYTICS_SNAPSHOT: "analytics-snapshot",
   ANALYTICS_COMPACTION: "analytics-compaction",
   IDEMPOTENCY_CLEANUP: "idempotency-cleanup",
@@ -67,6 +68,11 @@ export interface DLQJobData {
   payload: any;
 }
 
+export interface AutoRebalanceCheckJobData {
+  triggeredBy?: "scheduler" | "manual" | "startup" | "recovery";
+  correlationId?: string;
+}
+
 export interface PriceHistoryJobData {
     triggeredBy?: 'scheduler' | 'startup'
 }
@@ -79,6 +85,7 @@ let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null;
 let analyticsCompactionQueue: Queue<AnalyticsCompactionJobData> | null = null;
 let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null;
 let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null;
+let autoRebalanceCheckQueue: Queue<AutoRebalanceCheckJobData> | null = null;
 let priceHistorySnapshotQueue: Queue<PriceHistoryJobData> | null = null;
 let priceHistoryPruneQueue: Queue<PriceHistoryJobData> | null = null;
 
@@ -119,6 +126,21 @@ export function getRebalanceQueue(): Queue<RebalanceJobData> | null {
       logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.REBALANCE}`);
     }
     return rebalanceQueue;
+  } catch {
+    return null;
+  }
+}
+
+export function getAutoRebalanceCheckQueue(): Queue<AutoRebalanceCheckJobData> | null {
+  try {
+    if (!autoRebalanceCheckQueue) {
+      autoRebalanceCheckQueue = new Queue(QUEUE_NAMES.AUTO_REBALANCE_CHECK, {
+        connection: getConnectionOptions(),
+        defaultJobOptions: getDefaultJobOptions(),
+      });
+      logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.AUTO_REBALANCE_CHECK}`);
+    }
+    return autoRebalanceCheckQueue;
   } catch {
     return null;
   }
@@ -208,6 +230,7 @@ export function getQueueByName(name: string): Queue<any, any> | null {
   const queueMap: Record<string, () => any> = {
     [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
     [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
+    [QUEUE_NAMES.AUTO_REBALANCE_CHECK]: getAutoRebalanceCheckQueue,
     [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
     [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
     [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
@@ -254,6 +277,7 @@ export async function closeAllQueues(): Promise<void> {
   await Promise.all([
     portfolioCheckQueue?.close(),
     rebalanceQueue?.close(),
+    autoRebalanceCheckQueue?.close(),
     analyticsSnapshotQueue?.close(),
     analyticsCompactionQueue?.close(),
     idempotencyCleanupQueue?.close(),
@@ -264,6 +288,7 @@ export async function closeAllQueues(): Promise<void> {
   ]);
   portfolioCheckQueue = null;
   rebalanceQueue = null;
+  autoRebalanceCheckQueue = null;
   analyticsSnapshotQueue = null;
   analyticsCompactionQueue = null;
   idempotencyCleanupQueue = null;
