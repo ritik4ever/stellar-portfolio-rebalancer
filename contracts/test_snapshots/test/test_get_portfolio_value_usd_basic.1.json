@@ -91,7 +91,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 20000000
+                    "lo": 100
                   }
                 },
                 {
@@ -122,7 +122,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10000000
+                    "lo": 100
                   }
                 },
                 {
@@ -261,7 +261,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 20000000
+                                "lo": 100
                               }
                             }
                           },
@@ -272,7 +272,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 10000000
+                                "lo": 100
                               }
                             }
                           }
@@ -843,7 +843,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 20000000
+                    "lo": 100
                   }
                 },
                 {
@@ -882,7 +882,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 20000000
+                    "lo": 100
                   }
                 }
               ]
@@ -942,7 +942,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10000000
+                    "lo": 100
                   }
                 },
                 {
@@ -981,7 +981,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10000000
+                    "lo": 100
                   }
                 }
               ]
@@ -1027,7 +1027,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "preview_rebalance"
+                "symbol": "get_portfolio_value_usd"
               }
             ],
             "data": {
@@ -1354,165 +1354,166 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "preview_rebalance"
+                "symbol": "get_portfolio_value_usd"
               }
             ],
             "data": {
               "map": [
                 {
                   "key": {
-                    "symbol": "candidate_trades"
+                    "symbol": "assets"
                   },
                   "val": {
-                    "map": [
+                    "vec": [
                       {
-                        "key": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": -1,
-                            "lo": 18446744073704551616
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "asset"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "current_pct"
+                            },
+                            "val": {
+                              "u32": 5000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "drift"
+                            },
+                            "val": {
+                              "i32": 0
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "oracle_price"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 10000000000000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "quantity"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 100
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "target_pct"
+                            },
+                            "val": {
+                              "u32": 5000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "usd_value"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 10000
+                              }
+                            }
                           }
-                        }
+                        ]
                       },
                       {
-                        "key": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 5000000
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "asset"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "current_pct"
+                            },
+                            "val": {
+                              "u32": 5000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "drift"
+                            },
+                            "val": {
+                              "i32": 0
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "oracle_price"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 10000000000000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "quantity"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 100
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "target_pct"
+                            },
+                            "val": {
+                              "u32": 5000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "usd_value"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 10000
+                              }
+                            }
                           }
-                        }
+                        ]
                       }
                     ]
                   }
                 },
                 {
                   "key": {
-                    "symbol": "rebalance_needed"
-                  },
-                  "val": {
-                    "bool": true
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "skip_reasons"
-                  },
-                  "val": {
-                    "map": []
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "skipped_assets"
-                  },
-                  "val": {
-                    "vec": []
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "threshold_decisions"
-                  },
-                  "val": {
-                    "map": [
-                      {
-                        "key": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "current_percent"
-                              },
-                              "val": {
-                                "u32": 6666
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "drift"
-                              },
-                              "val": {
-                                "u32": 1666
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "exceeds_threshold"
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "target_percent"
-                              },
-                              "val": {
-                                "u32": 5000
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "current_percent"
-                              },
-                              "val": {
-                                "u32": 3333
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "drift"
-                              },
-                              "val": {
-                                "u32": 1667
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "exceeds_threshold"
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "target_percent"
-                              },
-                              "val": {
-                                "u32": 5000
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    ]
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_value"
+                    "symbol": "total_usd_value"
                   },
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 3000000000
+                      "lo": 20000
                     }
                   }
                 }
