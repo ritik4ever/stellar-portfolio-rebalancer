@@ -137,6 +137,10 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **GET /api/portfolio/{id}/rebalance-plan** — Get rebalance plan (total value, slippage, prices).
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
+- **GET /api/portfolio/{id}/attribution** — Portfolio performance attribution. Optional query: `from`, `to`.
+  - Returns per-asset contribution to total return using start/end snapshot weights.
+  - Contribution formula: `contributionPercent = startWeight * assetReturnPercent`, where `assetReturnPercent = (endValue - startValue) / startValue * 100`.
+  - If there is no attribution history, the endpoint returns empty `contributions` and `totalReturnPercent: 0`.
 - **GET /api/portfolio/{id}/performance-summary** — Performance summary.
 
 ### Rebalance history
