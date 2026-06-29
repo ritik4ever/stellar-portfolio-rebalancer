@@ -38,6 +38,7 @@ import {
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
 import PortfolioWizard from './pages/PortfolioWizard'
+import Compare from './pages/Compare'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
@@ -488,6 +489,13 @@ function App() {
             ) : currentView === 'wizard' ? (
                 <ErrorBoundary fallbackTitle="Portfolio Wizard">
                     <PortfolioWizard
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'compare' ? (
+                <ErrorBoundary fallbackTitle="Compare Portfolios">
+                    <Compare
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
                     />
