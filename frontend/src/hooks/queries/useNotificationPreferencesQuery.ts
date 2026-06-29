@@ -15,6 +15,8 @@ export interface NotificationPreferencesModel {
     emailAddress: string
     webhookEnabled: boolean
     webhookUrl: string
+    telegramEnabled: boolean
+    telegramChatId: string
     events: NotificationEventPreferences
     digestEnabled: boolean
     digestFrequency: DigestFrequency

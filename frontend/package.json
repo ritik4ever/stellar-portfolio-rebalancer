@@ -13,7 +13,8 @@
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:e2e:visual": "PLAYWRIGHT_VISUAL_BASELINES=1 playwright test --project=visual-regression",
+    "test:e2e:visual": "playwright test --project=visual-regression",
+    "test:e2e:visual-update": "playwright test --project=visual-regression --update-snapshots",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -64,6 +65,7 @@
     "@storybook/addon-mcp": "^0.6.0",
     "eslint-plugin-storybook": "^10.4.6",
     "playwright": "^1.61.1",
-    "@vitest/browser-playwright": "^4.0.18"
+    "@vitest/browser-playwright": "^4.0.18",
+    "@axe-core/playwright": "^4.10.1"
   }
 }

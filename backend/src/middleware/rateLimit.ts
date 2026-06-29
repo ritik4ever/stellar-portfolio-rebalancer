@@ -7,8 +7,8 @@ import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
 
-const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
-const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
+const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
+const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
 const WRITE_MAX = parseInt(process.env.RATE_LIMIT_WRITE_MAX || "", 10) || 20;
 const AUTH_MAX = parseInt(process.env.RATE_LIMIT_AUTH_MAX || "", 10) || 10;
 const CRITICAL_MAX = parseInt(process.env.RATE_LIMIT_CRITICAL_MAX || "", 10) || 5;

@@ -20,6 +20,8 @@ const defaultPreferences: Preferences = {
     emailAddress: '',
     webhookEnabled: false,
     webhookUrl: '',
+    telegramEnabled: false,
+    telegramChatId: '',
     events: {
         rebalance: true,
         circuitBreaker: true,
@@ -41,6 +43,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const [error, setError] = useState<string | null>(null)
     const [webhookError, setWebhookError] = useState<string | null>(null)
     const [emailError, setEmailError] = useState<string | null>(null)
+    const [telegramError, setTelegramError] = useState<string | null>(null)
     const [exporting, setExporting] = useState<'json' | 'csv' | 'pdf' | null>(null)
     const [savedProviderActive, setSavedProviderActive] = useState(false)
     const [showUnsubscribeReason, setShowUnsubscribeReason] = useState(false)
@@ -57,7 +60,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             setPreferences(prefData.preferences)
             setOriginalPreferences(prefData.preferences)
             setSavedProviderActive(
-                prefData.preferences.emailEnabled || prefData.preferences.webhookEnabled
+                prefData.preferences.emailEnabled || prefData.preferences.webhookEnabled || prefData.preferences.telegramEnabled
             )
         } else {
             setPreferences(defaultPreferences)
@@ -132,6 +135,15 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
         }
     }
 
+    const handleTelegramChatIdChange = (id: string) => {
+        setPreferences(prev => ({ ...prev, telegramChatId: id }))
+        if (preferences.telegramEnabled && !id) {
+            setTelegramError('Telegram Chat ID is required')
+        } else {
+            setTelegramError(null)
+        }
+    }
+
     const handleSave = async () => {
         // Validate email address if email is enabled
         if (preferences.emailEnabled && !preferences.emailAddress) {
@@ -163,6 +175,12 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             return
         }
 
+        // Validate telegram if enabled
+        if (preferences.telegramEnabled && !preferences.telegramChatId) {
+            setTelegramError('Telegram Chat ID is required when telegram notifications are enabled')
+            return
+        }
+
         setError(null)
         clearSuccessMessage()
 
@@ -170,7 +188,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
             await saveMutation.mutateAsync(preferences)
 
             setOriginalPreferences(preferences)
-            setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled)
+            setSavedProviderActive(preferences.emailEnabled || preferences.webhookEnabled || preferences.telegramEnabled)
             showSuccessMessage('Preferences saved successfully')
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to save preferences')
@@ -203,6 +221,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 ...prev,
                 emailEnabled: false,
                 webhookEnabled: false,
+                telegramEnabled: false,
             }))
             setOriginalPreferences(prev =>
                 prev
@@ -210,6 +229,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                           ...prev,
                           emailEnabled: false,
                           webhookEnabled: false,
+                          telegramEnabled: false,
                       }
                     : null
             )
@@ -247,6 +267,10 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
     const webhookHasUnsavedChanges = !!originalPreferences && (
         preferences.webhookEnabled !== originalPreferences.webhookEnabled ||
         preferences.webhookUrl !== originalPreferences.webhookUrl
+    )
+    const telegramHasUnsavedChanges = !!originalPreferences && (
+        preferences.telegramEnabled !== originalPreferences.telegramEnabled ||
+        preferences.telegramChatId !== originalPreferences.telegramChatId
     )
     const eventsHaveUnsavedChanges = !!originalPreferences &&
         JSON.stringify(preferences.events) !== JSON.stringify(originalPreferences.events)
@@ -499,6 +523,76 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                             )}
                             <p className="mt-1 text-xs text-gray-500">
                                 Must be a valid HTTP or HTTPS URL
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Telegram Provider */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center">
+                            <span className="w-5 h-5 flex items-center justify-center text-gray-600 mr-2 font-bold">TG</span>
+                            <span className="font-medium text-gray-900">Telegram Notifications</span>
+                        </div>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={preferences.telegramEnabled}
+                            aria-label="Telegram notifications"
+                            onClick={() => setPreferences(prev => ({ ...prev, telegramEnabled: !prev.telegramEnabled }))}
+                            disabled={actionPending}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                preferences.telegramEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                            <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                    preferences.telegramEnabled ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                            />
+                        </button>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-3">
+                        Send notifications to your Telegram chat via bot
+                    </p>
+                    <p
+                        className={`mb-3 text-xs ${
+                            savePending && telegramHasUnsavedChanges
+                                ? 'text-blue-600'
+                                : telegramHasUnsavedChanges
+                                  ? 'text-orange-600'
+                                  : 'text-gray-500'
+                        }`}
+                        role={telegramHasUnsavedChanges || savePending ? 'status' : undefined}
+                        aria-live="polite"
+                    >
+                        {savePending && telegramHasUnsavedChanges
+                            ? 'Saving Telegram notification settings...'
+                            : telegramHasUnsavedChanges
+                              ? 'Telegram notification changes are pending save.'
+                              : 'Telegram notification settings are unchanged.'}
+                    </p>
+
+                    {preferences.telegramEnabled && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Telegram Chat ID
+                            </label>
+                            <input
+                                type="text"
+                                value={preferences.telegramChatId}
+                                onChange={(e) => handleTelegramChatIdChange(e.target.value)}
+                                placeholder="123456789"
+                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                    telegramError ? 'border-red-300' : 'border-gray-300'
+                                }`}
+                            />
+                            {telegramError && (
+                                <p className="mt-1 text-sm text-red-600">{telegramError}</p>
+                            )}
+                            <p className="mt-1 text-xs text-gray-500">
+                                Your Telegram User ID or Group Chat ID
                             </p>
                         </div>
                     )}
@@ -797,7 +891,7 @@ const NotificationPreferences: React.FC<NotificationPreferencesProps> = ({ userI
                 <button
                     type="button"
                     onClick={handleUnsubscribeClick}
-                    disabled={actionPending || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled)}
+                    disabled={actionPending || showUnsubscribeReason || (!preferences.emailEnabled && !preferences.webhookEnabled && !preferences.telegramEnabled)}
                     className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                     Unsubscribe from all

@@ -114,7 +114,7 @@ export function snapshotWorkerRuntimeStatus(status: WorkerRuntimeStatus): Worker
 }
 
 export async function handleFinalFailure(job: Job, error: unknown): Promise<void> {
-    const maxAttempts = job.opts.attempts || 5;
+    const maxAttempts = job.opts.attempts || 3;
     if (job.attemptsMade < maxAttempts) {
         return;
     }
