@@ -258,6 +258,7 @@ export function getQueueByName(name: string): Queue<any, any> | null {
     [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
     [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
     [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
+    [QUEUE_NAMES.ANALYTICS_COMPACTION]: getAnalyticsCompactionQueue,
     [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
     [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
     [QUEUE_NAMES.DLQ]: getDLQQueue,
