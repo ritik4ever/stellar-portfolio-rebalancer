@@ -130,6 +130,7 @@ export const API_CONFIG = {
         AUTH_REFRESH: '/api/auth/refresh',
         AUTH_LOGOUT: '/api/auth/logout',
         PORTFOLIO: `${API_RESOURCE_ROOT}/portfolio`,
+        PORTFOLIO_IMPORT: `${API_RESOURCE_ROOT}/portfolio/import`,
         USER_PORTFOLIOS: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}`,
         PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') =>
