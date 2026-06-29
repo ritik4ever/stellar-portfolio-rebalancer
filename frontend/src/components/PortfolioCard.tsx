@@ -16,19 +16,23 @@ export const PortfolioCard: React.FC<PortfolioCardProps> = ({
 }) => {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-  // Fallback checks for flat line if history tracking data is < 7 days
-  const hasHistory = history7Day && history7Day.length >= 7;
-  const safeHistory = hasHistory ? history7Day : Array(7).fill(history7Day?.[0] || currentValue);
+  // Normalize history data: slice to ensure max of 7 points, and fallback to currentValue for flat arrays
+  const normalizedHistory = useMemo(() => {
+    if (!history7Day || history7Day.length < 7) return Array(7).fill(currentValue);
+    return history7Day.slice(-7);
+  }, [history7Day, currentValue]);
 
-  // Fast limits calculation for performance metrics (< 50ms)
+  const hasHistory = history7Day && history7Day.length >= 7;
+
+  // Limits calculation using strict greater-than comparison for trend flags
   const { min, max, isUpTrend } = useMemo(() => {
-    const minVal = Math.min(...safeHistory);
-    const maxVal = Math.max(...safeHistory);
-    const initial = safeHistory[0];
-    const current = safeHistory[safeHistory.length - 1];
+    const minVal = Math.min(...normalizedHistory);
+    const maxVal = Math.max(...normalizedHistory);
+    const initial = normalizedHistory[0];
+    const current = normalizedHistory[normalizedHistory.length - 1];
     
-    return { min: minVal, max: maxVal, isUpTrend: current >= initial };
-  }, [safeHistory]);
+    return { min: minVal, max: maxVal, isUpTrend: current > initial };
+  }, [normalizedHistory]);
 
   const width = 120;
   const height = 36;
@@ -36,16 +40,16 @@ export const PortfolioCard: React.FC<PortfolioCardProps> = ({
 
   // Build the SVG custom points mapping string dynamically
   const points = useMemo(() => {
-    const totalPoints = safeHistory.length;
+    const totalPoints = normalizedHistory.length;
     const valueRange = max - min;
 
-    return safeHistory.map((val, index) => {
+    return normalizedHistory.map((val, index) => {
       const x = (index / (totalPoints - 1)) * (width - padding * 2) + padding;
       if (valueRange === 0) return { x, y: height / 2, val };
       const y = height - padding - ((val - min) / valueRange) * (height - padding * 2);
       return { x, y, val };
     });
-  }, [safeHistory, min, max]);
+  }, [normalizedHistory, min, max]);
 
   const pathData = useMemo(() => {
     if (points.length === 0) return '';
@@ -55,10 +59,10 @@ export const PortfolioCard: React.FC<PortfolioCardProps> = ({
   // Accessibility descriptive compliance text
   const trendDescription = useMemo(() => {
     if (!hasHistory) return "Portfolio value history flat line due to insufficient tracking timeline data.";
-    return `Portfolio value history sparkline over 7 days showing an ${isUpTrend ? 'upward' : 'downward'} trend from $${safeHistory[0].toFixed(2)} to $${safeHistory[safeHistory.length - 1].toFixed(2)}.`;
-  }, [hasHistory, isUpTrend, safeHistory]);
+    return `Portfolio value history sparkline over 7 days showing an ${isUpTrend ? 'upward' : 'downward'} trend from $${normalizedHistory[0].toFixed(2)} to $${normalizedHistory[normalizedHistory.length - 1].toFixed(2)}.`;
+  }, [hasHistory, isUpTrend, normalizedHistory]);
 
-  const strokeColor = isUpTrend ? '#22c55e' : '#ef4444'; // Green or Red
+  const strokeColor = isUpTrend ? '#22c55e' : '#ef4444'; // Green if strictly greater, Red otherwise
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg flex flex-col justify-between w-full max-w-sm transition-all hover:border-slate-600">

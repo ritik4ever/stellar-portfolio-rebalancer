@@ -236,7 +236,7 @@ pub fn check_portfolio_invariants(portfolio: &Portfolio) -> Result<(), Error> {
         return Err(Error::InvariantViolation);
     }
     if portfolio.target_allocations.len() > MAX_PORTFOLIO_ASSETS {
-        return Err(Error::InvariantViolation);
+        return Err(Error::TooManyAssets);
     }
     if !(1..=50).contains(&portfolio.rebalance_threshold) {
         return Err(Error::InvariantViolation);

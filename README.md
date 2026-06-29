@@ -145,7 +145,7 @@ Other supported providers include SendGrid, Mailgun, and AWS SES.
 Test Notifications:
 
 Bash
-curl -X POST http://localhost:3001/api/v1/notifications/test \
+curl -X POST http://localhost:3001/api/v1/debug/notifications/test \
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 
@@ -312,9 +312,9 @@ docker compose -f deployment/docker-compose.yml up --build -d
 Contributing
 See CONTRIBUTING.md for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
 
-System Workflows: For Windows and WSL users, see the Windows/WSL Local Development Workflow (or appropriate documentation link).
+System Workflows: For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
 
-Issue Management: For issue management, triage definitions (P0-P3), and PR rules, see the Backlog Grooming Guide.
+Issue Management: For issue management, triage definitions (P0-P3), and PR rules, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
 
 PR Requirement: Pull Requests must explicitly link to an open issue, or provide a detailed rationale when no issue exists. A block-level CI check strictly enforces this rule.
 
