@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FlakyTestQuarantineRegistry",
+  "description": "Schema for backend/src/test/flaky/quarantine.json",
+  "type": "object",
+  "required": ["quarantined"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "_comment": { "type": "string" },
+    "quarantined": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "file", "title", "reason", "issue", "owner", "quarantinedAt"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable slug: kebab-case derived from the test title"
+          },
+          "file": {
+            "type": "string",
+            "description": "Path relative to backend/src/test/"
+          },
+          "title": {
+            "type": "string",
+            "description": "Exact string passed to describe()/it()/test()"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Short human-readable explanation of why the test is flaky"
+          },
+          "issue": {
+            "type": "string",
+            "format": "uri",
+            "description": "GitHub issue URL tracking the fix"
+          },
+          "owner": {
+            "type": "string",
+            "description": "GitHub @username responsible for the fix"
+          },
+          "quarantinedAt": {
+            "type": "string",
+            "format": "date",
+            "description": "ISO 8601 date when the test was quarantined"
+          },
+          "reviewBy": {
+            "type": "string",
+            "format": "date",
+            "description": "Optional: date by which the issue should be resolved or re-evaluated"
+          }
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,8 @@ const strictBoolean = z.preprocess((val) => {
 // Schema for POST /portfolio
 export const createPortfolioSchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),
+    name: z.string().max(256, "name is too long").optional(),
+    description: z.string().max(2000, "description is too long").optional(),
     allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
         (allocations) => {
             const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
@@ -33,6 +35,10 @@ export const createPortfolioSchema = z.object({
         minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
     }).optional(),
 }).strict();
+
+export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
+    version: z.number().int().min(1, "Version must be a positive integer")
+});
 
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
@@ -74,12 +80,25 @@ export const recordRebalanceEventSchema = z.object({
 export const autoRebalancerControlSchema = z.object({}).strict();
 
 // ─── Auth schemas ────────────────────────────────────────────────────────────
-export const loginSchema = z.object({
+export const challengeSchema = z.object({
     address: z.string().min(1, 'address is required').trim()
+}).strict();
+
+export const loginSchema = z.object({
+    address: z.string().min(1, 'address is required').trim(),
+    signature: z.string().min(1, 'signature is required').trim()
 }).strict();
 
 export const refreshTokenSchema = z.object({
     refreshToken: z.string().min(1, 'refreshToken is required')
+}).strict();
+
+export const logoutSchema = z.object({
+    refreshToken: z.string().optional()
+}).strict();
+
+export const logoutAllSchema = z.object({
+    address: z.string().optional()
 }).strict();
 
 // ─── Consent schemas ─────────────────────────────────────────────────────────
@@ -95,21 +114,24 @@ export const recordConsentSchema = z.object({
     userId: z.string().min(1, 'userId is required'),
     terms: z.boolean().refine((v) => v === true, { message: 'You must accept Terms of Service' }),
     privacy: z.boolean().refine((v) => v === true, { message: 'You must accept Privacy Policy' }),
-    cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' })
+    cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' }),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict();
 
 export const consentGrantSchema = z.object({
     userId: z.string().min(1, 'userId is required').optional(),
     terms: z.boolean().default(true),
     privacy: z.boolean().default(true),
-    cookies: z.boolean().default(true)
+    cookies: z.boolean().default(true),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict().refine(
     (data) => data.terms && data.privacy && data.cookies,
     { message: 'All consent flags must be accepted', path: ['terms'] }
 );
 
 export const consentRevokeSchema = z.object({
-    userId: z.string().min(1, 'userId is required').optional()
+    userId: z.string().min(1, 'userId is required').optional(),
+    documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict();
 
 export const consentAuditQuerySchema = z.object({
@@ -122,7 +144,8 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional()
+    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
@@ -135,7 +158,72 @@ export const adminAddAssetSchema = z.object({
 }).strict();
 
 export const adminPatchAssetSchema = z.object({
-    enabled: z.boolean()
+    enabled: z.boolean().optional(),
+    quarantined: z.boolean().optional()
+}).strict().refine(
+    (data) => data.enabled !== undefined || data.quarantined !== undefined,
+    { message: 'At least one of enabled or quarantined must be provided' }
+);
+
+// Query params for GET /assets — pagination, sorting, and issuer/symbol filters.
+export const assetsListQuerySchema = z.object({
+    enabledOnly: strictBoolean.optional(),
+    // Symbol/name search aliases (kept for backward compatibility).
+    code: z.string().trim().optional(),
+    search: z.string().trim().optional(),
+    q: z.string().trim().optional(),
+    // Filter by issuer account (case-insensitive substring).
+    issuer: z.string().trim().optional(),
+    sortBy: z.enum(['symbol', 'name', 'enabled']).optional(),
+    order: z.enum(['asc', 'desc']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).optional()
+    ),
+    limit: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).optional()
+    )
+});
+
+// ─── Draft portfolio schemas ─────────────────────────────────────────────────
+export const createDraftSchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required"),
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ),
+    threshold: z.number().min(1).max(50),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
+}).strict();
+
+export const updateDraftSchema = z.object({
+    label: z.string().max(256).optional(),
+    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
+        (allocations) => {
+            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+            return Math.abs(total - 100) <= 0.01;
+        },
+        { message: "Allocations must sum to 100%" }
+    ).optional(),
+    threshold: z.number().min(1).max(50).optional(),
+    slippageTolerance: z.number().min(0.1).max(5).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: z.object({
+        intervalDays: z.number().min(1).max(365).optional(),
+        volatilityThresholdPct: z.number().min(1).max(100).optional(),
+        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    }).optional(),
 }).strict();
 
 // ─── Export / query-param schemas ─────────────────────────────────────────────
@@ -152,6 +240,10 @@ export const rebalanceHistoryQuerySchema = z.object({
         (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
         z.number().int().min(1).max(500).optional()
     ),
+    offset: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(0).optional()
+    ),
     source: z.enum(['offchain', 'simulated', 'onchain']).optional(),
     startTimestamp: z.string().optional(),
     endTimestamp: z.string().optional(),
@@ -165,4 +257,16 @@ export const rebalanceHistoryQuerySchema = z.object({
 export const debugTestNotificationSchema = z.object({
     userId: z.string().min(1).optional(),
     eventType: z.enum(['rebalance', 'circuitBreaker', 'priceMovement', 'riskChange']).optional()
+});
+
+export const portfolioHistoryQuerySchema = z.object({
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).default(20)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
 });

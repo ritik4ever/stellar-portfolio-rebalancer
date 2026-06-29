@@ -236,3 +236,5 @@ monitoring/logs/
 # Generated output files
 backend/test_results.txt
 frontend/tsc-output.txt
+
+*storybook.log

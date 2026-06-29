@@ -283,6 +283,77 @@ services:
           cpus: '0.25'
           memory: 64M
 
+  # Jaeger — OpenTelemetry trace collector and UI.
+  # Start with: docker compose --profile observability up
+  # Access Jaeger UI at http://localhost:16686
+  # OTLP HTTP endpoint at http://localhost:4318 for backend tracing.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: portfolio-jaeger
+    restart: unless-stopped
+    profiles:
+      - observability
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_HTTP_PORT=4318
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Self-hosted Umami analytics — privacy-respecting, cookie-free.
+  # Start with: docker compose --profile analytics up
+  # Access dashboard at http://localhost:3004 (default login: admin / umami)
+  # After first login, create a website and set the site ID in VITE_ANALYTICS_SITE_ID.
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: portfolio-umami
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      - DATABASE_URL=postgresql://umami:umami@umami-db:5432/umami
+      - DATABASE_TYPE=postgresql
+      - APP_SECRET=${UMAMI_APP_SECRET:-change-me-in-production}
+    ports:
+      - "3004:3000"
+    depends_on:
+      - umami-db
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  umami-db:
+    image: postgres:15-alpine
+    container_name: portfolio-umami-db
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      - POSTGRES_DB=umami
+      - POSTGRES_USER=umami
+      - POSTGRES_PASSWORD=umami
+    volumes:
+      - umami_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
 volumes:
   backend_data:
   redis_data:
@@ -292,6 +363,7 @@ volumes:
   loki_data:
   alertmanager_data:
   frontend_logs:
+  umami_data:
 
 networks:
   default:

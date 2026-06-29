@@ -1,14 +1,18 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-import { ThemeProvider } from './context/ThemeContext'
+import { ThemeProvider, bootstrapThemeBeforeHydration } from './context/ThemeContext'
 import { RealtimeConnectionProvider } from './context/RealtimeConnectionContext'
 import { QueryProvider } from './providers/QueryProvider'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { initializeObservability } from './observability'
+import { initAnalytics } from './analytics'
 import './styles/globals.css'
+import './i18n'
 
 initializeObservability()
+initAnalytics()
+bootstrapThemeBeforeHydration()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

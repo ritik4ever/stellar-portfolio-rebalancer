@@ -56,6 +56,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Initialized"
                             }
                           ]
@@ -232,10 +244,25 @@
                   ]
                 },
                 {
-                  "u32": 0
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
+                  "u32": 51
                 },
                 {
                   "u32": 50
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -337,10 +364,25 @@
                       ]
                     },
                     {
-                      "u32": 0
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          },
+                          "val": {
+                            "u32": 7
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "u32": 51
                     },
                     {
                       "u32": 50
+                    },
+                    {
+                      "u32": 1
                     }
                   ]
                 }

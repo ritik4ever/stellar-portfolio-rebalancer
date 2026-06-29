@@ -4,9 +4,9 @@ import request from 'supertest'
 import { describe, expect, it } from 'vitest'
 import { buildCorsOptions, enforceCorsOriginAllowlist } from '../http/corsSecurity.js'
 
-function createCorsApp(corsOrigins: string[]) {
+function createCorsApp(corsOrigins: string[], nodeEnv?: string) {
     const app = express()
-    const corsOptions = buildCorsOptions(corsOrigins)
+    const corsOptions = buildCorsOptions(corsOrigins, nodeEnv)
     app.use(enforceCorsOriginAllowlist(corsOrigins))
     app.use(cors(corsOptions))
     app.options('*', cors(corsOptions))
@@ -58,5 +58,20 @@ describe('CORS security policy', () => {
 
         expect(res.headers['access-control-allow-credentials']).toBe('true')
         expect(res.headers['access-control-allow-origin']).not.toBe('*')
+    })
+
+    it('strips wildcard from CORS_ORIGINS in production', () => {
+        const opts = buildCorsOptions(['*', 'https://app.example.com'], 'production')
+        expect(opts.origin).toEqual(['https://app.example.com'])
+    })
+
+    it('disables all origins in production when only wildcard is set', () => {
+        const opts = buildCorsOptions(['*'], 'production')
+        expect(opts.origin).toBe(false)
+    })
+
+    it('sets maxAge for preflight caching', () => {
+        const opts = buildCorsOptions(['https://app.example.com'])
+        expect(opts.maxAge).toBe(86400)
     })
 })

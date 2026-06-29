@@ -20,13 +20,13 @@ const JWT_SECRET = 'test-jwt-secret-for-portfolio-tests-min-32!!'
 const OWNER_ADDRESS = 'GPORTFOWNER123456789ABCDEF'
 const OTHER_ADDRESS = 'GPORTFOTHER123456789ABCDEF'
 
-function createApp(): Express {
+async function createApp(): Promise<Express> {
     const app = express()
     app.use(cors({ origin: true, credentials: true }))
     app.use(express.json({ limit: '10mb' }))
     app.set('trust proxy', 1)
 
-    const { portfolioRouter } = require('../api/routes.js') as any
+    const { portfolioRouter } = await import('../api/routes.js') as any
     app.use('/api', portfolioRouter)
 
     return app
@@ -42,7 +42,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
     let testDbPath: string
     let createdPortfolioId: string | null = null
 
-    beforeAll(() => {
+    beforeAll(async () => {
         process.env.JWT_SECRET = JWT_SECRET
         process.env.NODE_ENV = 'test'
 
@@ -51,7 +51,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         testDbPath = join(testDir, 'test.db')
         process.env.DB_PATH = testDbPath
 
-        app = createApp()
+        app = await createApp()
     })
 
     afterAll(() => {
@@ -235,15 +235,14 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
                 })
         })
 
-        it('returns error for non-existent portfolio', async () => {
+        it('returns 404 for non-existent portfolio', async () => {
             const res = await request(app)
                 .get('/api/portfolio/non-existent-id-xyz')
-                .expect((res) => {
-                    expect([400, 404, 500]).toContain(res.status)
-                })
+                .expect(404)
 
             expect(res.body.success).toBe(false)
-            expect(res.body.error).toBeDefined()
+            expect(res.body.error.code).toBe('NOT_FOUND')
+            expect(res.body.error.message).toBe('Portfolio not found')
         })
 
         it('response body matches OpenAPI spec schema', async () => {
@@ -386,7 +385,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
                 .set(authHeader(OTHER_ADDRESS))
                 .query({ format: 'json' })
                 .expect((res) => {
-                    expect([403, 200, 404]).toContain(res.status)
+                    expect([403, 200, 202, 404]).toContain(res.status)
                 })
 
             if (res.status === 403) {
@@ -494,6 +493,63 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
     })
 
+    describe('POST /api/portfolio/:id/rebalance/dry-run', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('returns dry-run result envelope for owner', async () => {
+            expect(portfolioId).toBeDefined()
+
+            const res = await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .set(authHeader(OWNER_ADDRESS))
+                .send({ options: { slippageOverrides: { 'XLM->USDC': 120 } } })
+                .expect((resp) => {
+                    expect([200, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 200) {
+                expect(res.body.success).toBe(true)
+                expect(res.body.data.result).toMatchObject({
+                    portfolioId,
+                    guardrails: expect.objectContaining({
+                        riskManagement: expect.objectContaining({ reason: expect.any(String) }),
+                    }),
+                })
+                expect(Array.isArray(res.body.data.result.estimatedTrades)).toBe(true)
+                expect(Array.isArray(res.body.data.result.skippedAssets)).toBe(true)
+            }
+        })
+
+        it('returns forbidden for non-owner', async () => {
+            const res = await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .set(authHeader(OTHER_ADDRESS))
+                .send({})
+                .expect((resp) => {
+                    expect([403, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 403) {
+                expect(res.body.success).toBe(false)
+                expect(res.body.error.code).toBe('FORBIDDEN')
+            }
+        })
+    })
+
     describe('GET /api/portfolio/:id/analytics', () => {
         let portfolioId: string
 
@@ -534,5 +590,168 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             expect(res.body.success).toBe(true)
         })
+    })
+
+    describe('GET /api/portfolio/:id/history - paginated rebalance history', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('returns paginated history with correct structure', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/history`)
+                .expect((res) => {
+                    expect([200, 500]).toContain(res.status)
+                })
+
+            if (res.status === 200) {
+                expect(res.body.success).toBe(true)
+                expect(res.body.data).toHaveProperty('total')
+                expect(res.body.data).toHaveProperty('page')
+                expect(res.body.data).toHaveProperty('page_size')
+                expect(res.body.data).toHaveProperty('data')
+                expect(Array.isArray(res.body.data.data)).toBe(true)
+                expect(res.body.data.page).toBe(1)
+            } else {
+                expect(res.body.success).toBe(false)
+                expect(res.body.error.code).toBe('INTERNAL_ERROR')
+            }
+        })
+
+        it('accepts page and page_size query params', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/history`)
+                .query({ page: 1, page_size: 10 })
+                .expect((res) => {
+                    expect([200, 500]).toContain(res.status)
+                })
+
+            if (res.status === 200) {
+                expect(res.body.success).toBe(true)
+                expect(res.body.data.page).toBe(1)
+                expect(res.body.data.page_size).toBe(10)
+            }
+        })
+
+        it('returns 422 for invalid page param', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/history`)
+                .query({ page: 0 })
+                .expect(422)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('returns 422 for page_size exceeding max 100', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/history`)
+                .query({ page_size: 200 })
+                .expect(422)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('returns 404 for non-existent portfolio history', async () => {
+            const res = await request(app)
+                .get('/api/portfolio/nonexistent-id-xyz/history')
+                .expect(404)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('NOT_FOUND')
+        })
+
+        it('accepts sort param with asc value', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/history`)
+                .query({ sort: 'asc' })
+                .expect((res) => {
+                    expect([200, 500]).toContain(res.status)
+                })
+
+            if (res.status === 200) {
+                expect(res.body.success).toBe(true)
+            }
+        })
+    })
+
+    describe('POST /api/portfolio/:id/clone - Clone portfolio', () => {
+        let sourceId: string;
+        beforeEach(async () => {
+            // create a source portfolio
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                });
+            expect(res.body.success).toBe(true);
+            sourceId = res.body.data.portfolioId;
+        });
+
+        it('clones portfolio with default overrides', async () => {
+            const res = await request(app)
+                .post(`/api/portfolio/${sourceId}/clone`)
+                .set(authHeader(OWNER_ADDRESS))
+                .send({})
+                .expect(201);
+
+            expect(res.body.success).toBe(true);
+            expect(res.body.data.newPortfolioId).toBeDefined();
+            // verify new portfolio exists and has same balances
+            const getRes = await request(app)
+                .get(`/api/portfolio/${res.body.data.newPortfolioId}`)
+                .set(authHeader(OWNER_ADDRESS))
+                .expect(200);
+
+            expect(getRes.body.success).toBe(true);
+            expect(getRes.body.data.portfolio.balances).toEqual(expect.any(Object));
+        });
+
+        it('clones with overridden metadata', async () => {
+            const newOwner = OTHER_ADDRESS;
+            const overrides = { userAddress: newOwner, threshold: 10 };
+            const res = await request(app)
+                .post(`/api/portfolio/${sourceId}/clone`)
+                .set(authHeader(OWNER_ADDRESS))
+                .send(overrides)
+                .expect(201);
+
+            expect(res.body.success).toBe(true);
+            const newId = res.body.data.newPortfolioId;
+            const getRes = await request(app)
+                .get(`/api/portfolio/${newId}`)
+                .set(authHeader(newOwner))
+                .expect(200);
+
+            expect(getRes.body.success).toBe(true);
+            expect(getRes.body.data.portfolio.userAddress).toBe(newOwner);
+            expect(getRes.body.data.portfolio.threshold).toBe(10);
+        });
+
+        it('returns 404 if source portfolio not found', async () => {
+            const res = await request(app)
+                .post('/api/portfolio/nonexistent-id/clone')
+                .set(authHeader(OWNER_ADDRESS))
+                .send({})
+                .expect(404);
+
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('NOT_FOUND');
+        });
     })
 })

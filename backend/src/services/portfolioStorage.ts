@@ -36,12 +36,16 @@ export class PortfolioStorage {
     async createPortfolio(
         userAddress: string,
         allocations: Record<string, number>,
-        threshold: number
+        threshold: number,
+        name?: string,
+        description?: string
     ): Promise<string> {
         const id = randomUUID()
         const portfolio: Portfolio = {
             id,
             userAddress,
+            name,
+            description,
             allocations,
             threshold,
             balances: {},
@@ -51,7 +55,7 @@ export class PortfolioStorage {
             version: 1
         }
         if (isDbConfigured()) {
-            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0)
+            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0, 1, 'threshold', {}, name, description)
         }
         this.cacheSet(portfolio)
         return id
@@ -62,13 +66,17 @@ export class PortfolioStorage {
         allocations: Record<string, number>,
         threshold: number,
         currentBalances: Record<string, number>,
-        slippageTolerance: number = 1
+        slippageTolerance: number = 1,
+        name?: string,
+        description?: string
     ): Promise<string> {
         const id = randomUUID()
         const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
         const portfolio: Portfolio = {
             id,
             userAddress,
+            name,
+            description,
             allocations,
             threshold,
             slippageTolerance: clampSlippageTolerance(slippageTolerance),
@@ -86,7 +94,11 @@ export class PortfolioStorage {
                 threshold,
                 currentBalances,
                 totalValue,
-                portfolio.slippageTolerance ?? 1
+                portfolio.slippageTolerance ?? 1,
+                'threshold',
+                {},
+                name,
+                description
             )
         }
         this.cacheSet(portfolio)
@@ -106,23 +118,51 @@ export class PortfolioStorage {
         return Array.from(this.portfolios.values()).filter(p => p.userAddress === userAddress)
     }
 
-    async updatePortfolio(id: string, updates: Partial<Portfolio>): Promise<boolean> {
+    async updatePortfolio(id: string, updates: Partial<Portfolio>, expectedVersion?: number): Promise<boolean> {
         const portfolio = await this.getPortfolio(id)
         if (!portfolio) return false
-        const updated = { ...portfolio, ...updates }
+
+        if (expectedVersion !== undefined && portfolio.version !== expectedVersion) {
+            const { ConflictError } = await import('../types/index.js')
+            throw new ConflictError(portfolio.version ?? -1)
+        }
+
+        const nextVersion = (portfolio.version ?? 1) + 1
+        const updated = { ...portfolio, ...updates, version: nextVersion }
         if (isDbConfigured()) {
             const ok = await portfolioDb.dbUpdatePortfolio(id, {
                 userAddress: updates.userAddress,
+                name: updates.name,
+                description: updates.description,
                 allocations: updates.allocations,
                 threshold: updates.threshold,
                 balances: updates.balances,
                 totalValue: updates.totalValue,
                 lastRebalance: updates.lastRebalance
-            })
-            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance)) return false
+            }, expectedVersion)
+            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance ?? updates.name ?? updates.description)) return false
         }
         this.cacheSet(updated)
         return true
+    }
+
+    async searchPortfolios(searchQuery: string, limit: number, offset: number): Promise<Portfolio[]> {
+        if (isDbConfigured()) {
+            const list = await portfolioDb.dbSearchPortfolios(searchQuery, limit, offset)
+            if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
+            return list
+        }
+        
+        let all = Array.from(this.portfolios.values())
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase()
+            all = all.filter(p => 
+                (p.name && p.name.toLowerCase().includes(q)) || 
+                (p.description && p.description.toLowerCase().includes(q))
+            )
+        }
+        all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        return all.slice(offset, offset + limit)
     }
 
     async getAllPortfolios(): Promise<Portfolio[]> {
@@ -149,6 +189,42 @@ export class PortfolioStorage {
             return ok
         }
         return this.portfolios.delete(id)
+    }
+
+    /**
+     * Clone an existing portfolio, optionally overriding fields.
+     * Returns the new portfolio ID.
+     */
+    async clonePortfolio(sourceId: string, overrides: Partial<Portfolio> = {}): Promise<string> {
+        const source = await this.getPortfolio(sourceId)
+        if (!source) throw new Error(`Source portfolio ${sourceId} not found`)
+        const userAddress = overrides.userAddress ?? source.userAddress
+        const allocations = overrides.allocations ?? source.allocations
+        const threshold = overrides.threshold ?? source.threshold
+        const slippageTolerance = overrides.slippageTolerance ?? source.slippageTolerance ?? 1
+        const strategy = overrides.strategy ?? source.strategy
+        const strategyConfig = overrides.strategyConfig ?? source.strategyConfig ?? {}
+        // Preserve balances if they exist
+        if (Object.keys(source.balances).length > 0) {
+            const newId = await this.createPortfolioWithBalances(
+                userAddress,
+                allocations,
+                threshold,
+                source.balances,
+                slippageTolerance,
+            )
+            // Update strategy if provided
+            if (strategy) {
+                await this.updatePortfolio(newId, { strategy, strategyConfig })
+            }
+            return newId
+        } else {
+            const newId = await this.createPortfolio(userAddress, allocations, threshold)
+            if (strategy) {
+                await this.updatePortfolio(newId, { strategy, strategyConfig })
+            }
+            return newId
+        }
     }
 
     clearAll(): void {

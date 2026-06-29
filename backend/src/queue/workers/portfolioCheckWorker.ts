@@ -1,5 +1,7 @@
 import type { Job } from "bullmq";
 import { Worker } from "bullmq";
+import { randomUUID } from "node:crypto";
+import { runWithRequestContext } from "../../utils/requestContext.js";
 import { portfolioStorage } from "../../services/portfolioStorage.js";
 import { StellarService } from "../../services/stellar.js";
 import { ReflectorService } from "../../services/reflector.js";
@@ -17,6 +19,7 @@ import {
   markWorkerStarting,
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 
@@ -29,55 +32,64 @@ export async function processPortfolioCheckJob(
   job: Job<PortfolioCheckJobData>,
 ): Promise<void> {
   const { triggeredBy, correlationId } = job.data;
+  const requestId = correlationId ?? randomUUID();
 
-  logger.info("[WORKER:portfolio-check] Running portfolio check cycle", {
-    jobId: job.id,
-    triggeredBy,
-    correlationId,
-  });
-
-  const allPortfolios = await portfolioStorage.getAllPortfolios();
-  const portfolios = allPortfolios.filter((p) => !DEMO_PORTFOLIO_IDS.has(p.id));
-
-  if (portfolios.length === 0) {
-    return;
-  }
-
-  const reflector = new ReflectorService();
-  const prices = await reflector.getCurrentPrices();
-  const market = await CircuitBreakers.checkMarketConditions(prices);
-  if (!market.safe) {
-    logger.warn(
-      "[WORKER:portfolio-check] Skipping rebalance enqueue — market conditions unsafe",
-      {
-        jobId: job.id,
-        reason: market.reason,
-        correlationId,
-      },
-    );
-    return;
-  }
-
-  const queue = getRebalanceQueue();
-  if (!queue) {
-    logger.warn("[WORKER:portfolio-check] Rebalance queue unavailable", {
+  return runWithRequestContext({ requestId }, async () => {
+    logger.info("[WORKER:portfolio-check] Running portfolio check cycle", {
       jobId: job.id,
+      triggeredBy,
       correlationId,
     });
-    return;
-  }
 
-  const stellarService = new StellarService();
-  for (const p of portfolios) {
-    const needed = await stellarService.checkRebalanceNeeded(p.id);
-    if (!needed) continue;
-
-    await queue.add(
-      `rebalance-${p.id}`,
-      { portfolioId: p.id, triggeredBy: "auto" as const, correlationId: correlationId },
-      { removeOnComplete: true },
+    const allPortfolios = await portfolioStorage.getAllPortfolios();
+    const portfolios = allPortfolios.filter(
+      (p) => !DEMO_PORTFOLIO_IDS.has(p.id),
     );
-  }
+
+    if (portfolios.length === 0) {
+      return;
+    }
+
+    const reflector = new ReflectorService();
+    const prices = await reflector.getCurrentPrices();
+    const market = await CircuitBreakers.checkMarketConditions(prices);
+    if (!market.safe) {
+      logger.warn(
+        "[WORKER:portfolio-check] Skipping rebalance enqueue — market conditions unsafe",
+        {
+          jobId: job.id,
+          reason: market.reason,
+          correlationId,
+        },
+      );
+      return;
+    }
+
+    const queue = getRebalanceQueue();
+    if (!queue) {
+      logger.warn("[WORKER:portfolio-check] Rebalance queue unavailable", {
+        jobId: job.id,
+        correlationId,
+      });
+      return;
+    }
+
+    const stellarService = new StellarService();
+    for (const p of portfolios) {
+      const needed = await stellarService.checkRebalanceNeeded(p.id);
+      if (!needed) continue;
+
+      await queue.add(
+        `rebalance-${p.id}`,
+        {
+          portfolioId: p.id,
+          triggeredBy: "auto" as const,
+          correlationId: correlationId,
+        },
+        { removeOnComplete: true },
+      );
+    }
+  });
 }
 
 export function startPortfolioCheckWorker(): Worker | null {
@@ -91,21 +103,27 @@ export function startPortfolioCheckWorker(): Worker | null {
     });
   } catch (err) {
     markWorkerFailed(runtimeStatus, err);
-    logger.warn("[WORKER:portfolio-check] Failed to start - Redis may be unavailable", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    logger.warn(
+      "[WORKER:portfolio-check] Failed to start - Redis may be unavailable",
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
     return null;
   }
 
-  void worker.waitUntilReady().then(() => {
-    markWorkerReady(runtimeStatus);
-    logger.info("[WORKER:portfolio-check] Worker ready");
-  }).catch((err) => {
-    markWorkerFailed(runtimeStatus, err);
-    logger.error("[WORKER:portfolio-check] Worker failed readiness check", {
-      error: err instanceof Error ? err.message : String(err),
+  void worker
+    .waitUntilReady()
+    .then(() => {
+      markWorkerReady(runtimeStatus);
+      logger.info("[WORKER:portfolio-check] Worker ready");
+    })
+    .catch((err) => {
+      markWorkerFailed(runtimeStatus, err);
+      logger.error("[WORKER:portfolio-check] Worker failed readiness check", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
-  });
 
   worker.on("completed", (j) => {
     markWorkerJobCompleted(runtimeStatus);
@@ -119,6 +137,7 @@ export function startPortfolioCheckWorker(): Worker | null {
       error: err.message,
       attemptsMade: j?.attemptsMade,
     });
+    void handleFinalFailure(j, err);
   });
 
   logger.info("[WORKER:portfolio-check] Worker started");
@@ -142,6 +161,8 @@ export function getPortfolioCheckWorkerStatus(): WorkerRuntimeStatus {
   return snapshotWorkerRuntimeStatus(runtimeStatus);
 }
 
-export function setPortfolioCheckSchedulerRegistered(registered: boolean): void {
+export function setPortfolioCheckSchedulerRegistered(
+  registered: boolean,
+): void {
   runtimeStatus.schedulerRegistered = registered;
 }
