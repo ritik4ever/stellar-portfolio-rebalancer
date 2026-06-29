@@ -9,6 +9,17 @@ CREATE TABLE IF NOT EXISTS user_alerts (
         'asset_price_above', 
         'asset_price_below'
     )),
+    CHECK (
+        (
+            alert_type IN ('portfolio_value_above', 'portfolio_value_below')
+            AND portfolio_id IS NOT NULL
+            AND asset_id IS NULL
+        ) OR (
+            alert_type IN ('asset_price_above', 'asset_price_below')
+            AND asset_id IS NOT NULL
+            AND portfolio_id IS NULL
+        )
+    ),
     threshold_value NUMERIC NOT NULL,
     is_triggered BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
