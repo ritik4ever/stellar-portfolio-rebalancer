@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Share2 } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Share2, Settings, WalletCards } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
@@ -14,7 +14,7 @@ import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
 import { API_CONFIG } from '../config/api'
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
 import { buildPortfolioCloneDraft, savePortfolioCloneDraft, loadPortfolioCloneDraft, clearPortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
@@ -69,6 +69,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         refetch: refetchPrices,
     } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
+    const { data: costSummary, isLoading: costSummaryLoading } = usePortfolioCostSummary(latestPortfolioId)
 
     const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
     const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
@@ -519,6 +520,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {shareLink ? 'Sharing' : 'Share'}
                                     </button>
                                 ) : null}
+                                <button type="button" onClick={() => onNavigate('wizard')}
+                                    className="border border-blue-600 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-500 dark:hover:bg-blue-900/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+                                    title="Use step-by-step wizard to create a portfolio">
+                                    ✨ Wizard
+                                </button>
                                 <button type="button" onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                                     {dashboardCopy.createPortfolio}
@@ -839,6 +845,47 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                     )}
                                 </motion.div>
                             )}
+
+                            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Cost Summary</h3>
+                                    <WalletCards className="w-5 h-5 text-blue-500" aria-hidden />
+                                </div>
+                                {costSummaryLoading ? (
+                                    <div className="space-y-3" aria-busy="true">
+                                        <div className="h-5 w-28 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                        <div className="h-5 w-36 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                        <div className="h-5 w-32 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3 text-sm">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Total fees paid</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {(costSummary?.total_fees_paid ?? 0).toFixed(4)} XLM
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Avg slippage</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {(costSummary?.avg_slippage_bps ?? 0).toFixed(2)} bps
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Cost per rebalance</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {(costSummary?.cost_per_rebalance ?? 0).toFixed(4)} XLM
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Total rebalances</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {costSummary?.total_rebalances ?? 0}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
 
                             {/* Allocation Chart */}
                             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">

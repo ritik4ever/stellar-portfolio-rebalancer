@@ -37,6 +37,7 @@ import {
 } from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
+import PortfolioWizard from './pages/PortfolioWizard'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
@@ -480,6 +481,13 @@ function App() {
             ) : currentView === 'setup' ? (
                 <ErrorBoundary fallbackTitle="Portfolio Setup">
                     <PortfolioSetup
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'wizard' ? (
+                <ErrorBoundary fallbackTitle="Portfolio Wizard">
+                    <PortfolioWizard
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
                     />
