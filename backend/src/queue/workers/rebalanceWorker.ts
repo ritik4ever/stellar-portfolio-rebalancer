@@ -101,6 +101,8 @@ export async function processRebalanceJob(
             : "Manual Rebalancing",
         trades: rebalanceResult.trades ?? 0,
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+        slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
       });

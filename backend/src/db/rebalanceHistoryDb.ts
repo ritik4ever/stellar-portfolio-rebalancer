@@ -7,6 +7,8 @@ export interface RebalanceEventRow {
     trigger: string
     trades: number
     gas_used: string
+    fee_paid: string
+    slippage_bps: string
     status: string
     is_automatic: boolean
     risk_alerts: unknown
@@ -23,6 +25,8 @@ function rowToEvent(r: RebalanceEventRow) {
         trigger: r.trigger,
         trades: r.trades,
         gasUsed: r.gas_used,
+        feePaid: Number(r.fee_paid ?? 0),
+        slippageBps: Number(r.slippage_bps ?? 0),
         status: r.status as 'completed' | 'failed' | 'pending',
         isAutomatic: r.is_automatic,
         riskAlerts: (r.risk_alerts as any[]) ?? [],
@@ -40,6 +44,8 @@ export async function dbInsertRebalanceEvent(event: {
     trigger: string
     trades: number
     gasUsed: string
+    feePaid?: number
+    slippageBps?: number
     status: string
     isAutomatic: boolean
     riskAlerts?: unknown[]
@@ -48,14 +54,16 @@ export async function dbInsertRebalanceEvent(event: {
     timestamp?: Date
 }): Promise<{ id: string }> {
     await query(
-        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()))`,
+        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, fee_paid, slippage_bps, status, is_automatic, risk_alerts, error, details, timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()))`,
         [
             event.id,
             event.portfolioId,
             event.trigger,
             event.trades,
             event.gasUsed,
+            event.feePaid ?? 0,
+            event.slippageBps ?? 0,
             event.status,
             event.isAutomatic,
             event.riskAlerts ? JSON.stringify(event.riskAlerts) : null,
@@ -81,6 +89,39 @@ export async function dbGetRebalanceHistoryCountByPortfolio(portfolioId: string)
         [portfolioId]
     )
     return parseInt(result.rows[0]?.count ?? '0', 10)
+}
+
+export interface RebalanceCostSummary {
+    total_fees_paid: number
+    avg_slippage_bps: number
+    cost_per_rebalance: number
+    total_rebalances: number
+}
+
+export async function dbGetRebalanceCostSummary(portfolioId: string): Promise<RebalanceCostSummary> {
+    const result = await query<{
+        total_fees_paid: string
+        avg_slippage_bps: string
+        total_rebalances: string
+    }>(
+        `SELECT
+            COALESCE(SUM(fee_paid), 0) as total_fees_paid,
+            COALESCE(AVG(slippage_bps), 0) as avg_slippage_bps,
+            COUNT(*) as total_rebalances
+         FROM rebalance_events
+         WHERE portfolio_id = $1`,
+        [portfolioId]
+    )
+    const row = result.rows[0]
+    const totalFees = Number(row?.total_fees_paid ?? 0)
+    const totalRebalances = parseInt(row?.total_rebalances ?? '0', 10)
+
+    return {
+        total_fees_paid: totalFees,
+        avg_slippage_bps: Number(row?.avg_slippage_bps ?? 0),
+        cost_per_rebalance: totalRebalances > 0 ? totalFees / totalRebalances : 0,
+        total_rebalances: totalRebalances
+    }
 }
 
 export async function dbGetRebalanceHistoryAll(limit: number, offset = 0) {
