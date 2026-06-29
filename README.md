@@ -50,7 +50,7 @@ stellar-portfolio-rebalancer/
 
 ### Prerequisites
 
-- Node.js 18+  
+- Node.js 20.19.0+
 - Rust + Cargo  
 - Soroban CLI  
 - Stellar wallet (Freighter or Rabet recommended)  
