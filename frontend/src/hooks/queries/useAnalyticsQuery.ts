@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, ENDPOINTS } from '../../config/api'
+import { api, ENDPOINTS, createApiUrl } from '../../config/api'
 
 export const analyticsKeys = {
     all: ['analytics'] as const,
@@ -23,5 +23,14 @@ export const usePerformanceSummary = (portfolioId: string | null) => {
         queryFn: () => api.get<any>(ENDPOINTS.PORTFOLIO_PERFORMANCE_SUMMARY(portfolioId!)),
         enabled: !!portfolioId && portfolioId !== 'demo',
         staleTime: 60000, // 1 minute
+    })
+}
+
+export const usePortfolioBenchmark = (portfolioId: string | null, from: string, to: string) => {
+    return useQuery({
+        queryKey: [...analyticsKeys.portfolio(portfolioId || ''), 'benchmark', { from, to }] as const,
+        queryFn: () => api.get<any>(createApiUrl(`/api/v1/portfolio/${portfolioId}/benchmark`, { from, to })),
+        enabled: !!portfolioId && portfolioId !== 'demo' && !!from && !!to,
+        staleTime: 300000, // 5 minutes
     })
 }

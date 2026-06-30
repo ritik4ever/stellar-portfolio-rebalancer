@@ -1,9 +1,17 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { trace } from '@opentelemetry/api'
+import { Horizon } from '@stellar/stellar-sdk'
 
 function getTracer() {
   return trace.getTracer('stellar-service', '1.0.0')
+}
+
+function getHorizonServer(): Horizon.Server {
+  const network = (process.env.STELLAR_NETWORK || 'testnet').toLowerCase()
+  const horizonUrl = process.env.STELLAR_HORIZON_URL || 
+    (network === 'mainnet' ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org')
+  return new Horizon.Server(horizonUrl)
 }
 
 export interface ExecuteRebalanceOptions {
@@ -154,6 +162,37 @@ export class StellarService {
         span.setAttribute('portfolio.id', portfolioId)
         try {
             return { estimatedGasXlm: '0', estimatedGasUsd: '0' }
+        } finally {
+            span.end()
+        }
+    }
+
+    async syncAccountBalance(address: string): Promise<{ balances: Record<string, string>; lastUpdated: string }> {
+        const span = getTracer().startSpan('stellar.syncAccountBalance')
+        span.setAttribute('account.address', address)
+        try {
+            const server = getHorizonServer()
+            const account = await server.loadAccount(address)
+            
+            const balances: Record<string, string> = {}
+            
+            for (const balance of account.balances) {
+                if (balance.asset_type === 'native') {
+                    balances['XLM'] = balance.balance
+                } else {
+                    const assetCode = balance.asset_code
+                    const assetIssuer = balance.asset_issuer
+                    const key = `${assetCode}:${assetIssuer}`
+                    balances[key] = balance.balance
+                }
+            }
+            
+            span.setAttribute('balances.count', Object.keys(balances).length)
+            
+            return {
+                balances,
+                lastUpdated: new Date().toISOString()
+            }
         } finally {
             span.end()
         }
