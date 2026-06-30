@@ -235,3 +235,80 @@ analyticsRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res:
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
+
+analyticsRouter.get('/portfolio/:id/benchmark', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const from = req.query.from as string | undefined
+        const to = req.query.to as string | undefined
+
+        if (!portfolioId || !from || !to) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID, from, and to are required')
+        }
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        }
+
+        const fromDate = new Date(from)
+        const toDate = new Date(to)
+
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Invalid date format')
+        }
+
+        // Get Portfolio Return
+        const snapshots = analyticsService.getAnalyticsInRange(portfolioId, from, to)
+        let portfolio_return = 0
+        if (snapshots.length >= 2) {
+            const initialValue = snapshots[0].totalValue
+            const finalValue = snapshots[snapshots.length - 1].totalValue
+            if (initialValue > 0) {
+                portfolio_return = ((finalValue - initialValue) / initialValue) * 100
+            }
+        }
+
+        // Dynamic import to avoid circular dependency or import issues at top level if not present
+        const { getPriceHistoryInRange } = await import('../db/priceHistoryDb.js')
+
+        // Get Benchmark Returns
+        const getAssetReturn = async (asset: string) => {
+            const history = await getPriceHistoryInRange(asset, fromDate, toDate)
+            if (history.length < 2) return 0
+            const pStart = history[0].price
+            const pEnd = history[history.length - 1].price
+            return pStart > 0 ? ((pEnd - pStart) / pStart) * 100 : 0
+        }
+
+        const xlmReturn = await getAssetReturn('XLM')
+        const btcReturn = await getAssetReturn('BTC')
+        const usdcReturn = await getAssetReturn('USDC')
+
+        const benchmarks = [
+            {
+                name: 'XLM-only',
+                portfolio_return,
+                benchmark_return: xlmReturn,
+                alpha: portfolio_return - xlmReturn
+            },
+            {
+                name: 'BTC-only',
+                portfolio_return,
+                benchmark_return: btcReturn,
+                alpha: portfolio_return - btcReturn
+            },
+            {
+                name: '60/40 XLM-USDC',
+                portfolio_return,
+                benchmark_return: (0.6 * xlmReturn) + (0.4 * usdcReturn),
+                alpha: portfolio_return - ((0.6 * xlmReturn) + (0.4 * usdcReturn))
+            }
+        ]
+
+        return ok(res, { benchmarks })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio benchmark failed', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})

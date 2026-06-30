@@ -130,6 +130,7 @@ export const API_CONFIG = {
         AUTH_REFRESH: '/api/auth/refresh',
         AUTH_LOGOUT: '/api/auth/logout',
         PORTFOLIO: `${API_RESOURCE_ROOT}/portfolio`,
+        PORTFOLIO_IMPORT: `${API_RESOURCE_ROOT}/portfolio/import`,
         USER_PORTFOLIOS: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}`,
         PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') =>
@@ -152,6 +153,7 @@ export const API_CONFIG = {
         PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/performance-summary`,
         PRICES: `${API_RESOURCE_ROOT}/prices`,
+        MARKET_MOVERS: `${API_RESOURCE_ROOT}/market/movers`,
         PRICES_ENHANCED: `${API_RESOURCE_ROOT}/prices/enhanced`,
         MARKET_DETAILS: (asset: string) => `${API_RESOURCE_ROOT}/market/${asset}/details`,
         PRICE_CHART: (asset: string) => `${API_RESOURCE_ROOT}/market/${asset}/chart`,

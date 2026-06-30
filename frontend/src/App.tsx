@@ -85,6 +85,14 @@ function App() {
         return null
     })
 
+    const [embedPortfolioId, setEmbedPortfolioId] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/embed\/portfolio\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
+
     useEffect(() => {
         checkWalletConnection()
         runBootDiagnostics({
@@ -424,6 +432,8 @@ function App() {
                     doc={legalDoc}
                     onBack={() => handleNavigate('landing')}
                 />
+            ) : embedPortfolioId ? (
+                <EmbedWidget id={embedPortfolioId} />
             ) : publicShareHash ? (
                 <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (
