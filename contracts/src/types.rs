@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map, String, Vec};
 
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
 pub const ALLOCATION_DENOMINATOR: u32 = 10_000;
@@ -32,6 +32,7 @@ pub const MIN_REBALANCE_THRESHOLD: u32 = 1;
 pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
+pub const MAX_FEE_BPS: u32 = 50;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,6 +107,7 @@ pub struct RebalancePreview {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeeConfig {
+    pub platform_name: String,
     pub fee_bps: u32,
     pub fee_recipient: Address,
     pub enabled: bool,
