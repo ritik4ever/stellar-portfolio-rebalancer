@@ -1,0 +1,51 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/integration-tests.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/integration-tests.yml'
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      SOROBAN_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: integration-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            integration-${{ runner.os }}-
+
+      - name: Run integration tests
+        working-directory: ./contracts
+        run: cargo test --features integration -- --nocapture
+
+      - name: Run unit tests
+        working-directory: ./contracts
+        run: cargo test -- --nocapture

@@ -1,0 +1,116 @@
+name: Backend Performance Test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/**'
+      - '.github/workflows/performance-test.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/**'
+      - '.github/workflows/performance-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  actions: write
+
+jobs:
+  performance-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      sqlite:
+        image: noop
+        # SQLite runs embedded, no service needed
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Install clinic.js globally
+        run: npm install -g clinic
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Make load test script executable
+        run: chmod +x ./backend/scripts/load-test.mjs
+
+      - name: Start backend with clinic.js doctor
+        working-directory: ./backend
+        timeout-minutes: 8
+        run: |
+          # Set minimal environment for backend startup
+          export NODE_ENV=test
+          export DATABASE_URL="sqlite::memory:"
+          export REDIS_URL="redis://localhost:6379"
+          export JWT_SECRET="test-secret-key-for-performance-testing"
+          export STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+          export CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
+          export LOG_LEVEL="warn"
+          export ENABLE_STARTUP_SELF_TEST="false"
+
+          # Start backend with clinic.js doctor (it will monitor for 5+ minutes)
+          timeout 400 clinic doctor --collect-only -- npm start &
+          BACKEND_PID=$!
+
+          # Wait for backend to start
+          sleep 5
+
+          # Run load test for 5 minutes
+          BACKEND_URL="http://localhost:3000" timeout 320 node ./scripts/load-test.mjs
+          LOAD_TEST_EXIT=$?
+
+          # Wait for clinic to finish collecting data
+          wait $BACKEND_PID || true
+
+          exit $LOAD_TEST_EXIT
+        env:
+          NODE_OPTIONS: '--max-old-space-size=2048'
+
+      - name: Analyze clinic report
+        if: always()
+        working-directory: ./backend
+        run: node ./scripts/analyze-clinic-report.mjs
+
+      - name: Upload clinic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinic-report
+          path: backend/.clinic/
+          retention-days: 30
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Performance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Duration: 5 minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Concurrent Workers: 10" >> $GITHUB_STEP_SUMMARY
+          echo "- Heap Growth Threshold: 50MB" >> $GITHUB_STEP_SUMMARY
+          echo "- Profiler: clinic.js doctor" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts:** Check the 'clinic-report' artifact for detailed heap usage graphs and analysis." >> $GITHUB_STEP_SUMMARY

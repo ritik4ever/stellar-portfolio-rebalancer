@@ -50,6 +50,7 @@ vi.mock('./AssetSelector', () => ({
 }))
 
 const mockMutateAsync = vi.fn()
+const mockImportMutateAsync = vi.fn()
 vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
   buildRollbackMessage: (error: unknown, action = "portfolio update") => {
     const detail =
@@ -58,6 +59,10 @@ vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
   },
   useCreatePortfolioMutation: () => ({
     mutateAsync: mockMutateAsync,
+    isPending: false,
+  }),
+  useImportPortfolioMutation: () => ({
+    mutateAsync: mockImportMutateAsync,
     isPending: false,
   }),
 }));
@@ -105,8 +110,56 @@ describe('PortfolioSetup allocation validation', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     mockMutateAsync.mockResolvedValue({})
+    mockImportMutateAsync.mockResolvedValue({ portfolioId: 'imported-portfolio' })
     // Return empty assets so the component falls back to DEFAULT_ASSET_OPTIONS
     vi.spyOn(api, 'get').mockResolvedValue({ assets: [] } as any)
+  })
+
+  describe('import/export controls', () => {
+    it('renders import and export buttons in portfolio settings', () => {
+      renderSetup()
+
+      expect(screen.getByRole('button', { name: /export json/i })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /import json/i })).toBeTruthy()
+      expect(screen.getByLabelText(/import portfolio json/i)).toBeTruthy()
+    })
+
+    it('opens the import file picker when import is clicked', () => {
+      renderSetup()
+
+      const input = screen.getByLabelText(/import portfolio json/i) as HTMLInputElement
+      const clickSpy = vi.spyOn(input, 'click')
+
+      fireEvent.click(screen.getByRole('button', { name: /import json/i }))
+
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('uploads a JSON file and sends it to the import mutation', async () => {
+      renderSetup('GIMPORTTEST')
+
+      const payload = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        userAddress: 'GIMPORTTEST',
+        allocations: { XLM: 60, USDC: 40 },
+        threshold: 5,
+        slippageTolerance: 1.5,
+        strategy: 'periodic',
+        strategyConfig: { intervalDays: 14 },
+      }
+
+      const input = screen.getByLabelText(/import portfolio json/i) as HTMLInputElement
+      const file = new File([JSON.stringify(payload)], 'portfolio.json', {
+        type: 'application/json',
+      })
+
+      fireEvent.change(input, { target: { files: [file] } })
+
+      await waitFor(() => {
+        expect(mockImportMutateAsync).toHaveBeenCalledWith(payload)
+      })
+    })
   })
 
   // ── Sum-to-100 boundary tests ─────────────────────────────────────────────
@@ -403,6 +456,67 @@ describe('PortfolioSetup allocation validation', () => {
 
       await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1))
       expect(window.localStorage.getItem(draftKey)).toBeNull()
+    })
+  })
+
+  describe('saved templates reload', () => {
+    const anonymousKey = 'portfolio-templates-anonymous'
+
+    it('refreshes saved templates when the connected wallet changes', () => {
+      window.localStorage.setItem(
+        anonymousKey,
+        JSON.stringify([
+          {
+            id: 'saved-a',
+            name: 'Anonymous Template',
+            description: 'Stored for anonymous use',
+            riskLevel: 'medium',
+            allocations: [{ asset: 'XLM', percentage: 100 }],
+          },
+        ]),
+      )
+
+      const { rerender } = render(
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+            })
+          }
+        >
+          <PortfolioSetup onNavigate={vi.fn()} publicKey={null} />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getByText(/anonymous template/i)).toBeTruthy()
+
+      window.localStorage.setItem(
+        'portfolio-templates-GTESTUSER',
+        JSON.stringify([
+          {
+            id: 'saved-b',
+            name: 'Wallet Template',
+            description: 'Stored for a connected wallet',
+            riskLevel: 'low',
+            allocations: [{ asset: 'USDC', percentage: 100 }],
+          },
+        ]),
+      )
+
+      rerender(
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+            })
+          }
+        >
+          <PortfolioSetup onNavigate={vi.fn()} publicKey={'GTESTUSER'} />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByText(/anonymous template/i)).toBeNull()
+      expect(screen.getByText(/wallet template/i)).toBeTruthy()
     })
   })
 
