@@ -6,6 +6,7 @@ import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnap
 import { setAnalyticsCompactionSchedulerRegistered } from './workers/analyticsCompactionWorker.js'
 import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyCleanupWorker.js'
 import { notificationService } from '../services/notificationService.js'
+import { sendDigests } from '../notifications/digest.js'
 
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
 const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
@@ -257,7 +258,11 @@ export async function startQueueScheduler(): Promise<void> {
         const ms = next.getTime() - now.getTime()
         setTimeout(async () => {
             try { await notificationService.processDigests('daily') } catch (e) { logger.error('Daily digest failed', { error: e instanceof Error ? e.message : String(e) }) }
-            setInterval(async () => { try { await notificationService.processDigests('daily') } catch (e) { logger.error('Daily digest failed', { error: e instanceof Error ? e.message : String(e) }) } }, 24 * 60 * 60 * 1000)
+            try { await sendDigests('daily') } catch (e) { logger.error('Daily portfolio digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            setInterval(async () => {
+                try { await notificationService.processDigests('daily') } catch (e) { logger.error('Daily digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+                try { await sendDigests('daily') } catch (e) { logger.error('Daily portfolio digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            }, 24 * 60 * 60 * 1000)
         }, ms)
     }
 
@@ -272,14 +277,34 @@ export async function startQueueScheduler(): Promise<void> {
         const ms = next.getTime() - now.getTime()
         setTimeout(async () => {
             try { await notificationService.processDigests('weekly') } catch (e) { logger.error('Weekly digest failed', { error: e instanceof Error ? e.message : String(e) }) }
-            setInterval(async () => { try { await notificationService.processDigests('weekly') } catch (e) { logger.error('Weekly digest failed', { error: e instanceof Error ? e.message : String(e) }) } }, 7 * 24 * 60 * 60 * 1000)
+            try { await sendDigests('weekly') } catch (e) { logger.error('Weekly portfolio digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            setInterval(async () => {
+                try { await notificationService.processDigests('weekly') } catch (e) { logger.error('Weekly digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+                try { await sendDigests('weekly') } catch (e) { logger.error('Weekly portfolio digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            }, 7 * 24 * 60 * 60 * 1000)
+        }, ms)
+    }
+
+    const scheduleMonthly = () => {
+        const now = new Date()
+        const next = new Date(now)
+        next.setHours(10, 0, 0, 0)
+        next.setDate(1)
+        if (next <= now) next.setMonth(next.getMonth() + 1)
+        const ms = next.getTime() - now.getTime()
+        setTimeout(async () => {
+            try { await sendDigests('monthly') } catch (e) { logger.error('Monthly portfolio digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            setInterval(async () => {
+                try { await sendDigests('monthly') } catch (e) { logger.error('Monthly portfolio digest failed', { error: e instanceof Error ? e.message : String(e) }) }
+            }, 30 * 24 * 60 * 60 * 1000)
         }, ms)
     }
 
     try {
         scheduleDaily()
         scheduleWeekly()
-        logger.info('[SCHEDULER] Digest timers scheduled (daily, weekly)')
+        scheduleMonthly()
+        logger.info('[SCHEDULER] Digest timers scheduled (daily, weekly, monthly)')
     } catch (e) {
         logger.error('Failed to schedule digest timers', { error: e instanceof Error ? e.message : String(e) })
     }
