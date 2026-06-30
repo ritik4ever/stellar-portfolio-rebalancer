@@ -66,6 +66,7 @@ These checks are triggered only when their path filters match. GitHub treats the
 | Check name    | Workflow file | Trigger            | What it does                                    |
 | ------------- | ------------- | ------------------ | ----------------------------------------------- |
 | `deploy`      | `deploy.yml`  | `push` to `main`   | Builds Docker images and validates compose startup |
+| `contract-deploy` | `contract-deploy.yml` | `push` to `main`, `release/**` PRs, manual dispatch | Promotes the Soroban contract through testnet, staging, and mainnet with environment approval gates |
 
 ### Scheduled checks (not blocking PRs)
 

@@ -61,13 +61,6 @@ We provide templates for common contribution types:
 
 If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for how to label, prioritize, and respond to issues and pull requests.
 
-## Commit Messages and Changelog Updates
-
-Use [Conventional Commits](https://conventionalcommits.org/) for every commit. Pull requests run commitlint in CI, and non-conforming commit messages are blocked before merge.
-
-Release PRs are generated automatically by release-please after changes land on `main`. The generated PR updates `CHANGELOG.md` from conventional commits and groups release notes into Features, Bug Fixes, Performance, and Breaking Changes.
-
-Examples:
 
 - `feat(api): add new endpoint` -> Features
 - `fix(auth): resolve token issue` -> Bug Fixes
