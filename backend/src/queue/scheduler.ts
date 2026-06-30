@@ -5,6 +5,7 @@ import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWo
 import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnapshotWorker.js'
 import { setAnalyticsCompactionSchedulerRegistered } from './workers/analyticsCompactionWorker.js'
 import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyCleanupWorker.js'
+import { setUserAlertsSchedulerRegistered } from './workers/userAlertsWorker.js'
 import { notificationService } from '../services/notificationService.js'
 
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
@@ -13,6 +14,7 @@ const ANALYTICS_COMPACTION_CRON = '0 2 * * 0'  // every Sunday at 02:00 UTC
 const IDEMPOTENCY_CLEANUP_CRON = '15 * * * *'  // every 60 minutes (quarter past the hour)
 const PRICE_HISTORY_SNAPSHOT_CRON = '*/5 * * * *'  // every 5 minutes
 const PRICE_HISTORY_PRUNE_CRON = '0 2 * * *'       // daily at 02:00
+const USER_ALERTS_CRON = '*/5 * * * *';
 
 // Job recovery configuration
 interface JobRecoveryConfig {
@@ -57,6 +59,14 @@ const RECOVERY_CONFIGS: JobRecoveryConfig[] = [
         maxMissedToReplay: 1,
         recoveryWindowMs: 24 * 60 * 60 * 1000,
     },
+    {
+        queueName: 'user-alerts',
+        cronPattern: USER_ALERTS_CRON,
+        jobId: 'repeatable-user-alerts-check',
+        critical: false,
+        maxMissedToReplay: 0,
+        recoveryWindowMs: 24 * 60 * 60 * 1000,
+    }
 ]
 
 function generateSchedulerCorrelationId(prefix: string): string {
@@ -65,9 +75,11 @@ function generateSchedulerCorrelationId(prefix: string): string {
 
 function calculateMissedExecutions(cronPattern: string, since: Date, now: Date): number {
     const intervalMs: Record<string, number> = {
+        '*/5 * * * *': 5 * 60 * 1000,
         '*/30 * * * *': 30 * 60 * 1000,
         '0 * * * *': 60 * 60 * 1000,
         '15 * * * *': 60 * 60 * 1000,
+        '0 2 * * *': 24 * 60 * 60 * 1000,
         '0 2 * * 0': 7 * 24 * 60 * 60 * 1000,
     }
 
@@ -232,6 +244,16 @@ export async function startQueueScheduler(): Promise<void> {
         )
     }
 
+    const userAlertsQueue = getQueueByName('user-alerts');
+    if (userAlertsQueue) {
+        await userAlertsQueue.add(
+            'scheduled-user-alerts-check',
+            { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('alerts') },
+            { repeat: { pattern: USER_ALERTS_CRON }, jobId: 'repeatable-user-alerts-check' }
+        );
+        setUserAlertsSchedulerRegistered(true);
+    }
+
     logger.info('[SCHEDULER] Repeatable jobs registered', {
         portfolioCheck: PORTFOLIO_CHECK_CRON,
         analyticsSnapshot: ANALYTICS_SNAPSHOT_CRON,
@@ -239,6 +261,7 @@ export async function startQueueScheduler(): Promise<void> {
         idempotencyCleanup: IDEMPOTENCY_CLEANUP_CRON,
         priceHistorySnapshot: PRICE_HISTORY_SNAPSHOT_CRON,
         priceHistoryPrune: PRICE_HISTORY_PRUNE_CRON,
+        userAlertsCheck: USER_ALERTS_CRON,
     })
 
     try {
@@ -293,8 +316,9 @@ export async function stopQueueScheduler(): Promise<void> {
     const analyticsSnapshotQueue = getAnalyticsSnapshotQueue()
     const analyticsCompactionQueue = getAnalyticsCompactionQueue()
     const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
+    const userAlertsQueue = getQueueByName('user-alerts')
 
-    for (const queue of [portfolioCheckQueue, analyticsSnapshotQueue, analyticsCompactionQueue, idempotencyCleanupQueue]) {
+    for (const queue of [portfolioCheckQueue, analyticsSnapshotQueue, analyticsCompactionQueue, idempotencyCleanupQueue, userAlertsQueue]) {
         if (queue) {
             const repeatableJobs = await queue.getRepeatableJobs()
             for (const job of repeatableJobs) {
@@ -307,6 +331,7 @@ export async function stopQueueScheduler(): Promise<void> {
     setAnalyticsSnapshotSchedulerRegistered(false)
     setAnalyticsCompactionSchedulerRegistered(false)
     setIdempotencyCleanupSchedulerRegistered(false)
+    setUserAlertsSchedulerRegistered(false)
 
     logger.info('[SCHEDULER] Repeatable jobs removed')
 }

@@ -30,6 +30,20 @@ export async function getPriceHistory(
     return result.rows
 }
 
+export async function getPriceHistoryInRange(
+    asset: string,
+    from: Date,
+    to: Date,
+): Promise<PriceSnapshot[]> {
+    const pool = getPool()
+    if (!pool) return []
+    const result = await pool.query<PriceSnapshot>(
+        'SELECT id, asset, price::float AS price, recorded_at FROM price_history WHERE asset = $1 AND recorded_at >= $2 AND recorded_at <= $3 ORDER BY recorded_at ASC',
+        [asset, from, to],
+    )
+    return result.rows
+}
+
 export async function pruneOldPriceSnapshots(olderThanDays = 90): Promise<number> {
     const pool = getPool()
     if (!pool) return 0

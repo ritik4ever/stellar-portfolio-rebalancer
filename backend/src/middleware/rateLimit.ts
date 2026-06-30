@@ -36,7 +36,7 @@ if (process.env.NODE_ENV !== "test") {
     redisClient = new IORedis(REDIS_URL, {
       lazyConnect: true,
       connectTimeout: 3000,
-      maxRetriesPerRequest: null,
+      maxRetriesPerRequest: 0,
       enableReadyCheck: false,
     });
     // Absorb all connection errors so a missing Redis never crashes the process.
@@ -165,6 +165,7 @@ export const globalRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("global"),
   skip: skipSuccessfulRequests,
+  passOnStoreError: true,
   message: "Too many requests from this IP, please try again later.",
 });
 
@@ -177,6 +178,7 @@ export const burstProtectionLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("burst"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const writeRateLimiter = rateLimit({
@@ -188,6 +190,7 @@ export const writeRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("write"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const writeBurstLimiter = rateLimit({
@@ -199,6 +202,7 @@ export const writeBurstLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("write-burst"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const authRateLimiter = rateLimit({
@@ -210,6 +214,7 @@ export const authRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("auth"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const criticalRateLimiter = rateLimit({
@@ -221,6 +226,7 @@ export const criticalRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("critical"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const adminRateLimiter = rateLimit({
@@ -232,6 +238,7 @@ export const adminRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("admin"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 // Composite middleware definitions

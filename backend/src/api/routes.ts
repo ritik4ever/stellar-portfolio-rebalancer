@@ -7,7 +7,7 @@ import { debugRouter } from './debug.routes.js'
 import { consentRouter } from './consent.routes.js'
 import { assetsRouter } from './assets.routes.js'
 import { analyticsRouter } from './analytics.routes.js'
-import { marketRouter } from './market.routes.js'
+
 
 export const portfolioRouter = Router()
 
@@ -19,5 +19,4 @@ portfolioRouter.use(debugRouter)
 portfolioRouter.use(consentRouter)
 portfolioRouter.use(assetsRouter)
 portfolioRouter.use(analyticsRouter)
-portfolioRouter.use(marketRouter)
 

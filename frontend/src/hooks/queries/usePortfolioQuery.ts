@@ -8,6 +8,7 @@ export const portfolioKeys = {
     list: (address: string) => [...portfolioKeys.lists(), address] as const,
     details: () => [...portfolioKeys.all, 'detail'] as const,
     detail: (id: string) => [...portfolioKeys.details(), id] as const,
+    costSummary: (id: string) => [...portfolioKeys.detail(id), 'cost-summary'] as const,
 }
 
 export type RebalanceConfirmationSummary = {
@@ -29,6 +30,13 @@ export type RebalancePlanSnapshot = {
     maxSlippagePercent: number
     estimatedSlippageBps: number
     priceFeedMeta?: PriceFeedClientMeta
+}
+
+export type PortfolioCostSummary = {
+    total_fees_paid: number
+    avg_slippage_bps: number
+    cost_per_rebalance: number
+    total_rebalances: number
 }
 
 export function buildRebalanceConfirmationSummary(input: {
@@ -186,6 +194,16 @@ export const useRebalancePlan = (id: string | null, enabled = true) => {
         queryFn: () => api.get<RebalancePlanSnapshot>(ENDPOINTS.PORTFOLIO_REBALANCE_PLAN(id!)),
         enabled: enabled && !!id && id !== 'demo',
         staleTime: 25000,
+        placeholderData: (previous) => previous,
+    })
+}
+
+export const usePortfolioCostSummary = (id: string | null) => {
+    return useQuery({
+        queryKey: portfolioKeys.costSummary(id || ''),
+        queryFn: () => api.get<PortfolioCostSummary>(ENDPOINTS.PORTFOLIO_COST_SUMMARY(id!)),
+        enabled: !!id && id !== 'demo',
+        staleTime: 30000,
         placeholderData: (previous) => previous,
     })
 }
