@@ -4,6 +4,42 @@ import {
   notificationPreferencesSchema,
 } from '../services/notificationPreferences.js';
 
+export const MAX_PORTFOLIO_ASSETS = 10
+
+const portfolioStrategyConfigSchema = z.object({
+    intervalDays: z.number().min(1).max(365).optional(),
+    volatilityThresholdPct: z.number().min(1).max(100).optional(),
+    minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+}).strict()
+
+export const portfolioAllocationsSchema = z.record(z.string(), z.number().min(0).max(100)).refine(
+    (allocations) => {
+        const entries = Object.entries(allocations)
+        if (entries.length === 0 || entries.length > MAX_PORTFOLIO_ASSETS) return false
+        const total = entries.reduce((sum, [, value]) => sum + value, 0)
+        return Math.abs(total - 100) <= 0.01
+    },
+    {
+        message: `Allocations must contain between 1 and ${MAX_PORTFOLIO_ASSETS} assets and sum to 100%`,
+    }
+)
+
+export const portfolioSettingsSchema = z.object({
+    allocations: portfolioAllocationsSchema,
+    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
+    slippageTolerance: z.number().min(0.1, "Slippage tolerance must be between 0.1% and 5%").max(5, "Slippage tolerance must be between 0.1% and 5%").optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategyConfig: portfolioStrategyConfigSchema.optional(),
+    name: z.string().max(256, "name is too long").optional(),
+    description: z.string().max(2000, "description is too long").optional(),
+}).strict()
+
+export const portfolioExportSchema = portfolioSettingsSchema.extend({
+    schemaVersion: z.literal(1),
+    exportedAt: z.string().datetime().optional(),
+    userAddress: z.string().min(1, 'userAddress is required'),
+})
+
 const strictBoolean = z.preprocess((val) => {
     if (typeof val === 'string') {
         if (val.toLowerCase() === 'true') return true;
@@ -13,28 +49,9 @@ const strictBoolean = z.preprocess((val) => {
 }, z.boolean());
 
 // Schema for POST /portfolio
-export const createPortfolioSchema = z.object({
+export const createPortfolioSchema = portfolioSettingsSchema.extend({
     userAddress: z.string().min(1, "userAddress is required"),
-    name: z.string().max(256, "name is too long").optional(),
-    description: z.string().max(2000, "description is too long").optional(),
-    allocations: z.record(z.string(), z.number().min(0).max(100)).refine(
-        (allocations) => {
-            const total = Object.values(allocations).reduce((sum, val) => sum + val, 0);
-            return Math.abs(total - 100) <= 0.01;
-        },
-        {
-            message: "Allocations must sum to 100%",
-        }
-    ),
-    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
-    slippageTolerance: z.number().min(0.1, "Slippage tolerance must be between 0.1% and 5%").max(5, "Slippage tolerance must be between 0.1% and 5%").optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
-    strategyConfig: z.object({
-        intervalDays: z.number().min(1).max(365).optional(),
-        volatilityThresholdPct: z.number().min(1).max(100).optional(),
-        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
-    }).optional(),
-}).strict();
+});
 
 export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
     version: z.number().int().min(1, "Version must be a positive integer")
@@ -73,7 +90,22 @@ export const recordRebalanceEventSchema = z.object({
     onChainLedger: z.number().int().optional(),
     onChainContractId: z.string().optional(),
     onChainPagingToken: z.string().optional(),
-    isSimulated: strictBoolean.optional()
+    isSimulated: strictBoolean.optional(),
+    feePaid: z.number().min(0).optional(),
+    slippageBps: z.number().min(0).optional(),
+    estimatedSlippageBps: z.number().min(0).optional(),
+    actualSlippageBps: z.number().min(0).optional(),
+    totalSlippageBps: z.number().min(0).optional(),
+    gasFeeXlm: z.number().min(0).optional(),
+    gasFeeUsd: z.number().min(0).optional(),
+    gasPerTradeXlm: z.number().min(0).optional(),
+    gasWarning: strictBoolean.optional(),
+    gasBreakdown: z.array(z.object({
+        tradeId: z.string(),
+        fromAsset: z.string().optional(),
+        toAsset: z.string().optional(),
+        feeXlm: z.number().min(0)
+    })).optional()
 }).strict();
 
 // Auto-Rebalancer control schemas (must be entirely empty payloads)
@@ -228,10 +260,7 @@ export const updateDraftSchema = z.object({
 
 // ─── Export / query-param schemas ─────────────────────────────────────────────
 export const portfolioExportQuerySchema = z.object({
-    format: z.enum(['json', 'csv', 'pdf']).refine(
-        (v) => ['json', 'csv', 'pdf'].includes(v),
-        { message: 'Query parameter format must be one of: json, csv, pdf' }
-    )
+    format: z.enum(['json', 'csv', 'pdf']).optional()
 });
 
 export const rebalanceHistoryQuerySchema = z.object({
@@ -270,3 +299,42 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+const isoDateString = z.string().refine((v) => !isNaN(Date.parse(v)), 'Invalid ISO date string');
+
+export const ohlcvQuerySchema = z.object({
+    asset: z.string().min(1, 'asset is required').max(32).toUpperCase(),
+    interval: z.enum(['1h', '4h', '1d']),
+    from: isoDateString,
+    to: isoDateString,
+});
+
+/**
+ * Query params for GET /portfolio/:id/rebalance-history
+ *
+ * Supports:
+ *   from          – ISO timestamp lower-bound (inclusive)
+ *   to            – ISO timestamp upper-bound (inclusive)
+ *   trigger_type  – 'manual' | 'auto' | 'circuit_breaker'
+ *   status        – 'success' | 'partial' | 'failed'
+ *   page          – 1-based page number (default 1)
+ *   page_size     – records per page, max 500 (default 50)
+ *   sort          – 'asc' | 'desc' (default 'desc')
+ */
+export const portfolioRebalanceHistoryQuerySchema = z.object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to:   z.string().datetime({ offset: true }).optional(),
+    trigger_type: z.enum(['manual', 'auto', 'circuit_breaker']).optional(),
+    status: z.enum(['success', 'partial', 'failed']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).default(1)
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(500).default(50)
+    ),
+    sort: z.enum(['asc', 'desc']).default('desc')
+});
+
+export type PortfolioRebalanceHistoryQuery = z.infer<typeof portfolioRebalanceHistoryQuerySchema>;

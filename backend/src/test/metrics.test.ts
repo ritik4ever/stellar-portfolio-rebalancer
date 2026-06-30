@@ -63,9 +63,6 @@ describe('metrics observability', () => {
         expect(payload).toContain('stellar_portfolio_queue_jobs')
         expect(payload).toContain('queue="rebalance",state="failed"')
     })
-
-
-    })
 })
 
 describe('metrics endpoint protection', () => {

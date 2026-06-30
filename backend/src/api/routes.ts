@@ -9,6 +9,7 @@ import { assetsRouter } from './assets.routes.js'
 import { analyticsRouter } from './analytics.routes.js'
 import { taxReportRouter } from './taxReport.routes.js'
 
+
 export const portfolioRouter = Router()
 
 portfolioRouter.use(portfoliosRouter)
@@ -19,4 +20,4 @@ portfolioRouter.use(debugRouter)
 portfolioRouter.use(consentRouter)
 portfolioRouter.use(assetsRouter)
 portfolioRouter.use(analyticsRouter)
-portfolioRouter.use(taxReportRouter)
+
