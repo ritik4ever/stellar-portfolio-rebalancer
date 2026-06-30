@@ -98,7 +98,7 @@ async function getRedisClient() {
   }
 
   const redis = await import('ioredis');
-  return new redis.default(connectionOptions);
+  return new redis.Redis(connectionOptions);
 }
 
 /**

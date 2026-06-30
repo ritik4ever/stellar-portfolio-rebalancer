@@ -1,20 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock ioredis
-const mockGet = vi.fn()
-const mockSetex = vi.fn()
-const mockDel = vi.fn()
-const mockExpire = vi.fn()
-const mockConnect = vi.fn()
+const { mockGet, mockSetex, mockDel, mockExpire, mockConnect } = vi.hoisted(() => ({
+    mockGet: vi.fn(),
+    mockSetex: vi.fn(),
+    mockDel: vi.fn(),
+    mockExpire: vi.fn(),
+    mockConnect: vi.fn(),
+}))
 
 vi.mock('ioredis', () => ({
-    default: vi.fn().mockImplementation(() => ({
-        get: mockGet,
-        setex: mockSetex,
-        del: mockDel,
-        expire: mockExpire,
-        connect: mockConnect,
-    })),
+    default: vi.fn().mockImplementation(function(this: any) {
+        this.get = mockGet
+        this.setex = mockSetex
+        this.del = mockDel
+        this.expire = mockExpire
+        this.connect = mockConnect
+        return this
+    }),
 }))
 
 vi.mock('../queue/connection.js', () => ({ REDIS_URL: 'redis://localhost:6379' }))
