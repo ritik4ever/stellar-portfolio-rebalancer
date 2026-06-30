@@ -1,82 +1,117 @@
 [
   {
-    "file": "001_initial_schema.up.sql",
-    "sha256": "01d495382dcd7fedf63d87a6c7d3809f20facc6255f1e7795f218ca619efb46c"
-  },
-  {
     "file": "001_initial_schema.down.sql",
-    "sha256": "16c6b0494fe6b928e8029b3483d5c2cf4dcff4b864056b64a39399adfeb30b86"
+    "sha256": "aaba39fd1f233325a420060d35dddc76759bd9cd3e390edba4e27a562d68a7ba"
   },
   {
-    "file": "002_seed_demo_data.up.sql",
-    "sha256": "2eb3fff967924bcf000c5987a9ac675345954bb6ad96a25c40a9433d25808db3"
+    "file": "001_initial_schema.up.sql",
+    "sha256": "f245a8a1e5c72fe55f8dd24369d625023bd0c3d7a6fbaaba3b507d9e72adbcca"
   },
   {
     "file": "002_seed_demo_data.down.sql",
-    "sha256": "02b85017d185376ddb53abfb183bc457248ada66f7e7d03cdf3481f7ba2f622d"
+    "sha256": "5ce0fe4a9dd539acbb6087da0d3683dcc4db3ebaa625f79b494f150d4a3f87c8"
   },
   {
-    "file": "003_add_users_table.up.sql",
-    "sha256": "bd3086fa0550e09f16f8a32d5ce6ee56fcd57201ac5c220d9f1c178308344376"
+    "file": "002_seed_demo_data.up.sql",
+    "sha256": "6233609a91b0838bbbf363904124df7cf40d152dbb650bc0e1ff845d9699558d"
   },
   {
     "file": "003_add_users_table.down.sql",
-    "sha256": "9dd33465e8e161f398c69bfb62d934a5db1a2a736a44141469484320254798fc"
+    "sha256": "a6c3a96d48be7512c9378db027507fc7d78b60c7e841b987dfe634dbe70682d3"
   },
   {
-    "file": "004_slippage_tolerance.up.sql",
-    "sha256": "7d1a402a4cb16b959699270c1755b132b677c835d88eb557490960e45e2e84a6"
+    "file": "003_add_users_table.up.sql",
+    "sha256": "3255d1e39635b3aaadb4fd226f4ebca9ba51bbfde728c72751565c05fe89b0bc"
   },
   {
     "file": "004_slippage_tolerance.down.sql",
-    "sha256": "626b6d75f6d6ee0c3bbb39891eb7cba83980166ebba03fbb2e15d7938a52f148"
+    "sha256": "7d0eb72e4464a99be790d60f5a015541cbc823994bd3ab8d338d11288992d561"
   },
   {
-    "file": "005_refresh_tokens.up.sql",
-    "sha256": "b3fac9d935bacd6cd2064763a457240c2e10fcb75da169044c3d9dfe06848999"
+    "file": "004_slippage_tolerance.up.sql",
+    "sha256": "90c8263e056f8c2484c84b6a577326b06ce5a76aaeb2074fe5cd41a8dfa5aa2f"
   },
   {
     "file": "005_refresh_tokens.down.sql",
-    "sha256": "72fbfc3d388f2dd2c1826957c42dd85e360039d543b6c956d4430e5bf5e920f4"
+    "sha256": "78f8d9731a34cbeb1009700b3cbceaa8d0f8619f8128dd01d34da45531059409"
   },
   {
-    "file": "006_rebalancing_strategy.up.sql",
-    "sha256": "8ecded2ddeeae0b8c2649a4b65bd39b49147a1302d9f83386afaf29360d11a31"
+    "file": "005_refresh_tokens.up.sql",
+    "sha256": "78202be0a0bf8d32bebb1f11c777a00f7a704be3f157febbec0bf5fefa1c2029"
   },
   {
     "file": "006_rebalancing_strategy.down.sql",
-    "sha256": "271810be879ddbaf030fc38d881c1ddbc93aecce175beab572bcd16898602cbc"
+    "sha256": "191ac0782a494caf7a97b031d75cb411a9c67c00bd76f37ea1d2cb64a790aebe"
   },
   {
-    "file": "007_asset_registry.up.sql",
-    "sha256": "c0f509e169f4b81955f93fd3061161de87ac0b5c047215e52eb133671068347b"
+    "file": "006_rebalancing_strategy.up.sql",
+    "sha256": "6cae7b66c129aa068490d1ae8c49ffd90c20bebf07ac71a11b81f687caa81541"
   },
   {
     "file": "007_asset_registry.down.sql",
-    "sha256": "bfebfa240198d36b0711b3e58fdab71d7f2d1205c748485e59a2aab0a1b45727"
+    "sha256": "4f9727dfa042bca3921772dafeb0f3e77f4c60617bc73b96d0b5279fcf60aa6f"
   },
   {
-    "file": "008_legal_consent.up.sql",
-    "sha256": "ed1e6d5b25105c95063092801f39d2037bfe638048cba77fea9a9801f1a1f7e4"
+    "file": "007_asset_registry.up.sql",
+    "sha256": "4ed530f29729564ef80186fe4524e64515aebc56969d265f4bea1c37948e734d"
   },
   {
     "file": "008_legal_consent.down.sql",
-    "sha256": "e9453f86563c50f1788278f73620ea51b7580b23dec046730541c8d0659e6f4b"
+    "sha256": "2006c78ca8d232974383931a5703c5114854e76eb1ca417d58c26229dbd06e43"
   },
   {
-    "file": "009_notification_logs.up.sql",
-    "sha256": "f0ce7a46d358485aee1f0ceb87298be1516b230416000075661430dee5f500af"
+    "file": "008_legal_consent.up.sql",
+    "sha256": "7826c93e7da68d560a24601799cff0f5311f131e2a07fd1306f5acad8a3061d7"
   },
   {
     "file": "009_notification_logs.down.sql",
-    "sha256": "57ab60cc1f7de4b048c04feeec2b98b5f160bf097674f6fff0453c0ef7c2be9c"
+    "sha256": "7ad7243db8d55122422af7b63470900f273713d290739eaadf335ddbaeb67d9a"
   },
   {
-    "file": "010_consent_audit_lifecycle.up.sql",
-    "sha256": "28cdb74b2c190dc9a46f56077952345258a0b6c655253b3ff4fcf85458e5cdfe"
+    "file": "009_notification_logs.up.sql",
+    "sha256": "c3ca5697d86963049adc2301ac48cf9c75419cbf05075820e1f58ba6ab143862"
+  },
+  {
+    "file": "009_price_history.down.sql",
+    "sha256": "b33032724f91596cb42c498df6cc60e9cb47bf711ae1930b7a41b488ad59544c"
+  },
+  {
+    "file": "009_price_history.up.sql",
+    "sha256": "013f49d9f4c9fafa7bc5858cf7f898538485edbc5eefed6503563218ead32471"
   },
   {
     "file": "010_consent_audit_lifecycle.down.sql",
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    "sha256": "d8977398dde3e54341c838307c620d8533b4ee7c6e73e50910edd8612e705806"
+  },
+  {
+    "file": "010_consent_audit_lifecycle.up.sql",
+    "sha256": "a99e9ac749b2c5dda393d2d42ae1379a2ad4e4a3537eedef0acfba04c5224ec8"
+  },
+  {
+    "file": "011_consent_document_version.down.sql",
+    "sha256": "760965e9f85468262b6b24af7aec4646a80c1de0d195c93f6d211f4024241a4c"
+  },
+  {
+    "file": "011_consent_document_version.up.sql",
+    "sha256": "9c4685a15874baa12f810d3b4d76c8c9c1829ea4d7fb30728be5a06575233549"
+  },
+  {
+    "file": "011_notification_delivery_metadata.down.sql",
+    "sha256": "42259bb4f2b70bbd554ce3db1a62d6f37c7c042204246e49d40b2792081fb61a"
+  },
+  {
+    "file": "011_notification_delivery_metadata.up.sql",
+    "sha256": "3e274ed8c8f411aa538dc1ceb39240b74ae56c9febe7d920680607f3c072816c"
+  },
+  {
+    "file": "012_portfolio_search.down.sql",
+    "sha256": "7fb1ce8ae9d0065870b3d42c23f5d3a5a385134725d6522b39439c76ec8c4c06"
+  },
+  {
+    "file": "012_portfolio_search.up.sql",
+    "sha256": "98cb9682b01ba4ae16ef965dd72c0269de9549c73060065dd297150ebe5b79ab"
+
     "sha256": "351bae86974db75abfb7508e0cadf3b5695f3c223b93b68a1a6bf97dc3f85caf"
   },
   {
@@ -86,5 +121,6 @@
   {
     "file": "011_rebalance_cost_metrics.down.sql",
     "sha256": "5760434f3e48c47c28e4be090296ec9b02b9f5822ead2fb8a337a3f4ba2be8b5"
+
   }
 ]

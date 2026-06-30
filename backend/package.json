@@ -12,6 +12,9 @@
         "db:migrate:status": "tsx src/db/migrate.ts -- --status",
         "db:setup": "tsx src/db/migrate.ts",
         "db:seed:e2e": "tsx src/db/seed.e2e.ts",
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+
+        "test": "vitest run",
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
         "test:ci": "npm run test:coverage",
