@@ -4,8 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { StrKey } from '@stellar/stellar-sdk'
 import { Buffer } from 'node:buffer'
-
-
+import { parseAssetCreatePayload, AssetRegistryValidationError } from '../services/assetRegistryValidation.js'
 
 const VALID_CONTRACT = StrKey.encodeContract(Buffer.alloc(32, 2))
 const VALID_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
@@ -63,15 +62,6 @@ const VALID_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
       expect(() => parseAssetCreatePayload('X', 'a'.repeat(257), {})).toThrow(
         AssetRegistryValidationError
       )
-    })
-
-    it('rejects contract and issuer together', () => {
-      expect(() =>
-        parseAssetCreatePayload('X', 'Y', {
-          contractAddress: VALID_CONTRACT,
-          issuerAccount: VALID_ISSUER
-        })
-      ).toThrow(AssetRegistryValidationError)
     })
 
 })

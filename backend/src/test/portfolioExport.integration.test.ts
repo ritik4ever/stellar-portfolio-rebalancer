@@ -264,10 +264,6 @@ describe('JSON import — POST /api/portfolio/import', () => {
         const exportRes = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
             .expect(200)
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-        expect(res.headers['content-type']).toMatch(/application\/json/)
-    })
-
 
 
         const importRes = await request(app)
