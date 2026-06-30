@@ -22,6 +22,7 @@ const spec: Record<string, any> = {
     tags: [
         { name: 'Health', description: 'Health and root' },
         { name: 'Portfolio', description: 'Portfolio CRUD and rebalancing' },
+        { name: 'Events', description: 'Global event feed' },
         { name: 'Rebalance history', description: 'Rebalance event history' },
         { name: 'Risk', description: 'Risk metrics and checks' },
         { name: 'Prices & market', description: 'Price feeds and market data' },
@@ -190,6 +191,46 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Event recorded', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/events': {
+            get: {
+                tags: ['Events'],
+                summary: 'Get global event feed',
+                description: 'Return stream events across all streams, sorted by timestamp descending.',
+                parameters: [
+                    { name: 'eventType', in: 'query', schema: { type: 'string' }, description: 'Filter by event type' },
+                    { name: 'streamId', in: 'query', schema: { type: 'string' }, description: 'Filter by stream ID' },
+                    { name: 'actor', in: 'query', schema: { type: 'string', enum: ['user', 'system', 'admin', 'scheduler'] } },
+                    { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' }, description: 'Inclusive start timestamp' },
+                    { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' }, description: 'Inclusive end timestamp' },
+                    { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+                    { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 } },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Event feed',
+                        content: {
+                            'application/json': {
+                                schema: { $ref: '#/components/schemas/ApiEnvelope' },
+                                example: {
+                                    success: true,
+                                    data: {
+                                        data: [],
+                                        total: 0,
+                                        page: 1,
+                                        limit: 50,
+                                        filters: {},
+                                    },
+                                    error: null,
+                                    timestamp: '2025-01-01T00:00:00.000Z',
+                                },
+                            },
+                        },
+                    },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },

@@ -29,6 +29,23 @@ export interface RebalanceHistoryQueryOptions {
   endTimestamp?: string;
 }
 
+export interface GlobalEventFeedQueryOptions {
+  eventType?: string;
+  streamId?: string;
+  actor?: "user" | "system" | "admin" | "scheduler";
+  from?: string;
+  to?: string;
+  page: number;
+  limit: number;
+}
+
+export interface GlobalEventFeedResult {
+  data: RebalanceEvent[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
 // ─────────────────────────────────────────────
@@ -380,6 +397,13 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
     actor: details?.actor,
     source: details?.source,
     triggerMetadata: details?.triggerMetadata,
+    onChainConfirmed: details?.onChainConfirmed,
+    onChainEventType: details?.onChainEventType,
+    onChainTxHash: details?.onChainTxHash,
+    onChainLedger: details?.onChainLedger,
+    onChainContractId: details?.onChainContractId,
+    onChainPagingToken: details?.onChainPagingToken,
+    isSimulated: details?.isSimulated,
     details,
   };
 }
@@ -1122,6 +1146,13 @@ export class DatabaseService {
         ...(eventData.actor !== undefined && { actor: eventData.actor }),
         ...(eventData.source !== undefined && { source: eventData.source }),
         ...(eventData.triggerMetadata !== undefined && { triggerMetadata: eventData.triggerMetadata }),
+        ...(eventData.onChainConfirmed !== undefined && { onChainConfirmed: eventData.onChainConfirmed }),
+        ...(eventData.onChainEventType !== undefined && { onChainEventType: eventData.onChainEventType }),
+        ...(eventData.onChainTxHash !== undefined && { onChainTxHash: eventData.onChainTxHash }),
+        ...(eventData.onChainLedger !== undefined && { onChainLedger: eventData.onChainLedger }),
+        ...(eventData.onChainContractId !== undefined && { onChainContractId: eventData.onChainContractId }),
+        ...(eventData.onChainPagingToken !== undefined && { onChainPagingToken: eventData.onChainPagingToken }),
+        ...(eventData.isSimulated !== undefined && { isSimulated: eventData.isSimulated }),
       };
 
       const event: RebalanceEvent = {
@@ -1208,6 +1239,63 @@ export class DatabaseService {
           portfolioId ? ` for portfolio '${portfolioId}'` : ""
         }: ${err}`,
       );
+    }
+  }
+
+  getGlobalEventFeed(options: GlobalEventFeedQueryOptions): GlobalEventFeedResult {
+    try {
+      const clauses: string[] = [];
+      const params: unknown[] = [];
+
+      if (options.eventType) {
+        clauses.push("(trigger = ? OR json_extract(details, '$.onChainEventType') = ?)");
+        params.push(options.eventType, options.eventType);
+      }
+
+      if (options.streamId) {
+        clauses.push("portfolio_id = ?");
+        params.push(options.streamId);
+      }
+
+      if (options.actor) {
+        clauses.push("json_extract(details, '$.actor') = ?");
+        params.push(options.actor);
+      }
+
+      if (options.from) {
+        clauses.push("timestamp >= ?");
+        params.push(options.from);
+      }
+
+      if (options.to) {
+        clauses.push("timestamp <= ?");
+        params.push(options.to);
+      }
+
+      const whereSql = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+      const total = (
+        this.db
+          .prepare(`SELECT COUNT(*) as cnt FROM rebalance_history ${whereSql}`)
+          .get(...params) as { cnt: number }
+      ).cnt;
+
+      const offset = (options.page - 1) * options.limit;
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM rebalance_history ${whereSql}
+           ORDER BY timestamp DESC, id DESC
+           LIMIT ? OFFSET ?`,
+        )
+        .all(...params, options.limit, offset) as RebalanceHistoryRow[];
+
+      return {
+        data: rows.map(rowToEvent),
+        total,
+        page: options.page,
+        limit: options.limit,
+      };
+    } catch (err) {
+      throw new Error(`Failed to retrieve global event feed: ${err}`);
     }
   }
 
