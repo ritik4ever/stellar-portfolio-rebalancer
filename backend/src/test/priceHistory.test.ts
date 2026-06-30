@@ -8,14 +8,15 @@ vi.mock('../db/priceHistoryDb.js', () => ({
 
 // Mock the reflector (oracle) price feed
 vi.mock('../services/reflector.js', () => ({
-    ReflectorService: vi.fn().mockImplementation(() => ({
-        getCurrentPrices: vi.fn().mockResolvedValue({
+    ReflectorService: vi.fn().mockImplementation(function(this: any) {
+        this.getCurrentPrices = vi.fn().mockResolvedValue({
             XLM: 0.12,
             BTC: 65000,
             ETH: 3200,
             USDC: 1.0,
-        }),
-    })),
+        })
+        return this
+    }),
 }))
 
 import { snapshotPrices, pruneStaleSnapshots } from '../services/priceHistory.js'

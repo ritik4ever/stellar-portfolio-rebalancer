@@ -85,8 +85,18 @@ fn integration_full_rebalance_flow() {
     );
     assert_eq!(pid, 1);
 
-    client.deposit(&pid, &asset_a, &200_000_000, &String::from_str(&env, "initial"));
-    client.deposit(&pid, &asset_b, &100_000_000, &String::from_str(&env, "initial"));
+    client.deposit(
+        &pid,
+        &asset_a,
+        &200_000_000,
+        &String::from_str(&env, "initial"),
+    );
+    client.deposit(
+        &pid,
+        &asset_b,
+        &100_000_000,
+        &String::from_str(&env, "initial"),
+    );
 
     assert!(client.check_rebalance_needed(&pid));
 

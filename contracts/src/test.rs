@@ -1,4 +1,3 @@
-
 extern crate std;
 
 use super::*;
@@ -7,7 +6,11 @@ use soroban_sdk::{
     vec, Address, Env, IntoVal, Map, String,
 };
 
-fn allocation_decimals(env: &Env, allocations: &Map<Address, u32>, decimals: u32) -> Map<Address, u32> {
+fn allocation_decimals(
+    env: &Env,
+    allocations: &Map<Address, u32>,
+    decimals: u32,
+) -> Map<Address, u32> {
     let mut asset_decimals = Map::new(env);
     for (asset, _) in allocations.iter() {
         asset_decimals.set(asset, decimals);
@@ -65,9 +68,7 @@ mod reflector_contract {
         }
         pub fn lastprice(env: Env, asset: Asset) -> Option<PriceData> {
             let price = match asset {
-                Asset::Stellar(_addr) => {
-                    100_00000000000000i128
-                }
+                Asset::Stellar(_addr) => 100_00000000000000i128,
                 _ => 100_00000000000000i128,
             };
 
@@ -338,6 +339,82 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
+fn test_fee_config_supports_platform_name_and_zero_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let recipient = Address::generate(&env);
+    let config = FeeConfig {
+        platform_name: String::from_str(&env, "Acme Vault"),
+        fee_bps: 0,
+        fee_recipient: recipient.clone(),
+        enabled: true,
+    };
+
+    client.set_fee_config(&config);
+
+    let persisted = client.get_fee_config();
+    assert_eq!(
+        persisted.platform_name,
+        String::from_str(&env, "Acme Vault")
+    );
+    assert_eq!(persisted.fee_bps, 0);
+    assert_eq!(persisted.fee_recipient, recipient);
+    assert!(persisted.enabled);
+}
+
+#[test]
+fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset1, &1000, &String::from_str(&env, ""));
+
+    let recipient = Address::generate(&env);
+    let config = FeeConfig {
+        platform_name: String::from_str(&env, "Acme Vault"),
+        fee_bps: 100,
+        fee_recipient: recipient,
+        enabled: true,
+    };
+    client.set_fee_config(&config);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 495);
+    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 495);
+}
+
+#[test]
 fn test_execute_rebalance_cooldown() {
     let env = Env::default();
     env.mock_all_auths();
@@ -583,7 +660,10 @@ fn test_validate_allocations_single_asset_full_boundary() {
 #[test]
 fn test_validate_allocations_ten_assets_equal_weight() {
     let env = Env::default();
-    let allocations = allocation_map_from_percentages(&env, &[1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000]);
+    let allocations = allocation_map_from_percentages(
+        &env,
+        &[1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
+    );
     assert!(crate::portfolio::validate_allocations(&allocations));
 }
 
@@ -834,8 +914,14 @@ fn test_calculate_rebalance_trades_direction_buy_sell() {
     let trade_a1 = trades.get(asset1).unwrap();
     let trade_a2 = trades.get(asset2).unwrap();
 
-    assert!(trade_a1 < 0, "Overweight asset should result in a sell (negative) trade");
-    assert!(trade_a2 > 0, "Underweight asset should result in a buy (positive) trade");
+    assert!(
+        trade_a1 < 0,
+        "Overweight asset should result in a sell (negative) trade"
+    );
+    assert!(
+        trade_a2 > 0,
+        "Underweight asset should result in a buy (positive) trade"
+    );
     assert_eq!(trade_a1, -20 * 10i128.pow(14));
     assert_eq!(trade_a2, 20 * 10i128.pow(14));
 }
@@ -1017,8 +1103,14 @@ fn test_calculate_rebalance_trades_price_precision_14_decimals_edge_case() {
         &env,
         &[(asset1.clone(), 5000), (asset2.clone(), 5000)],
         &[
-            (asset1.clone(), target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5)),
-            (asset2.clone(), target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5)),
+            (
+                asset1.clone(),
+                target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5),
+            ),
+            (
+                asset2.clone(),
+                target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5),
+            ),
         ],
         246_913_578,
     );
@@ -1028,8 +1120,11 @@ fn test_calculate_rebalance_trades_price_precision_14_decimals_edge_case() {
 
     let trades = crate::portfolio::calculate_rebalance_trades(&env, &portfolio, &prices);
     let expected_target_value = (portfolio.total_value * 5000) / 10000;
-    let expected_target_balance =
-        crate::portfolio::value_to_balance(expected_target_value, precise_price, DEFAULT_ASSET_DECIMALS);
+    let expected_target_balance = crate::portfolio::value_to_balance(
+        expected_target_value,
+        precise_price,
+        DEFAULT_ASSET_DECIMALS,
+    );
     let expected_buy = expected_target_balance - (target_balance - (MIN_TRADE_AMOUNT_STROOPS + 5));
     let expected_sell = expected_target_balance - (target_balance + (MIN_TRADE_AMOUNT_STROOPS + 5));
     assert_eq!(trades.get(asset1).unwrap(), expected_buy);
@@ -1135,7 +1230,9 @@ fn test_create_portfolio_multiple_same_ledger() {
 fn test_portfolio_id_starts_at_one() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().with_mut(|li| { li.sequence_number = 1; });
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
@@ -1273,7 +1370,10 @@ fn test_create_portfolio_max_assets_limit() {
 
     let mut max_allocations = Map::new(&env);
     for _ in 0..MAX_PORTFOLIO_ASSETS {
-        max_allocations.set(Address::generate(&env), ALLOCATION_DENOMINATOR / MAX_PORTFOLIO_ASSETS);
+        max_allocations.set(
+            Address::generate(&env),
+            ALLOCATION_DENOMINATOR / MAX_PORTFOLIO_ASSETS,
+        );
     }
     let pid = create_portfolio_with_defaults(&env, &client, &user, &max_allocations, 5, 50);
     assert!(pid > 0);
@@ -1282,7 +1382,8 @@ fn test_create_portfolio_max_assets_limit() {
     for _ in 0..20u32 {
         too_many_allocations.set(Address::generate(&env), 500);
     }
-    let too_many_decimals = allocation_decimals(&env, &too_many_allocations, DEFAULT_ASSET_DECIMALS);
+    let too_many_decimals =
+        allocation_decimals(&env, &too_many_allocations, DEFAULT_ASSET_DECIMALS);
     let result = client.try_create_portfolio(
         &user,
         &too_many_allocations,
@@ -1300,7 +1401,10 @@ fn test_portfolio_storage_footprint_estimate_is_deterministic() {
 
     let portfolio = build_trade_test_portfolio(
         &env,
-        &[(Address::generate(&env), 7000), (Address::generate(&env), 3000)],
+        &[
+            (Address::generate(&env), 7000),
+            (Address::generate(&env), 3000),
+        ],
         &[],
         0,
     );
@@ -1363,15 +1467,17 @@ fn test_transfer_stewardship_steward_can_deposit() {
     let new_steward = Address::generate(&env);
     client.transfer_stewardship(&pid, &new_steward);
 
-    client.mock_auths(&[MockAuth {
-        address: &new_steward,
-        invoke: &MockAuthInvoke {
-            contract: &contract_id,
-            fn_name: "deposit",
-            args: (pid, asset.clone(), 500i128, String::from_str(&env, "")).into_val(&env),
-            sub_invokes: &[],
-        },
-    }]).deposit(&pid, &asset, &500, &String::from_str(&env, ""));
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_steward,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "deposit",
+                args: (pid, asset.clone(), 500i128, String::from_str(&env, "")).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .deposit(&pid, &asset, &500, &String::from_str(&env, ""));
 
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.current_balances.get(asset).unwrap(), 500);
@@ -1451,7 +1557,10 @@ fn test_create_portfolio_stores_slippage_policy_version() {
     allocations.set(Address::generate(&env), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.slippage_policy_version, SLIPPAGE_POLICY_VERSION_V1);
+    assert_eq!(
+        portfolio.slippage_policy_version,
+        SLIPPAGE_POLICY_VERSION_V1
+    );
 }
 
 #[test]
@@ -1473,15 +1582,17 @@ fn test_transfer_stewardship_unauthorized() {
 
     let unauthorized = Address::generate(&env);
     let attacker = Address::generate(&env);
-    client.mock_auths(&[MockAuth {
-        address: &unauthorized,
-        invoke: &MockAuthInvoke {
-            contract: &contract_id,
-            fn_name: "transfer_stewardship",
-            args: (pid, attacker.clone()).into_val(&env),
-            sub_invokes: &[],
-        },
-    }]).transfer_stewardship(&pid, &attacker);
+    client
+        .mock_auths(&[MockAuth {
+            address: &unauthorized,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "transfer_stewardship",
+                args: (pid, attacker.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .transfer_stewardship(&pid, &attacker);
 }
 
 #[test]
@@ -1516,6 +1627,30 @@ fn test_capabilities() {
 }
 
 #[test]
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+fn test_capability_summary() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    
+    assert_eq!(client.version(), 1);
+    assert_eq!(client.schema_version(), 1);
+    
+    let summary = client.capability_summary();
+    assert_eq!(summary.version, 1);
+    assert_eq!(summary.schema_version, 1);
+    assert!(summary.capability_flags & CapabilityFlag::PerPortfolioSteward as u32 != 0);
+    assert!(summary.capability_flags & CapabilityFlag::DifferentiatedPricing as u32 != 0);
+    assert!(summary.capability_flags & CapabilityFlag::EmergencyStop as u32 != 0);
+    assert_eq!(summary.min_rebalance_threshold, 1);
+    assert_eq!(summary.max_rebalance_threshold, 50);
+    assert_eq!(summary.min_slippage_tolerance_bps, 10);
+    assert_eq!(summary.max_slippage_tolerance_bps, 500);
+    assert_eq!(summary.max_portfolio_assets, 10);
+}
+
+// // #[test]
+
 fn test_missing_price_error() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1526,7 +1661,8 @@ fn test_missing_price_error() {
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let missing_reflector_id = env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
+    let missing_reflector_id =
+        env.register_contract(None, reflector_without_prices::ReflectorWithoutPrices);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     client.initialize(&admin, &missing_reflector_id);
@@ -1666,7 +1802,10 @@ fn test_contract_pause_reason_on_emergency_stop() {
     client.initialize(&admin, &reflector_id);
 
     client.set_emergency_stop(&true);
-    assert_eq!(client.get_contract_pause_reason(), PauseReason::AdminEmergency);
+    assert_eq!(
+        client.get_contract_pause_reason(),
+        PauseReason::AdminEmergency
+    );
 
     client.set_emergency_stop(&false);
     assert_eq!(client.get_contract_pause_reason(), PauseReason::None);
@@ -1819,19 +1958,29 @@ fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
     );
 }
 
-fn assert_cost_within_tolerance(name: &str, cpu: u64, mem: u64, baseline_cpu: u64, baseline_mem: u64) {
+fn assert_cost_within_tolerance(
+    name: &str,
+    cpu: u64,
+    mem: u64,
+    baseline_cpu: u64,
+    baseline_mem: u64,
+) {
     let cpu_limit = baseline_cpu + (baseline_cpu * BENCHMARK_TOLERANCE_PERCENT / 100);
     let mem_limit = baseline_mem + (baseline_mem * BENCHMARK_TOLERANCE_PERCENT / 100);
 
     assert!(
         cpu <= cpu_limit,
         "CPU instruction usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
-        cpu, baseline_cpu, cpu_limit
+        cpu,
+        baseline_cpu,
+        cpu_limit
     );
     assert!(
         mem <= mem_limit,
         "Memory usage exceeded threshold: actual={}, baseline={}, max_allowed={}",
-        mem, baseline_mem, mem_limit
+        mem,
+        baseline_mem,
+        mem_limit
     );
 }
 
