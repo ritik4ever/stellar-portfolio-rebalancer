@@ -1,7 +1,6 @@
 use crate::types::*;
 use soroban_sdk::{symbol_short, xdr::ToXdr, Address, Env, Map, Symbol, Vec};
 
-
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
     if allocations.is_empty() {
         return false;
@@ -64,7 +63,8 @@ pub fn calculate_rebalance_trades(
 
     for (asset, target_percentage) in portfolio.target_allocations.iter() {
         let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
-        let target_value = (total_value * target_percentage as i128) / ALLOCATION_DENOMINATOR as i128;
+        let target_value =
+            (total_value * target_percentage as i128) / ALLOCATION_DENOMINATOR as i128;
         let asset_decimals = asset_decimals_for(portfolio, asset.clone());
 
         if let Some(price) = current_prices.get(asset.clone()) {
@@ -137,13 +137,15 @@ pub fn build_rebalance_preview(
         let price = current_prices.get(asset.clone()).unwrap();
         let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
         let current_asset_value = balance_to_value(current_balance, price);
-        let current_percent_u32 = ((current_asset_value * ALLOCATION_DENOMINATOR as i128) / total_value) as u32;
+        let current_percent_u32 =
+            ((current_asset_value * ALLOCATION_DENOMINATOR as i128) / total_value) as u32;
         let drift = if current_percent_u32 >= target_percent {
             current_percent_u32 - target_percent
         } else {
             target_percent - current_percent_u32
         };
-        let exceeds_threshold = drift > portfolio.rebalance_threshold * (ALLOCATION_DENOMINATOR / 100);
+        let exceeds_threshold =
+            drift > portfolio.rebalance_threshold * (ALLOCATION_DENOMINATOR / 100);
         if exceeds_threshold {
             rebalance_needed = true;
         }
@@ -210,15 +212,21 @@ pub fn portfolio_has_positive_balance(portfolio: &Portfolio) -> bool {
     false
 }
 
-pub fn estimate_portfolio_storage_footprint(env: &Env, _portfolio_id: u64, portfolio: &Portfolio) -> u32 {
+pub fn estimate_portfolio_storage_footprint(
+    env: &Env,
+    _portfolio_id: u64,
+    portfolio: &Portfolio,
+) -> u32 {
     let xdr = portfolio.clone().to_xdr(env);
     xdr.len() as u32
 }
 
 #[cfg(test)]
-static OVERRIDE_STORAGE_LIMIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+static OVERRIDE_STORAGE_LIMIT: core::sync::atomic::AtomicU32 =
+    core::sync::atomic::AtomicU32::new(0);
 #[cfg(test)]
-static OVERRIDE_STORAGE_LIMIT_ACTIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static OVERRIDE_STORAGE_LIMIT_ACTIVE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 pub fn set_portfolio_storage_limit_for_tests(limit: Option<u32>) {
@@ -234,7 +242,11 @@ pub fn set_portfolio_storage_limit_for_tests(limit: Option<u32>) {
     }
 }
 
-pub fn validate_portfolio_storage_footprint(env: &Env, portfolio_id: u64, portfolio: &Portfolio) -> Result<u32, Error> {
+pub fn validate_portfolio_storage_footprint(
+    env: &Env,
+    portfolio_id: u64,
+    portfolio: &Portfolio,
+) -> Result<u32, Error> {
     let estimate = estimate_portfolio_storage_footprint(env, portfolio_id, portfolio);
     #[cfg(test)]
     {
@@ -254,28 +266,41 @@ pub fn validate_portfolio_storage_footprint(env: &Env, portfolio_id: u64, portfo
 }
 
 pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {
-    env.events()
-        .publish((symbol_short!("portfolio"), symbol_short!("created")), (portfolio_id, user));
+    env.events().publish(
+        (symbol_short!("portfolio"), symbol_short!("created")),
+        (portfolio_id, user),
+    );
 }
 
 pub fn emit_portfolio_deposit(env: &Env, portfolio_id: u64, asset: Address, amount: i128) {
-    env.events()
-        .publish((symbol_short!("portfolio"), symbol_short!("deposit")), (portfolio_id, asset, amount));
+    env.events().publish(
+        (symbol_short!("portfolio"), symbol_short!("deposit")),
+        (portfolio_id, asset, amount),
+    );
 }
 
 pub fn emit_portfolio_withdraw(env: &Env, portfolio_id: u64, asset: Address, amount: i128) {
-    env.events()
-        .publish((symbol_short!("portfolio"), symbol_short!("withdraw")), (portfolio_id, asset, amount));
+    env.events().publish(
+        (symbol_short!("portfolio"), symbol_short!("withdraw")),
+        (portfolio_id, asset, amount),
+    );
 }
 
 pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
-    env.events()
-        .publish((symbol_short!("portfolio"), Symbol::new(env, "rebalanced")), (portfolio_id, timestamp));
+    env.events().publish(
+        (symbol_short!("portfolio"), Symbol::new(env, "rebalanced")),
+        (portfolio_id, timestamp),
+    );
 }
 
 pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, timestamp: u64) {
-    env.events()
-        .publish((symbol_short!("portfolio"), Symbol::new(env, "cooldown_override")), (portfolio_id, admin, timestamp));
+    env.events().publish(
+        (
+            symbol_short!("portfolio"),
+            Symbol::new(env, "cooldown_override"),
+        ),
+        (portfolio_id, admin, timestamp),
+    );
 }
 
 pub fn validate_slippage_policy_version(version: u32) -> bool {
