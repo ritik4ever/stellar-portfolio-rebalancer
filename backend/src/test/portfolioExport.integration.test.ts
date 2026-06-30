@@ -265,6 +265,7 @@ describe('JSON import — POST /api/portfolio/import', () => {
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
             .expect(200)
 
+
         const importRes = await request(app)
             .post('/api/portfolio/import')
             .send(exportRes.body)
@@ -499,4 +500,5 @@ describe('Ownership enforcement (auth enabled)', () => {
         expect(res.headers['content-type']).toMatch(/application\/json/)
         expect(res.body.userAddress).toBe(OWNER_ADDRESS)
     })
+})
 })
