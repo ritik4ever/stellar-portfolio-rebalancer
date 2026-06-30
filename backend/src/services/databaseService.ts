@@ -1672,6 +1672,30 @@ export class DatabaseService {
     });
   }
 
+  getRebalanceHistoryByDateRange(
+    startDate: string,
+    endDate: string,
+  ): RebalanceEvent[] {
+    return this._withTiming("getRebalanceHistoryByDateRange", () => {
+      try {
+        const rows = this.db
+          .prepare<[string, string], RebalanceHistoryRow>(
+            `SELECT * FROM rebalance_history
+             WHERE status = 'completed'
+               AND timestamp >= ?
+               AND timestamp < ?
+             ORDER BY timestamp ASC`,
+          )
+          .all(startDate, endDate);
+        return rows.map(rowToEvent);
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve rebalance history by date range: ${err}`,
+        );
+      }
+    });
+  }
+
   initializeDemoData(portfolioId: string): void {
     try {
       const existing = this.db
