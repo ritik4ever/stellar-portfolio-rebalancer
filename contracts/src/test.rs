@@ -338,6 +338,79 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
+fn test_fee_config_supports_platform_name_and_zero_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let recipient = Address::generate(&env);
+    let config = FeeConfig {
+        platform_name: String::from_str(&env, "Acme Vault"),
+        fee_bps: 0,
+        fee_recipient: recipient.clone(),
+        enabled: true,
+    };
+
+    client.set_fee_config(&config);
+
+    let persisted = client.get_fee_config();
+    assert_eq!(persisted.platform_name, String::from_str(&env, "Acme Vault"));
+    assert_eq!(persisted.fee_bps, 0);
+    assert_eq!(persisted.fee_recipient, recipient);
+    assert!(persisted.enabled);
+}
+
+#[test]
+fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset1, &1000, &String::from_str(&env, ""));
+
+    let recipient = Address::generate(&env);
+    let config = FeeConfig {
+        platform_name: String::from_str(&env, "Acme Vault"),
+        fee_bps: 100,
+        fee_recipient: recipient,
+        enabled: true,
+    };
+    client.set_fee_config(&config);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 495);
+    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 495);
+}
+
+#[test]
 fn test_execute_rebalance_cooldown() {
     let env = Env::default();
     env.mock_all_auths();

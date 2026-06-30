@@ -340,7 +340,12 @@ impl PortfolioRebalancer {
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
+        if config.fee_bps > MAX_FEE_BPS {
+            panic!("fee_bps must be between 0 and 50");
+        }
         env.storage().instance().set(&DataKey::FeeConfig, &config);
+        env.events()
+            .publish(Symbol::new(&env, "FeeConfigUpdated"), config);
     }
 
     pub fn get_fee_config(env: Env) -> FeeConfig {
@@ -348,6 +353,7 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::FeeConfig)
             .unwrap_or(FeeConfig {
+                platform_name: String::from_str(&env, ""),
                 fee_bps: 0,
                 fee_recipient: env.current_contract_address(),
                 enabled: false,
@@ -599,6 +605,9 @@ impl PortfolioRebalancer {
 
         let trades = portfolio::calculate_rebalance_trades(env, &snapshot, &current_prices);
 
+        let fee_config = Self::get_fee_config(env.clone());
+        let effective_fee_bps = if fee_config.enabled { fee_config.fee_bps } else { 0 };
+
         let mut has_actual_balances = false;
         for (_, _) in actual_balances.iter() {
             has_actual_balances = true;
@@ -640,8 +649,14 @@ impl PortfolioRebalancer {
         }
 
         for (asset, amount) in trades.iter() {
+            let fee_amount = if effective_fee_bps > 0 {
+                (amount.abs() * effective_fee_bps as i128) / 10000
+            } else {
+                0
+            };
+            let effective_amount = amount - fee_amount;
             let current = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
-            portfolio.current_balances.set(asset.clone(), current + amount);
+            portfolio.current_balances.set(asset.clone(), current + effective_amount);
         }
         portfolio.total_value = total_value;
         portfolio.last_rebalance = current_time;
