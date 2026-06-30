@@ -98,6 +98,11 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
 
+    const enableApiDocs = process.env.ENABLE_API_DOCS || (config.nodeEnv !== 'production' ? 'true' : 'false')
+    if (enableApiDocs === 'true') {
+        app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
+    }
+
     const serveOpenApiJson = (_req: Request, res: Response) => {
         res.setHeader('Content-Type', 'application/json')
         res.json(spec)

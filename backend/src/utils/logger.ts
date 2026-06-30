@@ -1,6 +1,7 @@
 import pino from 'pino'
 import { redactArgs } from './secretRedactor.js'
-import { getRequestId, getCorrelationId } from './requestContext.js'
+import { getRequestId, getCorrelationId, getTraceId, getSpanId } from './requestContext.js'
+import { getTraceId as getOtelTraceId, getSpanId as getOtelSpanId } from '../observability/tracing.js'
 
 const isProduction = process.env.NODE_ENV === 'production'
 
@@ -17,9 +18,15 @@ const baseLogger = pino({
     mixin() {
         const requestId = getRequestId()
         const correlationId = getCorrelationId()
+        const ctxTraceId = getTraceId()
+        const ctxSpanId = getSpanId()
+        const otelTraceId = getOtelTraceId()
+        const otelSpanId = getOtelSpanId()
         const fields: Record<string, string> = {}
         if (requestId) fields.requestId = requestId
         if (correlationId) fields.correlation_id = correlationId
+        if (ctxTraceId || otelTraceId) fields.trace_id = ctxTraceId || otelTraceId
+        if (ctxSpanId || otelSpanId) fields.span_id = ctxSpanId || otelSpanId
         return fields
     },
     hooks: {

@@ -1,5 +1,7 @@
 # Stellar Portfolio Rebalancer
 
+[English](README.md) | [Português](docs/README.pt.md) | [Español](docs/README.es.md)
+
 ---
 
 ## 2. README.md Updates
@@ -350,6 +352,10 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
 - Reflector Protocol
 - Soroban
 - Community wallet integrations
+
+## Translations
+
+This README is also available in [Portuguese](docs/README.pt.md) and [Spanish](docs/README.es.md). Translations may lag behind the English version by one release. Translators are credited in [CONTRIBUTORS.md](CONTRIBUTORS.md).
 
 Built with ❤️ for the Stellar ecosystem
 
