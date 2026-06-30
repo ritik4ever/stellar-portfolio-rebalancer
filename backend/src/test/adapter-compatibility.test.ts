@@ -78,7 +78,7 @@ vi.mock('../db/client.js', () => {
                     filtered = filtered.filter(h => h.portfolio_id === params![0])
                 }
                 filtered.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-                const limit = params![params!.length - 1]
+                const limit = params![1]
                 return { rows: filtered.slice(0, limit) }
             }
             if (text.includes('SELECT COUNT(*)')) {

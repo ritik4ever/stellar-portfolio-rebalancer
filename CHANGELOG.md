@@ -9,26 +9,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Ownership and Process
 
-**Changelog Owner**: Project maintainers are responsible for reviewing and finalizing release notes before each release.
+**Changelog Owner**: Project maintainers are responsible for reviewing and finalizing release-please pull requests before each release.
 
 **Contributor Workflow**:
 
-1. **During development**: Add entries to `## [Unreleased]` section when making user-facing changes
-2. **Before PR**: Run `npm run changelog:update` to auto-generate entries from conventional commits
-3. **PR review**: Maintainers review changelog entries for clarity and completeness
-4. **Release preparation**: Maintainers move entries from `[Unreleased]` to a new version section
+1. **During development**: Use Conventional Commit messages for every commit.
+2. **Before PR**: Select the PR commit type and flag breaking changes in the PR template when applicable.
+3. **PR review**: Commitlint validates PR commit messages in CI.
+4. **Release preparation**: release-please opens or updates a release PR after changes merge to `main`.
 
 ### Automated Collection
 
-The project uses [conventional-changelog-cli](https://github.com/conventional-changelog/conventional-changelog) to automatically generate changelog entries from commit messages:
-
-```bash
-# Generate changelog entries from commits
-npm run changelog:update
-
-# Preview changes without writing
-npm run changelog:preview
-```
+The project uses release-please to automatically generate changelog entries from commit messages and update `CHANGELOG.md` on release PRs.
 
 **Commit Message Format** (follows [Conventional Commits](https://conventionalcommits.org/)):
 
@@ -44,53 +36,52 @@ npm run changelog:preview
 
 - `feat(api): add portfolio export endpoint`
 - `fix(auth): resolve JWT token expiration handling`
+- `perf(worker): reduce rebalance polling load`
 - `docs: update API client examples`
 - `chore(deps): update stellar-sdk to v12.0.1`
+- `feat(api)!: require signed export requests`
+
+Use a `!` after the type/scope or add a `BREAKING CHANGE:` footer when a commit introduces a breaking change. release-please flags those entries in the generated changelog.
 
 ### Entry Categories
 
-Changelog entries are organized by impact:
+Release changelog entries are generated into these sections:
 
-- **Added**: New features and capabilities
-- **Changed**: Changes to existing functionality
-- **Deprecated**: Soon-to-be removed features
-- **Removed**: Features removed in this version
-- **Fixed**: Bug fixes
-- **Security**: Security-related changes
+- **Features**: New features and capabilities from `feat`
+- **Bug Fixes**: Bug fixes from `fix`
+- **Performance**: Performance improvements from `perf`
+- **Breaking Changes**: Breaking changes flagged with `!` or `BREAKING CHANGE:`
 
 ### Release Publication
 
 **Pre-release checklist**:
 
-1. ✅ All `[Unreleased]` entries reviewed and categorized
-2. ✅ Version number follows [semantic versioning](https://semver.org/)
-3. ✅ Release date added in ISO format (YYYY-MM-DD)
-4. ✅ Breaking changes clearly documented
-5. ✅ Migration guides provided for major changes
+1. Confirm the release-please PR was generated from the intended commits.
+2. Confirm the proposed version follows [semantic versioning](https://semver.org/).
+3. Review the generated `CHANGELOG.md` sections for clarity.
+4. Confirm breaking changes are clearly documented.
+5. Add migration guides for major changes when needed.
 
 **Release process**:
 
-1. Create release branch: `git checkout -b release/v1.4.0`
-2. Move `[Unreleased]` entries to new version section
-3. Update version in `package.json` files
-4. Commit changes: `git commit -m "chore: prepare release v1.4.0"`
-5. Create PR for release branch
-6. After merge, tag release: `git tag v1.4.0`
-7. Push tag: `git push origin v1.4.0`
+1. Merge conventional commits to `main`.
+2. Let release-please create or update the release PR.
+3. Review the generated version bump and `CHANGELOG.md` updates.
+4. Merge the release PR when ready.
+5. release-please creates the GitHub release and tag from the merged release PR.
 
 ### Maintenance Guidelines
 
 **For contributors**:
 
-- Include changelog entries for user-facing changes
-- Use clear, non-technical language when possible
-- Reference issue/PR numbers: `(#123)`
-- Group related changes under single entries when appropriate
-- **API Changes documentation**: Any modification to the API specification (`spec.ts` or `openapi.json`) requires matching updates to either `API.md` or `CHANGELOG.md` within the same Pull Request (enforced in CI).
+- Use clear conventional commit subjects for user-facing changes.
+- Mark breaking changes with `!` or a `BREAKING CHANGE:` footer.
+- Reference issue/PR numbers in PR descriptions.
+- Keep related work grouped into reviewable commits when practical.
 
 **For maintainers**:
 
-- Review changelog entries during PR review
+- Review generated changelog entries in release-please PRs
 - Ensure breaking changes are prominently documented
 - Maintain consistent formatting and tone
 - Archive old versions (keep last 2 major versions visible)
@@ -125,6 +116,7 @@ Changelog entries are organized by impact:
 - Feature-flag test coverage for env parsing, runtime toggles, fail-safe defaults, and startup logging visibility.
 - Project-level changelog automation script using `conventional-changelog-cli`.
 - CI commit message lint that enforces Conventional Commits on pull requests, with a locally runnable `scripts/check-commit-messages.sh` helper and contributor documentation.
+- commitlint-based PR commit validation, release-please changelog release automation, and a PR template commit type selector.
 - Sharded backend test execution in CI (4 parallel shards with merged coverage and threshold enforcement) plus `test:shard`/`test:merge-coverage` scripts and contributor docs for reproducing it locally.
 - Portable health smoke script (`scripts/health-smoke.sh`, `npm run smoke`) that probes `/health`, `/api/health`, `/ready`, and `/metrics` across local/staging/prod with a clear pass/fail summary, documented in OPERATIONS.md and API.md.
 - Tightened generated-artifact guard: `backend/openapi.json` freshness is now verified by regenerating from source and diffing (replacing a heuristic that referenced a non-existent spec path), wired into the Generated Artifact Guard workflow and documented in backend/docs/openapi.md.
