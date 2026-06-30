@@ -134,3 +134,7 @@ soroban contract invoke \
 
 ## Maintenance Guidance
 Keep these examples aligned with current contract interfaces. If the signature of `create_portfolio` or `execute_rebalance` changes in `contracts/src/lib.rs`, please update this cookbook accordingly.
+
+## Error Reference
+
+For a complete list of contract error codes with numeric values, human-readable descriptions, and suggested recovery actions, see the [Contract ABI Error Codes](../contracts/CONTRACT_ABI.md#error-codes-contractssrctypesrs).

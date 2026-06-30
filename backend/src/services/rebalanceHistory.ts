@@ -7,8 +7,10 @@ import {
   dbGetAutoRebalancesSince,
   dbGetAllAutoRebalances,
   dbGetHistoryStats,
+  dbGetRebalanceHistoryCountByPortfolio,
+  dbGetRebalanceCostSummary,
 } from '../db/rebalanceHistoryDb.js'
-import type { RebalanceHistoryQueryOptions } from '../db/rebalanceHistoryDb.js'
+import type { RebalanceCostSummary, RebalanceHistoryQueryOptions } from '../db/rebalanceHistoryDb.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
 import { logger } from '../utils/logger.js'
@@ -20,6 +22,8 @@ export interface RebalanceEvent {
     trigger: string
     trades: number
     gasUsed: string
+    feePaid?: number
+    slippageBps?: number
     status: 'completed' | 'failed' | 'pending'
     isAutomatic?: boolean
     riskAlerts?: any[]
@@ -55,6 +59,8 @@ export interface RebalanceEvent {
         gasPerTradeXlm?: number
         gasWarning?: boolean
         gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
+        feePaid?: number
+        slippageBps?: number
     }
 }
 
@@ -96,6 +102,8 @@ export class RebalanceHistoryService {
         slippageExceededTolerance?: boolean
         /** Optional aggregate slippage in basis points for backwards compatibility. */
         totalSlippageBps?: number
+        feePaid?: number
+        slippageBps?: number
         gasFeeXlm?: number
         gasFeeUsd?: number
         gasPerTradeXlm?: number
@@ -124,6 +132,8 @@ export class RebalanceHistoryService {
             gasWarning: eventData.gasWarning,
             gasBreakdown: eventData.gasBreakdown
         }
+        const feePaid = this.deriveFeePaid(eventData, details)
+        const slippageBps = this.deriveSlippageBps(eventData)
 
         if (eventData.prices && eventData.portfolio) {
             try {
@@ -147,6 +157,8 @@ export class RebalanceHistoryService {
             trigger: eventData.trigger,
             trades: eventData.trades,
             gasUsed: eventData.gasUsed,
+            feePaid,
+            slippageBps,
             status: eventData.status,
             isAutomatic: eventData.isAutomatic ?? false,
             riskAlerts: eventData.riskAlerts ?? [],
@@ -172,6 +184,8 @@ export class RebalanceHistoryService {
             trigger: eventData.trigger,
             trades: eventData.trades,
             gasUsed: eventData.gasUsed,
+            feePaid,
+            slippageBps,
             status: eventData.status,
             isAutomatic: eventData.isAutomatic ?? false,
             riskAlerts: eventData.riskAlerts ?? [],
@@ -187,7 +201,11 @@ export class RebalanceHistoryService {
             onChainContractId: eventData.onChainContractId,
             onChainPagingToken: eventData.onChainPagingToken,
             isSimulated: eventData.isSimulated,
-            details,
+            details: {
+                ...details,
+                feePaid,
+                slippageBps
+            },
         }
 
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
@@ -319,5 +337,50 @@ export class RebalanceHistoryService {
 
     async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
         return dbGetHistoryStats()
+    }
+
+    async getRebalanceHistoryCount(portfolioId: string): Promise<number> {
+        return dbGetRebalanceHistoryCountByPortfolio(portfolioId)
+    }
+
+    async getCostSummary(portfolioId: string): Promise<RebalanceCostSummary> {
+        return dbGetRebalanceCostSummary(portfolioId)
+    }
+
+    private deriveFeePaid(
+        eventData: {
+            feePaid?: number
+            gasFeeXlm?: number
+            gasBreakdown?: Array<{ feeXlm: number }>
+        },
+        details: RebalanceEvent['details']
+    ): number {
+        if (typeof eventData.feePaid === 'number' && Number.isFinite(eventData.feePaid)) {
+            return Math.max(0, eventData.feePaid)
+        }
+        if (typeof eventData.gasFeeXlm === 'number' && Number.isFinite(eventData.gasFeeXlm)) {
+            return Math.max(0, eventData.gasFeeXlm)
+        }
+        const breakdownTotal = details?.gasBreakdown?.reduce((sum, item) => {
+            const fee = Number(item.feeXlm)
+            return sum + (Number.isFinite(fee) ? fee : 0)
+        }, 0)
+        return Math.max(0, breakdownTotal ?? 0)
+    }
+
+    private deriveSlippageBps(eventData: {
+        slippageBps?: number
+        actualSlippageBps?: number
+        totalSlippageBps?: number
+        estimatedSlippageBps?: number
+    }): number {
+        const candidates = [
+            eventData.slippageBps,
+            eventData.actualSlippageBps,
+            eventData.totalSlippageBps,
+            eventData.estimatedSlippageBps
+        ]
+        const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate))
+        return Math.max(0, value ?? 0)
     }
 }

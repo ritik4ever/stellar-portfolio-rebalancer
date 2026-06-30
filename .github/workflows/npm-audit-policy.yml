@@ -39,3 +39,10 @@ jobs:
 
       - name: Check dependency audit baseline
         run: npm run audit:policy
+
+      - name: Notify Slack on Failure
+        if: failure() && github.ref == 'refs/heads/main'
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"🚨 Security Scan / Dependency Vulnerability Failure on main!\n*Repo*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Failing Step*: ${{ github.job }}\n*Link*: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}

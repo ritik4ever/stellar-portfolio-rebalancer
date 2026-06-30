@@ -30,6 +30,7 @@ export interface NotificationTestResponse {
     sentTo: {
         email: string | null
         webhook: string | null
+        telegram: string | null
     }
     timestamp: string
 }
@@ -42,6 +43,7 @@ export interface NotificationTestAllResponse {
         sentTo?: {
             email: string | null
             webhook: string | null
+            telegram: string | null
         }
         timestamp: string
     }>
@@ -160,6 +162,7 @@ export interface TestNotificationResult {
     sentTo: {
         email: string | null
         webhook: string | null
+        telegram: string | null
     }
     timestamp: string
 }
@@ -189,7 +192,7 @@ export interface TestAllNotificationResult {
         eventType: EventType
         success: boolean
         error?: string
-        sentTo?: { email: string | null; webhook: string | null }
+        sentTo?: { email: string | null; webhook: string | null; telegram: string | null }
         timestamp: string
     }>
 }

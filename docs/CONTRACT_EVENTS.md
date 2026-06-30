@@ -2,6 +2,8 @@
 
 The backend `ContractEventIndexerService` (`backend/src/services/contractEventIndexer.ts`) subscribes to Soroban **contract** events for the configured portfolio contract and maps them into rebalance history rows.
 
+For the frontend-facing view of supported methods, expected arguments, and graceful-degradation behaviour, see the [Contract Capability Matrix & Frontend Compatibility Guide](CONTRACT_CAPABILITY_MATRIX.md).
+
 ## Schema version
 
 - **Code constant:** `BACKEND_CONTRACT_EVENT_SCHEMA_VERSION` in `backend/src/config/contractEventSchema.ts`.

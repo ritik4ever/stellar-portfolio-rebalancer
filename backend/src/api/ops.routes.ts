@@ -14,6 +14,7 @@ import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWo
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
+import { getQueueByName } from '../queue/queues.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -25,6 +26,8 @@ import { requireAdmin } from '../middleware/auth.js'
 
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
+import { isRedisAvailable } from '../queue/connection.js'
+import { databaseService } from '../services/databaseService.js'
 
 export const opsRouter = Router()
 
@@ -33,11 +36,69 @@ const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 const publicFeatureFlags = getPublicFeatureFlags()
 
-/** Lightweight JSON health for API clients and integration tests (mounted at /api/health). */
-opsRouter.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json({
-        status: 'healthy',
-        timestamp: new Date().toISOString()
+/** Comprehensive health check for API clients and monitoring tools (mounted at /api/health, /api/v1/health). */
+opsRouter.get('/health', async (_req: Request, res: Response) => {
+    const checkedAt = new Date().toISOString()
+    const deps: Record<string, { status: 'ok' | 'degraded' | 'down'; latency_ms: number; last_checked: string }> = {}
+
+    let dbStart = Date.now()
+    try {
+        const dbResult = databaseService.getReadiness()
+        deps.database = {
+            status: dbResult.ready ? 'ok' : 'down',
+            latency_ms: Date.now() - dbStart,
+            last_checked: checkedAt
+        }
+    } catch {
+        deps.database = { status: 'down', latency_ms: Date.now() - dbStart, last_checked: checkedAt }
+    }
+
+    let redisStart = Date.now()
+    try {
+        const redisAvailable = await isRedisAvailable()
+        deps.redis = {
+            status: redisAvailable ? 'ok' : 'down',
+            latency_ms: Date.now() - redisStart,
+            last_checked: checkedAt
+        }
+    } catch {
+        deps.redis = { status: 'down', latency_ms: Date.now() - redisStart, last_checked: checkedAt }
+    }
+
+    const horizonUrl = process.env.STELLAR_HORIZON_URL
+    let horizonStart = Date.now()
+    try {
+        if (horizonUrl) {
+            const resp = await fetch(horizonUrl, { method: 'GET', signal: AbortSignal.timeout(5000) })
+            deps.stellar_horizon = {
+                status: resp.ok ? 'ok' : 'degraded',
+                latency_ms: Date.now() - horizonStart,
+                last_checked: checkedAt
+            }
+        } else {
+            deps.stellar_horizon = { status: 'degraded', latency_ms: 0, last_checked: checkedAt }
+        }
+    } catch {
+        deps.stellar_horizon = { status: 'down', latency_ms: Date.now() - horizonStart, last_checked: checkedAt }
+    }
+
+    let reflectorStart = Date.now()
+    try {
+        const reflectorResult = await reflectorService.testApiConnectivity()
+        deps.reflector_oracle = {
+            status: reflectorResult.success ? 'ok' : 'degraded',
+            latency_ms: Date.now() - reflectorStart,
+            last_checked: checkedAt
+        }
+    } catch {
+        deps.reflector_oracle = { status: 'down', latency_ms: Date.now() - reflectorStart, last_checked: checkedAt }
+    }
+
+    const anyCriticalDown = Object.values(deps).some((d) => d.status === 'down')
+    res.status(anyCriticalDown ? 503 : 200).json({
+        status: anyCriticalDown ? 'unhealthy' : 'healthy',
+        timestamp: checkedAt,
+        dependencies: deps
     })
 })
 
@@ -131,6 +192,58 @@ opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
             ...cursorInfo
         })
     } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
+// JOB STATUS ROUTE
+// ================================
+
+opsRouter.get('/jobs/:id', async (req: Request, res: Response) => {
+    try {
+        const jobId = req.params.id
+        if (!jobId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Job ID is required')
+        }
+
+        const queueNames = [
+            'portfolio-check',
+            'rebalance',
+            'analytics-snapshot',
+            'analytics-compaction',
+            'idempotency-cleanup',
+            'portfolio-export',
+            'price-history-snapshot',
+            'price-history-prune',
+        ]
+
+        for (const name of queueNames) {
+            const queue = getQueueByName(name)
+            if (!queue) continue
+            const job = await queue.getJob(jobId)
+            if (job) {
+                const state = await job.getState()
+                return ok(res, {
+                    jobId: job.id,
+                    queue: name,
+                    name: job.name,
+                    state,
+                    data: job.data,
+                    progress: job.progress,
+                    attemptsMade: job.attemptsMade,
+                    createdAt: job.timestamp ? new Date(job.timestamp).toISOString() : null,
+                    processedAt: job.processedOn ? new Date(job.processedOn).toISOString() : null,
+                    finishedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+                    failedReason: job.failedReason || null,
+                    returnValue: state === 'completed' ? job.returnvalue : null,
+                })
+            }
+        }
+
+        return fail(res, 404, 'NOT_FOUND', 'Job not found')
+    } catch (error) {
+        logger.error('[ERROR] Job status check failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -483,6 +596,16 @@ opsRouter.get('/prices', async (req: Request, res: Response) => {
         const payload = await reflectorService.getCurrentPricesWithMeta()
 
         logger.info('[DEBUG] Raw prices from service', { prices: payload.prices, feedMeta: payload.feedMeta })
+
+        if (payload.feedMeta.cacheStatus === 'redis_hit') {
+            res.setHeader('X-Cache', 'HIT')
+        } else if (payload.feedMeta.cacheStatus === 'redis_unavailable') {
+            res.setHeader('X-Cache', 'STALE')
+        } else if (payload.feedMeta.cacheStatus === 'redis_miss') {
+            res.setHeader('X-Cache', 'MISS')
+        } else if (payload.feedMeta.cacheStatus === 'redis_bypassed') {
+            res.setHeader('X-Cache', 'BYPASS')
+        }
 
         return ok(res, payload)
     } catch (error) {

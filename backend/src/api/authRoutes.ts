@@ -9,7 +9,9 @@ import {
     verifyWalletSignature,
     getRecentAuthAuditEvents
 } from '../services/authService.js'
+import { createChallenge, verifyChallenge, InvalidSignatureError } from '../services/stellarAuthService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
+import { authRateLimiter } from '../middleware/rateLimit.js'
 import { validateRequest } from '../middleware/validate.js'
 import { challengeSchema, loginSchema, refreshTokenSchema, logoutSchema, logoutAllSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'
@@ -136,6 +138,60 @@ router.post('/logout-all', requireJwt, validateRequest(logoutAllSchema), async (
         await logout(undefined, address)
         return ok(res, { message: 'Logged out' })
     } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ── Stellar challenge-response authentication ────────────────────────────────
+
+/**
+ * POST /api/auth/challenge
+ * Body: { address: string }  — Stellar G-address
+ * Returns: { nonce: string }  — sign this with your Stellar private key
+ */
+router.post('/challenge', authRateLimiter, (req: Request, res: Response) => {
+    try {
+        const address = req.body?.address
+        if (!address || typeof address !== 'string' || !address.trim()) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'address is required')
+        }
+        const nonce = createChallenge(address.trim())
+        return ok(res, { nonce })
+    } catch (error) {
+        const msg = getErrorMessage(error)
+        if (msg.includes('Invalid Stellar address')) {
+            return fail(res, 400, 'VALIDATION_ERROR', msg)
+        }
+        return fail(res, 500, 'INTERNAL_ERROR', msg)
+    }
+})
+
+/**
+ * POST /api/auth/verify
+ * Body: { address: string, signature: string }
+ *   signature = base64(Keypair.sign(Buffer.from(nonce, 'utf8')))
+ * Returns: { accessToken, refreshToken, expiresIn, refreshExpiresIn }
+ *
+ * Example (curl):
+ *   nonce=$(curl -s -X POST .../auth/challenge -d '{"address":"G..."}' | jq -r .data.nonce)
+ *   sig=$(node -e "const {Keypair}=require('@stellar/stellar-sdk'); const kp=Keypair.fromSecret('S...'); console.log(kp.sign(Buffer.from('$nonce')).toString('base64'))")
+ *   curl -X POST .../auth/verify -d "{\"address\":\"G...\",\"signature\":\"$sig\"}"
+ */
+router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const { address, signature } = req.body ?? {}
+        if (!address || typeof address !== 'string') {
+            return fail(res, 400, 'VALIDATION_ERROR', 'address is required')
+        }
+        if (!signature || typeof signature !== 'string') {
+            return fail(res, 400, 'VALIDATION_ERROR', 'signature is required')
+        }
+        const tokens = await verifyChallenge(address.trim(), signature.trim())
+        return ok(res, tokens)
+    } catch (error) {
+        if (error instanceof InvalidSignatureError) {
+            return fail(res, 401, 'UNAUTHORIZED', error.message)
+        }
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

@@ -2,7 +2,7 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec};
 
 mod portfolio;
 mod reflector;
@@ -83,7 +83,7 @@ impl PortfolioRebalancer {
             return Err(Error::InvalidSlippageTolerance);
         }
 
-        if !validate_slippage_policy_version(slippage_policy_version) {
+        if !portfolio::validate_slippage_policy_version(slippage_policy_version) {
             return Err(Error::UnsupportedSlippagePolicyVersion);
         }
 
@@ -236,15 +236,29 @@ impl PortfolioRebalancer {
             &reflector_client,
         ) {
             Ok(val) => val,
-
+            Err(_) => return false,
         };
 
         if total_value == 0 {
             return false;
         }
 
-
-<
+        for (asset, target_pct) in portfolio.target_allocations.iter() {
+            let balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
+            if let Some(price_data) =
+                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
+            {
+                let asset_value = portfolio::balance_to_value(balance, price_data.price);
+                let current_pct =
+                    ((asset_value * ALLOCATION_DENOMINATOR as i128) / total_value) as u32;
+                let drift = if current_pct >= target_pct {
+                    current_pct - target_pct
+                } else {
+                    target_pct - current_pct
+                };
+                if drift > portfolio.rebalance_threshold * (ALLOCATION_DENOMINATOR / 100) {
+                    return true;
+                }
             }
         }
 
@@ -256,8 +270,8 @@ impl PortfolioRebalancer {
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
-
-
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
+    }
 
     pub fn admin_force_rebalance(
         env: Env,
@@ -289,6 +303,7 @@ impl PortfolioRebalancer {
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
 
+        let current_steward: Address = env
             .storage()
             .persistent()
             .get(&DataKey::Steward(portfolio_id))
@@ -298,7 +313,7 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::Steward(portfolio_id), &new_steward);
         env.events()
-            .publish(("portfolio", "steward_transferred"), (portfolio_id, current_steward, new_steward));
+            .publish((symbol_short!("portfolio"), Symbol::new(&env, "steward_transferred")), (portfolio_id, current_steward, new_steward));
         Ok(())
     }
 
@@ -358,27 +373,22 @@ impl PortfolioRebalancer {
         );
     }
 
-    /// Returns the minimum allowed rebalance threshold percentage.
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD
     }
 
-    /// Returns the maximum allowed rebalance threshold percentage.
     pub fn max_rebalance_threshold(_env: Env) -> u32 {
         MAX_REBALANCE_THRESHOLD
     }
 
-    /// Returns the minimum allowed slippage tolerance in basis points.
     pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
         MIN_SLIPPAGE_TOLERANCE_BPS
     }
 
-    /// Returns the maximum allowed slippage tolerance in basis points.
     pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
 
-    /// Returns the maximum number of assets allowed in a portfolio.
     pub fn max_portfolio_assets(_env: Env) -> u32 {
         MAX_PORTFOLIO_ASSETS
     }
@@ -426,6 +436,91 @@ impl PortfolioRebalancer {
             .unwrap_or(PauseReason::None)
     }
 
+    pub fn get_config_view(env: Env, portfolio_id: u64) -> ConfigView {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let emergency_stop: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::EmergencyStop)
+            .unwrap_or(false);
+        let portfolio: PortfolioOption = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+        {
+            Some(p) => PortfolioOption::Some(p),
+            None => PortfolioOption::None,
+        };
+        ConfigView {
+            admin,
+            reflector_address,
+            emergency_stop,
+            portfolio,
+        }
+    }
+
+    /// Issue #862: view function for current portfolio value in USD.
+    /// Callable without signing. Returns per-asset USD value and drift from target.
+    pub fn get_portfolio_value_usd(env: Env, portfolio_id: u64) -> Result<PortfolioValuation, Error> {
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+
+        let total_value = portfolio::calculate_portfolio_value(
+            &env,
+            &portfolio.current_balances,
+            &portfolio.asset_decimals,
+            &reflector_client,
+        )?;
+
+        let mut assets: Vec<AssetValuation> = Vec::new(&env);
+
+        for (asset, target_pct) in portfolio.target_allocations.iter() {
+            let quantity = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
+            let (oracle_price, usd_value) = if let Some(price_data) =
+                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            {
+                let val = portfolio::balance_to_value(quantity, price_data.price);
+                (price_data.price, val)
+            } else {
+                (0, 0)
+            };
+
+            let current_pct = if total_value > 0 {
+                ((usd_value * ALLOCATION_DENOMINATOR as i128) / total_value) as u32
+            } else {
+                0
+            };
+
+            let drift = current_pct as i32 - target_pct as i32;
+
+            assets.push_back(AssetValuation {
+                asset,
+                quantity,
+                oracle_price,
+                usd_value,
+                target_pct,
+                current_pct,
+                drift,
+            });
+        }
+
+        Ok(PortfolioValuation {
+            total_usd_value: total_value,
+            assets,
+        })
+    }
+
     fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
         env.storage()
             .persistent()
@@ -445,6 +540,11 @@ impl PortfolioRebalancer {
         }
 
         let mut portfolio = Self::load_portfolio(env, portfolio_id)?;
+
+        // Issue #861: validate allocations sum to exactly ALLOCATION_DENOMINATOR (10000 bps)
+        if !portfolio::validate_allocations(&portfolio.target_allocations) {
+            return Err(Error::InvalidAllocationSum);
+        }
 
         portfolio::check_portfolio_invariants(&portfolio)?;
 
@@ -473,16 +573,14 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
-        let mut current_prices = Map::new(&env);
+        let mut current_prices = Map::new(env);
         for (asset, _) in portfolio.target_allocations.iter() {
             if let Some(price_data) =
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
             {
-
-                }
                 current_prices.set(asset.clone(), price_data.price);
             } else {
-
+                return Err(Error::MissingPrice);
             }
         }
 
@@ -507,12 +605,15 @@ impl PortfolioRebalancer {
             break;
         }
         if has_actual_balances {
-            let total_value = portfolio::calculate_portfolio_value(
+            let total_value = match portfolio::calculate_portfolio_value(
                 env,
                 &portfolio.current_balances,
                 &portfolio.asset_decimals,
                 &reflector_client,
-            )
+            ) {
+                Ok(v) => v,
+                Err(_) => return Err(Error::StaleData),
+            };
 
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
@@ -520,7 +621,7 @@ impl PortfolioRebalancer {
                         .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
                         .unwrap();
                     let price = price_data.price;
-                    let expected_value = (total_value * target_pct as i128) / 100;
+                    let expected_value = (total_value * target_pct as i128) / ALLOCATION_DENOMINATOR as i128;
                     let decimals = portfolio.asset_decimals.get(asset.clone()).unwrap_or(DEFAULT_ASSET_DECIMALS);
                     let expected_balance =
                         portfolio::value_to_balance(expected_value, price, decimals);
@@ -572,5 +673,5 @@ fn validate_asset_decimals(allocations: &Map<Address, u32>, asset_decimals: &Map
             None => return false,
         }
     }
-
+    true
 }

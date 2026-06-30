@@ -31,10 +31,16 @@ import {
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
+import {
+    detectContractCapabilities,
+    type ContractCapabilityReport,
+} from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
+import PortfolioWizard from './pages/PortfolioWizard'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
+import OnboardingChecklist from './components/OnboardingChecklist'
 
 function App() {
     const queryClient = useQueryClient()
@@ -51,6 +57,8 @@ function App() {
     const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
     const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
     const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
+    const [contractCapabilities, setContractCapabilities] =
+        useState<ContractCapabilityReport | null>(null)
 
     const showBackendBanner = loadError || notices.length > 0
     const showApiCompatibilityBanner =
@@ -100,6 +108,19 @@ function App() {
         void checkApiCompatibility(controller.signal).then((result) => {
             setApiCompatibility(result)
             setApiCompatibilityLoading(false)
+        })
+        return () => controller.abort()
+    }, [])
+
+    // Lightweight contract capability detection: confirm the deployment supports
+    // the documented methods before any write is attempted (issue #834).
+    useEffect(() => {
+        const controller = new AbortController()
+        void detectContractCapabilities(controller.signal).then((report) => {
+            setContractCapabilities(report)
+            if (report.severity !== 'ok') {
+                console.warn(`[contract] ${report.title}: ${report.message}`)
+            }
         })
         return () => controller.abort()
     }, [])
@@ -318,7 +339,7 @@ function App() {
                     {appCopy.checkingApiConfig}
                 </span>
             ) : null}
-            <DeveloperDrawer publicKey={publicKey} />
+            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} />
             <Shortcuts
                 onNewPortfolio={() => handleNavigate('setup')}
                 onOpenSettings={() => {
@@ -329,6 +350,7 @@ function App() {
                 }}
             />
             <Onboarding />
+            <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"
@@ -459,6 +481,13 @@ function App() {
             ) : currentView === 'setup' ? (
                 <ErrorBoundary fallbackTitle="Portfolio Setup">
                     <PortfolioSetup
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'wizard' ? (
+                <ErrorBoundary fallbackTitle="Portfolio Wizard">
+                    <PortfolioWizard
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
                     />

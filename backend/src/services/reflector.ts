@@ -1,9 +1,10 @@
-import { SorobanRpc } from '@stellar/stellar-sdk'
 import type { PricesMap, PriceData, PriceFeedMeta, PricesFeedPayload } from '../types/index.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
-import { recordCacheTtl } from '../observability/metrics.js'
+import { recordCacheTtl, recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice, recordCacheOperation, recordCacheExpiration, recordCacheAge, recordCacheHitRatio, recordCacheSize, recordCacheEntries } from '../observability/metrics.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { REDIS_URL } from '../queue/connection.js'
+import { databaseService } from './databaseService.js'
 
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
@@ -25,16 +26,23 @@ export class ReflectorService {
     private readonly CACHE_DURATION = process.env.NODE_ENV === 'production' ? 600000 : 300000 // 10 min vs 5 min
     private lastRequestTime = 0
     private readonly MIN_REQUEST_INTERVAL = 90000 // Increased to 1.5 minutes for Pro API
+    private readonly oracleCacheTtlSeconds: number
 
     // Cache metrics tracking
     private cacheStats: Map<string, { hits: number; misses: number; lastAgeMs: number }> = new Map()
     private cacheMetricsReportInterval: NodeJS.Timer | null = null
+    private redisCache: Awaited<ReturnType<typeof import('ioredis').default>> | null = null
+    private redisAvailable: boolean = false
+    private readonly ORACLE_CACHE_KEY = 'oracle:prices'
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
         this.priceCache = new Map()
         this.coinGeckoIds = { ...DEFAULT_COIN_IDS }
         this.reflectorApiUrl = process.env.REFLECTOR_API_URL || ''
+
+        const rawTtl = Number.parseInt(process.env.ORACLE_CACHE_TTL_SECONDS || '30', 10)
+        this.oracleCacheTtlSeconds = Number.isFinite(rawTtl) && rawTtl >= 0 ? rawTtl : 30
 
         // Initialize cache metrics reporting
         this.startCacheMetricsReporting()
@@ -56,17 +64,17 @@ export class ReflectorService {
     }
 
     async getCurrentPrices(): Promise<PricesMap> {
-        const { map } = await this.resolvePricesInternal()
+        const { map, hint, cacheStatus } = await this.resolvePricesWithRedisCache()
         return this.applyQuoteAges(map)
     }
 
     async getCurrentPricesWithMeta(): Promise<PricesFeedPayload> {
-        const { map, hint } = await this.resolvePricesInternal()
+        const { map, hint, cacheStatus } = await this.resolvePricesWithRedisCache()
         const prices = this.applyQuoteAges(map)
-        return { prices, feedMeta: this.buildFeedMeta(prices, hint) }
+        return { prices, feedMeta: this.buildFeedMeta(prices, hint, cacheStatus) }
     }
 
-    buildFeedMeta(prices: PricesMap, hint: PriceResolutionHint): PriceFeedMeta {
+    buildFeedMeta(prices: PricesMap, hint: PriceResolutionHint, cacheStatus?: PriceFeedMeta['cacheStatus']): PriceFeedMeta {
         const entries = Object.values(prices)
         const degraded =
             hint === 'synthetic_fallback'
@@ -80,10 +88,92 @@ export class ReflectorService {
             degraded,
             staleOrLimited,
             resolutionHint: hint,
-            assetsCount: Object.keys(prices).length
+            assetsCount: Object.keys(prices).length,
+            cacheStatus
         }
         recordPriceFeedResolution(meta)
         return meta
+    }
+
+    private async getRedisCache() {
+        if (this.redisCache) return this.redisCache
+        try {
+            const { default: IORedis } = await import('ioredis')
+            this.redisCache = new IORedis(REDIS_URL, {
+                lazyConnect: true,
+                connectTimeout: 2000,
+                maxRetriesPerRequest: 1,
+                enableReadyCheck: false,
+                retryStrategy: () => null
+            })
+            this.redisCache.on('error', () => {})
+            await this.redisCache.connect()
+            await this.redisCache.ping()
+            this.redisAvailable = true
+        } catch {
+            this.redisAvailable = false
+            this.redisCache = null
+        }
+        return this.redisCache
+    }
+
+    private async readFromRedisCache(): Promise<{ map: PricesMap; cacheStatus: PriceFeedMeta['cacheStatus'] } | null> {
+        if (this.oracleCacheTtlSeconds === 0) return null
+        try {
+            const redis = await this.getRedisCache()
+            if (!redis) return { map: {}, cacheStatus: 'redis_unavailable' }
+            const raw = await redis.get(this.ORACLE_CACHE_KEY)
+            if (!raw) return { map: {}, cacheStatus: 'redis_miss' }
+            const map = JSON.parse(raw) as PricesMap
+            if (typeof map === 'object' && map !== null && Object.keys(map).length > 0) {
+                return { map, cacheStatus: 'redis_hit' }
+            }
+            return { map: {}, cacheStatus: 'redis_miss' }
+        } catch {
+            return { map: {}, cacheStatus: 'redis_unavailable' }
+        }
+    }
+
+    private async writeToRedisCache(map: PricesMap): Promise<void> {
+        if (this.oracleCacheTtlSeconds === 0 || Object.keys(map).length === 0) return
+        try {
+            const redis = await this.getRedisCache()
+            if (!redis) return
+            const stripped: PricesMap = {}
+            for (const [asset, data] of Object.entries(map)) {
+                stripped[asset] = {
+                    price: data.price,
+                    change: data.change,
+                    timestamp: data.timestamp,
+                    source: data.source,
+                    volume: data.volume
+                }
+            }
+            await redis.set(this.ORACLE_CACHE_KEY, JSON.stringify(stripped), 'EX', this.oracleCacheTtlSeconds)
+        } catch {
+            // Redis write failed — graceful degradation
+        }
+    }
+
+    private async resolvePricesWithRedisCache(): Promise<{ map: PricesMap; hint: PriceResolutionHint; cacheStatus: PriceFeedMeta['cacheStatus'] }> {
+        if (this.oracleCacheTtlSeconds === 0) {
+            const result = await this.resolvePricesInternal()
+            return { ...result, cacheStatus: 'redis_bypassed' }
+        }
+
+        const redisResult = await this.readFromRedisCache()
+        if (redisResult?.cacheStatus === 'redis_hit' && Object.keys(redisResult.map).length > 0) {
+            return { map: redisResult.map, hint: 'cached_only', cacheStatus: 'redis_hit' }
+        }
+
+        const resolved = await this.resolvePricesInternal()
+        const cacheStatus: PriceFeedMeta['cacheStatus'] = redisResult?.cacheStatus === 'redis_unavailable' ? 'redis_unavailable' : 'redis_miss'
+
+        if (Object.keys(resolved.map).length > 0) {
+            await this.writeToRedisCache(resolved.map)
+        }
+
+        return { ...resolved, cacheStatus }
     }
 
     private async resolvePricesInternal(): Promise<{ map: PricesMap; hint: PriceResolutionHint }> {

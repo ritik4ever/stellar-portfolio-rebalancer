@@ -1,5 +1,7 @@
 # Stellar Portfolio Rebalancer
 
+[English](README.md) | [Português](docs/README.pt.md) | [Español](docs/README.es.md)
+
 ---
 
 ## 2. README.md Updates
@@ -227,6 +229,7 @@ This target outputs the hash of both the release WASM and the optimized WASM (if
 
 Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
 Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
+Frontend compatibility & capability matrix (what's supported, how the app degrades): [`docs/CONTRACT_CAPABILITY_MATRIX.md`](docs/CONTRACT_CAPABILITY_MATRIX.md)
 
 ### Usage
 
@@ -349,6 +352,10 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
 - Reflector Protocol
 - Soroban
 - Community wallet integrations
+
+## Translations
+
+This README is also available in [Portuguese](docs/README.pt.md) and [Spanish](docs/README.es.md). Translations may lag behind the English version by one release. Translators are credited in [CONTRIBUTORS.md](CONTRIBUTORS.md).
 
 Built with ❤️ for the Stellar ecosystem
 

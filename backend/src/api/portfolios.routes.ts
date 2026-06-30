@@ -3,9 +3,9 @@ import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
-import { analyticsService } from '../services/analyticsService.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
+import { rebalanceHistoryService } from '../services/serviceContainer.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -14,15 +14,16 @@ import { validateRequest, validateQuery } from '../middleware/validate.js'
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioExportSchema, portfolioRebalanceHistoryQuerySchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
+import { analyticsRouter } from './analytics.routes.js'
+import { dbGetPortfolioRebalanceHistory } from '../db/rebalanceHistoryDb.js'
 
 function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
     const options = body?.options
@@ -33,7 +34,36 @@ function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
     }
 }
 
+function buildPortfolioExportPayload(portfolio: Portfolio) {
+    return {
+        schemaVersion: 1 as const,
+        exportedAt: new Date().toISOString(),
+        userAddress: portfolio.userAddress,
+        name: portfolio.name,
+        description: portfolio.description,
+        allocations: portfolio.allocations,
+        threshold: portfolio.threshold,
+        slippageTolerance: portfolio.slippageTolerancePercent ?? portfolio.slippageTolerance ?? 1,
+        strategy: portfolio.strategy ?? 'threshold',
+        strategyConfig: portfolio.strategyConfig ?? {},
+    }
+}
+
 export const portfoliosRouter = Router()
+
+portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
+    try {
+        const search = req.query.search as string || ''
+        const limit = parseInt(req.query.limit as string) || 20
+        const offset = parseInt(req.query.offset as string) || 0
+
+        const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset)
+        return ok(res, { portfolios, limit, offset })
+    } catch (error) {
+        logger.error('[ERROR] Search portfolios failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
 
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
@@ -41,7 +71,7 @@ const featureFlags = getFeatureFlags()
 
 portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), async (req: Request, res: Response) => {
     try {
-        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig } = req.body
+        const { userAddress, allocations, threshold, slippageTolerance, strategy, strategyConfig, name, description } = req.body
 
         const slippageTolerancePercent = slippageTolerance ?? 1
         const portfolioId = await stellarService.createPortfolio(
@@ -50,7 +80,9 @@ portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), asyn
             threshold,
             slippageTolerancePercent,
             strategy ?? 'threshold',
-            strategyConfig ?? {}
+            strategyConfig ?? {},
+            name,
+            description
         )
         const mode = featureFlags.demoMode ? 'demo' : 'onchain'
         return ok(res, {
@@ -94,6 +126,9 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         
         try {
             portfolio = await stellarService.getPortfolio(portfolioId)
+            if (!portfolio) {
+                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            }
             
             try {
                 const prices = await reflectorService.getCurrentPrices()
@@ -136,6 +171,19 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
         return ok(res, { portfolio, riskHeatmap })
     } catch (error) {
         logger.error('[ERROR] Get portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolio/:id/cost-summary', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const summary = await rebalanceHistoryService.getCostSummary(portfolioId)
+        return ok(res, summary)
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio cost summary failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -369,7 +417,7 @@ portfoliosRouter.get('/user/:address/drafts', async (req: Request, res: Response
 portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQuery(portfolioExportQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
-        const format = req.query.format as 'json' | 'csv' | 'pdf'
+        const format = (req.query.format as 'json' | 'csv' | 'pdf' | undefined) ?? 'json'
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -379,6 +427,15 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         }
         if (!databaseService.hasFullConsent(portfolio.userAddress)) {
             return fail(res, 403, 'FORBIDDEN', 'Active consent is required before exporting portfolio data')
+        }
+
+        if (format === 'json') {
+            const payload = buildPortfolioExportPayload(portfolio)
+            const parsed = portfolioExportSchema.safeParse(payload)
+            if (!parsed.success) {
+                return fail(res, 500, 'INTERNAL_ERROR', 'Unable to build export payload')
+            }
+            return res.status(200).json(parsed.data)
         }
 
         const queue = await import('../queue/queues.js').then(m => m.getPortfolioExportQueue())
@@ -395,6 +452,47 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         return ok(res, { jobId: job.id, status: 'processing' }, { status: 202 })
     } catch (error) {
         logger.error('[ERROR] Portfolio export job creation failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/import', requireJwtWhenEnabled, validateRequest(portfolioExportSchema), async (req: Request, res: Response) => {
+    try {
+        const imported = req.body as any
+        const userAddress = req.user?.address ?? imported.userAddress
+        if (!userAddress) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userAddress is required')
+        }
+
+        if (!databaseService.hasFullConsent(userAddress)) {
+            return fail(res, 403, 'FORBIDDEN', 'Active consent is required before importing portfolio data')
+        }
+
+        if (req.user && imported.userAddress !== req.user.address) {
+            logger.warn('[PORTFOLIO IMPORT] Imported owner differs from authenticated user; using authenticated wallet', {
+                importedUserAddress: imported.userAddress,
+                authenticatedUserAddress: req.user.address,
+            })
+        }
+
+        const portfolioId = await stellarService.createPortfolio(
+            userAddress,
+            imported.allocations,
+            imported.threshold,
+            imported.slippageTolerance ?? 1,
+            imported.strategy ?? 'threshold',
+            imported.strategyConfig ?? {},
+            imported.name,
+            imported.description,
+        )
+
+        return ok(res, {
+            portfolioId,
+            status: 'imported',
+            mode: featureFlags.demoMode ? 'demo' : 'onchain',
+        }, { status: 201 })
+    } catch (error) {
+        logger.error('[ERROR] Portfolio import failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -518,25 +616,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-portfoliosRouter.get('/portfolio/:id/rebalance-status', async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
-        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
 
-        const lastRebalanced = portfolio.lastRebalance === portfolio.createdAt
-            ? null
-            : portfolio.lastRebalance
-
-        return ok(res, { portfolioId, lastRebalanced })
-    } catch (error) {
-        logger.error('[ERROR] Rebalance status failed', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -569,6 +649,17 @@ portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortf
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
+            await rebalanceHistoryService.recordRebalanceEvent({
+                portfolioId,
+                trigger: 'Manual Rebalancing',
+                trades: result.trades ?? 0,
+                gasUsed: result.gasUsed ?? '0 XLM',
+                feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
+                slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
+                status: result.status === 'failed' ? 'failed' : 'completed',
+                isAutomatic: false,
+            });
+
             return ok(res, { result });
         } finally {
             await releaseWorkerLock(portfolioId);
@@ -583,86 +674,61 @@ portfoliosRouter.post('/portfolio/:id/rebalance', validateRequest(rebalancePortf
 
 });
 
-// ================================
-// ANALYTICS ROUTES
-// ================================
-
-portfoliosRouter.get('/portfolio/:id/analytics', async (req: Request, res: Response) => {
+portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolioRebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
-        const days = parseInt(req.query.days as string) || 30
-
+        const portfolioId = req.params.id;
         if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
         }
 
-        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId);
         if (!portfolio) {
-            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
         }
 
-        const analytics = analyticsService.getAnalytics(portfolioId, days)
+        const { from, to, trigger_type, status, page, page_size, sort } = req.query as any;
 
-        return ok(
-            res,
-            {
-                portfolioId,
-                data: analytics
+        const limit = page_size ? parseInt(page_size, 10) : 50;
+        const pageNum = page ? parseInt(page, 10) : 1;
+        const offset = (pageNum - 1) * limit;
+
+        const start = Date.now();
+        const { items, total } = await dbGetPortfolioRebalanceHistory(portfolioId, {
+            from,
+            to,
+            trigger_type,
+            status,
+            limit,
+            offset,
+            sort: sort === 'asc' ? 'asc' : 'desc'
+        });
+        const duration = Date.now() - start;
+
+        // Log warning if query is slow
+        if (duration > 200) {
+            logger.warn('Slow rebalance history query detected', { portfolioId, durationMs: duration, count: items.length });
+        }
+
+        return ok(res, {
+            history: items,
+            pagination: {
+                page: pageNum,
+                pageSize: limit,
+                total,
+                totalPages: Math.ceil(total / limit)
             },
-            { meta: { count: analytics.length, period: `${days} days` } }
-        )
-    } catch (error) {
-        logger.error('Failed to fetch analytics', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-portfoliosRouter.get('/portfolio/:id/performance-summary', async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
-
-        const portfolio = portfolioStorage.getPortfolio(portfolioId)
-        if (!portfolio) {
-            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-        }
-
-        const summary = analyticsService.getPerformanceSummary(portfolioId)
-
-        return ok(res, { portfolioId, ...summary })
-    } catch (error) {
-        logger.error('Failed to fetch performance summary', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-portfoliosRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res: Response) => {
-    try {
-        const portfolioId = req.params.id
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
-
-        let portfolio: any
-        try {
-            portfolio = await stellarService.getPortfolio(portfolioId)
-        } catch (error) {
-            const errMsg = getErrorMessage(error)
-            if (errMsg.includes('Portfolio not found')) {
-                return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            filters: {
+                from: from || null,
+                to: to || null,
+                trigger_type: trigger_type || null,
+                status: status || null
             }
-            throw error
-        }
-
-        const prices = await reflectorService.getCurrentPrices()
-        const riskHeatmap = riskManagementService.calculateRiskHeatmap(portfolio.allocations, prices)
-
-        return ok(res, { riskHeatmap })
+        });
     } catch (error) {
-        logger.error('[ERROR] Get portfolio risk diagnostics failed', { error: getErrorObject(error), portfolioId: req.params.id })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
-})
+});
+
+
+
