@@ -13,6 +13,7 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
@@ -963,6 +964,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
+import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
+
+...
+    const refreshData = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
+        ])
+    }, [queryClient])
+...
                             <PriceTracker />
                         </div>
                     </div>

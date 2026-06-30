@@ -33,6 +33,13 @@ export interface NotificationPreferences {
 // Get or create the SQLite database instance for notifications
 let notificationDb: Database.Database | null = null
 
+export function closeNotificationDb(): void {
+    if (notificationDb) {
+        notificationDb.close()
+        notificationDb = null
+    }
+}
+
 function getDb(): Database.Database {
     if (!notificationDb) {
         const dbPath = process.env.DB_PATH || './data/portfolio.db'
