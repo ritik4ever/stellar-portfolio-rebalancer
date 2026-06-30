@@ -9,130 +9,148 @@
  *   - Submit blocked until all fields and total are valid
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
+// TanStack Query Mutations
+import {
+  buildRollbackMessage,
+  useCreatePortfolioMutation,
+  useImportPortfolioMutation,
+} from "../hooks/mutations/usePortfolioMutations";
 import {
   Plus,
   Trash2,
   ArrowLeft,
   AlertCircle,
   CheckCircle,
-  Search,
   Save,
   User,
   Zap,
   RefreshCw,
+  Download,
+  Upload,
 } from "lucide-react";
-import { api, ENDPOINTS } from "../config/api";
+
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
+import { downloadJSON } from "../utils/export";
+import { percentageToBps, remainingAllocation } from "../utils/calculations";
+import { loadPortfolioCloneDraft, clearPortfolioCloneDraft } from "../utils/portfolioCloneDraft";
+import { clearPortfolioSetupDraft, loadPortfolioSetupDraft, savePortfolioSetupDraft, PortfolioSetupDraft } from "../hooks/usePortfolio";
+import { useAssets } from "../hooks/queries/useAssetsQuery";
 
-// TanStack Query Mutations
-import { useCreatePortfolioMutation } from "../hooks/mutations/usePortfolioMutations";
-import { useAssets } from "../hooks/queries/useAssetsQuery"; // NEW: Use enhanced assets query
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AssetOption {
-  value: string;
-  label: string;
+  value: string
+  label: string
 }
 
 interface PortfolioSetupProps {
-  onNavigate: (view: string) => void;
-  publicKey: string | null;
+  onNavigate: (view: string) => void
+  publicKey: string | null
 }
 
 interface Allocation {
-  asset: string;
-  percentage: number;
+  asset: string
+  percentage: number
 }
 
 const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
-  { value: "XLM", label: "XLM (Stellar Lumens)" },
-  { value: "USDC", label: "USDC (USD Coin)" },
-  { value: "BTC", label: "BTC (Bitcoin)" },
-  { value: "ETH", label: "ETH (Ethereum)" },
-];
+  { value: 'XLM', label: 'XLM (Stellar Lumens)' },
+  { value: 'USDC', label: 'USDC (USD Coin)' },
+  { value: 'BTC', label: 'BTC (Bitcoin)' },
+  { value: 'ETH', label: 'ETH (Ethereum)' },
+]
 
-export type RiskLevel = "low" | "medium" | "high";
+export type RiskLevel = 'low' | 'medium' | 'high'
 
 export interface PortfolioTemplate {
-  id: string;
-  name: string;
-  description: string;
-  riskLevel: RiskLevel;
-  allocations: Allocation[];
+  id: string
+  name: string
+  description: string
+  riskLevel: RiskLevel
+  allocations: Allocation[]
 }
 
 export const PORTFOLIO_TEMPLATES: PortfolioTemplate[] = [
   {
     id: "conservative",
     name: "Conservative",
-    description: "Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.",
+    description:
+      "Heavy on stablecoins and XLM. Lower volatility, capital preservation focus.",
     riskLevel: "low",
     allocations: [
-      { asset: "USDC", percentage: 60 },
-      { asset: "XLM", percentage: 30 },
-      { asset: "BTC", percentage: 10 },
+      { asset: 'USDC', percentage: 60 },
+      { asset: 'XLM', percentage: 30 },
+      { asset: 'BTC', percentage: 10 },
     ],
   },
   {
     id: "balanced",
     name: "Balanced",
-    description: "Mix of stablecoins and crypto. Moderate risk with growth potential.",
+    description:
+      "Mix of stablecoins and crypto. Moderate risk with growth potential.",
     riskLevel: "medium",
     allocations: [
-      { asset: "USDC", percentage: 40 },
-      { asset: "XLM", percentage: 30 },
-      { asset: "BTC", percentage: 20 },
-      { asset: "ETH", percentage: 10 },
+      { asset: 'USDC', percentage: 40 },
+      { asset: 'XLM', percentage: 30 },
+      { asset: 'BTC', percentage: 20 },
+      { asset: 'ETH', percentage: 10 },
     ],
   },
   {
-    id: "aggressive",
-    name: "Aggressive",
-    description: "Crypto-heavy for maximum growth. Higher volatility and risk.",
-    riskLevel: "high",
+    id: 'aggressive',
+    name: 'Aggressive',
+    description: 'Crypto-heavy for maximum growth. Higher volatility and risk.',
+    riskLevel: 'high',
     allocations: [
-      { asset: "BTC", percentage: 50 },
-      { asset: "ETH", percentage: 30 },
-      { asset: "XLM", percentage: 20 },
+      { asset: 'BTC', percentage: 50 },
+      { asset: 'ETH', percentage: 30 },
+      { asset: 'XLM', percentage: 20 },
     ],
   },
   {
     id: "stablecoin-focus",
     name: "Stablecoin Focus",
-    description: "Mostly USDC with some XLM. Minimal exposure to crypto volatility.",
+    description:
+      "Mostly USDC with some XLM. Minimal exposure to crypto volatility.",
     riskLevel: "low",
     allocations: [
-      { asset: "USDC", percentage: 80 },
-      { asset: "XLM", percentage: 20 },
+      { asset: 'USDC', percentage: 80 },
+      { asset: 'XLM', percentage: 20 },
     ],
   },
   {
     id: "custom",
     name: "Custom",
-    description: "Define your own allocation. Start from scratch and add assets.",
+    description:
+      "Define your own allocation. Start from scratch and add assets.",
     riskLevel: "medium",
     allocations: [{ asset: "XLM", percentage: 100 }],
   },
-];
+]
 
-const SAVED_TEMPLATES_KEY = (userId: string) => `portfolio-templates-${userId || "anonymous"}`;
+const SAVED_TEMPLATES_KEY = (userId: string) =>
+  `portfolio-templates-${userId || "anonymous"}`;
 
 function loadSavedTemplates(userId: string): PortfolioTemplate[] {
   try {
-    const raw = localStorage.getItem(SAVED_TEMPLATES_KEY(userId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as PortfolioTemplate[];
-    return Array.isArray(parsed) ? parsed : [];
+    const raw = localStorage.getItem(SAVED_TEMPLATES_KEY(userId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as PortfolioTemplate[]
+    return Array.isArray(parsed) ? parsed : []
   } catch {
-    return [];
+    return []
   }
 }
 
-function saveSavedTemplates(userId: string, templates: PortfolioTemplate[]): void {
+function saveSavedTemplates(
+  userId: string,
+  templates: PortfolioTemplate[],
+): void {
   localStorage.setItem(SAVED_TEMPLATES_KEY(userId), JSON.stringify(templates));
 }
 
@@ -146,47 +164,212 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   const [allocations, setAllocations] = useState<Allocation[]>(() => {
     const balanced = PORTFOLIO_TEMPLATES.find((t) => t.id === "balanced");
-    return balanced ? balanced.allocations.map((a) => ({ ...a })) : [{ asset: "XLM", percentage: 40 }];
+    return balanced
+      ? balanced.allocations.map((a) => ({ ...a }))
+      : [{ asset: "XLM", percentage: 40 }];
   });
   const [threshold, setThreshold] = useState(5);
   const [slippageTolerance, setSlippageTolerance] = useState(1);
   const [strategy, setStrategy] = useState<string>("threshold");
-  const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>({});
+  const [strategyConfig, setStrategyConfig] = useState<Record<string, number>>(
+    {},
+  );
   const [autoRebalance, setAutoRebalance] = useState(true);
   const [error, setError] = useState<string | null>(null); // submit-level error message
   const [success, setSuccess] = useState(false); // shows success banner after creation
   const [isDemoMode] = useState(true); // demo mode: skips real wallet requirement
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("balanced");
-  const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(() =>
-    loadSavedTemplates(publicKey || "")
+  const [selectedTemplateId, setSelectedTemplateId] =
+    useState<string>("balanced");
+  const [savedTemplates, setSavedTemplates] = useState<PortfolioTemplate[]>(
+    () => loadSavedTemplates(publicKey || ""),
   );
-
-  // NEW: Use enhanced assets query
-  const { data: assets = [], isLoading: assetsLoading } = useAssets()
+  const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
+    loadPortfolioCloneDraft(),
+  );
+  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(() => {
+    const result = loadPortfolioSetupDraft(publicKey)
+    return result.status === 'loaded' ? result.draft : null
+  })
+  const [draftPromptResolved, setDraftPromptResolved] = useState(!loadPortfolioSetupDraft(publicKey).draft)
+  const [draftRestored, setDraftRestored] = useState(false)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const hasMountedDraftSaver = useRef(false)
 
   useEffect(() => {
-    setSavedTemplates(loadSavedTemplates(publicKey || ""));
-  }, [publicKey]);
+    if (!draftPromptResolved) return
+
+    if (!hasMountedDraftSaver.current) {
+      hasMountedDraftSaver.current = true
+      return
+    }
+
+    const result = savePortfolioSetupDraft(publicKey, {
+      allocations: allocations.map((allocation) => ({ ...allocation })),
+      threshold,
+      slippageTolerance,
+      strategy,
+      strategyConfig,
+      autoRebalance,
+      selectedTemplateId,
+    })
+
+    setDraftError(
+      result.status === 'failed'
+        ? 'We could not save your draft locally. Your current inputs remain on this page only.'
+        : null,
+    )
+    setDraftRestored(false)
+  }, [
+    allocations,
+    threshold,
+    slippageTolerance,
+    strategy,
+    strategyConfig,
+    autoRebalance,
+    selectedTemplateId,
+    publicKey,
+    draftPromptResolved,
+  ])
+
+  const restoreDraft = () => {
+    if (!pendingDraft) return
+    setAllocations(
+      pendingDraft.allocations.map((allocation) => ({ ...allocation })),
+    )
+    setThreshold(pendingDraft.threshold)
+    setSlippageTolerance(pendingDraft.slippageTolerance)
+    setStrategy(pendingDraft.strategy)
+    setStrategyConfig({ ...pendingDraft.strategyConfig })
+    setAutoRebalance(pendingDraft.autoRebalance)
+    setSelectedTemplateId(pendingDraft.selectedTemplateId)
+    setPendingDraft(null)
+    setDraftError(null)
+    setDraftRestored(true)
+    setDraftPromptResolved(true)
+    hasMountedDraftSaver.current = true
+  }
+
+  const discardDraft = () => {
+    const result = clearPortfolioSetupDraft(publicKey)
+    setPendingDraft(null)
+    setDraftRestored(false)
+    setDraftPromptResolved(true)
+    setDraftError(result.status === 'failed' ? result.error : null)
+    hasMountedDraftSaver.current = false
+  }
+
+  const formatDraftSavedAt = (savedAt: string): string => {
+    const savedDate = new Date(savedAt)
+    if (Number.isNaN(savedDate.getTime())) return 'a previous visit'
+    return savedDate.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  }
+
+  useEffect(() => {
+    const draft = loadPortfolioCloneDraft();
+    if (!draft) return
+
+    setCloneDraft(draft);
+    setAllocations(draft.allocations.map((row) => ({ ...row })));
+    setThreshold(draft.threshold);
+    setSlippageTolerance(draft.slippageTolerance);
+    setStrategy(draft.strategy || "threshold");
+    setStrategyConfig(draft.strategyConfig ?? {});
+    setSelectedTemplateId("custom");
+  }, []);
 
   const getRiskLevelLabel = (level: RiskLevel): string => {
     switch (level) {
-      case "low": return "Low risk";
-      case "medium": return "Medium risk";
-      case "high": return "High risk";
-      default: return "Risk";
+      case "low":
+        return "Low risk";
+      case "medium":
+        return "Medium risk";
+      case "high":
+        return "High risk";
+      default:
+        return "Risk";
     }
-  };
+  }
 
   const getRiskLevelClass = (level: RiskLevel): string => {
     switch (level) {
-      case "low": return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
-      case "medium": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
-      case "high": return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
-      default: return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+      case "low":
+        return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
+      case "medium":
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
+      case "high":
+        return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+      default:
+        return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
     }
-  };
+  }
   // Mutation for portfolio creation
-  const createPortfolioMutation = useCreatePortfolioMutation();
+  const createPortfolioMutation = useCreatePortfolioMutation()
+  const importPortfolioMutation = useImportPortfolioMutation()
+  const importFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const buildExportPayload = () => ({
+    schemaVersion: 1 as const,
+    exportedAt: new Date().toISOString(),
+    userAddress: publicKey || 'demo-user',
+    allocations: allocations.reduce(
+      (acc, allocation) => {
+        acc[allocation.asset] = allocation.percentage
+        return acc
+      },
+      {} as Record<string, number>,
+    ),
+    threshold,
+    slippageTolerance,
+    strategy: strategy || 'threshold',
+    strategyConfig: Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
+  })
+
+  const exportCurrentSettings = () => {
+    if (!isValidTotal || hasAnyFieldError) {
+      setError('Fix the allocation validation issues before exporting this portfolio')
+      return
+    }
+
+    const filename = `portfolio-settings_${publicKey ? publicKey.slice(0, 6) : 'demo'}_${new Date().toISOString()}.json`
+    downloadJSON(filename, buildExportPayload())
+  }
+
+  const openImportDialog = () => {
+    importFileInputRef.current?.click()
+  }
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setError(null)
+
+    try {
+      const raw = await file.text()
+      const parsed = JSON.parse(raw) as any
+      const payload = parsed?.portfolio ?? parsed?.data ?? parsed
+      const imported = await importPortfolioMutation.mutateAsync(payload)
+
+      clearPortfolioSetupDraft(publicKey)
+      clearPortfolioCloneDraft()
+      setCloneDraft(null)
+      setPendingDraft(null)
+      setDraftPromptResolved(true)
+      setSuccess(true)
+
+      if (imported?.portfolioId) {
+        setTimeout(() => onNavigate('dashboard'), 2000)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed. Please check the JSON file and try again.')
+    }
+  }
 
   // ── Validation ─────────────────────────────────────────────────────────────
 
@@ -199,30 +382,30 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    *   - Must not exceed 100 (> 100)
    */
   const getAllocationError = (percentage: number): string | null => {
-    if (percentage < 0) return "Cannot be negative";
-    if (percentage > 100) return "Cannot exceed 100%";
-    return null;
-  };
+    if (percentage < 0) return 'Cannot be negative'
+    if (percentage > 100) return 'Cannot exceed 100%'
+    return null
+  }
 
   /** Sum of all current allocation percentages */
   const totalPercentage = allocations.reduce(
     (sum, alloc) => sum + alloc.percentage,
     0,
-  );
+  )
 
   /**
    * True when the total is within 0.01% of 100.
    * The small tolerance prevents false negatives from floating-point arithmetic
    * e.g. 33.3 + 33.3 + 33.4 = 100.00000000000001 without this guard.
    */
-  const isValidTotal = Math.abs(totalPercentage - 100) < 0.01;
+  const isValidTotal = Math.abs(totalPercentage - 100) < 0.01
 
   /**
    * Signed deviation from 100%, rounded to 1 decimal place.
    * Positive = over-allocated (e.g. +5 means 105% total)
    * Negative = under-allocated (e.g. -10 means 90% total)
    */
-  const deviation = parseFloat((totalPercentage - 100).toFixed(1));
+  const deviation = parseFloat((totalPercentage - 100).toFixed(2))
 
   /**
    * Builds the real-time summary message shown below the allocation list.
@@ -232,21 +415,21 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    *   'warning' → yellow (total is under 100%)
    */
   const totalDeviationMessage = (): {
-    text: string;
-    type: "error" | "warning" | "success";
+    text: string
+    type: 'error' | 'warning' | 'success'
   } | null => {
     if (isValidTotal)
-      return { text: "Allocations sum to 100% ✓", type: "success" };
+      return { text: 'Allocations sum to 100% ✓', type: 'success' }
     if (deviation > 0)
       return {
         text: `${deviation}% over — reduce allocations by ${deviation}%`,
-        type: "error",
-      };
+        type: 'error',
+      }
     return {
       text: `${Math.abs(deviation)}% under — add ${Math.abs(deviation)}% more`,
-      type: "warning",
-    };
-  };
+      type: 'warning',
+    }
+  }
 
   /**
    * True if any individual allocation row has a validation error.
@@ -255,76 +438,81 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    */
   const hasAnyFieldError = allocations.some(
     (a) => getAllocationError(a.percentage) !== null,
-  );
+  )
+
+  /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
+  const remaining = remainingAllocation(allocations);
+
+  const { data: selectableAssets = [], isLoading: assetsLoading } = useAssets()
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   /** Adds a new allocation row using the first asset not already in the list */
   const addAllocation = () => {
-    const unusedAssets = assets.filter(
+    const unusedAssets = selectableAssets.filter(
       (asset) => !allocations.some((alloc) => alloc.asset === asset.symbol),
-    );
+    )
     if (unusedAssets.length > 0) {
       setAllocations([
         ...allocations,
         { asset: unusedAssets[0].symbol, percentage: 0 },
-      ]);
+      ])
     }
-  };
+  }
 
   /** Removes the allocation row at the given index. Always keeps at least one row. */
   const removeAllocation = (index: number) => {
     if (allocations.length > 1) {
-      setAllocations(allocations.filter((_, i) => i !== index));
+      setAllocations(allocations.filter((_, i) => i !== index))
     }
-  };
+  }
 
   /** Updates either the asset or percentage field for a specific allocation row */
   const updateAllocation = (
     index: number,
-    field: "asset" | "percentage",
+    field: 'asset' | 'percentage',
     value: string | number,
   ) => {
-    const updated = [...allocations];
-    updated[index] = { ...updated[index], [field]: value };
-    setAllocations(updated);
-  };
+    const updated = [...allocations]
+    updated[index] = { ...updated[index], [field]: value }
+    setAllocations(updated)
+  }
 
   /** Replaces the current allocation list with a template. User can modify before creating. */
   const applyTemplate = (template: PortfolioTemplate) => {
-    setSelectedTemplateId(template.id);
-    setAllocations(template.allocations.map((a) => ({ ...a })));
-  };
+    setSelectedTemplateId(template.id)
+    setAllocations(template.allocations.map((a) => ({ ...a })))
+  }
 
   const saveCurrentAsTemplate = () => {
-    const name = window.prompt("Template name", "My custom template");
-    if (!name?.trim()) return;
-    if (!isValidTotal || hasAnyFieldError) return;
+    const name = window.prompt('Template name', 'My custom template')
+    if (!name?.trim()) return
+    if (!isValidTotal || hasAnyFieldError) return
     const custom: PortfolioTemplate = {
       id: `saved-${Date.now()}`,
       name: name.trim(),
-      description: "Saved by you. Modify and use as a starting point.",
-      riskLevel: "medium",
+      description: 'Saved by you. Modify and use as a starting point.',
+      riskLevel: 'medium',
       allocations: allocations.map((a) => ({ ...a })),
-    };
-    const userId = publicKey || "";
-    const next = [...savedTemplates, custom];
-    setSavedTemplates(next);
-    saveSavedTemplates(userId, next);
-    setSelectedTemplateId(custom.id);
-  };
+    }
+    const userId = publicKey || ''
+    const next = [...savedTemplates, custom]
+    setSavedTemplates(next)
+    saveSavedTemplates(userId, next)
+    setSelectedTemplateId(custom.id)
+  }
 
   const removeSavedTemplate = (id: string) => {
-    if (!window.confirm("Remove this saved template?")) return;
-    const userId = publicKey || "";
-    const next = savedTemplates.filter((t) => t.id !== id);
-    setSavedTemplates(next);
-    saveSavedTemplates(userId, next);
+    if (!window.confirm('Remove this saved template?')) return
+    const userId = publicKey || ''
+    const next = savedTemplates.filter((t) => t.id !== id)
+    setSavedTemplates(next)
+    saveSavedTemplates(userId, next)
     if (selectedTemplateId === id) {
-      setSelectedTemplateId("custom");
-      setAllocations([{ asset: "XLM", percentage: 100 }]);
+      setSelectedTemplateId('custom')
+      setAllocations([{ asset: 'XLM', percentage: 100 }])
     }
-  };
+  }
 
   /**
    * Submits the portfolio to the API.
@@ -339,70 +527,73 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const createPortfolio = async () => {
     // Block submission if any validation check has not passed
     if (!isValidTotal || hasAnyFieldError) {
-      setError("Please fix validation errors before submitting");
-      return;
+      setError('Please fix validation errors before submitting')
+      return
     }
 
     // Block submission if no wallet is connected (skipped in demo mode)
     if (!publicKey && !isDemoMode) {
-      setError("Please connect your wallet first");
-      return;
+      setError('Please connect your wallet first')
+      return
     }
 
-    setError(null);
+    setError(null)
 
     try {
       const allocationsMap = allocations.reduce(
         (acc, alloc) => {
-          acc[alloc.asset] = alloc.percentage;
-          return acc;
+          acc[alloc.asset] = percentageToBps(alloc.percentage)
+          return acc
         },
         {} as Record<string, number>,
-      );
+      )
 
       await createPortfolioMutation.mutateAsync({
-        userAddress: publicKey || "demo-user",
+        userAddress: publicKey || 'demo-user',
         allocations: allocationsMap,
         threshold,
         slippageTolerance,
-        strategy: strategy || "threshold",
+        strategy: strategy || 'threshold',
         strategyConfig:
           Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
-      });
+      })
 
-      setSuccess(true);
-      setTimeout(() => onNavigate("dashboard"), 2000);
+      clearPortfolioSetupDraft(publicKey)
+      setPendingDraft(null)
+      setDraftPromptResolved(true)
+      setSuccess(true)
+      setTimeout(() => onNavigate('dashboard'), 2000)
+      clearPortfolioCloneDraft();
+      setCloneDraft(null);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Network error. Please try again.",
-      );
+      setError(buildRollbackMessage(err, "portfolio creation"));
     }
-  };
+  }
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
+  // Alias so the mobile action bar can reference the same submit handler
+  const handleSubmit = createPortfolio;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
-      <div className="max-w-4xl mx-auto px-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-6 sm:py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6">
         {/* ── Page header with back navigation ── */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6 sm:mb-8">
           <div className="flex items-center">
             <button
-              onClick={() => onNavigate("dashboard")}
-              className="mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              onClick={() => onNavigate('dashboard')}
+              className="mr-3 sm:mr-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
                 Create Portfolio
               </h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">
+              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">
                 Set up your automated rebalancing strategy
               </p>
             </div>
@@ -432,13 +623,40 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           )}
         </div>
 
+        {cloneDraft ? (
+          <div className="bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-indigo-900 dark:text-indigo-200 font-medium">
+                  Cloning portfolio {cloneDraft.sourceLabel ?? cloneDraft.sourcePortfolioId}
+                </h4>
+                <p className="text-indigo-800 dark:text-indigo-300 text-sm mt-1">
+                  Allocations and rebalance settings are pre-filled. Saving creates a new portfolio and does not change the original.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  clearPortfolioCloneDraft();
+                  setCloneDraft(null);
+                }}
+                className="self-start rounded-lg border border-indigo-300 dark:border-indigo-700 px-3 py-2 text-sm text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+              >
+                Discard clone
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {/* ── Demo mode information banner ── */}
         {isDemoMode && (
           <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
             <div className="flex items-center">
               <div className="text-blue-600 mr-2">ℹ️</div>
               <div>
-                <h4 className="text-blue-800 dark:text-blue-300 font-medium">Demo Mode</h4>
+                <h4 className="text-blue-800 dark:text-blue-300 font-medium">
+                  Demo Mode
+                </h4>
                 <p className="text-blue-700 dark:text-blue-400 text-sm">
                   Using simulated $10,000 portfolio with real price data.
                   Perfect for testing and demonstrations.
@@ -448,11 +666,85 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           </div>
         )}
 
+        {/* ── Local draft restore prompt ── */}
+        {pendingDraft && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-4 mb-6"
+            role="region"
+            aria-labelledby="portfolio-draft-title"
+          >
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start text-amber-900 dark:text-amber-100">
+                <Save className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h2 id="portfolio-draft-title" className="font-semibold">
+                    Resume saved portfolio draft?
+                  </h2>
+                  <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                    We found unfinished setup inputs saved locally from{' '}
+                    {formatDraftSavedAt(pendingDraft.savedAt)}. Restore them
+                    only if you want to continue that draft on this device.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 sm:ml-4">
+                <button
+                  type="button"
+                  onClick={restoreDraft}
+                  className="inline-flex items-center justify-center px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4 mr-1" />
+                  Restore draft
+                </button>
+                <button
+                  type="button"
+                  onClick={discardDraft}
+                  className="inline-flex items-center justify-center px-3 py-2 border border-amber-300 dark:border-amber-600 text-amber-900 dark:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-sm font-medium rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4 mr-1" />
+                  Start fresh
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {draftRestored && (
+          <div
+            className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-lg p-4 mb-6"
+            role="status"
+          >
+            <div className="flex items-center text-green-800 dark:text-green-200">
+              <CheckCircle className="w-5 h-5 mr-2" />
+              <span>
+                Draft restored. Changes will keep saving locally until you
+                create the portfolio or start fresh.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {draftError && (
+          <div
+            className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-lg p-4 mb-6"
+            role="alert"
+          >
+            <div className="flex items-center text-red-800 dark:text-red-200">
+              <AlertCircle className="w-5 h-5 mr-2" />
+              <span>{draftError}</span>
+            </div>
+          </div>
+        )}
+
         {/* ── Success banner — shown after portfolio is created ── */}
         {success && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="status"
+            aria-live="polite"
             className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-green-800">
@@ -469,6 +761,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
+            role="alert"
+            aria-live="assertive"
             className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
           >
             <div className="flex items-center text-red-800">
@@ -476,6 +770,45 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <span>{error}</span>
             </div>
           </motion.div>
+        )}
+
+        {/* ── First-time user quick-start / empty state ── */}
+        {savedTemplates.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm mb-6">
+            <div className="flex items-start">
+              <div className="flex-1">
+                <h4 className="text-md font-semibold text-gray-900 dark:text-white">Quick start</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  New here? Try a template to populate allocations, or learn how to set up a portfolio.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate(PORTFOLIO_TEMPLATES.find(t => t.id === 'balanced')!)}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+                  >
+                    Try Balanced Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
+                    className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                  >
+                    Read setup guide
+                  </button>
+                  {!publicKey && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('landing')}
+                      className="px-3 py-1 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm rounded-lg"
+                    >
+                      Connect wallet
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ── Main two-column layout ── */}
@@ -488,7 +821,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 Choose a template
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Start from a preset or custom. You can modify allocations below before creating.
+                Start from a preset or custom. You can modify allocations below
+                before creating.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {PORTFOLIO_TEMPLATES.map((template) => (
@@ -498,8 +832,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     onClick={() => applyTemplate(template)}
                     className={`p-4 text-left rounded-lg border-2 transition-colors ${
                       selectedTemplateId === template.id
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400"
-                        : "border-gray-200 dark:border-gray-600 bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400'
+                        : 'border-gray-200 dark:border-gray-600 bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600'
                     }`}
                   >
                     <div className="font-semibold text-gray-900 dark:text-white">
@@ -510,13 +844,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     </p>
                     <span
                       className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium ${getRiskLevelClass(
-                        template.riskLevel
+                        template.riskLevel,
                       )}`}
                     >
                       {getRiskLevelLabel(template.riskLevel)}
                     </span>
                     <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                      {template.allocations.length} asset{template.allocations.length !== 1 ? "s" : ""}
+                      {template.allocations.length} asset
+                      {template.allocations.length !== 1 ? "s" : ""}
                     </div>
                   </button>
                 ))}
@@ -533,8 +868,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                         key={template.id}
                         className={`p-4 rounded-lg border-2 flex flex-col ${
                           selectedTemplateId === template.id
-                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400"
-                            : "border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400'
+                            : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700'
                         }`}
                       >
                         <div className="flex items-start justify-between">
@@ -550,14 +885,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                               {template.description}
                             </p>
                             <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                              {template.allocations.length} asset{template.allocations.length !== 1 ? "s" : ""}
+                              {template.allocations.length} asset
+                              {template.allocations.length !== 1 ? "s" : ""}
                             </div>
                           </button>
                           <button
                             type="button"
                             onClick={(e) => {
-                              e.stopPropagation();
-                              removeSavedTemplate(template.id);
+                              e.stopPropagation()
+                              removeSavedTemplate(template.id)
                             }}
                             className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
                             title="Remove template"
@@ -592,8 +928,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 </h3>
                 {/* Disabled once all supported assets have been added */}
                 <button
+                  type="button"
                   onClick={addAllocation}
-                  disabled={allocations.length >= assets.length}
+                  disabled={
+                    assetsLoading ||
+                    allocations.length >= selectableAssets.length
+                  }
                   className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white text-sm rounded-lg transition-colors"
                 >
                   <Plus className="w-4 h-4 mr-1" />
@@ -604,7 +944,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <div className="space-y-4">
                 {allocations.map((allocation, index) => {
                   // Evaluate per-row validation on every render so errors update instantly
-                  const fieldError = getAllocationError(allocation.percentage);
+                  const fieldError = getAllocationError(allocation.percentage)
 
                   return (
                     /*
@@ -618,22 +958,24 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                        * to the top of the row so it doesn't jump when an error
                        * message adds height below the inputs.
                        */}
-                      <div className="flex items-start space-x-3">
+                      <div className="flex flex-col sm:flex-row sm:items-start space-y-3 sm:space-y-0 sm:space-x-3">
                         {/* Asset selector with enhanced search and issuer info */}
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Asset
                           </label>
                           <AssetSelector
                             value={allocation.asset}
-                            onChange={(asset) => updateAllocation(index, "asset", asset)}
+                            onChange={(asset) =>
+                              updateAllocation(index, "asset", asset)
+                            }
                             placeholder="Select asset..."
                             className="w-full"
                           />
                         </div>
 
                         {/* Percentage input — border and background turn red when invalid */}
-                        <div className="w-28">
+                        <div className="w-full sm:w-28">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Percentage
                           </label>
@@ -641,13 +983,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             type="number"
                             min="0"
                             max="100"
-                            step="0.1"
+                            step="0.01"
                             value={allocation.percentage}
                             onChange={(e) =>
                               updateAllocation(
                                 index,
-                                "percentage",
-                                parseFloat(e.target.value) || 0,
+                                'percentage',
+                                Number.isFinite(Number.parseFloat(e.target.value))
+                                  ? Number(Number.parseFloat(e.target.value).toFixed(2))
+                                  : 0,
                               )
                             }
                             // Marks the field as invalid for screen readers
@@ -658,8 +1002,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             }
                             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
                               fieldError
-                                ? "border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30" // invalid
-                                : "border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500" // default
+                                ? 'border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30' // invalid
+                                : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500' // default
                             }`}
                           />
                         </div>
@@ -667,8 +1011,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                         {/* Delete button — hidden when only one row remains to prevent empty state */}
                         {allocations.length > 1 && (
                           <button
+                            type="button"
+                            aria-label={`Remove ${allocation.asset} allocation`}
                             onClick={() => removeAllocation(index)}
-                            className="mt-6 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                            className="mt-6 sm:mt-6 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors self-start"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -693,7 +1039,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             initial={{ opacity: 0, height: 0, marginTop: 0 }}
                             animate={{
                               opacity: 1,
-                              height: "auto",
+                              height: 'auto',
                               marginTop: 4,
                             }}
                             exit={{ opacity: 0, height: 0, marginTop: 0 }}
@@ -706,7 +1052,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                         )}
                       </AnimatePresence>
                     </div>
-                  );
+                  )
                 })}
               </div>
 
@@ -720,15 +1066,46 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   <span
                     className={`font-semibold tabular-nums ${
                       isValidTotal
-                        ? "text-green-600" // exactly 100%
+                        ? 'text-green-600' // exactly 100%
                         : deviation > 0
-                          ? "text-red-600" // over 100%
-                          : "text-yellow-600" // under 100%
+                          ? 'text-red-600' // over 100%
+                          : 'text-yellow-600' // under 100%
                     }`}
                   >
-                    {totalPercentage.toFixed(1)}%
+                    {totalPercentage.toFixed(2)}%
                   </span>
                 </div>
+
+                {/* ── Remaining-allocation progress bar ── */}
+                <div
+                  className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden mb-2"
+                  role="progressbar"
+                  aria-valuenow={Math.min(totalPercentage, 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${totalPercentage.toFixed(2)}% of 100% allocated`}
+                >
+                  <div
+                    className={`h-full rounded-full transition-all duration-200 ${
+                      isValidTotal
+                        ? "bg-green-500"
+                        : deviation > 0
+                          ? "bg-red-500"
+                          : "bg-yellow-400"
+                    }`}
+                    style={{ width: `${Math.min(totalPercentage, 100)}%` }}
+                  />
+                </div>
+
+                {/* Remaining label */}
+                {!isValidTotal && (
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>Remaining:</span>
+                    <span className={remaining > 0 ? "text-yellow-600" : "text-red-600"}>
+                      {remaining > 0 ? `+${remaining.toFixed(2)}%` : `${remaining.toFixed(2)}%`}
+                    </span>
+                  </div>
+                )}
 
                 {/*
                  * Deviation guidance text — updates in real time as the user types.
@@ -752,15 +1129,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       transition={{ duration: 0.15 }}
                       role="status"
                       className={`text-xs mt-1 flex items-center ${
-                        totalStatus.type === "success"
-                          ? "text-green-600"
-                          : totalStatus.type === "error"
-                            ? "text-red-600"
-                            : "text-yellow-600"
+                        totalStatus.type === 'success'
+                          ? 'text-green-600'
+                          : totalStatus.type === 'error'
+                            ? 'text-red-600'
+                            : 'text-yellow-600'
                       }`}
                     >
                       {/* Warning icon only shown for error and warning states, not success */}
-                      {totalStatus.type !== "success" && (
+                      {totalStatus.type !== 'success' && (
                         <AlertCircle className="w-3 h-3 mr-1 flex-shrink-0" />
                       )}
                       {totalStatus.text}
@@ -784,8 +1161,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   <select
                     value={strategy}
                     onChange={(e) => {
-                      setStrategy(e.target.value);
-                      setStrategyConfig({});
+                      setStrategy(e.target.value)
+                      setStrategyConfig({})
                     }}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
@@ -795,14 +1172,18 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     <option value="custom">Custom rules</option>
                   </select>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {strategy === "threshold" && "Rebalance when allocation drift exceeds the threshold."}
-                    {strategy === "periodic" && "Rebalance on a fixed schedule (e.g. every 7 or 30 days)."}
-                    {strategy === "volatility" && "Rebalance when market volatility exceeds a percentage threshold."}
-                    {strategy === "custom" && "Minimum days between rebalances plus threshold check."}
+                    {strategy === "threshold" &&
+                      "Rebalance when allocation drift exceeds the threshold."}
+                    {strategy === "periodic" &&
+                      "Rebalance on a fixed schedule (e.g. every 7 or 30 days)."}
+                    {strategy === "volatility" &&
+                      "Rebalance when market volatility exceeds a percentage threshold."}
+                    {strategy === "custom" &&
+                      "Minimum days between rebalances plus threshold check."}
                   </p>
                 </div>
 
-                {strategy === "periodic" && (
+                {strategy === 'periodic' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Interval (days)
@@ -813,14 +1194,17 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       max="365"
                       value={strategyConfig.intervalDays ?? 7}
                       onChange={(e) =>
-                        setStrategyConfig((c) => ({ ...c, intervalDays: parseInt(e.target.value) || 7 }))
+                        setStrategyConfig((c) => ({
+                          ...c,
+                          intervalDays: parseInt(e.target.value) || 7,
+                        }))
                       }
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
                   </div>
                 )}
 
-                {strategy === "volatility" && (
+                {strategy === 'volatility' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Volatility threshold (%)
@@ -831,14 +1215,18 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       max="100"
                       value={strategyConfig.volatilityThresholdPct ?? 10}
                       onChange={(e) =>
-                        setStrategyConfig((c) => ({ ...c, volatilityThresholdPct: parseInt(e.target.value) || 10 }))
+                        setStrategyConfig((c) => ({
+                          ...c,
+                          volatilityThresholdPct:
+                            parseInt(e.target.value) || 10,
+                        }))
                       }
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
                   </div>
                 )}
 
-                {strategy === "custom" && (
+                {strategy === 'custom' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Min days between rebalances
@@ -849,7 +1237,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       max="365"
                       value={strategyConfig.minDaysBetweenRebalance ?? 1}
                       onChange={(e) =>
-                        setStrategyConfig((c) => ({ ...c, minDaysBetweenRebalance: parseInt(e.target.value) || 1 }))
+                        setStrategyConfig((c) => ({
+                          ...c,
+                          minDaysBetweenRebalance:
+                            parseInt(e.target.value) || 1,
+                        }))
                       }
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
@@ -891,7 +1283,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Trades will be rejected if price moves beyond this (0.1% - 5%)
+                    Trades will be rejected if price moves beyond this (0.1% -
+                    5%)
                   </p>
                 </div>
                 <div className="flex items-center">
@@ -931,11 +1324,13 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                       className="w-4 h-4 rounded-full mr-3"
                       style={{
                         backgroundColor:
-                          ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"][index] ||
-                          "#6B7280",
+                          ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'][index] ||
+                          '#6B7280',
                       }}
                     />
-                    <span className="font-medium dark:text-gray-200">{allocation.asset}</span>
+                    <span className="font-medium dark:text-gray-200">
+                      {allocation.asset}
+                    </span>
                   </div>
                   <span className="text-gray-600 dark:text-gray-400">
                     {allocation.percentage}%
@@ -950,21 +1345,66 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 <span className="text-sm text-gray-600 dark:text-gray-400">
                   Rebalance Threshold:
                 </span>
-                <span className="text-sm font-medium dark:text-gray-200">{threshold}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Auto-Rebalance:</span>
                 <span className="text-sm font-medium dark:text-gray-200">
-                  {autoRebalance ? "Enabled" : "Disabled"}
+                  {threshold}%
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Max Slippage:</span>
-                <span className="text-sm font-medium dark:text-gray-200">{slippageTolerance}%</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Auto-Rebalance:
+                </span>
+                <span className="text-sm font-medium dark:text-gray-200">
+                  {autoRebalance ? 'Enabled' : 'Disabled'}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Portfolio Value:</span>
-                <span className="text-sm font-medium dark:text-gray-200">$10,000 (Demo)</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Max Slippage:
+                </span>
+                <span className="text-sm font-medium dark:text-gray-200">
+                  {slippageTolerance}%
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Portfolio Value:
+                </span>
+                <span className="text-sm font-medium dark:text-gray-200">
+                  $10,000 (Demo)
+                </span>
+              </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={exportCurrentSettings}
+                    disabled={!isValidTotal || hasAnyFieldError}
+                    className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openImportDialog}
+                    disabled={importPortfolioMutation.isPending}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {importPortfolioMutation.isPending ? 'Importing...' : 'Import JSON'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Export saves the current settings as JSON. Import uploads a portfolio export and creates a new portfolio from it.
+                </p>
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  aria-label="Import portfolio JSON"
+                  onChange={handleImportFileChange}
+                />
               </div>
             </div>
 
@@ -976,31 +1416,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
-             <button
-               onClick={createPortfolio}
-               disabled={!isValidTotal || hasAnyFieldError || createPortfolioMutation.isPending}
-               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center"
-             >
-               {createPortfolioMutation.isPending ? (
-                 <>
-                   <Zap className="w-4 h-4 mr-2 animate-spin" />
-                   Creating...
-                 </>
-               ) : (
-                 "Create Portfolio"
-               )}
-             </button>
- 
-             {/*
-              * Helper hint shown beneath the disabled button.
-              * Explains why the button is inactive so users aren't left guessing.
-              * Hidden once the API call starts (createPortfolioMutation.isPending) to avoid mixed messaging.
-              */}
-             {(hasAnyFieldError || !isValidTotal) && !createPortfolioMutation.isPending && (
-              <p className="text-xs text-gray-400 text-center mt-2">
-                Fix validation errors above to continue
-              </p>
-            )}
+
           </div>
         </div>
 
@@ -1009,16 +1425,20 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           <div className="flex items-center justify-between max-w-sm mx-auto">
             {/* Allocation Summary */}
             <div className="text-center">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Total Allocation</div>
-              <div className={`text-lg font-bold ${
-                isValidTotal 
-                  ? 'text-green-600 dark:text-green-400' 
-                  : 'text-red-600 dark:text-red-400'
-              }`}>
-                {totalPercentage.toFixed(1)}%
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Total Allocation
+              </div>
+              <div
+                className={`text-lg font-bold ${
+                  isValidTotal
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {totalPercentage.toFixed(2)}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                {allocations.length} asset{allocations.length !== 1 ? 's' : ''}
+                {allocations.length} asset{allocations.length !== 1 ? "s" : ""}
               </div>
             </div>
 
@@ -1026,7 +1446,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             <div className="flex items-center gap-2">
               {/* Back Button */}
               <button
-                onClick={() => onNavigate('dashboard')}
+                onClick={() => onNavigate("dashboard")}
                 className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -1035,8 +1455,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
               {/* Create Portfolio Button */}
               <button
-                onClick={handleSubmit}
-                disabled={hasAnyFieldError || !isValidTotal || createPortfolioMutation.isPending}
+                type="button"
+                onClick={createPortfolio}
+
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (
@@ -1059,7 +1480,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         <div className="h-20 md:hidden"></div>
       </div>
     </div>
-  );
-};
+  )
+}
 
 export default PortfolioSetup;

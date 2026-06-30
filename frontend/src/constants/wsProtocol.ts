@@ -1,1 +1,9 @@
 export const WS_PROTOCOL_VERSION = '1.0.0' as const
+export const WS_HEARTBEAT_INTERVAL_MS = 30_000 as const
+export const WS_RECONNECT_MAX_ATTEMPTS = 12 as const
+export const WS_RECONNECT_SUGGESTED_BACKOFF_MS = 30_000 as const
+export const WS_SUBSCRIBE_TYPE = 'SUBSCRIBE' as const
+export const WS_SUBSCRIBED_TYPE = 'SUBSCRIBED' as const
+export const WS_CONNECTION_ACK_TYPE = 'CONNECTION_ACK' as const
+export const WS_HEARTBEAT_TYPE = 'HEARTBEAT' as const
+export const WS_ERROR_TYPE = 'ERROR' as const

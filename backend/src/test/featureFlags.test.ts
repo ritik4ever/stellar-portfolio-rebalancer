@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getFeatureFlags, isFeatureFlagEnabled } from '../config/featureFlags.js'
-import { validateStartupConfigOrThrow, logStartupSubsystems } from '../config/startupConfig.js'
+
 import { logger } from '../utils/logger.js'
+import fs from 'node:fs'
+import path from 'node:path'
 
 const ORIGINAL_ENV = { ...process.env }
 
@@ -24,6 +25,8 @@ describe('featureFlags', () => {
         delete process.env.ALLOW_DEMO_BALANCE_FALLBACK
         delete process.env.ENABLE_DEMO_DB_SEED
         delete process.env.ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO
+        delete process.env.FEATURE_FLAGS_FILE
+        clearFeatureFlagsCache()
     })
 
     afterEach(() => {
@@ -108,6 +111,24 @@ describe('featureFlags', () => {
         expect(config.consentAuditRetentionDays).toBe(365)
     })
 
+    it('parses notification delivery backoff from environment', () => {
+        process.env = {
+            ...process.env,
+            ...REQUIRED_STARTUP_ENV,
+            WEBHOOK_RETRY_COUNT: '2',
+            EMAIL_MAX_ATTEMPTS: '4',
+        }
+        const config = validateStartupConfigOrThrow(process.env)
+        expect(config.notificationDelivery.webhook.maxAttempts).toBe(3)
+        expect(config.notificationDelivery.email.maxAttempts).toBe(4)
+
+        const summary = buildStartupSummary(config)
+        expect(summary.notificationDelivery).toMatchObject({
+            email: { maxAttempts: 4 },
+            webhook: { maxAttempts: 3 },
+        })
+    })
+
     it('parses METRICS_ALLOWLIST from environment', () => {
         process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, METRICS_ALLOWLIST: '10.0.0.1,192.168.0.0/16' }
         const config = validateStartupConfigOrThrow(process.env)
@@ -131,5 +152,103 @@ describe('featureFlags', () => {
     it('validates READINESS_CACHE_TTL_MS must be a non-negative integer', () => {
         process.env = { ...process.env, ...REQUIRED_STARTUP_ENV, READINESS_CACHE_TTL_MS: '-1' }
         expect(() => validateStartupConfigOrThrow(process.env)).toThrow()
+    })
+
+    describe('file-based overrides', () => {
+        const tempFilePath = path.join(process.cwd(), 'temp-feature-flags-override-test.json')
+
+        afterEach(() => {
+            if (fs.existsSync(tempFilePath)) {
+                fs.unlinkSync(tempFilePath)
+            }
+            clearFeatureFlagsCache()
+        })
+
+        it('overrides feature flags from a JSON file with camelCase keys', () => {
+            fs.writeFileSync(tempFilePath, JSON.stringify({
+                demoMode: false,
+                enableDebugRoutes: true
+            }))
+
+            process.env.FEATURE_FLAGS_FILE = tempFilePath
+            const flags = getFeatureFlags()
+
+            expect(flags.demoMode).toBe(false)
+            expect(flags.enableDebugRoutes).toBe(true)
+        })
+
+        it('overrides feature flags from a JSON file with UPPER_SNAKE_CASE keys', () => {
+            fs.writeFileSync(tempFilePath, JSON.stringify({
+                DEMO_MODE: false,
+                ENABLE_DEBUG_ROUTES: true
+            }))
+
+            process.env.FEATURE_FLAGS_FILE = tempFilePath
+            const flags = getFeatureFlags()
+
+            expect(flags.demoMode).toBe(false)
+            expect(flags.enableDebugRoutes).toBe(true)
+        })
+
+        it('ignores unknown keys and non-boolean values gracefully, logging warnings', () => {
+            const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+            fs.writeFileSync(tempFilePath, JSON.stringify({
+                demoMode: 'not-a-boolean',
+                someUnknownKey: true,
+                enableDebugRoutes: true
+            }))
+
+            process.env.FEATURE_FLAGS_FILE = tempFilePath
+            const flags = getFeatureFlags()
+
+            // Invalid value should fallback to original environment value or default (true in development)
+            expect(flags.demoMode).toBe(true) 
+            expect(flags.enableDebugRoutes).toBe(true)
+            expect(warnSpy).toHaveBeenCalled()
+        })
+
+        it('caches overrides and does not read from file on subsequent calls unless cleared', () => {
+            fs.writeFileSync(tempFilePath, JSON.stringify({
+                demoMode: false
+            }))
+
+            process.env.FEATURE_FLAGS_FILE = tempFilePath
+            expect(getFeatureFlags().demoMode).toBe(false)
+
+            // Modify file content directly
+            fs.writeFileSync(tempFilePath, JSON.stringify({
+                demoMode: true
+            }))
+
+            // Should still return false because it is cached
+            expect(getFeatureFlags().demoMode).toBe(false)
+
+            // Clear cache
+            clearFeatureFlagsCache()
+
+            // Should now pick up the new value (true)
+            expect(getFeatureFlags().demoMode).toBe(true)
+        })
+
+        it('throws an error during startup configuration validation if override file is invalid JSON', () => {
+            fs.writeFileSync(tempFilePath, 'this is not JSON')
+
+            process.env = {
+                ...process.env,
+                ...REQUIRED_STARTUP_ENV,
+                FEATURE_FLAGS_FILE: tempFilePath
+            }
+
+            expect(() => validateStartupConfigOrThrow(process.env)).toThrow(/Failed to load feature flag overrides/)
+        })
+
+        it('handles non-existent override file by logging a warning and proceeding with environment defaults', () => {
+            const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+            process.env.FEATURE_FLAGS_FILE = 'does-not-exist.json'
+
+            const flags = getFeatureFlags()
+            expect(flags.demoMode).toBe(true) // Development default
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Override file not found at'))
+        })
     })
 })

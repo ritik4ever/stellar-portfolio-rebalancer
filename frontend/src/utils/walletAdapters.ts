@@ -1,3 +1,16 @@
+/**
+ * Wallet adapter implementations for Stellar Portfolio Rebalancer.
+ * 
+ * Supported wallets: Freighter, Rabet, xBull, Mock (E2E)
+ * 
+ * For user-facing troubleshooting, see: docs/WALLET_TROUBLESHOOTING.md
+ * For error codes and their meanings, see the "Error codes reference" table in that doc.
+ * 
+ * When adding a new wallet:
+ * 1. Implement the WalletAdapter interface
+ * 2. Add to walletAdapters array
+ * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
+ */
 export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
 
 export interface WalletAdapter {
@@ -39,6 +52,10 @@ function normalizeError(error: unknown, walletType: WalletType): WalletError {
 
     if (msg.includes('timeout') || msg.includes('timed out')) {
         return new WalletError('Connection timed out. Please try again', 'TIMEOUT', walletType)
+    }
+
+    if (msg.includes('popup') || msg.includes('blocked')) {
+        return new WalletError('Popup was blocked by your browser. Please allow popups for this site and try again.', 'POPUP_BLOCKED', walletType)
     }
 
     return new WalletError(err.message || 'Wallet connection failed', 'UNKNOWN_ERROR', walletType)
