@@ -300,6 +300,15 @@ export const portfolioHistoryQuerySchema = z.object({
     sort: z.enum(['asc', 'desc']).default('desc')
 });
 
+const isoDateString = z.string().refine((v) => !isNaN(Date.parse(v)), 'Invalid ISO date string');
+
+export const ohlcvQuerySchema = z.object({
+    asset: z.string().min(1, 'asset is required').max(32).toUpperCase(),
+    interval: z.enum(['1h', '4h', '1d']),
+    from: isoDateString,
+    to: isoDateString,
+});
+
 /**
  * Query params for GET /portfolio/:id/rebalance-history
  *
