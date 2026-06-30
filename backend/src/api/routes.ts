@@ -7,7 +7,6 @@ import { debugRouter } from './debug.routes.js'
 import { consentRouter } from './consent.routes.js'
 import { assetsRouter } from './assets.routes.js'
 import { analyticsRouter } from './analytics.routes.js'
-import { taxReportRouter } from './taxReport.routes.js'
 
 
 export const portfolioRouter = Router()
