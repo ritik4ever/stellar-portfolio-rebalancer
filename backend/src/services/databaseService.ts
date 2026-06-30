@@ -6,6 +6,7 @@ import { randomUUID, createHash } from "node:crypto";
 import type { RebalanceEvent } from "./rebalanceHistory.js";
 import { getFeatureFlags } from "../config/featureFlags.js";
 import { logger } from "../utils/logger.js";
+import { ConflictError, BackupVerificationError } from "../types/index.js";
 
 import type { Portfolio } from "../types/index.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
@@ -167,6 +168,7 @@ CREATE TABLE IF NOT EXISTS rebalance_history (
     portfolio_id  TEXT NOT NULL,
     timestamp     TEXT NOT NULL,
     trigger       TEXT NOT NULL,
+    reason_code   TEXT,
     trades        INTEGER NOT NULL DEFAULT 0,
     gas_used      TEXT NOT NULL,
     status        TEXT NOT NULL,
@@ -605,6 +607,44 @@ export class DatabaseService {
       );
     } else {
       logger.info("[DB] SQLite pragma validation passed", { dbPath, results });
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Backup verification (high‑risk operations)
+  // ─────────────────────────────────────────────
+
+  /**
+   * Checks whether a recent usable backup exists.
+   * The implementation looks for a KV entry `backup_last_success` and ensures it
+   * is within the configured TTL (default 24 hours). Adjust the logic to match
+   * your actual backup service.
+   */
+  private verifyBackupExists(): void {
+    if (process.env.NODE_ENV === 'test') return;
+    try {
+      const row = this.db
+        .prepare<[string]>("SELECT value FROM kv_store WHERE key = ?")
+        .get("backup_last_success") as { value: string } | undefined;
+      if (!row) {
+        throw new BackupVerificationError(
+          "No backup record found; a recent backup is required before performing this operation.",
+        );
+      }
+      const timestamp = new Date(row.value).getTime();
+      const now = Date.now();
+      const ttlMs = 24 * 60 * 60 * 1000; // 24 hours
+      if (now - timestamp > ttlMs) {
+        throw new BackupVerificationError(
+          "Backup is older than 24 hours; please create a fresh backup before proceeding.",
+        );
+      }
+    } catch (err) {
+      if (err instanceof BackupVerificationError) throw err;
+      // If the KV table does not exist or query fails, treat as missing backup
+      throw new BackupVerificationError(
+        `Backup verification failed: ${err}`,
+      );
     }
   }
 
