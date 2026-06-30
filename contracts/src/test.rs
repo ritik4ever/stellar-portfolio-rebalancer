@@ -1627,6 +1627,30 @@ fn test_capabilities() {
 }
 
 #[test]
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+fn test_capability_summary() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    
+    assert_eq!(client.version(), 1);
+    assert_eq!(client.schema_version(), 1);
+    
+    let summary = client.capability_summary();
+    assert_eq!(summary.version, 1);
+    assert_eq!(summary.schema_version, 1);
+    assert!(summary.capability_flags & CapabilityFlag::PerPortfolioSteward as u32 != 0);
+    assert!(summary.capability_flags & CapabilityFlag::DifferentiatedPricing as u32 != 0);
+    assert!(summary.capability_flags & CapabilityFlag::EmergencyStop as u32 != 0);
+    assert_eq!(summary.min_rebalance_threshold, 1);
+    assert_eq!(summary.max_rebalance_threshold, 50);
+    assert_eq!(summary.min_slippage_tolerance_bps, 10);
+    assert_eq!(summary.max_slippage_tolerance_bps, 500);
+    assert_eq!(summary.max_portfolio_assets, 10);
+}
+
+// // #[test]
+
 fn test_missing_price_error() {
     let env = Env::default();
     env.mock_all_auths();

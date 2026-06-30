@@ -616,7 +616,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
+
     try {
         const portfolioId = req.params.id;
 

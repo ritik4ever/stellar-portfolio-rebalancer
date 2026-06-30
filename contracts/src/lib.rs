@@ -5,6 +5,10 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String};
+
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec};
 
 mod portfolio;
 mod reflector;
@@ -17,6 +21,12 @@ pub use types::*;
 
 #[contract]
 pub struct PortfolioRebalancer;
+
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+fn validate_slippage_policy_version(version: u32) -> bool {
+    version == CURRENT_SLIPPAGE_POLICY_VERSION
+}
+
 
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
@@ -78,6 +88,17 @@ impl PortfolioRebalancer {
         if target_allocations.len() > MAX_PORTFOLIO_ASSETS {
             return Err(Error::TooManyAssets);
         }
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+
+        if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
+            return Err(Error::InvalidThreshold);
+        }
+
+        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance) {
+            return Err(Error::InvalidSlippageTolerance);
+        }
+
+        if !validate_slippage_policy_version(slippage_policy_version) {
 
         if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
             return Err(Error::InvalidThreshold);
@@ -89,6 +110,7 @@ impl PortfolioRebalancer {
         }
 
         if !portfolio::validate_slippage_policy_version(slippage_policy_version) {
+
             return Err(Error::UnsupportedSlippagePolicyVersion);
         }
 
@@ -112,7 +134,11 @@ impl PortfolioRebalancer {
         };
 
         let _estimated_footprint =
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+            // portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
+
             portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
+
 
         env.storage()
             .persistent()
@@ -248,6 +274,14 @@ impl PortfolioRebalancer {
             return false;
         }
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+        let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
+        if let Ok(p) = preview {
+            p.rebalance_needed
+        } else {
+            false
+        }
+
         for (asset, target_pct) in portfolio.target_allocations.iter() {
             let balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
             if let Some(price_data) =
@@ -268,6 +302,7 @@ impl PortfolioRebalancer {
         }
 
         false
+
     }
 
     pub fn execute_rebalance(
@@ -328,6 +363,12 @@ impl PortfolioRebalancer {
             ),
             (portfolio_id, current_steward, new_steward),
         );
+        env.events()
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+            .publish(("portfolio", "steward_transferred"), (portfolio_id, current_steward, new_steward));
+
+            .publish((symbol_short!("portfolio"), Symbol::new(&env, "steward_transferred")), (portfolio_id, current_steward, new_steward));
+
         Ok(())
     }
 
@@ -343,6 +384,16 @@ impl PortfolioRebalancer {
             .unwrap_or(portfolio.user)
     }
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
+    }
+
+    pub fn schema_version(_env: Env) -> u32 {
+        CONTRACT_EVENT_SCHEMA_VERSION
+    }
+
+
     pub fn capabilities(_env: Env) -> u32 {
         let mut flags: u32 = 0;
         flags |= CapabilityFlag::PerPortfolioSteward as u32;
@@ -350,6 +401,21 @@ impl PortfolioRebalancer {
         flags |= CapabilityFlag::EmergencyStop as u32;
         flags
     }
+
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    pub fn capability_summary(env: Env) -> ContractCapabilitySummary {
+        ContractCapabilitySummary {
+            version: Self::version(env.clone()),
+            schema_version: Self::schema_version(env.clone()),
+            capability_flags: Self::capabilities(env),
+            min_rebalance_threshold: MIN_REBALANCE_THRESHOLD,
+            max_rebalance_threshold: MAX_REBALANCE_THRESHOLD,
+            min_slippage_tolerance_bps: MIN_SLIPPAGE_TOLERANCE_BPS,
+            max_slippage_tolerance_bps: MAX_SLIPPAGE_TOLERANCE_BPS,
+            max_portfolio_assets: MAX_PORTFOLIO_ASSETS,
+        }
+    }
+
 
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -396,21 +462,36 @@ impl PortfolioRebalancer {
         );
     }
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    /// Returns the minimum allowed rebalance threshold percentage.
+
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD
     }
+
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    /// Returns the maximum allowed rebalance threshold percentage.
 
     pub fn max_rebalance_threshold(_env: Env) -> u32 {
         MAX_REBALANCE_THRESHOLD
     }
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    /// Returns the minimum allowed slippage tolerance in basis points.
+
     pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
         MIN_SLIPPAGE_TOLERANCE_BPS
     }
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    /// Returns the maximum allowed slippage tolerance in basis points.
+
     pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
+
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+    /// Returns the maximum number of assets allowed in a portfolio.
 
     pub fn max_portfolio_assets(_env: Env) -> u32 {
         MAX_PORTFOLIO_ASSETS
@@ -459,6 +540,8 @@ impl PortfolioRebalancer {
             .get(&DataKey::ContractPauseReason)
             .unwrap_or(PauseReason::None)
     }
+
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 
     pub fn get_config_view(env: Env, portfolio_id: u64) -> ConfigView {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -568,10 +651,13 @@ impl PortfolioRebalancer {
 
         let mut portfolio = Self::load_portfolio(env, portfolio_id)?;
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+
         // Issue #861: validate allocations sum to exactly ALLOCATION_DENOMINATOR (10000 bps)
         if !portfolio::validate_allocations(&portfolio.target_allocations) {
             return Err(Error::InvalidAllocationSum);
         }
+
 
         portfolio::check_portfolio_invariants(&portfolio)?;
 
@@ -603,7 +689,11 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+        let mut current_prices = Map::new(&env);
+
         let mut current_prices = Map::new(env);
+
         for (asset, _) in portfolio.target_allocations.iter() {
             if let Some(price_data) =
                 reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
@@ -649,7 +739,11 @@ impl PortfolioRebalancer {
                 &reflector_client,
             ) {
                 Ok(v) => v,
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+                Err(_) => return Err(Error::MissingPrice),
+
                 Err(_) => return Err(Error::StaleData),
+
             };
 
             if total_value > 0 {
@@ -664,6 +758,12 @@ impl PortfolioRebalancer {
                         .asset_decimals
                         .get(asset.clone())
                         .unwrap_or(DEFAULT_ASSET_DECIMALS);
+ #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
+                    let expected_value = (total_value * target_pct as i128) / 100;
+
+                    let expected_value = (total_value * target_pct as i128) / ALLOCATION_DENOMINATOR as i128;
+
+                    let decimals = portfolio.asset_decimals.get(asset.clone()).unwrap_or(DEFAULT_ASSET_DECIMALS);
                     let expected_balance =
                         portfolio::value_to_balance(expected_value, price, decimals);
                     let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);

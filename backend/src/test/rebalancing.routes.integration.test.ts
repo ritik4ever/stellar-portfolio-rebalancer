@@ -26,7 +26,7 @@ async function createApp(): Promise<Express> {
     app.set('trust proxy', 1)
 
     // Mount rebalancing routes
-
+    const { rebalancingRouter } = await import('../api/rebalancing.routes.js')
     app.use('/api', rebalancingRouter)
 
     return app
