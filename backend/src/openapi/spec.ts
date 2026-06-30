@@ -684,6 +684,59 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/prices/ohlcv': {
+            get: {
+                tags: ['Prices & market'],
+                summary: 'Get OHLCV candles',
+                description: 'Returns OHLCV (open, high, low, close) candles computed from stored price snapshots. Missing intervals are filled with the previous close. Results are cached for 10 minutes.',
+                parameters: [
+                    { name: 'asset', in: 'query', required: true, schema: { type: 'string', example: 'XLM' }, description: 'Asset symbol, e.g. XLM, BTC, ETH, USDC' },
+                    { name: 'interval', in: 'query', required: true, schema: { type: 'string', enum: ['1h', '4h', '1d'] }, description: 'Candle interval' },
+                    { name: 'from', in: 'query', required: true, schema: { type: 'string', format: 'date-time' }, description: 'Start of time range (ISO 8601)' },
+                    { name: 'to', in: 'query', required: true, schema: { type: 'string', format: 'date-time' }, description: 'End of time range (ISO 8601)' },
+                ],
+                responses: {
+                    '200': {
+                        description: 'OHLCV candle array',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                asset: { type: 'string' },
+                                                interval: { type: 'string' },
+                                                candles: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            timestamp: { type: 'number', description: 'Unix ms of interval start' },
+                                                            open: { type: 'number' },
+                                                            high: { type: 'number' },
+                                                            low: { type: 'number' },
+                                                            close: { type: 'number' },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Database unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/prices/enhanced': {
             get: {
                 tags: ['Prices & market'],

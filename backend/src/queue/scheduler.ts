@@ -1,18 +1,22 @@
 import { randomUUID } from 'node:crypto'
-import { getPortfolioCheckQueue, getAnalyticsSnapshotQueue, getAnalyticsCompactionQueue, getIdempotencyCleanupQueue, getQueueByName, getPriceHistorySnapshotQueue, getPriceHistoryPruneQueue } from './queues.js'
+import { getPortfolioCheckQueue, getAutoRebalanceCheckQueue, getAnalyticsSnapshotQueue, getAnalyticsCompactionQueue, getIdempotencyCleanupQueue, getQueueByName, getPriceHistorySnapshotQueue, getPriceHistoryPruneQueue } from './queues.js'
 import { logger } from '../utils/logger.js'
 import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWorker.js'
+import { setAutoRebalanceSchedulerRegistered } from '../jobs/autoRebalance.js'
 import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnapshotWorker.js'
 import { setAnalyticsCompactionSchedulerRegistered } from './workers/analyticsCompactionWorker.js'
 import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyCleanupWorker.js'
+import { setUserAlertsSchedulerRegistered } from './workers/userAlertsWorker.js'
 import { notificationService } from '../services/notificationService.js'
 
 const PORTFOLIO_CHECK_CRON = '*/30 * * * *'    // every 30 minutes
+const AUTO_REBALANCE_CRON = '*/15 * * * *'    // every 15 minutes
 const ANALYTICS_SNAPSHOT_CRON = '0 * * * *'    // every 60 minutes (top of hour)
 const ANALYTICS_COMPACTION_CRON = '0 2 * * 0'  // every Sunday at 02:00 UTC
 const IDEMPOTENCY_CLEANUP_CRON = '15 * * * *'  // every 60 minutes (quarter past the hour)
 const PRICE_HISTORY_SNAPSHOT_CRON = '*/5 * * * *'  // every 5 minutes
 const PRICE_HISTORY_PRUNE_CRON = '0 2 * * *'       // daily at 02:00
+const USER_ALERTS_CRON = '*/5 * * * *';
 
 // Job recovery configuration
 interface JobRecoveryConfig {
@@ -31,6 +35,14 @@ const RECOVERY_CONFIGS: JobRecoveryConfig[] = [
         jobId: 'repeatable-portfolio-check',
         critical: true,
         maxMissedToReplay: 2,
+        recoveryWindowMs: 24 * 60 * 60 * 1000,
+    },
+    {
+        queueName: 'auto-rebalance-check',
+        cronPattern: AUTO_REBALANCE_CRON,
+        jobId: 'repeatable-auto-rebalance',
+        critical: true,
+        maxMissedToReplay: 4,
         recoveryWindowMs: 24 * 60 * 60 * 1000,
     },
     {
@@ -57,6 +69,14 @@ const RECOVERY_CONFIGS: JobRecoveryConfig[] = [
         maxMissedToReplay: 1,
         recoveryWindowMs: 24 * 60 * 60 * 1000,
     },
+    {
+        queueName: 'user-alerts',
+        cronPattern: USER_ALERTS_CRON,
+        jobId: 'repeatable-user-alerts-check',
+        critical: false,
+        maxMissedToReplay: 0,
+        recoveryWindowMs: 24 * 60 * 60 * 1000,
+    }
 ]
 
 function generateSchedulerCorrelationId(prefix: string): string {
@@ -65,9 +85,12 @@ function generateSchedulerCorrelationId(prefix: string): string {
 
 function calculateMissedExecutions(cronPattern: string, since: Date, now: Date): number {
     const intervalMs: Record<string, number> = {
+        '*/5 * * * *': 5 * 60 * 1000,
         '*/30 * * * *': 30 * 60 * 1000,
+        '*/15 * * * *': 15 * 60 * 1000,
         '0 * * * *': 60 * 60 * 1000,
         '15 * * * *': 60 * 60 * 1000,
+        '0 2 * * *': 24 * 60 * 60 * 1000,
         '0 2 * * 0': 7 * 24 * 60 * 60 * 1000,
     }
 
@@ -156,11 +179,12 @@ async function recoverMissedJobs(): Promise<void> {
  */
 export async function startQueueScheduler(): Promise<void> {
     const portfolioCheckQueue = getPortfolioCheckQueue()
+    const autoRebalanceCheckQueue = getAutoRebalanceCheckQueue()
     const analyticsSnapshotQueue = getAnalyticsSnapshotQueue()
     const analyticsCompactionQueue = getAnalyticsCompactionQueue()
     const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
 
-    if (!portfolioCheckQueue || !analyticsSnapshotQueue || !analyticsCompactionQueue || !idempotencyCleanupQueue) {
+    if (!portfolioCheckQueue || !autoRebalanceCheckQueue || !analyticsSnapshotQueue || !analyticsCompactionQueue || !idempotencyCleanupQueue) {
         logger.warn('[SCHEDULER] Redis unavailable – scheduler not started')
         return
     }
@@ -207,7 +231,20 @@ export async function startQueueScheduler(): Promise<void> {
         { priority: 1 }
     )
 
+    await autoRebalanceCheckQueue.add(
+        'scheduled-auto-rebalance',
+        { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('scheduled') },
+        { repeat: { pattern: AUTO_REBALANCE_CRON }, jobId: 'repeatable-auto-rebalance' }
+    )
+
+    await autoRebalanceCheckQueue.add(
+        'startup-auto-rebalance',
+        { triggeredBy: 'startup' as 'scheduler' | 'manual' | 'startup' | 'recovery', correlationId: generateSchedulerCorrelationId('startup') },
+        { priority: 1 }
+    )
+
     setPortfolioCheckSchedulerRegistered(true)
+    setAutoRebalanceSchedulerRegistered(true)
     setAnalyticsSnapshotSchedulerRegistered(true)
     setAnalyticsCompactionSchedulerRegistered(true)
     setIdempotencyCleanupSchedulerRegistered(true)
@@ -232,13 +269,25 @@ export async function startQueueScheduler(): Promise<void> {
         )
     }
 
+    const userAlertsQueue = getQueueByName('user-alerts');
+    if (userAlertsQueue) {
+        await userAlertsQueue.add(
+            'scheduled-user-alerts-check',
+            { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('alerts') },
+            { repeat: { pattern: USER_ALERTS_CRON }, jobId: 'repeatable-user-alerts-check' }
+        );
+        setUserAlertsSchedulerRegistered(true);
+    }
+
     logger.info('[SCHEDULER] Repeatable jobs registered', {
         portfolioCheck: PORTFOLIO_CHECK_CRON,
+        autoRebalance: AUTO_REBALANCE_CRON,
         analyticsSnapshot: ANALYTICS_SNAPSHOT_CRON,
         analyticsCompaction: ANALYTICS_COMPACTION_CRON,
         idempotencyCleanup: IDEMPOTENCY_CLEANUP_CRON,
         priceHistorySnapshot: PRICE_HISTORY_SNAPSHOT_CRON,
         priceHistoryPrune: PRICE_HISTORY_PRUNE_CRON,
+        userAlertsCheck: USER_ALERTS_CRON,
     })
 
     try {
@@ -290,11 +339,13 @@ export async function startQueueScheduler(): Promise<void> {
  */
 export async function stopQueueScheduler(): Promise<void> {
     const portfolioCheckQueue = getPortfolioCheckQueue()
+    const autoRebalanceCheckQueue = getAutoRebalanceCheckQueue()
     const analyticsSnapshotQueue = getAnalyticsSnapshotQueue()
     const analyticsCompactionQueue = getAnalyticsCompactionQueue()
     const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
+    const userAlertsQueue = getQueueByName('user-alerts')
 
-    for (const queue of [portfolioCheckQueue, analyticsSnapshotQueue, analyticsCompactionQueue, idempotencyCleanupQueue]) {
+
         if (queue) {
             const repeatableJobs = await queue.getRepeatableJobs()
             for (const job of repeatableJobs) {
@@ -304,9 +355,11 @@ export async function stopQueueScheduler(): Promise<void> {
     }
 
     setPortfolioCheckSchedulerRegistered(false)
+    setAutoRebalanceSchedulerRegistered(false)
     setAnalyticsSnapshotSchedulerRegistered(false)
     setAnalyticsCompactionSchedulerRegistered(false)
     setIdempotencyCleanupSchedulerRegistered(false)
+    setUserAlertsSchedulerRegistered(false)
 
     logger.info('[SCHEDULER] Repeatable jobs removed')
 }
