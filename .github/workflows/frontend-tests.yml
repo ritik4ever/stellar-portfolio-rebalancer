@@ -122,3 +122,15 @@ jobs:
           name: playwright-visual-diffs
           path: frontend/test-results/
           if-no-files-found: warn
+
+  slack-notification:
+    name: Notify Slack on failure
+    needs: [frontend-tests, visual-regression]
+    if: always() && contains(needs.*.result, 'failure') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"🚨 CI Failure on main!\n*Repo*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Failing Step*: ${{ github.workflow }}\n*Link*: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -24,7 +24,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 50
+                        "u32": 5000
                       }
                     },
                     {
@@ -32,7 +32,27 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                       },
                       "val": {
-                        "u32": 50
+                        "u32": 5000
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    },
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                      },
+                      "val": {
+                        "u32": 7
                       }
                     }
                   ]
@@ -42,6 +62,9 @@
                 },
                 {
                   "u32": 50
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -139,6 +162,31 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "asset_decimals"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            },
+                            "val": {
+                              "u32": 7
+                            }
+                          },
+                          {
+                            "key": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                            },
+                            "val": {
+                              "u32": 7
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "current_balances"
                       },
                       "val": {
@@ -163,10 +211,26 @@
                     },
                     {
                       "key": {
+                        "symbol": "pause_reason"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
                         "u32": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "slippage_policy_version"
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     },
                     {
@@ -188,7 +252,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                             },
                             "val": {
-                              "u32": 50
+                              "u32": 5000
                             }
                           },
                           {
@@ -196,7 +260,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                             },
                             "val": {
-                              "u32": 50
+                              "u32": 5000
                             }
                           }
                         ]
@@ -269,12 +333,36 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "EmergencyStop"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Initialized"
                             }
                           ]
                         },
                         "val": {
                           "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 0
                         }
                       },
                       {
@@ -472,7 +560,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 50
+                        "u32": 5000
                       }
                     },
                     {
@@ -480,7 +568,27 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                       },
                       "val": {
-                        "u32": 50
+                        "u32": 5000
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    },
+                    {
+                      "key": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                      },
+                      "val": {
+                        "u32": 7
                       }
                     }
                   ]
@@ -490,6 +598,9 @@
                 },
                 {
                   "u32": 50
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -507,10 +618,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "created"
+                "symbol": "created"
               }
             ],
             "data": {

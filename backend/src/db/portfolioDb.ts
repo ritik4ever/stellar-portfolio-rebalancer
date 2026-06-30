@@ -4,6 +4,8 @@ import { ConflictError } from '../types/index.js'
 export interface PortfolioRow {
     id: string
     user_address: string
+    name?: string
+    description?: string
     allocations: Record<string, number>
     threshold: number
     slippage_tolerance?: number
@@ -20,6 +22,8 @@ function rowToPortfolio(r: PortfolioRow) {
     return {
         id: r.id,
         userAddress: r.user_address,
+        name: r.name,
+        description: r.description,
         allocations: r.allocations || {},
         threshold: r.threshold,
         slippageTolerance: r.slippage_tolerance != null ? Number(r.slippage_tolerance) : 1,
@@ -42,12 +46,14 @@ export async function dbCreatePortfolio(
     totalValue: number,
     slippageTolerance: number = 1,
     strategy: string = 'threshold',
-    strategyConfig: Record<string, unknown> = {}
+    strategyConfig: Record<string, unknown> = {},
+    name?: string,
+    description?: string
 ) {
     await query(
-        `INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), 1, $8, $9)`,
-        [id, userAddress, JSON.stringify(allocations), threshold, slippageTolerance, JSON.stringify(balances), totalValue, strategy, JSON.stringify(strategyConfig)]
+        `INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config, name, description)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), 1, $8, $9, $10, $11)`,
+        [id, userAddress, JSON.stringify(allocations), threshold, slippageTolerance, JSON.stringify(balances), totalValue, strategy, JSON.stringify(strategyConfig), name, description]
     )
 }
 
@@ -90,6 +96,8 @@ export async function dbUpdatePortfolio(
     id: string,
     updates: { 
         userAddress?: string;
+        name?: string;
+        description?: string;
         allocations?: Record<string, number>;
         threshold?: number;
         balances?: Record<string, number>; 
@@ -104,6 +112,14 @@ export async function dbUpdatePortfolio(
     if (updates.userAddress !== undefined) {
         sets.push(`user_address = $${i++}`)
         values.push(updates.userAddress)
+    }
+    if (updates.name !== undefined) {
+        sets.push(`name = $${i++}`)
+        values.push(updates.name)
+    }
+    if (updates.description !== undefined) {
+        sets.push(`description = $${i++}`)
+        values.push(updates.description)
     }
     if (updates.allocations !== undefined) {
         sets.push(`allocations = $${i++}`)
@@ -167,4 +183,23 @@ export async function dbUpdatePortfolio(
 export async function dbDeletePortfolio(id: string) {
     const result = await query('DELETE FROM portfolios WHERE id = $1', [id])
     return (result.rowCount ?? 0) > 0
+}
+
+export async function dbSearchPortfolios(searchQuery: string, limit: number, offset: number) {
+    if (!searchQuery) {
+        const result = await query<PortfolioRow>(
+            'SELECT * FROM portfolios ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+            [limit, offset]
+        )
+        return result.rows.map(rowToPortfolio)
+    }
+
+    const result = await query<PortfolioRow>(
+        `SELECT * FROM portfolios 
+         WHERE search_vector @@ plainto_tsquery('english', $1)
+         ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC, created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [searchQuery, limit, offset]
+    )
+    return result.rows.map(rowToPortfolio)
 }

@@ -68,6 +68,23 @@ describe('requireJwt middleware', () => {
         expect(res.body.error?.code).toBe('UNAUTHORIZED')
     })
 
+    it('accepts valid token with clock skew when token is slightly ahead', async () => {
+        vi.stubEnv('JWT_CLOCK_SKEW_SEC', '15')
+        const token = jwt.sign({ sub: 'GSKEW123', type: 'access' }, CURRENT_SECRET, { expiresIn: '15m' })
+        vi.useRealTimers()
+        vi.setSystemTime(new Date(Date.now() + 20 * 1000))
+        const app = createApp()
+
+        const res = await request(app)
+            .get('/protected')
+            .set('Authorization', `Bearer ${token}`)
+            .expect(200)
+
+        expect(res.body.user).toEqual({ address: 'GSKEW123' })
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    })
+
     it('returns 401 for token signed with wrong secret', async () => {
         const wrongSecretToken = jwt.sign({ sub: 'GWRONG', type: 'access' }, 'w'.repeat(32), { expiresIn: '15m' })
         const app = createApp()

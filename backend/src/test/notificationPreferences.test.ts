@@ -260,4 +260,25 @@ describe("normalizeNotificationPreferences", () => {
     });
     expect(result.events).toEqual(events);
   });
+
+  it("defaults digestMode to 'immediate' when not provided", () => {
+    const result = normalizeNotificationPreferences({
+      userId: 'u2',
+      emailEnabled: false,
+      webhookEnabled: false,
+      events: validEvents,
+    });
+    expect((result as any).digestMode).toBe('immediate');
+  });
+
+  it("accepts and preserves digestMode when provided", () => {
+    const result = normalizeNotificationPreferences({
+      userId: 'u3',
+      emailEnabled: false,
+      webhookEnabled: false,
+      digestMode: 'daily',
+      events: validEvents,
+    } as any);
+    expect((result as any).digestMode).toBe('daily');
+  });
 });

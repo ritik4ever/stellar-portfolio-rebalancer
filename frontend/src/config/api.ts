@@ -130,13 +130,18 @@ export const API_CONFIG = {
         AUTH_REFRESH: '/api/auth/refresh',
         AUTH_LOGOUT: '/api/auth/logout',
         PORTFOLIO: `${API_RESOURCE_ROOT}/portfolio`,
+        PORTFOLIO_IMPORT: `${API_RESOURCE_ROOT}/portfolio/import`,
         USER_PORTFOLIOS: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}`,
         PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
         PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-estimate`,
+        PORTFOLIO_REBALANCE_PLAN: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-plan`,
+        PORTFOLIO_COST_SUMMARY: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/cost-summary`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
+        PORTFOLIO_SHARE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/share`,
+        PORTFOLIO_SHARE_VIEW: (hash: string) => `${API_RESOURCE_ROOT}/portfolio/share/${hash}`,
         PORTFOLIO_ANALYTICS: (id: string, days: number) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
         PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) =>
@@ -153,8 +158,14 @@ export const API_CONFIG = {
         RISK_CHECK: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/check/${portfolioId}`,
         NOTIFICATIONS_PREFERENCES: `${API_RESOURCE_ROOT}/notifications/preferences`,
         NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
-        NOTIFICATIONS_UNSUBSCRIBE: (userId: string) =>
-            `${API_RESOURCE_ROOT}/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
+        NOTIFICATIONS_UNSUBSCRIBE: (userId: string, reason?: string) => {
+            const params = new URLSearchParams({ userId })
+            const trimmedReason = reason?.trim()
+            if (trimmedReason) {
+                params.set('reason', trimmedReason)
+            }
+            return `${API_RESOURCE_ROOT}/notifications/unsubscribe?${params.toString()}`
+        },
         NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/notifications/test`,
         NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/notifications/test-all`,
         TEST_CORS: '/test/cors',

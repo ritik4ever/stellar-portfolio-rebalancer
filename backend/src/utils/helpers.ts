@@ -18,3 +18,15 @@ export function parseOptionalBoolean(value: unknown): boolean | undefined {
     }
     return undefined;
 }
+
+export function stableStringify(obj: unknown): string {
+    if (obj === null || typeof obj !== 'object') {
+        return JSON.stringify(obj);
+    }
+    if (Array.isArray(obj)) {
+        return `[${obj.map(stableStringify).join(',')}]`;
+    }
+    const keys = Object.keys(obj).sort();
+    const entries = keys.map(key => `${JSON.stringify(key)}:${stableStringify((obj as any)[key])}`);
+    return `{${entries.join(',')}}`;
+}
