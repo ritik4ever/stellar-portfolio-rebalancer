@@ -1,0 +1,93 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "UTC",
+  "schedule": [
+    "before 3am on Monday"
+  ],
+  "rangeStrategy": "bump",
+  "semanticCommits": true,
+  "commitMessagePrefix": "chore(deps): ",
+  "major": {
+    "enabled": true
+  },
+  "minor": {
+    "enabled": true
+  },
+  "patch": {
+    "enabled": true
+  },
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/target/**",
+    ".git/**"
+  ],
+  "enableVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security", "dependencies"],
+    "assignees": ["@renovatebot"]
+  },
+  "prConcurrentLimit": 3,
+  "prCreationLimit": 3,
+  "npm": {
+    "enabled": true,
+    "supportPolicy": ["lts_active"]
+  },
+  "cargo": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "Group patch updates into weekly batch PR",
+      "matchUpdateTypes": ["patch"],
+      "groupName": "patch dependencies",
+      "schedule": ["before 3am on Monday"],
+      "automerge": false,
+      "semanticCommits": true
+    },
+    {
+      "description": "Minor version updates - separate PRs",
+      "matchUpdateTypes": ["minor"],
+      "groupName": "minor dependencies",
+      "automerge": false,
+      "semanticCommits": true
+    },
+    {
+      "description": "Major version updates - separate PRs with strict review",
+      "matchUpdateTypes": ["major"],
+      "groupName": "major dependencies",
+      "automerge": false,
+      "labels": ["breaking-change", "dependencies"],
+      "semanticCommits": true
+    },
+    {
+      "description": "Node.js version management",
+      "matchDatasources": ["node"],
+      "enabled": true,
+      "automerge": false,
+      "labels": ["toolchain", "dependencies"]
+    },
+    {
+      "description": "Rust toolchain updates",
+      "matchDatasources": ["rust"],
+      "enabled": true,
+      "automerge": false,
+      "labels": ["toolchain", "dependencies"]
+    },
+    {
+      "description": "Critical security updates",
+      "matchDatasources": ["npm", "cargo"],
+      "matchUpdateTypes": ["patch"],
+      "matchDepTypes": ["dependencies"],
+      "groupName": "security fixes",
+      "schedule": ["at any time"],
+      "automerge": false,
+      "labels": ["security", "dependencies"]
+    }
+  ]
+}
