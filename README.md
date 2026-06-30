@@ -213,6 +213,9 @@ GET /api/v1/portfolio/:id
 # Execute rebalance
 POST /api/v1/portfolio/:id/rebalance
 
+# Dry-run rebalance (read-only plan, no DB writes or contract call)
+POST /api/v1/portfolio/:id/rebalance/dry-run
+
 # Rebalance status
 GET /api/v1/portfolio/:id/rebalance-status
 ```
@@ -231,6 +234,7 @@ Price Data:
 ```bash
 GET /api/v1/prices
 GET /api/v1/portfolio/:id/rebalance-plan
+POST /api/v1/portfolio/:id/rebalance/dry-run
 ```
 
 ## Stellar DEX Integration

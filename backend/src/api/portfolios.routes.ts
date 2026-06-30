@@ -14,6 +14,7 @@ import { createPortfolioSchema, portfolioExportQuerySchema } from './validation.
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { getPortfolioExport } from '../services/portfolioExportService.js'
+import { buildRebalancePlan } from '../services/rebalancePlan.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
@@ -144,19 +145,23 @@ portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
-        const totalValue = Object.entries(portfolio.balances || {}).reduce((sum, [asset, bal]) => sum + (bal * (prices[asset]?.price ?? 0)), 0)
-        const slippageTolerancePercent = portfolio.slippageTolerancePercent ?? 1
-        const estimatedSlippageBps = Math.round(slippageTolerancePercent * 100)
-        return ok(res, {
-            portfolioId,
-            totalValue,
-            maxSlippagePercent: slippageTolerancePercent,
-            estimatedSlippageBps,
-            prices: Object.keys(prices).length > 0 ? prices : undefined,
-            priceFeedMeta: feedMeta
-        })
+        return ok(res, buildRebalancePlan(portfolio, prices, feedMeta))
     } catch (error) {
         logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
+        return ok(res, buildRebalancePlan(portfolio, prices, feedMeta))
+    } catch (error) {
+        logger.error('[ERROR] Rebalance dry-run failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

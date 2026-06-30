@@ -134,7 +134,8 @@ Expired keys (older than 24 hours) are permanently deleted during each cleanup c
 - **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%. Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}** — Get portfolio by ID.
 - **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address. When JWT auth is enabled, the token subject must match `:address` (otherwise `403`). In demo mode, public-by-address listing is allowed only when `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is enabled.
-- **GET /api/portfolio/{id}/rebalance-plan** — Get rebalance plan (total value, slippage, prices).
+- **GET /api/portfolio/{id}/rebalance-plan** — Get full read-only rebalance plan (per-asset buy/sell amounts, estimated fees, estimated slippage, projected allocations, prices).
+- **POST /api/portfolio/{id}/rebalance/dry-run** — Dry-run rebalance; returns the same response schema as `rebalance-plan` without DB writes, contract calls, or trade execution.
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
 - **GET /api/portfolio/{id}/performance-summary** — Performance summary.
