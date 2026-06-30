@@ -34,7 +34,10 @@ import {
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 import { downloadJSON } from "../utils/export";
-import { percentageToBps } from "../utils/calculations";
+import { percentageToBps, remainingAllocation } from "../utils/calculations";
+import { loadPortfolioCloneDraft, clearPortfolioCloneDraft } from "../utils/portfolioCloneDraft";
+import { clearPortfolioSetupDraft, loadPortfolioSetupDraft, savePortfolioSetupDraft, PortfolioSetupDraft } from "../hooks/usePortfolio";
+import { useAssets } from "../hooks/queries/useAssetsQuery";
 
 
 
@@ -183,8 +186,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
     loadPortfolioCloneDraft(),
   );
-
-
+  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(() => {
+    const result = loadPortfolioSetupDraft(publicKey)
+    return result.status === 'loaded' ? result.draft : null
+  })
+  const [draftPromptResolved, setDraftPromptResolved] = useState(!loadPortfolioSetupDraft(publicKey).draft)
+  const [draftRestored, setDraftRestored] = useState(false)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const hasMountedDraftSaver = useRef(false)
 
   useEffect(() => {
     if (!draftPromptResolved) return
@@ -433,6 +442,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
   const remaining = remainingAllocation(allocations);
+
+  const { data: selectableAssets = [], isLoading: assetsLoading } = useAssets()
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 

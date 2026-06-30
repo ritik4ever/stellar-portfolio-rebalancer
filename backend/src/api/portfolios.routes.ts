@@ -464,6 +464,10 @@ portfoliosRouter.post('/portfolio/import', requireJwtWhenEnabled, validateReques
             return fail(res, 400, 'VALIDATION_ERROR', 'userAddress is required')
         }
 
+        if (!databaseService.hasFullConsent(userAddress)) {
+            return fail(res, 403, 'FORBIDDEN', 'Active consent is required before importing portfolio data')
+        }
+
         if (req.user && imported.userAddress !== req.user.address) {
             logger.warn('[PORTFOLIO IMPORT] Imported owner differs from authenticated user; using authenticated wallet', {
                 importedUserAddress: imported.userAddress,
