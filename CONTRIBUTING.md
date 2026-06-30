@@ -62,9 +62,6 @@ We provide templates for common contribution types:
 If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for how to label, prioritize, and respond to issues and pull requests.
 
 
-
-Examples:
-
 - `feat(api): add new endpoint` -> Features
 - `fix(auth): resolve token issue` -> Bug Fixes
 - `perf(worker): reduce rebalance polling load` -> Performance

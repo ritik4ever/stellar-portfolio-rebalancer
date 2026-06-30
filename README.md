@@ -74,7 +74,7 @@ Backend: Node.js + Express + TypeScript
 
 Price Data: Reflector + CoinGecko API
 
-Blockchain: Stellar Testnet
+
 
 Quick Start
 Prerequisites
