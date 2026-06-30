@@ -14,6 +14,7 @@ import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWo
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
+import { getQueueByName } from '../queue/queues.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -191,6 +192,58 @@ opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
             ...cursorInfo
         })
     } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
+// JOB STATUS ROUTE
+// ================================
+
+opsRouter.get('/jobs/:id', async (req: Request, res: Response) => {
+    try {
+        const jobId = req.params.id
+        if (!jobId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Job ID is required')
+        }
+
+        const queueNames = [
+            'portfolio-check',
+            'rebalance',
+            'analytics-snapshot',
+            'analytics-compaction',
+            'idempotency-cleanup',
+            'portfolio-export',
+            'price-history-snapshot',
+            'price-history-prune',
+        ]
+
+        for (const name of queueNames) {
+            const queue = getQueueByName(name)
+            if (!queue) continue
+            const job = await queue.getJob(jobId)
+            if (job) {
+                const state = await job.getState()
+                return ok(res, {
+                    jobId: job.id,
+                    queue: name,
+                    name: job.name,
+                    state,
+                    data: job.data,
+                    progress: job.progress,
+                    attemptsMade: job.attemptsMade,
+                    createdAt: job.timestamp ? new Date(job.timestamp).toISOString() : null,
+                    processedAt: job.processedOn ? new Date(job.processedOn).toISOString() : null,
+                    finishedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+                    failedReason: job.failedReason || null,
+                    returnValue: state === 'completed' ? job.returnvalue : null,
+                })
+            }
+        }
+
+        return fail(res, 404, 'NOT_FOUND', 'Job not found')
+    } catch (error) {
+        logger.error('[ERROR] Job status check failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

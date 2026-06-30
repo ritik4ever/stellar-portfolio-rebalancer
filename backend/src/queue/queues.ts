@@ -86,10 +86,10 @@ function getDefaultJobOptions() {
   return {
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 200 },
-    attempts: 5,
+    attempts: 3,
     backoff: {
       type: "exponential" as const,
-      delay: 5000, // 5s → 10s → 20s → 40s → 80s
+      delay: 5000,
     },
   };
 }

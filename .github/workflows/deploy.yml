@@ -5,7 +5,12 @@ on:
     branches: [main]
 
 jobs:
+  zap-security-gate:
+    name: Security Gate (ZAP)
+    uses: ./.github/workflows/zap-scan.yml
+
   deploy:
+    needs: zap-security-gate
     runs-on: ubuntu-latest
 
     steps:

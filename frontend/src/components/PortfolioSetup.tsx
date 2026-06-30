@@ -1,22 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion'; // AnimatePresence added to animate error messages in/out
+
 // TanStack Query Mutations
 import {
   buildRollbackMessage,
   useCreatePortfolioMutation,
-} from '../hooks/mutations/usePortfolioMutations';
-import {
-  clearPortfolioSetupDraft,
-  loadPortfolioSetupDraft,
-  savePortfolioSetupDraft,
-  type PortfolioSetupDraft,
-} from '../hooks/usePortfolio';
-import {
-  clearPortfolioCloneDraft,
-  loadPortfolioCloneDraft,
-  type PortfolioCloneDraft,
-} from '../utils/portfolioCloneDraft';
-import { useAssets } from '../hooks/queries/useAssetsQuery';
+
 import {
   Plus,
   Trash2,
@@ -26,9 +13,7 @@ import {
   Save,
   User,
   RefreshCw,
-  RotateCcw,
-  X,
-} from 'lucide-react';
+
 
 import ThemeToggle from './ThemeToggle';
 import AssetSelector from './AssetSelector'; // NEW: Enhanced asset selector with search
@@ -209,45 +194,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
     loadPortfolioCloneDraft(),
   );
-  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(
-    null,
-  );
-  const [draftPromptResolved, setDraftPromptResolved] = useState(false);
-  const [draftRestored, setDraftRestored] = useState(false);
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const hasMountedDraftSaver = useRef(false);
-  const { data: assets = [], isLoading: assetsLoading } = useAssets();
 
-  useEffect(() => {
-    setSavedTemplates(loadSavedTemplates(publicKey || ''));
-  }, [publicKey]);
-
-  const selectableAssets: SuggestionAsset[] = useMemo(() => {
-    if (assets.length > 0) return assets;
-    return DEFAULT_ASSET_OPTIONS.map((asset) => ({
-      symbol: asset.value,
-      displayName: asset.label,
-      searchText: `${asset.value} ${asset.label}`.toLowerCase(),
-    }));
-  }, [assets]);
-
-  useEffect(() => {
-    const result = loadPortfolioSetupDraft(publicKey);
-    if (result.status === 'loaded') {
-      setPendingDraft(result.draft);
-      setDraftError(null);
-      setDraftPromptResolved(false);
-      setDraftRestored(false);
-      hasMountedDraftSaver.current = false;
-      return;
-    }
-
-    setPendingDraft(null);
-    setDraftPromptResolved(true);
-    setDraftRestored(false);
-    setDraftError(result.status === 'failed' ? result.error : null);
-    hasMountedDraftSaver.current = false;
-  }, [publicKey]);
 
   useEffect(() => {
     if (!draftPromptResolved) return;
@@ -362,7 +309,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     }
   };
   // Mutation for portfolio creation
-  const createPortfolioMutation = useCreatePortfolioMutation();
+
 
   // ── Validation ─────────────────────────────────────────────────────────────
 
@@ -409,7 +356,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    * Positive = over-allocated (e.g. +5 means 105% total)
    * Negative = under-allocated (e.g. -10 means 90% total)
    */
-  const deviation = parseFloat((totalPercentage - 100).toFixed(1));
+
 
   /**
    * Builds the real-time summary message shown below the allocation list.
@@ -452,16 +399,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   const remaining = remainingAllocation(allocations);
 
-  const clampNumber = (
-    rawValue: string,
-    fallback: number,
-    min: number,
-    max: number,
-  ): number => {
-    const parsed = Number(rawValue);
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.min(max, Math.max(min, parsed));
-  };
+
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -569,12 +507,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     try {
       const allocationsMap = allocations.reduce(
         (acc, alloc) => {
-          const assetKey = alloc.asset.trim().toUpperCase();
-          if (acc[assetKey] !== undefined) {
-            throw new Error(`Duplicate asset selected: ${assetKey}`);
-          }
-          acc[assetKey] = alloc.percentage;
-          return acc;
+
         },
         {} as Record<string, number>,
       );
@@ -1034,16 +967,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             Percentage
                           </label>
                           <input
-                            type='number'
-                            min='0'
-                            max='100'
-                            step='0.1'
+
                             value={allocation.percentage}
                             onChange={(e) =>
                               updateAllocation(
                                 index,
                                 'percentage',
-                                parseFloat(e.target.value) || 0,
+                                Number.isFinite(Number.parseFloat(e.target.value))
+                                  ? Number(Number.parseFloat(e.target.value).toFixed(2))
+                                  : 0,
                               )
                             }
                             // Marks the field as invalid for screen readers
@@ -1124,7 +1056,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           : 'text-yellow-600' // under 100%
                     }`}
                   >
-                    {totalPercentage.toFixed(1)}%
+                    {totalPercentage.toFixed(2)}%
                   </span>
                 </div>
 
@@ -1135,7 +1067,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   aria-valuenow={Math.min(totalPercentage, 100)}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-label={`${totalPercentage.toFixed(1)}% of 100% allocated`}
+                  aria-label={`${totalPercentage.toFixed(2)}% of 100% allocated`}
                 >
                   <div
                     className={`h-full rounded-full transition-all duration-200 ${
@@ -1153,14 +1085,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 {!isValidTotal && (
                   <div className='flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1'>
                     <span>Remaining:</span>
-                    <span
-                      className={
-                        remaining > 0 ? 'text-yellow-600' : 'text-red-600'
-                      }
-                    >
-                      {remaining > 0
-                        ? `+${remaining.toFixed(1)}%`
-                        : `${remaining.toFixed(1)}%`}
+
                     </span>
                   </div>
                 )}
@@ -1444,6 +1369,39 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   $10,000 (Demo)
                 </span>
               </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={exportCurrentSettings}
+                    disabled={!isValidTotal || hasAnyFieldError}
+                    className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openImportDialog}
+                    disabled={importPortfolioMutation.isPending}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {importPortfolioMutation.isPending ? 'Importing...' : 'Import JSON'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Export saves the current settings as JSON. Import uploads a portfolio export and creates a new portfolio from it.
+                </p>
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  aria-label="Import portfolio JSON"
+                  onChange={handleImportFileChange}
+                />
+              </div>
             </div>
 
             {/*
@@ -1472,7 +1430,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     : 'text-red-600 dark:text-red-400'
                 }`}
               >
-                {totalPercentage.toFixed(1)}%
+                {totalPercentage.toFixed(2)}%
               </div>
               <div className='text-xs text-gray-500 dark:text-gray-400'>
                 {allocations.length} asset{allocations.length !== 1 ? 's' : ''}

@@ -36,6 +36,31 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
+const CG_CACHE_KEY = 'coingecko_asset_cache'
+const CG_CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+interface CGCacheEntry {
+  logo: string
+  description: string
+  timestamp: number
+}
+
+function getCGCache(): Record<string, CGCacheEntry> {
+  try {
+    const raw = localStorage.getItem(CG_CACHE_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw)
+  } catch {
+    return {}
+  }
+}
+
+function saveCGCache(cache: Record<string, CGCacheEntry>) {
+  try {
+    localStorage.setItem(CG_CACHE_KEY, JSON.stringify(cache))
+  } catch {}
+}
+
 function formatContractAddress(address?: string): string {
   if (!address) return ''
   return `${address.slice(0, 4)}...${address.slice(-4)}`
@@ -61,6 +86,62 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
 
   const [dynamicResults, setDynamicResults] = useState<AssetSearchAsset[]>([])
   const [dynamicError, setDynamicError] = useState<string | null>(null)
+  const [cgData, setCgData] = useState<Record<string, { logo: string; description: string }>>({})
+
+  // Load CG cache on mount
+  useEffect(() => {
+    const cache = getCGCache()
+    const now = Date.now()
+    const validCache: Record<string, any> = {}
+    let updated = false
+    
+    for (const [symbol, data] of Object.entries(cache)) {
+      if (now - data.timestamp < CG_CACHE_TTL) {
+        validCache[symbol] = data
+      } else {
+        updated = true
+      }
+    }
+    
+    setCgData(validCache)
+    if (updated) saveCGCache(validCache)
+  }, [])
+
+  // Fetch CoinGecko search in background
+  useEffect(() => {
+    if (!debouncedSearch || debouncedSearch.length < 2) return
+    
+    let cancelled = false
+    fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(debouncedSearch)}`)
+      .then(res => {
+        if (!res.ok) throw new Error('CG Rate limit or error')
+        return res.json()
+      })
+      .then(data => {
+        if (cancelled || !data.coins) return
+        
+        setCgData(prev => {
+          const newCache = { ...prev }
+          const storageCache = getCGCache()
+          let hasChanges = false
+          
+          data.coins.slice(0, 10).forEach((coin: any) => {
+            const sym = coin.symbol.toUpperCase()
+            if (!newCache[sym]) {
+               newCache[sym] = { logo: coin.thumb, description: coin.name }
+               storageCache[sym] = { logo: coin.thumb, description: coin.name, timestamp: Date.now() }
+               hasChanges = true
+            }
+          })
+          
+          if (hasChanges) saveCGCache(storageCache)
+          return newCache
+        })
+      })
+      .catch(() => { /* ignore */ })
+      
+    return () => { cancelled = true }
+  }, [debouncedSearch])
 
   useEffect(() => {
     if (!debouncedSearch || debouncedSearch.length < 1) {
@@ -271,11 +352,19 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
                     highlightedIndex === index ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   } ${value === asset.symbol ? 'bg-blue-100 dark:bg-blue-900/40' : ''} transition-colors`}
                 >
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${
-                    asset.type === 'native' ? 'bg-blue-500' : 'bg-purple-500'
-                  }`}>
-                    {asset.symbol.slice(0, 2)}
-                  </div>
+                  {cgData[asset.symbol.toUpperCase()]?.logo ? (
+                    <img 
+                      src={cgData[asset.symbol.toUpperCase()].logo} 
+                      alt={`${asset.symbol} logo`}
+                      className="w-8 h-8 rounded-full flex-shrink-0 object-cover"
+                    />
+                  ) : (
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${
+                      asset.type === 'native' ? 'bg-blue-500' : 'bg-purple-500'
+                    }`}>
+                      {asset.symbol.slice(0, 2)}
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-gray-900 dark:text-white">
@@ -297,11 +386,15 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
                         </span>
                       )}
                     </div>
-                    {asset.name && (
+                    {asset.name ? (
                       <div className="text-sm text-gray-600 dark:text-gray-300">
                         {asset.name}
                       </div>
-                    )}
+                    ) : cgData[asset.symbol.toUpperCase()]?.description ? (
+                      <div className="text-sm text-gray-600 dark:text-gray-300">
+                        {cgData[asset.symbol.toUpperCase()].description}
+                      </div>
+                    ) : null}
                     <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                       {asset.contract ? (
                         <span>Contract: {formatContractAddress(asset.contract)}</span>
