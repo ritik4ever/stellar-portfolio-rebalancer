@@ -19,8 +19,10 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
+import { portfolioImportRouter } from './portfolioImportRoutes.js'
+
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
 import { analyticsRouter } from './analytics.routes.js'
@@ -36,6 +38,10 @@ function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
 }
 
 export const portfoliosRouter = Router()
+
+// Mount bulk import routes
+portfoliosRouter.use(portfolioImportRouter)
+
 
 portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
     try {

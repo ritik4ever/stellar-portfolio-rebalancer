@@ -31,10 +31,12 @@ import {
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 import { percentageToBps } from "../utils/calculations";
-
+import BulkPortfolioImport from "./BulkPortfolioImport";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+
 
 interface AssetOption {
   value: string
