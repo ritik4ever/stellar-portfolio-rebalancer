@@ -27,6 +27,7 @@ import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
 import { usePortfolioExport } from '../hooks/usePortfolio'
+import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -61,6 +62,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         error: detailsError,
         refetch: refetchPortfolioDetails,
     } = usePortfolioDetails(latestPortfolioId)
+
+    const { connectionState: liveFeedState } = usePortfolioLiveFeed(latestPortfolioId || null)
 
     const {
         data: priceBundle,
@@ -762,8 +765,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </p>
                                     )}
                                     <div className="mb-4">
-                                        <div className="text-3xl font-bold text-gray-900 dark:text-white">
+                                        <div className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
                                             ${portfolioData?.totalValue?.toLocaleString() || '0'}
+                                            {liveFeedState === 'connected' && (
+                                                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
+                                                    <span className="w-1.5 h-1.5 mr-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                                                    LIVE
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex items-center mt-1">
                                             <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
