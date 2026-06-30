@@ -1,0 +1,97 @@
+name: Schemathesis API Contract Tests
+
+on:
+  pull_request:
+    paths:
+      - 'backend/src/api/**'
+      - 'backend/src/openapi/**'
+      - 'backend/src/middleware/**'
+      - '.github/workflows/schemathesis.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/api/**'
+      - 'backend/src/openapi/**'
+      - 'backend/src/middleware/**'
+      - '.github/workflows/schemathesis.yml'
+
+jobs:
+  schemathesis:
+    name: OpenAPI contract testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_CONTRACT_ADDRESS: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      DEMO_MODE: 'true'
+      ALLOW_DEMO_BALANCE_FALLBACK: 'true'
+      JWT_SECRET: schemathesis-ci-jwt-secret-at-least-32
+      DB_PATH: /tmp/schemathesis-test.db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install schemathesis
+        run: pip install schemathesis
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Export OpenAPI spec
+        working-directory: ./backend
+        run: npm run openapi:export
+
+      - name: Build and start backend
+        working-directory: ./backend
+        env:
+          PORT: 3001
+        run: |
+          npm run build
+          npm start &
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::Backend did not become healthy"
+            exit 1
+          fi
+
+      - name: Run Schemathesis against OpenAPI spec
+        run: |
+          schemathesis run \
+            --base-url http://localhost:3001 \
+            --checks all \
+            --max-response-time 5000 \
+            --max-examples 30 \
+            --hypothesis-deadline 500 \
+            --contrib-openapi-formats-uuid \
+            backend/openapi.json
+
+      - name: Stop backend
+        if: always()
+        run: kill $(lsof -t -i:3001) 2>/dev/null || true

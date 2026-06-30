@@ -1,31 +1,5 @@
 # Stellar Portfolio Rebalancer
 
----
-
-## 2. README.md Updates
-
-Add a link in the README's "Further reading" or "Troubleshooting" section:
-
-**`README.md`** (add after "## Contributing" or in a new section)
-
-```markdown
-## Troubleshooting
-
-### Wallet Issues
-
-Having trouble connecting your Stellar wallet? See the **[Wallet Troubleshooting FAQ](docs/WALLET_TROUBLESHOOTING.md)** for step-by-step fixes for:
-
-- "Wallet is not installed" errors
-- Connection timeouts and declines
-- Transaction signing failures
-- Network mismatch between wallet and app
-- Wallet-specific quirks (Freighter, Rabet, xBull)
-
-### Common Setup Issues
-
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) §10 "Common setup failures" for backend, database, and environment issues.
-
-
 [![GitHub Repo](https://img.shields.io/badge/repo-Stellar%20Portfolio%20Rebalancer-blue?style=flat-square)](https://github.com/ritik4ever/stellar-portfolio-rebalancer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -35,19 +9,19 @@ See [CONTRIBUTING.md](docs/CONTRIBUTING.md) §10 "Common setup failures" for bac
 
 Stellar Portfolio Rebalancer is an **intelligent DeFi portfolio management platform** built on Stellar that automatically rebalances crypto portfolios using real-time price data from Reflector oracles.  
 
-It helps users maintain optimal asset allocation through automated rebalancing triggered by configurable drift thresholds while leveraging Stellar's fast, low-cost infrastructure. 
+It helps users maintain optimal asset allocation through automated rebalancing triggered by configurable drift thresholds while leveraging Stellar's fast, low-cost infrastructure.
 
 ---
 
 ## Features
 
-- **Smart Rebalancing** – Automatic maintenance of target allocations based on threshold triggers  
-- **Multi-Wallet Support** – Compatible with Freighter, Rabet, xBull, and other Stellar wallets  
-- **Real-Time Price Feeds** – Powered by Reflector oracles with API fallbacks  
-- **Risk Management** – Circuit breakers, concentration limits, volatility detection  
-- **Professional UI** – Responsive interface with real-time portfolio visualization  
-- **Demo Mode** – $10,000 simulated portfolio for testing  
-- **Trust & transparency** – Landing page summarizes architecture, risk controls, and observability; legal documents show a fixed version and effective date
+* **Smart Rebalancing** – Automatic maintenance of target allocations based on threshold triggers.
+* **Multi-Wallet Support** – Compatible with Freighter, Rabet, xBull, and other Stellar wallets.
+* **Real-Time Price Feeds** – Powered by Reflector oracles with API fallbacks.
+* **Risk Management** – Circuit breakers, concentration limits, and volatility detection.
+* **Professional UI** – Responsive interface with real-time portfolio visualization.
+* **Demo Mode** – $10,000 simulated portfolio for testing.
+* **Trust & Transparency** – Landing page summarizes architecture, risk controls, and observability; legal documents show a fixed version and effective date.
 
 ---
 
@@ -56,7 +30,7 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 See where the Stellar Portfolio Rebalancer is headed!
 
 | **Now** (Current Sprint) | **Next** (1-2 months) | **Later** (3-6+ months) |
-|-------------------------|------------------------|-------------------------|
+| :--- | :--- | :--- |
 | Core rebalancing algorithm | Portfolio dashboard | Mobile app |
 | Reflector oracle integration | Historical reports | Custom strategies |
 | Wallet connection stability | Notification system | DeFi integration |
@@ -66,135 +40,139 @@ See where the Stellar Portfolio Rebalancer is headed!
 
 ---
 
-
 ## Architecture
+
 ```text
 stellar-portfolio-rebalancer/
 ├── contracts/     # Soroban smart contracts
 ├── frontend/      # React + TypeScript frontend
 ├── backend/       # Node.js + Express API
 ├── deployment/    # Docker deployment files
-└── docs/          # Documentation (including [ADRs](docs/adr/README.md))
-```
+└── docs/          # Documentation (including ADRs)
 
-### Core terms
-
+Core Terms
 New contributors should read the glossary before deeper setup or contract work.
-- `Portfolio`: the user-managed allocation object tracked by `portfolio_id`
-- `Target allocation`, `Rebalance threshold`, and `Slippage tolerance`: the main contract parameters for automated rebalancing
-- `Reflector oracle`: the price source used by the contract for drift and rebalance decisioning
-- `Cooldown period` and `Emergency stop`: built-in safety controls for rebalances
 
-See [docs/GLOSSARY.md](docs/GLOSSARY.md) for the central glossary and cross-links to contract, API, and deployment docs.
+Portfolio: The user-managed allocation object tracked by portfolio_id.
 
-### Tech Stack
+Target Allocation, Rebalance Threshold, & Slippage Tolerance: The main contract parameters for automated rebalancing.
 
-| Layer             | Technology |
-|------------------|------------|
-| Smart Contracts   | Rust + Soroban |
-| Frontend          | React + TypeScript + Tailwind CSS |
-| Backend           | Node.js + Express + TypeScript |
-| Price Data        | Reflector + CoinGecko API |
-| Blockchain        | Stellar Testnet |
+Reflector Oracle: The price source used by the contract for drift and rebalance decisioning.
 
----
+Cooldown Period & Emergency Stop: Built-in safety controls for rebalances.
 
-## Quick Start
+📘 Glossary Access: See docs/GLOSSARY.md for the central glossary and cross-links to contract, API, and deployment docs.
 
-### Prerequisites
+Tech Stack
+Layer: Technology
 
-- Node.js 18+  
-- Rust + Cargo  
-- Soroban CLI  
-- Stellar wallet (Freighter or Rabet recommended)  
+Smart Contracts: Rust + Soroban
 
-### Installation
+Frontend: React + TypeScript + Tailwind CSS
 
-```bash
+Backend: Node.js + Express + TypeScript
+
+Price Data: Reflector + CoinGecko API
+
+
+
+Quick Start
+Prerequisites
+Node.js >=20.19.0
+
+Rust + Cargo
+
+Soroban CLI
+
+Stellar wallet (Freighter or Rabet recommended)
+
+Installation
+Bash
 # Clone the repository
-git clone https://github.com/ritik4ever/stellar-portfolio-rebalancer.git
+git clone [https://github.com/ritik4ever/stellar-portfolio-rebalancer.git](https://github.com/ritik4ever/stellar-portfolio-rebalancer.git)
 cd stellar-portfolio-rebalancer
 
-# Frontend
+# Frontend Setup
 cd frontend
 npm install
 
-# Backend
+# Backend Setup
 cd ../backend
 npm install
 
-# Smart Contracts
+# Smart Contracts Setup
 cd ../contracts
 cargo build
-```
 
-## Environment Setup
-```bash
+Environment Setup
+Bash
 # Backend
 cp backend/.env.example backend/.env
+
 # Frontend
 cp frontend/.env.example frontend/.env
-```
->Edit `.env` files with your own configuration (contract addresses, API keys, etc.)
+Edit the .env files with your own configuration (contract addresses, API keys, etc.).
 
-Full backend environment reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
+Environment Reference: Full backend environment reference can be found at docs/ENVIRONMENT.md.
 
-API Client Examples: [Python API Client Example](scripts/python_api_client.py)
+API Versioning: The frontend HTTP client targets /api/v1/* for resource routes by default (VITE_API_VERSION=v1 in frontend/.env.example). JWT auth still uses /api/auth/*. See API.md for complete versioning details.
 
-The frontend HTTP client targets **`/api/v1/*`** for resource routes by default (`VITE_API_VERSION=v1` in `frontend/.env.example`). JWT auth still uses **`/api/auth/*`**. See [API.md](API.md) for versioning details.
+API Client Examples: Check out the Python API Client Example (or corresponding examples file).
 
-## Database Setup
-PostgreSQL migrations are available for environments configured with `DATABASE_URL` or the `PGHOST` / `PGDATABASE` / `PGUSER` variables.
+Database Setup
+PostgreSQL migrations are available for environments configured with DATABASE_URL or the PGHOST / PGDATABASE / PGUSER variables.
 
-```bash
+Bash
 cd backend
-npm run db:migrate       # Apply migrations
+npm run db:migrate                 # Apply migrations
 npm run db:migrate -- --dry-run   # Preview migrations
-```
+Local Development: For local SQLite development, leave PostgreSQL variables unset and use DB_PATH instead. The default path is backend/data/portfolio.db. The backend creates the database file plus its parent directory automatically on startup. Fresh clones should not include any prebuilt .db, .db-wal, or .db-shm files.
 
-For local SQLite development, leave PostgreSQL unset and use `DB_PATH` instead. The default path is `backend/data/portfolio.db`, and the backend creates the database file plus its parent directory automatically on startup. Fresh clones should not include any prebuilt `.db`, `.db-wal`, or `.db-shm` files.
+Demo Seeding: SQLite demo data appears only when demo seeding is enabled through ENABLE_DEMO_DB_SEED or via Demo Mode. Otherwise, the local database starts empty and bootstraps from the checked-in schema and seed sources.
 
-SQLite demo data appears only when demo seeding is enabled through `ENABLE_DEMO_DB_SEED` or demo mode. Otherwise, the local database starts empty and bootstraps from the checked-in schema and seed sources.
+Email Notifications (Optional)
+Gmail Config Example:
 
-## Email Notifications (Optional)
-Gmail Example:
-```env
+Code snippet
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-app-password
 SMTP_FROM=your-email@gmail.com
-```
-Other providers: SendGrid, Mailgun, AWS SES.
+Other supported providers include SendGrid, Mailgun, and AWS SES.
 
 Test Notifications:
-```bash
+
+Bash
 curl -X POST http://localhost:3001/api/v1/notifications/test \
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
-```
 
-## Development
-Start development servers:
-```bash
-# Terminal 1 - Backend
+Development
+Start your local development servers:
+
+Terminal 1 - Backend:
+
+Bash
 cd backend
 npm run dev
 
-# Terminal 2 - Frontend
+Terminal 2 - Frontend:
+
+Bash
 cd frontend
 npm run dev
-```
-- Frontend: http://localhost:3000
 
-- Backend API: http://localhost:3001
+Frontend Local URL: http://localhost:3000
 
-## Smart Contract Deployment
-```bash
+Backend API Local URL: http://localhost:3001
+
+Smart Contract Deployment
+Bash
 cd contracts
 
-# Build
+# Build contract
 soroban contract build
 
 # Deploy to testnet
@@ -203,7 +181,7 @@ soroban contract deploy \
   --source deployer \
   --network testnet
 
-# Initialize
+# Initialize contract
 soroban contract invoke \
   --id YOUR_CONTRACT_ID \
   --source deployer \
@@ -211,61 +189,71 @@ soroban contract invoke \
   -- initialize \
   --admin YOUR_ADMIN_ADDRESS \
   --reflector_address CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO
-```
-Contract address example: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I`
+Contract Address Example: CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I
 
-### WASM Hash Verification
-
+WASM Hash Verification
 Before deploying, you can compute and audit the canonical SHA-256 hash of the compiled WASM contract to ensure reproducibility and security:
 
-```bash
+Bash
 cd contracts
 make hash
-```
-
 This target outputs the hash of both the release WASM and the optimized WASM (if available). The same hash calculation runs automatically on release/PR builds to simplify deployment audits.
 
-Contract interface reference (functions, errors, and type notes): [`contracts/CONTRACT_ABI.md`](contracts/CONTRACT_ABI.md)
-Common Soroban invoke commands and examples: [`docs/soroban-cookbook.md`](docs/soroban-cookbook.md)
-Frontend compatibility & capability matrix (what's supported, how the app degrades): [`docs/CONTRACT_CAPABILITY_MATRIX.md`](docs/CONTRACT_CAPABILITY_MATRIX.md)
+Developer Resources:
 
-### Usage
+Contract interface reference (functions, errors, type notes): contracts/CONTRACT_ABI.md
 
-**📸 New to the platform?** Check out our [Visual Demo Walkthrough](docs/DEMO_WALKTHROUGH.md) with step-by-step screenshots and detailed explanations.
+Common Soroban invoke commands and examples: docs/soroban-cookbook.md
 
-**Quick Start:**
-1. Connect your Stellar wallet
-2. Create a portfolio and set target allocations (sum must equal 100%, maximum 10 assets per portfolio)
-3. Configure rebalance thresholds (1–50%)
-4. Enable/disable automatic rebalancing
-5. Submit transaction
+Frontend compatibility & capability matrix (degradation mapping): docs/CONTRACT_CAPABILITY_MATRIX.md
 
-### Managing Portfolios
-- Dashboard: View current allocations and performance
-- Rebalancing: Manual or automatic execution
-- History: Track past rebalances
+Usage
+📸 New to the platform? Check out our Visual Demo Walkthrough with step-by-step screenshots and detailed explanations.
 
-### Portfolio Asset Limit
-Each portfolio supports a maximum of **10 assets** (`MAX_PORTFOLIO_ASSETS`). This limit exists because Soroban persistent storage entries are bounded by ledger entry size constraints, and each asset adds allocation and balance map entries plus oracle lookup overhead during rebalance. Attempting to create a portfolio with more than 10 assets returns a `TooManyAssets` error.
+Quick Start Workflow
+Connect your Stellar wallet.
 
-## Safety Features
-- Cooldown Periods: Minimum 1 hour between rebalances
-- Volatility Detection: Pauses rebalancing during extreme market conditions
-- Concentration Limits: Prevents over-allocation to single assets
-- Circuit Breakers: Multiple safety checks before executing trades
+Create a portfolio and set target allocations (sum must equal 100%, maximum 10 assets per portfolio).
 
-## Notifications
-- Email and Webhook notifications for rebalancing events
-- Event types: rebalance, circuit breaker, price movement, risk changes
-- Configurable per user
+Configure rebalance thresholds (1–50%).
+
+Enable/disable automatic rebalancing.
+
+Submit transaction.
+
+Managing Portfolios
+Dashboard: View current allocations and performance.
+
+Rebalancing: Manual or automatic execution.
+
+History: Track past rebalances.
+
+Portfolio Asset Limit
+Each portfolio supports a maximum of 10 assets (MAX_PORTFOLIO_ASSETS). This limit exists because Soroban persistent storage entries are bounded by ledger entry size constraints; each asset adds allocation and balance map entries plus oracle lookup overhead during rebalance. Attempting to create a portfolio with more than 10 assets returns a TooManyAssets error.
+
+Safety Features
+Cooldown Periods: Minimum 1 hour between rebalances.
+
+Volatility Detection: Pauses rebalancing during extreme market conditions.
+
+Concentration Limits: Prevents over-allocation to single assets.
+
+Circuit Breakers: Multiple safety checks before executing trades.
+
+Notifications
+Email and Webhook notifications for rebalancing events.
+
+Event types: rebalance, circuit breaker, price movement, risk changes.
+
+Configurable per user.
 
 API Reference
-Canonical: `/api/v1/*`
-Legacy (deprecated): `/api/*`
+Canonical: /api/v1/*
 
-```bash
+Legacy (Deprecated): /api/*
 # Create portfolio
 POST /api/v1/portfolio
+Content-Type: application/json
 {
   "userAddress": "STELLAR_ADDRESS",
   "allocations": {"XLM": 40, "USDC": 35, "BTC": 25},
@@ -280,84 +268,94 @@ POST /api/v1/portfolio/:id/rebalance
 
 # Rebalance status
 GET /api/v1/portfolio/:id/rebalance-status
-```
 
-Notifications: 
-```bash
-# Subscribe
+# Subscribe to notifications
 POST /api/v1/notifications/subscribe
+
 # Get preferences
 GET /api/v1/notifications/preferences?userId=STELLAR_ADDRESS
-# Unsubscribe
-DELETE /api/v1/notifications/unsubscribe?userId=STELLAR_ADDRESS
-```
 
-Price Data:
-```bash
+# Unsubscribe from notifications
+DELETE /api/v1/notifications/unsubscribe?userId=STELLAR_ADDRESS
+
+# Price Data Feeds
 GET /api/v1/prices
 GET /api/v1/portfolio/:id/rebalance-plan
-```
 
-## Stellar DEX Integration
-- Real trades on Stellar testnet using @stellar/stellar-sdk
-- Slippage-aware execution, partial fills, and rollback handling
-- Rebalance history tracks outcomes and slippage metrics
+Stellar DEX Integration
+Real trades executed on Stellar testnet using @stellar/stellar-sdk.
 
-## Testing
-```bash
-# Frontend
+Slippage-aware execution, partial fills, and automated rollback handling.
+
+Rebalance history tracks outcomes and explicit slippage metrics.
+
+Testing
+Bash
+# Frontend tests
 cd frontend && npm test
 
-# Backend
+# Backend tests
 cd backend && npm test
 
-# Smart contracts
+# Smart contract tests
 cd contracts && cargo test
 
 # Smart contract gas benchmarks
 cd contracts && make bench
-```
 
-## Docker Deployment
-```bash
+Docker Deployment
+Bash
 docker compose -f deployment/docker-compose.yml config
 docker compose -f deployment/docker-compose.yml build frontend backend
 docker compose -f deployment/docker-compose.yml up --build -d
-```
 
-## Contributing
+Contributing
+See CONTRIBUTING.md for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
 
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
+System Workflows: For Windows and WSL users, see the Windows/WSL Local Development Workflow (or appropriate documentation link).
 
-For Windows and WSL users, see the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md).
-For issue management and PR requirements, see the [Backlog Grooming Guide](docs/backlog-grooming.md).
+Issue Management: For issue management, triage definitions (P0-P3), and PR rules, see the Backlog Grooming Guide.
 
-**PRs must link to an issue** or provide a rationale when no issue exists. A CI check enforces this.
+PR Requirement: Pull Requests must explicitly link to an open issue, or provide a detailed rationale when no issue exists. A block-level CI check strictly enforces this rule.
 
-Quick steps:
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/awesome-feature`
-3. Follow setup in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
-4. Ensure tests pass: `cd backend && npm test && cd ../frontend && npm test`
-5. Open a Pull Request
+Quick Steps to Contribute:
+Fork the repository.
 
-## License
+Create a feature branch: git checkout -b feature/awesome-feature.
 
-This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
+Follow the setup instructions in docs/CONTRIBUTING.md.
 
-## Acknowledgments
-- Stellar Development Foundation
-- Reflector Protocol
-- Soroban
-- Community wallet integrations
+Ensure all local tests pass: cd backend && npm test && cd ../frontend && npm test.
+
+Open a well-documented Pull Request.
+
+Troubleshooting
+Wallet Issues
+Having trouble connecting your Stellar wallet? See the Wallet Troubleshooting FAQ for step-by-step fixes for:
+
+"Wallet is not installed" errors
+
+Connection timeouts and declines
+
+Transaction signing failures
+
+Network mismatch between wallet and app
+
+Wallet-specific quirks (Freighter, Rabet, xBull)
+
+Common Setup Issues
+See CONTRIBUTING.md §10 "Common setup failures" for backend, database, and environment issues.
+
+License
+This project is licensed under the MIT License.
+
+Acknowledgments
+Stellar Development Foundation
+
+Reflector Protocol
+
+Soroban
+
+Community wallet integrations
 
 Built with ❤️ for the Stellar ecosystem
-
-
-
-
-
-
-
-
-

@@ -75,6 +75,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "ContractPauseReason"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 2
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "EmergencyStop"
                             }
                           ]
