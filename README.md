@@ -75,11 +75,6 @@ Backend: Node.js + Express + TypeScript
 Price Data: Reflector + CoinGecko API
 
 
-
-Quick Start
-Prerequisites
-Node.js >=20.19.0
-
 Rust + Cargo
 
 Soroban CLI
@@ -145,7 +140,7 @@ Other supported providers include SendGrid, Mailgun, and AWS SES.
 Test Notifications:
 
 Bash
-curl -X POST http://localhost:3001/api/v1/notifications/test \
+
   -H "Content-Type: application/json" \
   -d '{"userId": "YOUR_STELLAR_ADDRESS", "eventType": "rebalance"}'
 
@@ -165,8 +160,6 @@ cd frontend
 npm run dev
 
 Frontend Local URL: http://localhost:3000
-
-Backend API Local URL: http://localhost:3001
 
 Smart Contract Deployment
 Bash
@@ -216,23 +209,6 @@ Connect your Stellar wallet.
 Create a portfolio and set target allocations (sum must equal 100%, maximum 10 assets per portfolio).
 
 Configure rebalance thresholds (1–50%).
-
-Enable/disable automatic rebalancing.
-
-Submit transaction.
-
-Managing Portfolios
-Dashboard: View current allocations and performance.
-
-Rebalancing: Manual or automatic execution.
-
-History: Track past rebalances.
-
-Portfolio Asset Limit
-Each portfolio supports a maximum of 10 assets (MAX_PORTFOLIO_ASSETS). This limit exists because Soroban persistent storage entries are bounded by ledger entry size constraints; each asset adds allocation and balance map entries plus oracle lookup overhead during rebalance. Attempting to create a portfolio with more than 10 assets returns a TooManyAssets error.
-
-Safety Features
-Cooldown Periods: Minimum 1 hour between rebalances.
 
 Volatility Detection: Pauses rebalancing during extreme market conditions.
 
@@ -312,9 +288,7 @@ docker compose -f deployment/docker-compose.yml up --build -d
 Contributing
 See CONTRIBUTING.md for the canonical contributor guide. It includes minimum local setup, optional services (Redis, PostgreSQL, SMTP), test commands, API doc generation, queue worker expectations, and frontend E2E setup.
 
-System Workflows: For Windows and WSL users, see the Windows/WSL Local Development Workflow (or appropriate documentation link).
 
-Issue Management: For issue management, triage definitions (P0-P3), and PR rules, see the Backlog Grooming Guide.
 
 PR Requirement: Pull Requests must explicitly link to an open issue, or provide a detailed rationale when no issue exists. A block-level CI check strictly enforces this rule.
 
