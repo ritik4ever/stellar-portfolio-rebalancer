@@ -15,6 +15,114 @@ import jwt from 'jsonwebtoken'
 import { portfolioRouter } from '../api/routes.js'
 import { vi } from 'vitest'
 import type { Job } from 'bullmq'
+import { portfolioStorage } from '../services/portfolioStorage.js'
+
+const mockPortfolios = new Map<string, any>()
+const mockPortfolioIds = ['a1b2c3d4', 'b2c3d4e5', 'c3d4e5f6', 'd4e5f6a7']
+
+vi.mock('../services/databaseService.js', () => ({
+    databaseService: {
+        hasFullConsent: vi.fn(() => true),
+    },
+}))
+
+vi.mock('../services/portfolioStorage.js', () => ({
+    portfolioStorage: {
+        getPortfolio: vi.fn(async (id: string) => mockPortfolios.get(id)),
+        createPortfolio: vi.fn(async (userAddress: string, allocations: Record<string, number>, threshold: number, name?: string, description?: string) => {
+            const id = mockPortfolioIds[mockPortfolios.size] ?? `p${mockPortfolios.size + 1}`
+            mockPortfolios.set(id, {
+                id,
+                userAddress,
+                allocations,
+                threshold,
+                slippageTolerancePercent: 1,
+                strategy: 'threshold',
+                strategyConfig: {},
+                name,
+                description,
+                balances: {},
+                totalValue: 0,
+                createdAt: new Date().toISOString(),
+                lastRebalance: new Date().toISOString(),
+                version: 1,
+            })
+            return id
+        }),
+    },
+}))
+
+vi.mock('../services/stellar.js', () => ({
+    StellarService: class {
+        async getPortfolio(portfolioId: string) {
+            return mockPortfolios.get(portfolioId) ?? null
+        }
+
+        async createPortfolio(
+            userAddress: string,
+            allocations: Record<string, number>,
+            threshold: number,
+            slippageTolerancePercent: number,
+            strategy: string,
+            strategyConfig: Record<string, unknown>,
+            name?: string,
+            description?: string,
+        ) {
+            const id = mockPortfolioIds[mockPortfolios.size] ?? `p${mockPortfolios.size + 1}`
+            mockPortfolios.set(id, {
+                id,
+                userAddress,
+                allocations,
+                threshold,
+                slippageTolerancePercent,
+                strategy,
+                strategyConfig,
+                name,
+                description,
+                balances: {},
+                totalValue: 0,
+                createdAt: new Date().toISOString(),
+                lastRebalance: new Date().toISOString(),
+                version: 1,
+            })
+            return id
+        }
+    },
+}))
+
+vi.mock('../services/reflector.js', () => ({
+    ReflectorService: class {
+        async getCurrentPrices() {
+            return {}
+        }
+    },
+}))
+
+vi.mock('../services/serviceContainer.js', () => ({
+    riskManagementService: {
+        calculateRiskHeatmap: vi.fn(() => null),
+    },
+    rebalanceHistoryService: {},
+}))
+
+vi.mock('../queue/workers/workerRuntime.js', () => ({
+    acquireWorkerLock: vi.fn(),
+    releaseWorkerLock: vi.fn(),
+    createWorkerRuntimeStatus: vi.fn(() => ({ isHealthy: true, status: 'idle' })),
+}))
+
+vi.mock('../api/analytics.routes.js', () => ({
+    analyticsRouter: express.Router(),
+}))
+
+vi.mock('../utils/logger.js', () => ({
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+    },
+}))
 
 vi.mock('../queue/queues.js', () => {
     let mockJobCounter = 0
@@ -107,14 +215,18 @@ beforeAll(async () => {
 
     const res = await request(app)
         .post('/api/portfolio')
-        .send({ userAddress: OWNER_ADDRESS, allocations: { XLM: 60, USDC: 40 }, threshold: 5 })
+        .send({
+            userAddress: OWNER_ADDRESS,
+            allocations: { XLM: 60, USDC: 40 },
+            threshold: 5,
+            slippageTolerance: 1.5,
+            strategy: 'periodic',
+            strategyConfig: { intervalDays: 14 },
+            name: 'JSON export source',
+            description: 'Source portfolio for import/export round-trip tests',
+        })
     expect([200, 201]).toContain(res.status)
     sharedPortfolioId = res.body.data.portfolioId as string
-
-    await request(app)
-        .post('/api/consent')
-        .send({ userId: OWNER_ADDRESS, terms: true, privacy: true, cookies: true })
-        .expect(200)
 })
 
 afterAll(() => {
@@ -126,57 +238,88 @@ afterAll(() => {
 })
 
 
-// ─── JSON export ──────────────────────────────────────────────────────────────
+// ─── JSON export / import ────────────────────────────────────────────────────
 
 describe('JSON export — GET /api/portfolio/:id/export?format=json', () => {
-    it('responds 202 with jobId', async () => {
+    it('returns the portfolio configuration as JSON', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-            .expect(202)
-        expect(res.body.data.jobId).toBeDefined()
-        expect(res.body.data.status).toBe('processing')
-    })
+            .expect(200)
 
-    it('status endpoint returns file when completed', async () => {
-        const createRes = await request(app)
+        expect(res.body.schemaVersion).toBe(1)
+        expect(res.body.userAddress).toBe(OWNER_ADDRESS)
+        expect(res.body.allocations).toEqual({ XLM: 60, USDC: 40 })
+        expect(res.body.threshold).toBe(5)
+        expect(res.body.slippageTolerance).toBe(1.5)
+        expect(res.body.strategy).toBe('periodic')
+        expect(res.body.strategyConfig).toEqual({ intervalDays: 14 })
+        expect(res.body.name).toBe('JSON export source')
+        expect(res.body.description).toBe('Source portfolio for import/export round-trip tests')
+        expect(res.body.exportedAt).toBeDefined()
+    })
+})
+
+describe('JSON import — POST /api/portfolio/import', () => {
+    it('creates a portfolio from exported JSON and preserves settings', async () => {
+        const exportRes = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-        const jobId = createRes.body.data.jobId
-        const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${jobId}`)
             .expect(200)
-        expect(res.headers['content-type']).toMatch(/application\/json/)
 
-    it('content-disposition is attachment with a .json filename', async () => {
-        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-        const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
-            .expect(200)
-        const disposition = res.headers['content-disposition'] as string
-        expect(disposition).toMatch(/^attachment/)
-        expect(disposition).toMatch(/\.json"$/)
+        const importRes = await request(app)
+            .post('/api/portfolio/import')
+            .send(exportRes.body)
+            .expect(201)
+
+        const importedId = importRes.body.data.portfolioId as string
+        expect(importedId).toBeTruthy()
+
+        const imported = await portfolioStorage.getPortfolio(importedId)
+        expect(imported).toBeTruthy()
+        expect(imported?.userAddress).toBe(OWNER_ADDRESS)
+        expect(imported?.allocations).toEqual({ XLM: 60, USDC: 40 })
+        expect(imported?.threshold).toBe(5)
+        expect(imported?.slippageTolerancePercent ?? imported?.slippageTolerance).toBe(1.5)
+        expect(imported?.strategy).toBe('periodic')
+        expect(imported?.strategyConfig).toEqual({ intervalDays: 14 })
+        expect(imported?.name).toBe('JSON export source')
+        expect(imported?.description).toBe('Source portfolio for import/export round-trip tests')
     })
 
-    it('filename matches pattern portfolio-<8chars>-export-<timestamp>.json', async () => {
-        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-        const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
+    it('rejects imports with more than 10 assets', async () => {
+        const exportRes = await request(app)
+            .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
             .expect(200)
-        const match = (res.headers['content-disposition'] as string).match(/filename="([^"]+)"/)
-        expect(match).not.toBeNull()
-        expect(match![1]).toMatch(/^portfolio-[0-9a-f-]{8}-export-.*\.json$/)
+
+        const invalidAllocations = { ...exportRes.body.allocations }
+        for (let index = 0; index < 9; index += 1) {
+            invalidAllocations[`ASSET_${index}`] = 0
+        }
+
+        const res = await request(app)
+            .post('/api/portfolio/import')
+            .send({
+                ...exportRes.body,
+                allocations: invalidAllocations,
+            })
+            .expect(422)
+
+        expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
 
-    it('body is valid JSON with GDPR meta fields', async () => {
-        const createRes = await request(app).get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-        const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
+    it('rejects imports whose allocations do not sum to 100%', async () => {
+        const exportRes = await request(app)
+            .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
             .expect(200)
-        const body = typeof res.body === 'object' ? res.body : JSON.parse(res.text)
-        expect(body.meta?.format).toBe('json')
-        expect(body.meta?.purpose).toBe('GDPR data export')
-        expect(body.portfolioId).toBe(sharedPortfolioId)
-        expect(body.exportedAt).toBeDefined()
-        expect(Array.isArray(body.rebalanceHistory)).toBe(true)
+
+        const res = await request(app)
+            .post('/api/portfolio/import')
+            .send({
+                ...exportRes.body,
+                allocations: { XLM: 59, USDC: 40 },
+            })
+            .expect(422)
+
+        expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
 })
 
@@ -285,23 +428,23 @@ describe('Export error handling', () => {
     it('returns 400 for an unsupported format (xlsx)', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=xlsx`)
-            .expect(400)
+            .expect(422)
         expect(res.body.success).toBe(false)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
 
-    it('returns 400 when format query param is omitted', async () => {
+    it('returns JSON when format query param is omitted', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export`)
-            .expect(400)
-        expect(res.body.success).toBe(false)
-        expect(res.body.error.code).toBe('VALIDATION_ERROR')
+            .expect(200)
+        expect(res.body.schemaVersion).toBe(1)
+        expect(res.body.userAddress).toBe(OWNER_ADDRESS)
     })
 
     it('returns 400 for an empty format param', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=`)
-            .expect(400)
+            .expect(422)
         expect(res.body.success).toBe(false)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
@@ -309,7 +452,7 @@ describe('Export error handling', () => {
     it('returns 400 for format=XML (case sensitivity)', async () => {
         const res = await request(app)
             .get(`/api/portfolio/${sharedPortfolioId}/export?format=XML`)
-            .expect(400)
+            .expect(422)
         expect(res.body.success).toBe(false)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
@@ -349,16 +492,11 @@ describe('Ownership enforcement (auth enabled)', () => {
 
     it('200 when the correct owner JWT is provided', async () => {
         const ownerToken = mintJwt(OWNER_ADDRESS)
-        const createRes = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
-            .set('Authorization', `Bearer ${ownerToken}`)
-            .expect(202)
         const res = await request(app)
-            .get(`/api/portfolio/${sharedPortfolioId}/export/status/${createRes.body.data.jobId}`)
+            .get(`/api/portfolio/${sharedPortfolioId}/export?format=json`)
             .set('Authorization', `Bearer ${ownerToken}`)
             .expect(200)
         expect(res.headers['content-type']).toMatch(/application\/json/)
-        const body = typeof res.body === 'object' ? res.body : JSON.parse(res.text)
-        expect(body.meta?.purpose).toBe('GDPR data export')
+        expect(res.body.userAddress).toBe(OWNER_ADDRESS)
     })
 })

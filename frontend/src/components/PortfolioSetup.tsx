@@ -9,12 +9,13 @@
  *   - Submit blocked until all fields and total are valid
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
 // TanStack Query Mutations
 import {
   buildRollbackMessage,
   useCreatePortfolioMutation,
+  useImportPortfolioMutation,
 } from "../hooks/mutations/usePortfolioMutations";
 import {
   Plus,
@@ -26,10 +27,17 @@ import {
   User,
   Zap,
   RefreshCw,
+  Download,
+  Upload,
 } from "lucide-react";
 
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
+import { downloadJSON } from "../utils/export";
+import { percentageToBps, remainingAllocation } from "../utils/calculations";
+import { loadPortfolioCloneDraft, clearPortfolioCloneDraft } from "../utils/portfolioCloneDraft";
+import { clearPortfolioSetupDraft, loadPortfolioSetupDraft, savePortfolioSetupDraft, PortfolioSetupDraft } from "../hooks/usePortfolio";
+import { useAssets } from "../hooks/queries/useAssetsQuery";
 
 
 
@@ -178,8 +186,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
     loadPortfolioCloneDraft(),
   );
-
-
+  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(() => {
+    const result = loadPortfolioSetupDraft(publicKey)
+    return result.status === 'loaded' ? result.draft : null
+  })
+  const [draftPromptResolved, setDraftPromptResolved] = useState(!loadPortfolioSetupDraft(publicKey).draft)
+  const [draftRestored, setDraftRestored] = useState(false)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const hasMountedDraftSaver = useRef(false)
 
   useEffect(() => {
     if (!draftPromptResolved) return
@@ -295,6 +309,67 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   }
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation()
+  const importPortfolioMutation = useImportPortfolioMutation()
+  const importFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const buildExportPayload = () => ({
+    schemaVersion: 1 as const,
+    exportedAt: new Date().toISOString(),
+    userAddress: publicKey || 'demo-user',
+    allocations: allocations.reduce(
+      (acc, allocation) => {
+        acc[allocation.asset] = allocation.percentage
+        return acc
+      },
+      {} as Record<string, number>,
+    ),
+    threshold,
+    slippageTolerance,
+    strategy: strategy || 'threshold',
+    strategyConfig: Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
+  })
+
+  const exportCurrentSettings = () => {
+    if (!isValidTotal || hasAnyFieldError) {
+      setError('Fix the allocation validation issues before exporting this portfolio')
+      return
+    }
+
+    const filename = `portfolio-settings_${publicKey ? publicKey.slice(0, 6) : 'demo'}_${new Date().toISOString()}.json`
+    downloadJSON(filename, buildExportPayload())
+  }
+
+  const openImportDialog = () => {
+    importFileInputRef.current?.click()
+  }
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setError(null)
+
+    try {
+      const raw = await file.text()
+      const parsed = JSON.parse(raw) as any
+      const payload = parsed?.portfolio ?? parsed?.data ?? parsed
+      const imported = await importPortfolioMutation.mutateAsync(payload)
+
+      clearPortfolioSetupDraft(publicKey)
+      clearPortfolioCloneDraft()
+      setCloneDraft(null)
+      setPendingDraft(null)
+      setDraftPromptResolved(true)
+      setSuccess(true)
+
+      if (imported?.portfolioId) {
+        setTimeout(() => onNavigate('dashboard'), 2000)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed. Please check the JSON file and try again.')
+    }
+  }
 
   // ── Validation ─────────────────────────────────────────────────────────────
 
@@ -330,7 +405,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    * Positive = over-allocated (e.g. +5 means 105% total)
    * Negative = under-allocated (e.g. -10 means 90% total)
    */
-  const deviation = parseFloat((totalPercentage - 100).toFixed(1))
+  const deviation = parseFloat((totalPercentage - 100).toFixed(2))
 
   /**
    * Builds the real-time summary message shown below the allocation list.
@@ -367,6 +442,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
   const remaining = remainingAllocation(allocations);
+
+  const { data: selectableAssets = [], isLoading: assetsLoading } = useAssets()
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -465,7 +542,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     try {
       const allocationsMap = allocations.reduce(
         (acc, alloc) => {
-          acc[alloc.asset] = alloc.percentage
+          acc[alloc.asset] = percentageToBps(alloc.percentage)
           return acc
         },
         {} as Record<string, number>,
@@ -906,13 +983,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                             type="number"
                             min="0"
                             max="100"
-                            step="0.1"
+                            step="0.01"
                             value={allocation.percentage}
                             onChange={(e) =>
                               updateAllocation(
                                 index,
                                 'percentage',
-                                parseFloat(e.target.value) || 0,
+                                Number.isFinite(Number.parseFloat(e.target.value))
+                                  ? Number(Number.parseFloat(e.target.value).toFixed(2))
+                                  : 0,
                               )
                             }
                             // Marks the field as invalid for screen readers
@@ -993,7 +1072,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                           : 'text-yellow-600' // under 100%
                     }`}
                   >
-                    {totalPercentage.toFixed(1)}%
+                    {totalPercentage.toFixed(2)}%
                   </span>
                 </div>
 
@@ -1004,7 +1083,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   aria-valuenow={Math.min(totalPercentage, 100)}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-label={`${totalPercentage.toFixed(1)}% of 100% allocated`}
+                  aria-label={`${totalPercentage.toFixed(2)}% of 100% allocated`}
                 >
                   <div
                     className={`h-full rounded-full transition-all duration-200 ${
@@ -1023,7 +1102,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
                     <span>Remaining:</span>
                     <span className={remaining > 0 ? "text-yellow-600" : "text-red-600"}>
-                      {remaining > 0 ? `+${remaining.toFixed(1)}%` : `${remaining.toFixed(1)}%`}
+                      {remaining > 0 ? `+${remaining.toFixed(2)}%` : `${remaining.toFixed(2)}%`}
                     </span>
                   </div>
                 )}
@@ -1294,6 +1373,39 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   $10,000 (Demo)
                 </span>
               </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={exportCurrentSettings}
+                    disabled={!isValidTotal || hasAnyFieldError}
+                    className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openImportDialog}
+                    disabled={importPortfolioMutation.isPending}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {importPortfolioMutation.isPending ? 'Importing...' : 'Import JSON'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Export saves the current settings as JSON. Import uploads a portfolio export and creates a new portfolio from it.
+                </p>
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  aria-label="Import portfolio JSON"
+                  onChange={handleImportFileChange}
+                />
+              </div>
             </div>
 
             {/*
@@ -1323,7 +1435,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     : "text-red-600 dark:text-red-400"
                 }`}
               >
-                {totalPercentage.toFixed(1)}%
+                {totalPercentage.toFixed(2)}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
                 {allocations.length} asset{allocations.length !== 1 ? "s" : ""}
