@@ -1,6 +1,16 @@
 import { WebSocketServer, WebSocket } from 'ws';
-
+import {
+  WSMessageSchema,
+  PROTOCOL_VERSION,
+  type WSSessionMetadata,
+  HEARTBEAT_INTERVAL_MS,
+  RECONNECT_MAX_ATTEMPTS,
+  RECONNECT_SUGGESTED_BACKOFF_MS
+} from '../types/websocket.js';
+import { verifyAccessTokenForWebSocket } from '../middleware/requireJwt.js';
+import { getAuthConfig } from './authService.js';
 import { logger } from '../utils/logger.js';
+import { ReflectorService } from './reflector.js';
 
 interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
@@ -98,22 +108,48 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
 
       client.isAlive = false;
       ws.ping();
-      sendWsMessage(ws, {
-        type: 'HEARTBEAT',
-        payload: {
-          serverTime: Date.now(),
-          heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-          reconnectPolicy: {
-            maxAttempts: RECONNECT_MAX_ATTEMPTS,
-            suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
+      if (client.isSubscribed) {
+        sendWsMessage(ws, {
+          type: 'HEARTBEAT',
+          payload: {
+            serverTime: Date.now(),
+            heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+            reconnectPolicy: {
+              maxAttempts: RECONNECT_MAX_ATTEMPTS,
+              suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
+            }
           }
-        }
-      });
+        });
+      }
     });
   }, HEARTBEAT_INTERVAL_MS);
 
+  const PRICE_BROADCAST_INTERVAL_MS = 30_000;
+  const reflectorService = new ReflectorService();
+  const priceBroadcastInterval = setInterval(async () => {
+    if (!attachedServer || attachedServer.clients.size === 0) return;
+    try {
+      const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta();
+      const message = JSON.stringify({
+        type: 'PRICE_UPDATE',
+        version: PROTOCOL_VERSION,
+        payload: { prices, feedMeta },
+        timestamp: Date.now(),
+      });
+      attachedServer.clients.forEach((ws) => {
+        const client = ws as ExtWebSocket;
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (!client.isSubscribed) return;
+        ws.send(message);
+      });
+    } catch (err) {
+      logger.warn('[WS] Price broadcast failed', { error: String(err) });
+    }
+  }, PRICE_BROADCAST_INTERVAL_MS);
+
   wss.on('close', () => {
     clearInterval(interval);
+    clearInterval(priceBroadcastInterval);
     attachedServer = null;
   });
 
@@ -121,6 +157,60 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
     const extWs = ws as ExtWebSocket;
     extWs.isAlive = true;
 
+    // === HARDENED HANDSHAKE: Validate JWT authorization ===
+    if (authConfig.enabled) {
+      const token = extractTokenFromRequest(req);
+      const verification = verifyAccessTokenForWebSocket(token ?? '');
+
+      if (!verification.ok) {
+        logger.warn('[WS] Connection rejected — auth failed', {
+          reason: verification.reason,
+          message: verification.message
+        });
+        ws.close(
+          1008, // Policy Violation
+          `Authentication failed: ${verification.message}`
+        );
+        return;
+      }
+
+      // Store authenticated session metadata
+      extWs.userId = verification.payload.sub;
+      extWs.sessionMetadata = {
+        userId: verification.payload.sub,
+        authenticatedAt: new Date().toISOString(),
+        tokenExpiresAt: verification.expiresAt.toISOString(),
+        tokenExpiryTimestamp: Math.floor(verification.expiresAt.getTime() / 1000)
+      };
+
+      logger.info('[WS] Client authenticated and connected', {
+        userId: extWs.userId,
+        expiresAt: extWs.sessionMetadata.tokenExpiresAt
+      });
+    } else {
+      // Fallback: read userId from query params (dev/test mode only)
+      const requestUrl = req.url ?? '';
+      const wsUrl = new URL(requestUrl, 'ws://localhost');
+      extWs.userId = wsUrl.searchParams.get('userId') ?? undefined;
+      logger.info('[WS] Client connected (auth disabled)', { userId: extWs.userId });
+    }
+
+    ws.send(JSON.stringify({
+      type: 'CONNECTION_ACK',
+      message: 'Validation and Monitoring Active',
+      version: PROTOCOL_VERSION,
+      payload: {
+        heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+        reconnectPolicy: {
+          maxAttempts: RECONNECT_MAX_ATTEMPTS,
+          suggestedBackoffMs: RECONNECT_SUGGESTED_BACKOFF_MS
+        }
+      },
+      sessionMetadata: extWs.sessionMetadata ? {
+        authenticatedAt: extWs.sessionMetadata.authenticatedAt,
+        tokenExpiresAt: extWs.sessionMetadata.tokenExpiresAt
+      } : undefined
+    }));
 
     ws.on('pong', () => {
       extWs.isAlive = true;
@@ -182,10 +272,12 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
             });
         }
 
-          type: 'ERROR',
-          payload: `Incompatible version or format. Use v${PROTOCOL_VERSION}`
-        });
-      }
+        } catch (err) {
+          sendWsMessage(ws, {
+            type: 'ERROR',
+            payload: `Incompatible version or format. Use v${PROTOCOL_VERSION}`
+          });
+        }
     });
 
     ws.on('close', (_code, reason) => {

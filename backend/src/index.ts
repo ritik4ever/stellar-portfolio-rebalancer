@@ -47,7 +47,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     const app = express()
 
-    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins)
+    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins, config.nodeEnv)
 
     app.use(enforceCorsOriginAllowlist(config.corsOrigins))
     app.use(cors(corsOptions))
@@ -60,7 +60,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     const sendReadiness = async (_req: Request, res: Response) => {
         const report = await buildReadinessReport()
-        res.status(report.status === 'ready' ? 200 : 503).json(report)
+        res.status((report as any).status === 'ready' ? 200 : 503).json(report)
     }
 
     app.get('/readiness', sendReadiness)
@@ -98,6 +98,11 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
 
+    const enableApiDocs = process.env.ENABLE_API_DOCS || (config.nodeEnv !== 'production' ? 'true' : 'false')
+    if (enableApiDocs === 'true') {
+        app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
+    }
+
     const serveOpenApiJson = (_req: Request, res: Response) => {
         res.setHeader('Content-Type', 'application/json')
         res.json(spec)
@@ -109,8 +114,26 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     app.use(apiErrorHandler)
 
     const server = createServer(app)
-    const wss = new WebSocketServer({ server })
+    const wss = new WebSocketServer({ noServer: true })
     initRobustWebSocket(wss)
+
+    const { initPortfolioFeedWebSocket } = await import('./ws/portfolioFeed.js')
+    const portfolioWss = new WebSocketServer({ noServer: true })
+    initPortfolioFeedWebSocket(portfolioWss)
+
+    server.on('upgrade', (request, socket, head) => {
+        const pathname = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`).pathname
+
+        if (pathname.startsWith('/ws/portfolio/')) {
+            portfolioWss.handleUpgrade(request, socket as any, head, (ws) => {
+                portfolioWss.emit('connection', ws, request)
+            })
+        } else {
+            wss.handleUpgrade(request, socket as any, head, (ws) => {
+                wss.emit('connection', ws, request)
+            })
+        }
+    })
 
     const rateLimitStore = getRateLimitStoreType()
     logger.info('[STARTUP] Config fingerprint', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)

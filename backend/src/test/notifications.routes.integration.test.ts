@@ -30,6 +30,8 @@ vi.mock('../middleware/rateLimit.js', () => ({
     criticalRateLimiter: passThroughMiddleware,
     adminRateLimiter: passThroughMiddleware,
     protectedCriticalLimiter: [passThroughMiddleware, passThroughMiddleware],
+    dynamicRateLimiter: passThroughMiddleware,
+    isTrustedHealthProbe: () => false,
     requestMonitoringMiddleware: passThroughMiddleware,
     closeRateLimitStore: vi.fn(),
     getRateLimitStoreType: () => 'memory' as const,
@@ -63,6 +65,10 @@ describe('Notification Preferences API Integration Tests', () => {
 
     beforeAll(async () => {
         process.env.WEBHOOK_SIGNING_SECRET = 'test-webhook-secret-for-callback-tests-32c!!'
+        process.env.SMTP_HOST = 'smtp.test.com'
+        process.env.SMTP_PORT = '587'
+        process.env.SMTP_USER = 'test@test.com'
+        process.env.SMTP_PASS = 'testpass'
         process.env.NODE_ENV = 'test'
 
         const testDir = join(tmpdir(), `stellar-notif-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -79,6 +85,10 @@ describe('Notification Preferences API Integration Tests', () => {
         }
         delete process.env.DB_PATH
         delete process.env.WEBHOOK_SIGNING_SECRET
+        delete process.env.SMTP_HOST
+        delete process.env.SMTP_PORT
+        delete process.env.SMTP_USER
+        delete process.env.SMTP_PASS
     })
 
     beforeEach(() => {
@@ -89,15 +99,20 @@ describe('Notification Preferences API Integration Tests', () => {
     })
 
     describe('GET /api/notifications/preferences - defaults for new user', () => {
-        it('returns null preferences for new user (no pre-existing prefs)', async () => {
+        it('returns default preferences for new user (auto-initialized)', async () => {
             const res = await request(app)
                 .get('/api/notifications/preferences')
                 .query({ userId: TEST_USER })
                 .expect(200)
 
             expect(res.body.success).toBe(true)
-            expect(res.body.data.preferences).toBeNull()
-            expect(res.body.data.message).toContain('No preferences found')
+            expect(res.body.data.preferences).not.toBeNull()
+            expect(res.body.data.preferences.emailEnabled).toBe(false)
+            expect(res.body.data.preferences.webhookEnabled).toBe(false)
+            expect(res.body.data.preferences.events.rebalance).toBe(true)
+            expect(res.body.data.preferences.events.circuitBreaker).toBe(true)
+            expect(res.body.data.preferences.events.priceMovement).toBe(true)
+            expect(res.body.data.preferences.events.riskChange).toBe(true)
         })
 
         it('returns 400 when userId query param is missing', async () => {
@@ -208,6 +223,32 @@ describe('Notification Preferences API Integration Tests', () => {
                 .expect(400)
 
             expect(res.body.success).toBe(false)
+        })
+
+        it('returns 503 when email is enabled but SMTP transport is not configured', async () => {
+            const originalSmptPass = process.env.SMTP_PASS
+            delete process.env.SMTP_PASS
+
+            const res = await request(app)
+                .post('/api/notifications/subscribe')
+                .send({
+                    userId: TEST_USER,
+                    emailEnabled: true,
+                    emailAddress: 'test@example.com',
+                    webhookEnabled: false,
+                    events: {
+                        rebalance: true,
+                        circuitBreaker: true,
+                        priceMovement: true,
+                        riskChange: true
+                    }
+                })
+                .expect(503)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE')
+
+            process.env.SMTP_PASS = originalSmptPass
         })
     })
 

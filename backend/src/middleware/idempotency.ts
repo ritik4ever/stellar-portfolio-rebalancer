@@ -4,13 +4,17 @@ import {
     dbGetIdempotencyResult,
     dbStoreIdempotencyResult
 } from '../db/idempotencyDb.js'
+import {
+    redisGetIdempotencyResult,
+    redisStoreIdempotencyResult
+} from '../services/idempotencyRedisStore.js'
 import { fail } from '../utils/apiResponse.js'
 import { stableStringify } from '../utils/helpers.js'
+import { logger } from '../utils/logger.js'
 
-export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
+export const idempotencyMiddleware: RequestHandler = async (req, res, next) => {
     const key = req.headers['idempotency-key'] as string | undefined
 
-    // No header → pass through (idempotency is opt-in)
     if (!key) return next()
 
     if (key.length < 1 || key.length > 255) {
@@ -22,7 +26,6 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
         ?? (req.headers['x-public-key'] as string | undefined)
         ?? 'anonymous'
 
-    // Fingerprint = method + path + canonicalised body + caller identity
     const requestHash = createHash('sha256')
         .update(req.method)
         .update(req.path)
@@ -30,32 +33,41 @@ export const idempotencyMiddleware: RequestHandler = (req, res, next) => {
         .update(requestUser)
         .digest('hex')
 
-    const existing = dbGetIdempotencyResult(key)
+    const existingRedis = await redisGetIdempotencyResult(key)
+    const existing = existingRedis ?? dbGetIdempotencyResult(key)
 
     if (existing) {
         if (existing.requestHash !== requestHash) {
-            // Same key, different payload → reject
+            logger.warn('[IDEMPOTENCY] Key reuse with different payload', {
+                key,
+                method: req.method,
+                path: req.path,
+                user: requestUser,
+                storedHash: existing.requestHash,
+                newHash: requestHash,
+            })
             fail(
                 res,
                 409,
                 'CONFLICT',
                 'Idempotency-Key already used with a different request payload',
-                { idempotencyKey: key }
+                { idempotencyKey: key, reason: 'Payload hash mismatch' }
             )
             return
         }
-        // Same key, same payload → safe replay
         res.set('Idempotency-Replayed', 'true')
         res.set('Idempotency-Key', key)
         res.status(existing.statusCode).json(JSON.parse(existing.responseBody))
         return
     }
 
-    // First time — intercept res.json to persist the result before sending
     const originalJson = res.json.bind(res)
     res.json = (body: unknown) => {
         try {
             dbStoreIdempotencyResult(
+                key, requestHash, req.method, req.path, res.statusCode, body
+            )
+            redisStoreIdempotencyResult(
                 key, requestHash, req.method, req.path, res.statusCode, body
             )
         } catch {

@@ -1,9 +1,10 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { TrendingUp, Shield, Zap, ArrowRight, X, Layers, Activity, Lock } from 'lucide-react'
+import { TrendingUp, Shield, Zap, ArrowRight, X, Layers, Activity, Lock, ChevronDown, LogOut, Wallet } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import { WalletSelector } from './WalletSelector'
 import { api, ENDPOINTS } from '../config/api'
+import { getConfiguredNetwork } from '../utils/networkDetection'
 
 interface LandingProps {
     onNavigate: (view: string) => void
@@ -16,6 +17,20 @@ interface LandingProps {
 const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsConsent, isConnecting, publicKey }) => {
     const [showWalletSelector, setShowWalletSelector] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [showWalletDropdown, setShowWalletDropdown] = useState(false)
+    const [walletNetwork,] = useState<string | null>(null)
+    const dropdownRef = useRef<HTMLDivElement>(null)
+    const configuredNetwork = getConfiguredNetwork()
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setShowWalletDropdown(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [])
 
     const handleConnectWallet = async () => {
         setShowWalletSelector(true)
@@ -45,6 +60,12 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
         setError(errorMsg)
     }
 
+    const handleDisconnect = async () => {
+        setShowWalletDropdown(false)
+        // The actual disconnect is handled by the parent component via navigation
+        onNavigate('landing')
+    }
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
             {/* Header */}
@@ -55,21 +76,58 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
                     </div>
                     <span className="text-xl font-bold text-gray-900 dark:text-white">Portfolio Rebalancer</span>
                 </div>
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-3 sm:space-x-4">
                     <ThemeToggle />
                     {publicKey ? (
-                        <button
-                            onClick={() => onNavigate('dashboard')}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                        >
-                            Go to Dashboard
-                        </button>
+                        <div className="relative" ref={dropdownRef}>
+                            <button
+                                onClick={() => setShowWalletDropdown(!showWalletDropdown)}
+                                className="flex items-center space-x-2 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 px-3 py-2 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
+                            >
+                                <Wallet className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                <span className="text-sm font-medium text-green-700 dark:text-green-300 hidden sm:inline">
+                                    {publicKey.slice(0, 6)}...{publicKey.slice(-4)}
+                                </span>
+                                <span className="text-sm font-medium text-green-700 dark:text-green-300 sm:hidden">
+                                    {publicKey.slice(0, 4)}...{publicKey.slice(-4)}
+                                </span>
+                                <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                                    configuredNetwork === 'mainnet' 
+                                        ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
+                                        : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                                }`}>
+                                    {configuredNetwork === 'mainnet' ? 'Mainnet' : 'Testnet'}
+                                </span>
+                                <ChevronDown className="w-4 h-4 text-green-600 dark:text-green-400" />
+                            </button>
+                            {showWalletDropdown && (
+                                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+                                    <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Connected as</p>
+                                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                            {publicKey.slice(0, 8)}...{publicKey.slice(-8)}
+                                        </p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                            {configuredNetwork === 'mainnet' ? 'Mainnet' : 'Testnet'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={handleDisconnect}
+                                        className="w-full flex items-center px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                    >
+                                        <LogOut className="w-4 h-4 mr-2" />
+                                        Disconnect
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <button
                             onClick={handleConnectWallet}
                             disabled={isConnecting}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors flex items-center"
+                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-3 sm:px-4 py-2 rounded-lg transition-colors flex items-center text-sm sm:text-base"
                         >
+                            <Wallet className="w-4 h-4 mr-2" />
                             Connect Wallet
                         </button>
                     )}

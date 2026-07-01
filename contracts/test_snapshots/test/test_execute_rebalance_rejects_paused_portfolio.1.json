@@ -24,7 +24,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -230,7 +230,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                             },
                             "val": {
-                              "u32": 100
+                              "u32": 10000
                             }
                           }
                         ]
@@ -321,6 +321,18 @@
                         },
                         "val": {
                           "bool": true
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LastTimestamp"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 20000
                         }
                       },
                       {
@@ -518,7 +530,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -708,7 +720,7 @@
             ],
             "data": {
               "error": {
-                "contract": 16
+                "contract": 18
               }
             }
           }
@@ -729,7 +741,7 @@
               },
               {
                 "error": {
-                  "contract": 16
+                  "contract": 18
                 }
               }
             ],
@@ -754,7 +766,7 @@
               },
               {
                 "error": {
-                  "contract": 16
+                  "contract": 18
                 }
               }
             ],

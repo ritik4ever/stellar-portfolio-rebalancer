@@ -238,7 +238,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -279,7 +279,7 @@
             ],
             "data": {
               "error": {
-                "contract": 18
+                "contract": 15
               }
             }
           }
@@ -300,7 +300,7 @@
               },
               {
                 "error": {
-                  "contract": 18
+                  "contract": 15
                 }
               }
             ],
@@ -325,7 +325,7 @@
               },
               {
                 "error": {
-                  "contract": 18
+                  "contract": 15
                 }
               }
             ],
@@ -349,7 +349,7 @@
                             "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                           },
                           "val": {
-                            "u32": 100
+                            "u32": 10000
                           }
                         }
                       ]
@@ -388,7 +388,7 @@
               },
               {
                 "error": {
-                  "contract": 18
+                  "contract": 15
                 }
               }
             ],

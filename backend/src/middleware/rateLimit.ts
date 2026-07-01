@@ -6,20 +6,16 @@ import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
-import { validateStartupConfigOrThrow } from "../config/startupConfig.js";
 
+const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
+const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
+const WRITE_MAX = parseInt(process.env.RATE_LIMIT_WRITE_MAX || "", 10) || 20;
+const AUTH_MAX = parseInt(process.env.RATE_LIMIT_AUTH_MAX || "", 10) || 10;
+const CRITICAL_MAX = parseInt(process.env.RATE_LIMIT_CRITICAL_MAX || "", 10) || 5;
 
-
-// Rate limiting configuration from startupConfig
-const GLOBAL_WINDOW_MS = config.rateLimitWindowMs;
-const GLOBAL_MAX = config.rateLimitMax;
-const WRITE_MAX = config.rateLimitWriteMax;
-const AUTH_MAX = config.rateLimitAuthMax;
-const CRITICAL_MAX = config.rateLimitCriticalMax;
-
-const BURST_WINDOW_MS = config.rateLimitBurstWindowMs;
-const BURST_MAX = config.rateLimitBurstMax;
-const WRITE_BURST_MAX = config.rateLimitWriteBurstMax;
+const BURST_WINDOW_MS = parseInt(process.env.RATE_LIMIT_BURST_WINDOW_MS || "", 10) || 1000;
+const BURST_MAX = parseInt(process.env.RATE_LIMIT_BURST_MAX || "", 10) || 5;
+const WRITE_BURST_MAX = parseInt(process.env.RATE_LIMIT_WRITE_BURST_MAX || "", 10) || 3;
 
 let redisClient: IORedis | undefined;
 
@@ -40,7 +36,7 @@ if (process.env.NODE_ENV !== "test") {
     redisClient = new IORedis(REDIS_URL, {
       lazyConnect: true,
       connectTimeout: 3000,
-      maxRetriesPerRequest: null,
+      maxRetriesPerRequest: 0,
       enableReadyCheck: false,
     });
     // Absorb all connection errors so a missing Redis never crashes the process.
@@ -126,7 +122,21 @@ function createKeyGenerator(prefix: string) {
 // ---------------------------------------------------------------------------
 /** @internal Use isTrustedHealthProbe() in middleware skip functions. */
 function isProbePath(path: string): boolean {
+  return ["/health", "/ready", "/readiness", "/metrics"].includes(path);
+}
 
+function isTrustedHealthProbe(req: Request): boolean {
+  const path = req.path || "";
+  if (!isProbePath(path)) return false;
+
+  const ip = req.ip || "";
+  const loopbacks = ["::1", "127.0.0.1", "::ffff:127.0.0.1", "localhost"];
+  if (loopbacks.includes(ip)) return true;
+
+  const secret = process.env.HEALTH_PROBE_SECRET || "";
+  if (secret && req.headers["x-probe-secret"] === secret) return true;
+
+  return false;
 }
 
 function skipSuccessfulRequests(
@@ -155,6 +165,7 @@ export const globalRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("global"),
   skip: skipSuccessfulRequests,
+  passOnStoreError: true,
   message: "Too many requests from this IP, please try again later.",
 });
 
@@ -167,6 +178,7 @@ export const burstProtectionLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("burst"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const writeRateLimiter = rateLimit({
@@ -178,6 +190,7 @@ export const writeRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("write"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const writeBurstLimiter = rateLimit({
@@ -189,6 +202,7 @@ export const writeBurstLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("write-burst"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const authRateLimiter = rateLimit({
@@ -200,6 +214,7 @@ export const authRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("auth"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const criticalRateLimiter = rateLimit({
@@ -211,6 +226,7 @@ export const criticalRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("critical"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 export const adminRateLimiter = rateLimit({
@@ -222,6 +238,7 @@ export const adminRateLimiter = rateLimit({
   legacyHeaders: true,
   store: makeStore("admin"),
   skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
 });
 
 // Composite middleware definitions

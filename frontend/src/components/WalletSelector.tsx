@@ -91,6 +91,8 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                 errorMessage = 'Network mismatch. Please check your wallet network settings.'
             } else if (error.code === 'TIMEOUT') {
                 errorMessage = 'Connection timed out. Please try again.'
+            } else if (error.message && error.message.includes('popup')) {
+                errorMessage = 'Popup was blocked by your browser. Please allow popups for this site and try again.'
             } else if (error.message) {
                 errorMessage = error.message
             }

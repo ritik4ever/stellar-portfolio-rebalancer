@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import PortfolioSetup from './components/PortfolioSetup'
+import Settings from './pages/Settings'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Legal from './components/Legal'
 import ConsentGate from './components/ConsentGate'
+import { trackPageView, trackEvent } from './analytics'
 import { walletManager } from './utils/walletManager'
 import { WalletError } from './utils/walletAdapters'
 import { login as authLogin } from './services/authService'
@@ -28,7 +31,16 @@ import {
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
+import {
+    detectContractCapabilities,
+    type ContractCapabilityReport,
+} from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
+import PublicPortfolio from './pages/PublicPortfolio'
+
+import Shortcuts from './components/Shortcuts'
+import Onboarding, { resetOnboarding } from './components/Onboarding'
+import OnboardingChecklist from './components/OnboardingChecklist'
 
 function App() {
     const queryClient = useQueryClient()
@@ -45,6 +57,8 @@ function App() {
     const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
     const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
     const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
+    const [contractCapabilities, setContractCapabilities] =
+        useState<ContractCapabilityReport | null>(null)
 
     const showBackendBanner = loadError || notices.length > 0
     const showApiCompatibilityBanner =
@@ -60,6 +74,23 @@ function App() {
 
     const [bootChecks, setBootChecks] = useState<BootCheck[]>([])
     const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
+    const settingsDirtyRef = useRef(false)
+
+    const [publicShareHash, setPublicShareHash] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/public\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
+
+    const [embedPortfolioId, setEmbedPortfolioId] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/embed\/portfolio\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
 
     useEffect(() => {
         checkWalletConnection()
@@ -85,6 +116,19 @@ function App() {
         void checkApiCompatibility(controller.signal).then((result) => {
             setApiCompatibility(result)
             setApiCompatibilityLoading(false)
+        })
+        return () => controller.abort()
+    }, [])
+
+    // Lightweight contract capability detection: confirm the deployment supports
+    // the documented methods before any write is attempted (issue #834).
+    useEffect(() => {
+        const controller = new AbortController()
+        void detectContractCapabilities(controller.signal).then((report) => {
+            setContractCapabilities(report)
+            if (report.severity !== 'ok') {
+                console.warn(`[contract] ${report.title}: ${report.message}`)
+            }
         })
         return () => controller.abort()
     }, [])
@@ -144,8 +188,10 @@ function App() {
             }
 
             setPublicKey(pk)
+            trackEvent('wallet_connected')
             if (navigateToDashboard) {
                 setCurrentView('dashboard')
+                trackPageView('dashboard')
             }
             await queryClient.invalidateQueries()
             return true
@@ -240,11 +286,15 @@ function App() {
     }
 
     const handleNavigate = (view: string, legalDocType?: LegalDocType) => {
+        if (currentView === 'settings' && settingsDirtyRef.current && view !== 'settings') {
+            if (!window.confirm('You have unsaved changes in Settings. Leave without saving?')) return
+        }
         setError(null)
         if (legalDocType) setLegalDoc(legalDocType)
         else if (view.startsWith('legal-')) setLegalDoc(view.replace('legal-', '') as LegalDocType)
         else setLegalDoc(null)
         setCurrentView(view)
+        trackPageView(view)
     }
 
     const errorTop = showBackendBanner ? 'top-[4.25rem]' : 'top-4'
@@ -297,7 +347,18 @@ function App() {
                     {appCopy.checkingApiConfig}
                 </span>
             ) : null}
-            <DeveloperDrawer publicKey={publicKey} />
+            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} />
+            <Shortcuts
+                onNewPortfolio={() => handleNavigate('setup')}
+                onOpenSettings={() => {
+                    if (currentView === 'dashboard') {
+                        resetOnboarding()
+                        window.location.reload()
+                    }
+                }}
+            />
+            <Onboarding />
+            <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"
@@ -370,6 +431,10 @@ function App() {
                     doc={legalDoc}
                     onBack={() => handleNavigate('landing')}
                 />
+            ) : embedPortfolioId ? (
+                <EmbedWidget id={embedPortfolioId} />
+            ) : publicShareHash ? (
+                <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (
                 <div className="relative">
                     <Landing
@@ -417,15 +482,33 @@ function App() {
                     ) : null}
                 </div>
             ) : currentView === 'dashboard' ? (
-                <Dashboard
-                    onNavigate={handleNavigate}
-                    publicKey={publicKey}
-                />
+                <ErrorBoundary fallbackTitle="Dashboard">
+                    <Dashboard
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
             ) : currentView === 'setup' ? (
-                <PortfolioSetup
-                    onNavigate={handleNavigate}
-                    publicKey={publicKey}
-                />
+                <ErrorBoundary fallbackTitle="Portfolio Setup">
+                    <PortfolioSetup
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'wizard' ? (
+                <ErrorBoundary fallbackTitle="Portfolio Wizard">
+                    <PortfolioWizard
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'settings' ? (
+                <ErrorBoundary fallbackTitle="Settings">
+                    <Settings
+                        onNavigate={handleNavigate}
+                        onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
+                    />
+                </ErrorBoundary>
             ) : null}
         </div>
     )

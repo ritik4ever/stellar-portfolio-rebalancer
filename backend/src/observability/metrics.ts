@@ -1,6 +1,7 @@
 
-
-
+import { Registry, collectDefaultMetrics, Histogram, Counter, Gauge } from 'prom-client';
+import { observabilityConfig } from './config.js';
+import type { Request, Response, NextFunction } from 'express';
 
 const register = new Registry();
 
@@ -183,6 +184,14 @@ const workerStatus = new Gauge({
   registers: [register],
 });
 
+export const dbQueryDuration = new Histogram({
+  name: `${observabilityConfig.metrics.prefix}db_query_duration_seconds`,
+  help: "Database query duration in seconds",
+  labelNames: ["operation", "status"] as const,
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  registers: [register],
+});
+
 const routeLabel = (req: Request): string =>
   req.route?.path || req.path || "unknown";
 
@@ -217,10 +226,11 @@ export const metricsMiddleware = (
 };
 
 export async function getMetricsPayload(): Promise<string> {
-
+  return await register.metrics();
 }
 
-
+export function getMetricsContentType(): string {
+  return register.contentType;
 }
 
 export function recordCacheOperation(operation: "hit" | "miss" | "eviction" | "update", asset: string): void {
@@ -233,6 +243,38 @@ export function recordCacheTtl(ttlSeconds: number): void {
 
 export function recordCacheExpiration(asset: string): void {
   cacheExpirationCounterTotal.inc({ asset });
+}
+
+export function recordPriceFeedResolution(meta: { resolutionHint: string; degraded: boolean; staleOrLimited: boolean }): void {
+  priceFeedResolutionsTotal.inc({
+    resolution_hint: meta.resolutionHint,
+    degraded: String(meta.degraded),
+    stale_or_limited: String(meta.staleOrLimited),
+  });
+}
+
+export function recordReflectorFallbackUsage(reason: string): void {
+  reflectorFallbackUsageTotal.inc({ reason });
+}
+
+export function recordReflectorStalePrice(asset: string): void {
+  reflectorStalePricesTotal.inc({ asset });
+}
+
+export function recordCacheHitRatio(asset: string, ratio: number): void {
+  cacheHitRatioGauge.set({ asset }, ratio);
+}
+
+export function recordCacheAge(asset: string, ageMs: number): void {
+  cacheAgeHistogram.observe({ asset }, ageMs);
+}
+
+export function recordCacheSize(sizeBytes: number): void {
+  cacheSizeGauge.set(sizeBytes);
+}
+
+export function recordCacheEntries(count: number): void {
+  cacheEntriesGauge.set(count);
 }
 
 // ── Auth security event metrics (Issue #423) ─────────────────────────────────

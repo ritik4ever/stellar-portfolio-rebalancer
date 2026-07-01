@@ -144,16 +144,6 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
     const error = queryError ? 'Failed to load rebalance history' : null
     const loading = forcedLoading || (isLoading && !data)
 
-    const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => {
-        const date = new Date(timestamp)
-
-        const dateFormatted = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        })
-
-
     const formatDateTime = (timestamp: string): { dateFormatted: string, timeFormatted: string } => ({
         dateFormatted: formatShortDate(timestamp),
         timeFormatted: formatTime(timestamp),
@@ -243,53 +233,37 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
         )
     }
 
-    //  NEW: Export History as CSV (timestamps + trades + status)
+    //  NEW: Export History as CSV with required columns: date, asset, before_pct, after_pct, amount_traded, fee, slippage
     const exportHistoryCSV = () => {
-        const rows = (history || []).map((event) => ({
-            timestamp: event.timestamp,
-            status: event.status,
-            trigger: event.trigger,
-            tradesCount: event.trades,
-            gasUsed: event.gasUsed,
-            portfolioId: event.portfolioId,
-            eventSource: event.eventSource ?? '',
-            onChainConfirmed: event.onChainConfirmed ? 'true' : 'false',
-            chain: event.details?.chain ?? '',
-            riskLevel: event.details?.riskLevel ?? '',
-            volatilityDetected: event.details?.volatilityDetected ? 'true' : 'false',
-            fromAsset: event.details?.fromAsset ?? '',
-            toAsset: event.details?.toAsset ?? '',
-            amount: event.details?.amount ?? '',
-            performanceImpact: event.details?.performanceImpact ?? '',
-            priceDirection: event.details?.priceDirection ?? '',
-            executionTimeMs: event.details?.executionTime ?? '',
-            reason: event.details?.reason ?? '',
-            totalSlippageBps: event.details?.totalSlippageBps ?? '',
-            slippagePct: event.details?.totalSlippageBps != null ? (event.details.totalSlippageBps / 100).toFixed(2) + '%' : ''
-        }))
+        const rows = (history || []).map((event) => {
+            const date = new Date(event.timestamp)
+            const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD format
+            
+            return {
+                date: dateStr,
+                asset: event.details?.fromAsset || event.details?.toAsset || '',
+                before_pct: '', // Not available in current data structure
+                after_pct: '', // Not available in current data structure
+                amount_traded: event.details?.amount || '',
+                fee: event.gasUsed || event.details?.gasFeeXlm || '',
+                slippage: event.details?.totalSlippageBps != null 
+                    ? (event.details.totalSlippageBps / 100).toFixed(4) + '%' 
+                    : ''
+            }
+        })
 
         const csv = toCSV(rows, [
-            'timestamp',
-            'status',
-            'trigger',
-            'tradesCount',
-            'gasUsed',
-            'portfolioId',
-            'eventSource',
-            'onChainConfirmed',
-            'chain',
-            'riskLevel',
-            'volatilityDetected',
-            'fromAsset',
-            'toAsset',
-            'amount',
-            'performanceImpact',
-            'priceDirection',
-            'executionTimeMs',
-            'reason'
+            'date',
+            'asset',
+            'before_pct',
+            'after_pct',
+            'amount_traded',
+            'fee',
+            'slippage'
         ])
 
-        const filename = `rebalance_history_${portfolioId ?? 'all'}_${new Date().toISOString()}.csv`
+        const today = new Date().toISOString().split('T')[0]
+        const filename = `rebalance_history_${today}.csv`
         downloadCSV(filename, csv)
     }
 
@@ -305,7 +279,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                         ))}
                     </div>
                 </div>
-            </section>
+            </div>
         )
     }
 
@@ -503,7 +477,7 @@ const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoad
                         )
                     })
                 )}
-            </div>
+            </header>
 
             {history.length > 0 && (
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">

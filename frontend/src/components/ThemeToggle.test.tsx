@@ -5,10 +5,15 @@ import ThemeToggle from './ThemeToggle'
 const themeMocks = vi.hoisted(() => ({
     toggleTheme: vi.fn(),
     isDark: false,
+    preference: 'light' as 'light' | 'dark' | 'system',
 }))
 
 vi.mock('../context/ThemeContext', () => ({
-    useTheme: vi.fn(() => ({ isDark: themeMocks.isDark, toggleTheme: themeMocks.toggleTheme })),
+    useTheme: vi.fn(() => ({
+        isDark: themeMocks.isDark,
+        preference: themeMocks.preference,
+        toggleTheme: themeMocks.toggleTheme,
+    })),
 }))
 
 describe('ThemeToggle', () => {
@@ -16,6 +21,7 @@ describe('ThemeToggle', () => {
         cleanup()
         vi.clearAllMocks()
         themeMocks.isDark = false
+        themeMocks.preference = 'light'
     })
 
     it('exposes an accessible label and toggles the theme on click', () => {
@@ -29,6 +35,7 @@ describe('ThemeToggle', () => {
 
     it('updates the accessible label for dark mode', () => {
         themeMocks.isDark = true
+        themeMocks.preference = 'system'
         render(<ThemeToggle />)
 
         expect(screen.getByRole('button', { name: /switch to light mode/i })).toBeTruthy()

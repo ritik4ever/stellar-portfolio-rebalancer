@@ -1,4 +1,13 @@
-
+import type { Job } from "bullmq";
+import { Worker } from "bullmq";
+import { randomUUID } from "node:crypto";
+import { runWithRequestContext } from "../../utils/requestContext.js";
+import { logger, logAudit } from "../../utils/logger.js";
+import { StellarService } from "../../services/stellar.js";
+import { rebalanceHistoryService } from "../../services/serviceContainer.js";
+import { notificationService } from "../../services/notificationService.js";
+import { getConnectionOptions } from "../connection.js";
+import type { RebalanceJobData } from "../queues.js";
 import {
   createWorkerRuntimeStatus,
   markWorkerFailed,
@@ -9,11 +18,39 @@ import {
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
   handleFinalFailure,
+  acquireWorkerLock,
+  releaseWorkerLock,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
+import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
+
+function broadcastJobCompletion(jobId: string, portfolioId: string, triggeredBy: string | undefined, data: Record<string, unknown>) {
+  broadcastPortfolioEvent({
+    portfolioId,
+    event: "rebalance_completed",
+    data: {
+      jobId,
+      triggeredBy: triggeredBy || "unknown",
+      ...data,
+    },
+  });
+}
+
+function broadcastJobFailure(jobId: string, portfolioId: string, triggeredBy: string | undefined, error: string, attemptsMade: number) {
+  broadcastPortfolioEvent({
+    portfolioId,
+    event: "rebalance_failed",
+    data: {
+      jobId,
+      triggeredBy: triggeredBy || "unknown",
+      error,
+      attemptsMade,
+    },
+  });
+}
 
 /**
  * Core processor: executes a single portfolio rebalance.
@@ -40,8 +77,14 @@ export async function processRebalanceJob(
     }
 
     const lockAcquired = await acquireWorkerLock(portfolioId);
-
-
+    if (!lockAcquired) {
+      logger.info(
+        "[WORKER:rebalance] Rebalance already in progress. Aborting.",
+        {
+          portfolioId,
+        },
+      );
+      return;
     }
 
     const stellarService = new StellarService();
@@ -58,6 +101,8 @@ export async function processRebalanceJob(
             : "Manual Rebalancing",
         trades: rebalanceResult.trades ?? 0,
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+        slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
       });
@@ -87,6 +132,11 @@ export async function processRebalanceJob(
       logger.info("[WORKER:rebalance] Rebalance completed", {
         portfolioId,
         trades: rebalanceResult.trades,
+      });
+      broadcastJobCompletion(job.id || "unknown", portfolioId, triggeredBy, {
+        trades: rebalanceResult.trades ?? 0,
+        gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        timestamp: new Date().toISOString(),
       });
       if (triggeredBy === "auto") {
         logAudit("auto_rebalance_completed", {
@@ -120,6 +170,7 @@ export async function processRebalanceJob(
         error: errorMessage,
         attemptsMade: job.attemptsMade,
       });
+      broadcastJobFailure(job.id || "unknown", portfolioId, triggeredBy, errorMessage, job.attemptsMade);
       if (triggeredBy === "auto") {
         logAudit("auto_rebalance_failed", {
           portfolioId,
@@ -170,9 +221,13 @@ export function startRebalanceWorker(): Worker | null {
     });
 
   worker.on("completed", (j: Job) => {
+    markWorkerJobCompleted(runtimeStatus);
     logger.info("[WORKER:rebalance] Job completed", {
       jobId: j.id,
       portfolioId: j.data.portfolioId,
+    });
+    broadcastJobCompletion(j.id || "unknown", j.data.portfolioId, j.data.triggeredBy, {
+      timestamp: new Date().toISOString(),
     });
   });
 

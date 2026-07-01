@@ -33,6 +33,13 @@ export interface NotificationPreferences {
 // Get or create the SQLite database instance for notifications
 let notificationDb: Database.Database | null = null
 
+export function closeNotificationDb(): void {
+    if (notificationDb) {
+        notificationDb.close()
+        notificationDb = null
+    }
+}
+
 function getDb(): Database.Database {
     if (!notificationDb) {
         const dbPath = process.env.DB_PATH || './data/portfolio.db'
@@ -213,6 +220,24 @@ export function dbGetAndDeleteDigestEventsBefore(cutoffIso: string): Notificatio
         data: r.data,
         created_at: r.created_at,
     }))
+}
+
+export function dbInitDefaultNotificationPreferences(userId: string): NotificationPreferences {
+    ensureNotificationTable()
+    const defaults: NotificationPreferences = {
+        userId,
+        emailEnabled: false,
+        webhookEnabled: false,
+        digestMode: 'immediate',
+        events: {
+            rebalance: true,
+            circuitBreaker: true,
+            priceMovement: true,
+            riskChange: true,
+        },
+    }
+    dbSaveNotificationPreferences(defaults)
+    return defaults
 }
 
 export function dbGetNotificationPreferences(userId: string): NotificationPreferences | undefined {
