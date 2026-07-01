@@ -14,12 +14,15 @@ import { validateRequest, validateQuery } from '../middleware/validate.js'
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
+import { getPortfolioExport } from '../services/portfolioExportService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
+import { portfolioImportRouter } from './portfolioImportRoutes.js'
+
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
 import { analyticsRouter } from './analytics.routes.js'
@@ -34,22 +37,11 @@ function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
     }
 }
 
-function buildPortfolioExportPayload(portfolio: Portfolio) {
-    return {
-        schemaVersion: 1 as const,
-        exportedAt: new Date().toISOString(),
-        userAddress: portfolio.userAddress,
-        name: portfolio.name,
-        description: portfolio.description,
-        allocations: portfolio.allocations,
-        threshold: portfolio.threshold,
-        slippageTolerance: portfolio.slippageTolerancePercent ?? portfolio.slippageTolerance ?? 1,
-        strategy: portfolio.strategy ?? 'threshold',
-        strategyConfig: portfolio.strategyConfig ?? {},
-    }
-}
-
 export const portfoliosRouter = Router()
+
+// Mount bulk import routes
+portfoliosRouter.use(portfolioImportRouter)
+
 
 portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
     try {
@@ -417,7 +409,7 @@ portfoliosRouter.get('/user/:address/drafts', async (req: Request, res: Response
 portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQuery(portfolioExportQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
-        const format = (req.query.format as 'json' | 'csv' | 'pdf' | undefined) ?? 'json'
+        const format = req.query.format as 'json' | 'csv' | 'pdf'
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -427,15 +419,6 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         }
         if (!databaseService.hasFullConsent(portfolio.userAddress)) {
             return fail(res, 403, 'FORBIDDEN', 'Active consent is required before exporting portfolio data')
-        }
-
-        if (format === 'json') {
-            const payload = buildPortfolioExportPayload(portfolio)
-            const parsed = portfolioExportSchema.safeParse(payload)
-            if (!parsed.success) {
-                return fail(res, 500, 'INTERNAL_ERROR', 'Unable to build export payload')
-            }
-            return res.status(200).json(parsed.data)
         }
 
         const queue = await import('../queue/queues.js').then(m => m.getPortfolioExportQueue())
@@ -452,47 +435,6 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
         return ok(res, { jobId: job.id, status: 'processing' }, { status: 202 })
     } catch (error) {
         logger.error('[ERROR] Portfolio export job creation failed', { error: getErrorObject(error) })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-portfoliosRouter.post('/portfolio/import', requireJwtWhenEnabled, validateRequest(portfolioExportSchema), async (req: Request, res: Response) => {
-    try {
-        const imported = req.body as any
-        const userAddress = req.user?.address ?? imported.userAddress
-        if (!userAddress) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'userAddress is required')
-        }
-
-        if (!databaseService.hasFullConsent(userAddress)) {
-            return fail(res, 403, 'FORBIDDEN', 'Active consent is required before importing portfolio data')
-        }
-
-        if (req.user && imported.userAddress !== req.user.address) {
-            logger.warn('[PORTFOLIO IMPORT] Imported owner differs from authenticated user; using authenticated wallet', {
-                importedUserAddress: imported.userAddress,
-                authenticatedUserAddress: req.user.address,
-            })
-        }
-
-        const portfolioId = await stellarService.createPortfolio(
-            userAddress,
-            imported.allocations,
-            imported.threshold,
-            imported.slippageTolerance ?? 1,
-            imported.strategy ?? 'threshold',
-            imported.strategyConfig ?? {},
-            imported.name,
-            imported.description,
-        )
-
-        return ok(res, {
-            portfolioId,
-            status: 'imported',
-            mode: featureFlags.demoMode ? 'demo' : 'onchain',
-        }, { status: 201 })
-    } catch (error) {
-        logger.error('[ERROR] Portfolio import failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -616,7 +558,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
     }
 })
 
-
+portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
 
@@ -674,6 +616,61 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
 
 });
 
+portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolioRebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
+        }
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId);
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
+        }
+
+        const { from, to, trigger_type, status, page, page_size, sort } = req.query as any;
+
+        const limit = page_size ? parseInt(page_size, 10) : 50;
+        const pageNum = page ? parseInt(page, 10) : 1;
+        const offset = (pageNum - 1) * limit;
+
+        const start = Date.now();
+        const { items, total } = await dbGetPortfolioRebalanceHistory(portfolioId, {
+            from,
+            to,
+            trigger_type,
+            status,
+            limit,
+            offset,
+            sort: sort === 'asc' ? 'asc' : 'desc'
+        });
+        const duration = Date.now() - start;
+
+        // Log warning if query is slow
+        if (duration > 200) {
+            logger.warn('Slow rebalance history query detected', { portfolioId, durationMs: duration, count: items.length });
+        }
+
+        return ok(res, {
+            history: items,
+            pagination: {
+                page: pageNum,
+                pageSize: limit,
+                total,
+                totalPages: Math.ceil(total / limit)
+            },
+            filters: {
+                from: from || null,
+                to: to || null,
+                trigger_type: trigger_type || null,
+                status: status || null
+            }
+        });
+    } catch (error) {
+        logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
 
 
 
