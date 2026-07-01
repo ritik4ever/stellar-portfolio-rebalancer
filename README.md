@@ -242,6 +242,9 @@ GET /api/v1/portfolio/:id
 # Execute rebalance
 POST /api/v1/portfolio/:id/rebalance
 
+# Dry-run rebalance (read-only plan, no DB writes or contract call)
+POST /api/v1/portfolio/:id/rebalance/dry-run
+
 # Rebalance status
 GET /api/v1/portfolio/:id/rebalance-status
 
@@ -257,6 +260,7 @@ DELETE /api/v1/notifications/unsubscribe?userId=STELLAR_ADDRESS
 # Price Data Feeds
 GET /api/v1/prices
 GET /api/v1/portfolio/:id/rebalance-plan
+
 
 Stellar DEX Integration
 Real trades executed on Stellar testnet using @stellar/stellar-sdk.

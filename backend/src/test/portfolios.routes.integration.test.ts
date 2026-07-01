@@ -490,6 +490,64 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
             expect(res.body.data).toHaveProperty('totalValue')
             expect(res.body.data).toHaveProperty('maxSlippagePercent')
             expect(res.body.data).toHaveProperty('estimatedSlippageBps')
+            expect(res.body.data).toHaveProperty('estimatedFees')
+            expect(res.body.data).toHaveProperty('assets')
+            expect(res.body.data).toHaveProperty('projectedAllocations')
+            expect(Array.isArray(res.body.data.assets)).toBe(true)
+            expect(res.body.data.assets[0]).toHaveProperty('buyAmount')
+            expect(res.body.data.assets[0]).toHaveProperty('sellAmount')
+            expect(res.body.data.assets[0]).toHaveProperty('projectedAllocationPercent')
+        })
+    })
+
+    describe('POST /api/portfolio/:id/rebalance/dry-run', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('returns the same schema as rebalance-plan', async () => {
+            const planRes = await request(app)
+                .get(`/api/portfolio/${portfolioId}/rebalance-plan`)
+                .expect(200)
+
+            const dryRunRes = await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .send({})
+                .expect(200)
+
+            expect(dryRunRes.body.success).toBe(true)
+            expect(Object.keys(dryRunRes.body.data).sort()).toEqual(Object.keys(planRes.body.data).sort())
+            expect(Object.keys(dryRunRes.body.data.estimatedFees).sort()).toEqual(Object.keys(planRes.body.data.estimatedFees).sort())
+            expect(Object.keys(dryRunRes.body.data.assets[0]).sort()).toEqual(Object.keys(planRes.body.data.assets[0]).sort())
+        })
+
+        it('does not mutate portfolio state on repeated calls', async () => {
+            const { portfolioStorage } = require('../services/portfolioStorage.js') as any
+            const before = portfolioStorage.getPortfolio(portfolioId)
+
+            await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .send({})
+                .expect(200)
+            await request(app)
+                .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+                .send({})
+                .expect(200)
+
+            const after = portfolioStorage.getPortfolio(portfolioId)
+            expect(after).toEqual(before)
         })
     })
 

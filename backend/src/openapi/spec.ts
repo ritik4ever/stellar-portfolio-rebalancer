@@ -436,7 +436,7 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Portfolio'],
                 summary: 'Get rebalance plan',
-                description: 'Get total value, slippage, and current prices for planning.',
+                description: 'Get the full read-only rebalance plan, including per-asset buy/sell amounts, estimated fees, estimated slippage, projected allocations, and current prices. This endpoint does not execute trades.',
                 parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': {
@@ -454,7 +454,112 @@ const spec: Record<string, any> = {
                                                 totalValue: { type: 'number' },
                                                 maxSlippagePercent: { type: 'number' },
                                                 estimatedSlippageBps: { type: 'integer' },
+                                                estimatedFees: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        xlm: { type: 'number' },
+                                                        usd: { type: 'number' },
+                                                        perTradeXlm: { type: 'number' },
+                                                        tradeCount: { type: 'integer' },
+                                                    },
+                                                },
+                                                assets: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            asset: { type: 'string' },
+                                                            action: { type: 'string', enum: ['buy', 'sell', 'hold'] },
+                                                            currentBalance: { type: 'number' },
+                                                            currentValue: { type: 'number' },
+                                                            currentAllocationPercent: { type: 'number' },
+                                                            targetAllocationPercent: { type: 'number' },
+                                                            targetValue: { type: 'number' },
+                                                            driftPercent: { type: 'number' },
+                                                            buyAmount: { type: 'number' },
+                                                            sellAmount: { type: 'number' },
+                                                            tradeValue: { type: 'number' },
+                                                            projectedBalance: { type: 'number' },
+                                                            projectedValue: { type: 'number' },
+                                                            projectedAllocationPercent: { type: 'number' },
+                                                            price: { type: 'number' },
+                                                        },
+                                                    },
+                                                },
+                                                projectedAllocations: { type: 'object', additionalProperties: { type: 'number' } },
                                                 prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
+                                                priceFeedMeta: { type: 'object' },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/rebalance/dry-run': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Dry-run rebalance',
+                description: 'Return the full rebalance plan without executing trades. This dry-run performs no database writes and makes no contract call; use POST /api/portfolio/{id}/rebalance for live execution.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                responses: {
+                    '200': {
+                        description: 'Dry-run plan data. The response data schema is identical to GET /api/portfolio/{id}/rebalance-plan.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolioId: { type: 'string' },
+                                                totalValue: { type: 'number' },
+                                                maxSlippagePercent: { type: 'number' },
+                                                estimatedSlippageBps: { type: 'integer' },
+                                                estimatedFees: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        xlm: { type: 'number' },
+                                                        usd: { type: 'number' },
+                                                        perTradeXlm: { type: 'number' },
+                                                        tradeCount: { type: 'integer' },
+                                                    },
+                                                },
+                                                assets: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            asset: { type: 'string' },
+                                                            action: { type: 'string', enum: ['buy', 'sell', 'hold'] },
+                                                            currentBalance: { type: 'number' },
+                                                            currentValue: { type: 'number' },
+                                                            currentAllocationPercent: { type: 'number' },
+                                                            targetAllocationPercent: { type: 'number' },
+                                                            targetValue: { type: 'number' },
+                                                            driftPercent: { type: 'number' },
+                                                            buyAmount: { type: 'number' },
+                                                            sellAmount: { type: 'number' },
+                                                            tradeValue: { type: 'number' },
+                                                            projectedBalance: { type: 'number' },
+                                                            projectedValue: { type: 'number' },
+                                                            projectedAllocationPercent: { type: 'number' },
+                                                            price: { type: 'number' },
+                                                        },
+                                                    },
+                                                },
+                                                projectedAllocations: { type: 'object', additionalProperties: { type: 'number' } },
+                                                prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
+                                                priceFeedMeta: { type: 'object' },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
