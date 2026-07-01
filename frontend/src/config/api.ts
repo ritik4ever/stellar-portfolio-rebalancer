@@ -144,6 +144,12 @@ export const API_CONFIG = {
         PORTFOLIO_SHARE_VIEW: (hash: string) => `${API_RESOURCE_ROOT}/portfolio/share/${hash}`,
         PORTFOLIO_ANALYTICS: (id: string, days: number) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
+        PORTFOLIO_COMPARE: (ids: string[], from?: string, to?: string) => {
+            const params = new URLSearchParams({ ids: ids.join(',') })
+            if (from) params.set('from', from)
+            if (to) params.set('to', to)
+            return `${API_RESOURCE_ROOT}/portfolios/compare?${params.toString()}`
+        },
         PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/performance-summary`,
         PRICES: `${API_RESOURCE_ROOT}/prices`,
