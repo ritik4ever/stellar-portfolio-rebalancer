@@ -3,179 +3,63 @@ import { StellarService } from '../services/stellar.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { analyticsService } from '../services/analyticsService.js'
 import { ReflectorService } from '../services/reflector.js'
-import { riskManagementService } from '../services/serviceContainer.js'
+import { riskManagementService, rebalanceHistoryService } from '../services/serviceContainer.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+
+const STABLECOINS = new Set(['USDC', 'USDT', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDN'])
+
+const ASSET_VOLATILITY: Record<string, number> = {
+    USDC: 3,
+    USDT: 3,
+    DAI: 5,
+    BUSD: 5,
+    FRAX: 6,
+    TUSD: 5,
+    XLM: 80,
+    BTC: 55,
+    ETH: 65,
+    SOL: 75,
+    ADA: 70,
+    DOT: 72,
+    MATIC: 78,
+    ATOM: 68,
+    LINK: 72,
+    UNI: 76,
+    XRP: 74,
+    DOGE: 85,
+    SHIB: 90,
+}
+
+const RISK_CACHE_TTL_MS = 10 * 60 * 1000
+
+interface RiskScoreCacheEntry {
+    data: RiskScoreResponse
+    cachedAt: number
+}
+
+interface RiskScoreResponse {
+    portfolioId: string
+    riskScore: number
+    riskLevel: 'very_low' | 'low' | 'moderate' | 'high' | 'very_high'
+    breakdown: {
+        volatility: { score: number; weight: number; contribution: number }
+        concentration: { score: number; weight: number; contribution: number; hhi: number }
+        maxAllocation: { score: number; weight: number; contribution: number; maxAllocationPct: number }
+        correlation: { score: number; weight: number; contribution: number; averageCorrelation: number; assetCount: number }
+    }
+    cachedAt: string
+}
+
+const riskScoreCache = new Map<string, RiskScoreCacheEntry>()
 
 export const analyticsRouter = Router()
 
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 
-const CORRELATION_CACHE_TTL_MS = 60 * 60 * 1000
 
-type CorrelationCacheEntry = {
-    expiresAt: number
-    value: Record<string, unknown>
-}
-
-const correlationCache = new Map<string, CorrelationCacheEntry>()
-
-function buildCorrelationCacheKey(assets: string[], days: number): string {
-    return `${assets.join(',')}:${days}`
-}
-
-function normalizeAssetList(assetsParam: string | undefined): string[] {
-    if (!assetsParam) return []
-    const normalized = assetsParam
-        .split(',')
-        .map((asset) => asset.trim().toUpperCase())
-        .filter((asset) => asset.length > 0)
-
-    return [...new Set(normalized)]
-}
-
-function calculatePearson(seriesA: number[], seriesB: number[]): number {
-    const n = Math.min(seriesA.length, seriesB.length)
-    if (n < 2) return 0
-
-    const meanA = seriesA.reduce((sum, value) => sum + value, 0) / n
-    const meanB = seriesB.reduce((sum, value) => sum + value, 0) / n
-
-    let numerator = 0
-    let varA = 0
-    let varB = 0
-
-    for (let i = 0; i < n; i++) {
-        const da = seriesA[i] - meanA
-        const db = seriesB[i] - meanB
-        numerator += da * db
-        varA += da * da
-        varB += db * db
-    }
-
-    const denominator = Math.sqrt(varA * varB)
-    if (denominator === 0) return 0
-    return Math.max(-1, Math.min(1, numerator / denominator))
-}
-
-function buildReturnSeries(history: Array<{ timestamp: number; price: number }>): Array<{ timestamp: number; value: number }> {
-    const sorted = [...history].sort((a, b) => a.timestamp - b.timestamp)
-    const returns: Array<{ timestamp: number; value: number }> = []
-
-    for (let i = 1; i < sorted.length; i++) {
-        const prevPrice = sorted[i - 1].price
-        const currentPrice = sorted[i].price
-        const value = prevPrice === 0 ? 0 : (currentPrice - prevPrice) / prevPrice
-        returns.push({ timestamp: sorted[i].timestamp, value })
-    }
-
-    return returns
-}
-
-function getCommonTimestamps(historyByAsset: Record<string, Array<{ timestamp: number; value: number }>>): number[] {
-    const assetKeys = Object.keys(historyByAsset)
-    if (assetKeys.length === 0) return []
-
-    const timestampSets = assetKeys.map((asset) => new Set(historyByAsset[asset].map((point) => point.timestamp)))
-    return [...timestampSets[0]].filter((timestamp) => timestampSets.every((set) => set.has(timestamp))).sort((a, b) => a - b)
-}
-
-function buildAlignedReturns(
-    assets: string[],
-    historyByAsset: Record<string, Array<{ timestamp: number; price: number }>>
-): Record<string, number[]> {
-    const returnHistoryByAsset: Record<string, Array<{ timestamp: number; value: number }>> = {}
-    assets.forEach((asset) => {
-        returnHistoryByAsset[asset] = buildReturnSeries(historyByAsset[asset] ?? [])
-    })
-
-    const commonTimestamps = getCommonTimestamps(returnHistoryByAsset)
-    const aligned: Record<string, number[]> = {}
-
-    assets.forEach((asset) => {
-        const priceMap = new Map(returnHistoryByAsset[asset].map((point) => [point.timestamp, point.value]))
-        aligned[asset] = commonTimestamps.map((timestamp) => priceMap.get(timestamp) ?? 0)
-    })
-
-    return aligned
-}
-
-function buildCorrelationMatrix(
-    assets: string[],
-    alignedReturns: Record<string, number[]>
-): Record<string, Record<string, number>> {
-    const matrix: Record<string, Record<string, number>> = {}
-
-    assets.forEach((assetA) => {
-        matrix[assetA] = {}
-        assets.forEach((assetB) => {
-            if (assetA === assetB) {
-                matrix[assetA][assetB] = 1
-            } else if (matrix[assetB]?.[assetA] !== undefined) {
-                matrix[assetA][assetB] = matrix[assetB][assetA]
-            } else {
-                matrix[assetA][assetB] = calculatePearson(alignedReturns[assetA], alignedReturns[assetB])
-            }
-        })
-    })
-
-    return matrix
-}
-
-export function clearCorrelationCache(): void {
-    correlationCache.clear()
-}
-
-analyticsRouter.get('/analytics/correlation', async (req: Request, res: Response) => {
-    try {
-        const assets = normalizeAssetList(req.query.assets as string | undefined)
-        const days = req.query.days ? parseInt(req.query.days as string, 10) : 30
-
-        if (assets.length === 0) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Query parameter assets is required and must include at least one asset code')
-        }
-
-        if (assets.some((asset) => asset.length === 0)) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Asset codes must be non-empty')
-        }
-
-        if (Number.isNaN(days) || days < 1) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Query parameter days must be a positive integer')
-        }
-
-        const sortedAssets = [...assets].sort()
-        const cacheKey = buildCorrelationCacheKey(sortedAssets, days)
-        const now = Date.now()
-        const cached = correlationCache.get(cacheKey)
-
-        if (cached && cached.expiresAt > now) {
-            return ok(res, cached.value)
-        }
-
-        const historyByAsset: Record<string, Array<{ timestamp: number; price: number }>> = {}
-        await Promise.all(sortedAssets.map(async (asset) => {
-            historyByAsset[asset] = await reflectorService.getPriceHistory(asset, days)
-        }))
-
-        const alignedReturns = buildAlignedReturns(sortedAssets, historyByAsset)
-        const correlationMatrix = buildCorrelationMatrix(sortedAssets, alignedReturns)
-        const result = {
-            assets: sortedAssets,
-            days,
-            correlationMatrix,
-            sampleSize: Object.values(alignedReturns)[0]?.length ?? 0
-        }
-
-        correlationCache.set(cacheKey, {
-            value: result,
-            expiresAt: now + CORRELATION_CACHE_TTL_MS
-        })
-
-        return ok(res, result)
-    } catch (error) {
-        logger.error('Failed to fetch correlation matrix', { error: getErrorObject(error), route: req.path })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -278,6 +162,164 @@ analyticsRouter.get('/portfolio/:id/performance-summary', async (req: Request, r
     }
 })
 
+function getAssetVolatility(asset: string): number {
+    return ASSET_VOLATILITY[asset] ?? 60
+}
+
+function getRiskLevel(score: number): 'very_low' | 'low' | 'moderate' | 'high' | 'very_high' {
+    if (score < 10) return 'very_low'
+    if (score < 30) return 'low'
+    if (score < 55) return 'moderate'
+    if (score < 80) return 'high'
+    return 'very_high'
+}
+
+function getFromCache(portfolioId: string): RiskScoreResponse | null {
+    const entry = riskScoreCache.get(portfolioId)
+    if (!entry) return null
+    if (Date.now() - entry.cachedAt > RISK_CACHE_TTL_MS) {
+        riskScoreCache.delete(portfolioId)
+        return null
+    }
+    return entry.data
+}
+
+function setCache(portfolioId: string, data: RiskScoreResponse): void {
+    riskScoreCache.set(portfolioId, { data, cachedAt: Date.now() })
+}
+
+function calculateRiskScore(
+    portfolioId: string,
+    allocations: Record<string, number>,
+    prices: Record<string, { price: number }>
+): RiskScoreResponse {
+    const weights: Record<string, number> = {}
+    let totalAlloc = 0
+    for (const [asset, alloc] of Object.entries(allocations)) {
+        const num = Number(alloc)
+        if (Number.isFinite(num) && num > 0) {
+            weights[asset] = num
+            totalAlloc += num
+        }
+    }
+
+    if (totalAlloc === 0) {
+        const empty: RiskScoreResponse = {
+            portfolioId,
+            riskScore: 0,
+            riskLevel: 'very_low',
+            breakdown: {
+                volatility: { score: 0, weight: 0.25, contribution: 0 },
+                concentration: { score: 0, weight: 0.25, contribution: 0, hhi: 0 },
+                maxAllocation: { score: 0, weight: 0.25, contribution: 0, maxAllocationPct: 0 },
+                correlation: { score: 0, weight: 0.25, contribution: 0, averageCorrelation: 0, assetCount: 0 },
+            },
+            cachedAt: new Date().toISOString(),
+        }
+        return empty
+    }
+
+    const normalizedWeights: Record<string, number> = {}
+    for (const [asset, w] of Object.entries(weights)) {
+        normalizedWeights[asset] = w / totalAlloc
+    }
+
+    const weightedVolatility = Object.entries(normalizedWeights).reduce(
+        (sum, [asset, w]) => sum + w * getAssetVolatility(asset),
+        0
+    )
+
+    const assetCount = Object.keys(normalizedWeights).length
+
+    let hhi = 0
+    let maxWeight = 0
+    for (const w of Object.values(normalizedWeights)) {
+        hhi += w * w
+        if (w > maxWeight) maxWeight = w
+    }
+
+    const assets = Object.keys(normalizedWeights)
+    let avgAbsCorr = 0
+    if (assetCount >= 2) {
+        let corrSum = 0
+        let corrCount = 0
+        for (let i = 0; i < assets.length; i++) {
+            const aVol = getAssetVolatility(assets[i]) / 100
+            for (let j = i + 1; j < assets.length; j++) {
+                const bVol = getAssetVolatility(assets[j]) / 100
+                const isPairHighCorr = Math.abs(aVol - bVol) < 0.15
+                const aIsStable = STABLECOINS.has(assets[i])
+                const bIsStable = STABLECOINS.has(assets[j])
+
+                let pairCorr: number
+                if (aIsStable && bIsStable) {
+                    pairCorr = 0.2
+                } else if (aIsStable || bIsStable) {
+                    pairCorr = 0.05
+                } else if (isPairHighCorr) {
+                    pairCorr = 0.75
+                } else {
+                    pairCorr = 0.5
+                }
+                corrSum += pairCorr
+                corrCount++
+            }
+        }
+        avgAbsCorr = corrCount > 0 ? corrSum / corrCount : 0
+    } else {
+        avgAbsCorr = 1.0
+    }
+
+    const riskMultiplier = Math.pow(weightedVolatility / 100, 0.85)
+
+    const volScore = weightedVolatility
+    const volContribution = volScore * 0.25
+
+    const concScore = hhi * 100
+    const concContribution = concScore * 0.25 * riskMultiplier
+
+    const maxAllocScore = maxWeight * 100
+    const maxAllocContribution = maxAllocScore * 0.25 * riskMultiplier
+
+    const corrScore = avgAbsCorr * 100
+    const corrContribution = corrScore * 0.25 * riskMultiplier
+
+    const riskScore = Math.min(100, Math.round((volContribution + concContribution + maxAllocContribution + corrContribution) * 100) / 100)
+
+    return {
+        portfolioId,
+        riskScore,
+        riskLevel: getRiskLevel(riskScore),
+        breakdown: {
+            volatility: {
+                score: Math.round(volScore * 100) / 100,
+                weight: 0.25,
+                contribution: Math.round(volContribution * 100) / 100,
+            },
+            concentration: {
+                score: Math.round(concScore * 100) / 100,
+                weight: 0.25,
+                contribution: Math.round(concContribution * 100) / 100,
+                hhi: Math.round(hhi * 10000) / 10000,
+            },
+            maxAllocation: {
+                score: Math.round(maxAllocScore * 100) / 100,
+                weight: 0.25,
+                contribution: Math.round(maxAllocContribution * 100) / 100,
+                maxAllocationPct: Math.round(maxWeight * 10000) / 100,
+            },
+            correlation: {
+                score: Math.round(corrScore * 100) / 100,
+                weight: 0.25,
+                contribution: Math.round(corrContribution * 100) / 100,
+                averageCorrelation: Math.round(avgAbsCorr * 1000) / 1000,
+                assetCount,
+            },
+        },
+        cachedAt: new Date().toISOString(),
+    }
+}
+
 analyticsRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
@@ -306,6 +348,112 @@ analyticsRouter.get('/portfolio/:id/risk-diagnostics', async (req: Request, res:
         return ok(res, { riskHeatmap })
     } catch (error) {
         logger.error('[ERROR] Get portfolio risk diagnostics failed', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+analyticsRouter.get('/portfolio/:id/risk-score', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        }
+
+        const cached = getFromCache(portfolioId)
+        if (cached) {
+            return ok(res, cached)
+        }
+
+        const portfolio = portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        }
+
+        const prices = await reflectorService.getCurrentPrices()
+
+        const data = calculateRiskScore(
+            portfolioId,
+            portfolio.allocations,
+            prices
+        )
+
+        setCache(portfolioId, data)
+
+        return ok(res, data)
+    } catch (error) {
+        logger.error('Failed to calculate risk score', { error: getErrorObject(error), portfolioId: req.params.id })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+analyticsRouter.get('/portfolio/:id/benchmark', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const from = req.query.from as string | undefined
+        const to = req.query.to as string | undefined
+
+        if (!portfolioId || !from || !to) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID, from, and to are required')
+        }
+
+        const fromDate = new Date(from)
+        const toDate = new Date(to)
+
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Invalid date format')
+        }
+
+        // Get Portfolio Return
+        const snapshots = analyticsService.getAnalyticsInRange(portfolioId, from, to)
+        let portfolio_return = 0
+        if (snapshots.length >= 2) {
+            const initialValue = snapshots[0].totalValue
+            const finalValue = snapshots[snapshots.length - 1].totalValue
+            if (initialValue > 0) {
+                portfolio_return = ((finalValue - initialValue) / initialValue) * 100
+            }
+        }
+
+        // Dynamic import to avoid circular dependency or import issues at top level if not present
+        const { getPriceHistoryInRange } = await import('../db/priceHistoryDb.js')
+
+        // Get Benchmark Returns
+        const getAssetReturn = async (asset: string) => {
+            const history = await getPriceHistoryInRange(asset, fromDate, toDate)
+            if (history.length < 2) return 0
+            const pStart = history[0].price
+            const pEnd = history[history.length - 1].price
+            return pStart > 0 ? ((pEnd - pStart) / pStart) * 100 : 0
+        }
+
+        const xlmReturn = await getAssetReturn('XLM')
+        const btcReturn = await getAssetReturn('BTC')
+        const usdcReturn = await getAssetReturn('USDC')
+
+        const benchmarks = [
+            {
+                name: 'XLM-only',
+                portfolio_return,
+                benchmark_return: xlmReturn,
+                alpha: portfolio_return - xlmReturn
+            },
+            {
+                name: 'BTC-only',
+                portfolio_return,
+                benchmark_return: btcReturn,
+                alpha: portfolio_return - btcReturn
+            },
+            {
+                name: '60/40 XLM-USDC',
+                portfolio_return,
+                benchmark_return: (0.6 * xlmReturn) + (0.4 * usdcReturn),
+                alpha: portfolio_return - ((0.6 * xlmReturn) + (0.4 * usdcReturn))
+            }
+        ]
+
+        return ok(res, { benchmarks })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio benchmark failed', { error: getErrorObject(error), portfolioId: req.params.id })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

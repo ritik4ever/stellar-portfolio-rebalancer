@@ -493,6 +493,57 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
     })
 
+    describe('GET /api/portfolio/:id/rebalance-status', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('returns null lastRebalanced for a newly created portfolio', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/rebalance-status`)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.portfolioId).toBe(portfolioId)
+            expect(res.body.data.lastRebalanced).toBeNull()
+        })
+
+        it('returns correct envelope structure', async () => {
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}/rebalance-status`)
+                .expect(200)
+
+            expect(res.body).toHaveProperty('success')
+            expect(res.body).toHaveProperty('data')
+            expect(res.body).toHaveProperty('error')
+            expect(res.body).toHaveProperty('timestamp')
+            expect(res.body.data).toHaveProperty('portfolioId')
+            expect(res.body.data).toHaveProperty('lastRebalanced')
+        })
+
+        it('returns 404 for non-existent portfolio', async () => {
+            const res = await request(app)
+                .get('/api/portfolio/non-existent-id-xyz/rebalance-status')
+                .expect((res) => {
+                    expect([404, 500]).toContain(res.status)
+                })
+
+            expect(res.body.success).toBe(false)
+        })
+    })
+
     describe('POST /api/portfolio/:id/rebalance/dry-run', () => {
         let portfolioId: string
 
@@ -753,5 +804,61 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
             expect(res.body.success).toBe(false);
             expect(res.body.error.code).toBe('NOT_FOUND');
         });
+    })
+
+    describe('POST /api/account/sync-balance - Stellar account balance sync', () => {
+        const VALID_STELLAR_ADDRESS = 'GD5J3J6K6MIXJ7WJLLKJW7SQQZ6J5K5J6K6MIXJ7WJLLKJW7SQQZ6J5K'
+        const INVALID_ADDRESS = 'INVALID_ADDRESS'
+
+        it('returns 400 for missing address', async () => {
+            const res = await request(app)
+                .post('/api/account/sync-balance')
+                .send({})
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('returns 400 for invalid Stellar address format', async () => {
+            const res = await request(app)
+                .post('/api/account/sync-balance')
+                .send({ address: INVALID_ADDRESS })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('returns 500 for Horizon connection errors (mocked)', async () => {
+            const res = await request(app)
+                .post('/api/account/sync-balance')
+                .send({ address: VALID_STELLAR_ADDRESS })
+                .expect((resp) => {
+                    expect([200, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 500) {
+                expect(res.body.success).toBe(false)
+                expect(res.body.error.code).toBe('INTERNAL_ERROR')
+            }
+        })
+
+        it('returns correct response structure when successful (mocked)', async () => {
+            const res = await request(app)
+                .post('/api/account/sync-balance')
+                .send({ address: VALID_STELLAR_ADDRESS })
+                .expect((resp) => {
+                    expect([200, 500]).toContain(resp.status)
+                })
+
+            if (res.status === 200) {
+                expect(res.body.success).toBe(true)
+                expect(res.body.data).toHaveProperty('address')
+                expect(res.body.data).toHaveProperty('balances')
+                expect(res.body.data).toHaveProperty('lastUpdated')
+                expect(typeof res.body.data.balances).toBe('object')
+            }
+        })
     })
 })

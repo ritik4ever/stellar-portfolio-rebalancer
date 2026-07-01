@@ -13,6 +13,8 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+
+import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
@@ -27,6 +29,7 @@ import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
 import { usePortfolioExport } from '../hooks/usePortfolio'
+import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -38,6 +41,7 @@ type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknow
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+    const [candlestickAsset, setCandlestickAsset] = useState<string>('XLM')
 
     const { isDark } = useTheme()
     const queryClient = useQueryClient()
@@ -61,6 +65,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         error: detailsError,
         refetch: refetchPortfolioDetails,
     } = usePortfolioDetails(latestPortfolioId)
+
+    const { connectionState: liveFeedState } = usePortfolioLiveFeed(latestPortfolioId || null)
 
     const {
         data: priceBundle,
@@ -130,8 +136,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         allocationData.splice(0, allocationData.length, ...allocationsArray)
     }
 
-    const missingPriceAssets = allocationData.filter((asset: any) => {
-        const row = prices[asset.name]
+    // Build drift gauge data — map target % and live current % per asset.
+    // "current" comes from portfolio allocations when available; falls back to target
+    // so the gauge still renders (showing 0 drift) before live data arrives.
+    const driftGaugeAssets: DriftGaugeAsset[] = allocationData.map((asset: any) => {
+        // portfolioData.allocations may be an array of { asset, target, current } or
+        // an object { assetSymbol: pct }. Resolve current from the raw portfolio data.
+        let current: number = asset.value // default: same as target (0 drift)
+        const rawAlloc = portfolioData?.allocations
+        if (Array.isArray(rawAlloc)) {
+            const match = rawAlloc.find((a: any) => (a.asset ?? a.name) === asset.name)
+            if (match) {
+                current = typeof match.current === 'number' ? match.current : asset.value
+            }
+        }
+        const threshold =
+            typeof (portfolioData as any)?.threshold === 'number'
+                ? (portfolioData as any).threshold
+                : 5 // sane default
+        return { name: asset.name, target: asset.value, current, threshold }
+    })
+
+    const missingPriceAssets = allocationData.filter((asset: any) => {        const row = prices[asset.name]
         return !row || row.price === undefined || row.price === null
     })
     const pricedAssets = allocationData.length - missingPriceAssets.length
@@ -762,8 +788,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </p>
                                     )}
                                     <div className="mb-4">
-                                        <div className="text-3xl font-bold text-gray-900 dark:text-white">
+                                        <div className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
                                             ${portfolioData?.totalValue?.toLocaleString() || '0'}
+                                            {liveFeedState === 'connected' && (
+                                                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
+                                                    <span className="w-1.5 h-1.5 mr-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                                                    LIVE
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex items-center mt-1">
                                             <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
@@ -887,6 +919,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
+                            {/* Drift Gauges — live allocation drift per asset */}
+                            {driftGaugeAssets.length > 0 && (
+                                <DriftGaugeGrid assets={driftGaugeAssets} title="Live Allocation Drift" />
+                            )}
+
                             {/* Allocation Chart */}
                             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
@@ -954,6 +991,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
+import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
+
+...
+    const refreshData = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
+        ])
+    }, [queryClient])
+...
                             <PriceTracker />
                         </div>
                     </div>
@@ -962,6 +1010,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 {/* Analytics Tab */}
                 {activeTab === 'analytics' && (
                     <div className="space-y-6">
+                        {/* Asset selector for candlestick chart */}
+                        {allocationData.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm text-gray-500 dark:text-gray-400">Price chart:</span>
+                                {allocationData.map((asset: any) => (
+                                    <button
+                                        key={asset.name}
+                                        type="button"
+                                        onClick={() => setCandlestickAsset(asset.name)}
+                                        aria-pressed={candlestickAsset === asset.name}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                                            candlestickAsset === asset.name
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        {asset.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <PriceCandlestick
+                            asset={candlestickAsset}
+                            portfolioCreatedAt={(portfolioData as any)?.createdAt ?? null}
+                            portfolioId={portfolioData?.id ?? null}
+                            onRebalanceClick={(_ev: CandlestickRebalanceEvent) => {}}
+                        />
                         <PerformanceChart portfolioId={portfolioData?.id || null} />
                         <AllocationHistory portfolioId={portfolioData?.id || null} />
                     </div>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import RebalanceHistory from './RebalanceHistory'
 
+// Hoisted mock references (shared by behavioral and snapshot tests)
 const { downloadCsvMock, toCsvMock, useHistoryMock } = vi.hoisted(() => ({
     downloadCsvMock: vi.fn(),
     toCsvMock: vi.fn(() => 'csv-content'),
@@ -202,4 +203,65 @@ describe('RebalanceHistory', () => {
     // Basic structural check to ensure the new UI contract is met
     expect(true).toBe(true);
   });
+
+  describe('snapshots', () => {
+    it('matches snapshot with fetched history data', async () => {
+      useHistoryMock.mockReturnValue({
+        data: {
+          history: [
+            {
+              id: 'e1',
+              timestamp: '2025-01-15T10:30:00Z',
+              trigger: 'Automatic Rebalancing',
+              trades: 2,
+              gasUsed: '0.02 XLM',
+              status: 'completed',
+              portfolioId: 'p1'
+            }
+          ]
+        },
+        isLoading: false,
+        error: null
+      })
+
+      const { container } = render(<RebalanceHistory portfolioId="p1" />)
+      await screen.findByText('Automatic Rebalancing')
+      expect(container).toMatchSnapshot()
+    })
+
+    it('matches snapshot in loading state', () => {
+      useHistoryMock.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        error: null
+      })
+
+      const { container } = render(<RebalanceHistory portfolioId="p1" isLoading={true} />)
+      expect(container).toMatchSnapshot()
+    })
+
+    it('matches snapshot in empty state', async () => {
+      useHistoryMock.mockReturnValue({
+        data: { history: [], total: 0 },
+        isLoading: false,
+        error: null
+      })
+
+      const { container } = render(<RebalanceHistory portfolioId="p1" />)
+      await screen.findByText(/No rebalancing history yet/i)
+      expect(container).toMatchSnapshot()
+    })
+
+    it('matches snapshot in error state', async () => {
+      useHistoryMock.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error('boom')
+      })
+
+      const { container } = render(<RebalanceHistory portfolioId="p1" />)
+      await screen.findByText(/Failed to load rebalance history/i)
+      expect(container).toMatchSnapshot()
+    })
+  })
 })

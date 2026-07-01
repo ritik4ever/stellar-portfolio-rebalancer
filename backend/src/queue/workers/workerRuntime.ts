@@ -1,8 +1,16 @@
-import { Job } from "bullmq";
+import { Job, Worker } from "bullmq";
 import { persistWorkerStatus } from './workerHeartbeat.js';
 import { getDLQQueue, DLQJobData } from '../queues.js';
 import { logger } from '../../utils/logger.js';
 import { query } from '../../db/client.js';
+import { startPortfolioCheckWorker } from './portfolioCheckWorker.js'
+import { startRebalanceWorker } from './rebalanceWorker.js'
+import { startAnalyticsSnapshotWorker } from './analyticsSnapshotWorker.js'
+import { startAnalyticsCompactionWorker } from './analyticsCompactionWorker.js'
+import { startIdempotencyCleanupWorker } from './idempotencyCleanupWorker.js'
+import { startPortfolioExportWorker } from './portfolioExportWorker.js'
+import { startUserAlertsWorker } from './userAlertsWorker.js'
+import { startPriceHistoryWorkers, stopPriceHistoryWorkers } from './priceHistoryWorker.js'
 
 export interface WorkerRuntimeStatus {
     name: string
@@ -29,7 +37,7 @@ function stringHash32(str: string): number {
 }
 
 /** Acquire a PostgreSQL advisory lock for the given worker name.
- *  Returns true when the lock is successfully obtained; otherwise false.
+ * Returns true when the lock is successfully obtained; otherwise false.
  */
 export async function acquireWorkerLock(name: string): Promise<boolean> {
     const key = stringHash32(name)
@@ -129,7 +137,7 @@ export async function handleFinalFailure(job: Job, error: unknown): Promise<void
 
     const dlqJobData: DLQJobData = {
         originalQueue: job.queueName,
-        originalJobId: job.id,
+        originalJobId: job.id as string,
         attempts: job.attemptsMade,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack || "" : "",
@@ -142,5 +150,45 @@ export async function handleFinalFailure(job: Job, error: unknown): Promise<void
         logger.info(`[DLQ] Successfully moved job ${job.id} to dead-letter-queue.`);
     } catch (err) {
         logger.error(`[DLQ] Error occurred while adding job ${job.id} to DLQ: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+
+let workers: Worker[] = []
+
+export function startAllWorkers(): void {
+    logger.info('[WORKER] Starting all background workers...')
+
+    try {
+        workers.push(
+            startPortfolioCheckWorker() as Worker,
+            startRebalanceWorker() as Worker,
+            startAnalyticsSnapshotWorker() as Worker,
+            startAnalyticsCompactionWorker() as Worker,
+            startIdempotencyCleanupWorker() as Worker,
+            startPortfolioExportWorker() as Worker,
+            startUserAlertsWorker()
+        )
+        
+        startPriceHistoryWorkers()
+        
+        logger.info(`[WORKER] Successfully started ${workers.length} standard worker(s) alongside price history workers`)
+    } catch (error) {
+        logger.error('[WORKER] Failed to start one or more workers:', error)
+        throw error
+    }
+}
+
+export async function stopAllWorkers(): Promise<void> {
+    logger.info('[WORKER] Stopping all background workers...')
+    
+    try {
+        await Promise.all([
+            ...workers.map(w => w.close()),
+            stopPriceHistoryWorkers()
+        ])
+        workers = []
+        logger.info('[WORKER] All workers stopped successfully')
+    } catch (error) {
+        logger.error('[WORKER] Error while stopping workers:', error)
     }
 }
