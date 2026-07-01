@@ -299,5 +299,3 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
-
-
