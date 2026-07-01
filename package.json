@@ -1,6 +1,6 @@
 {
   "name": "stellar-portfolio-rebalancer",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Intelligent portfolio rebalancing service for Stellar ecosystem using Reflector oracles",
   "scripts": {
@@ -39,9 +39,7 @@
     "lint:frontend": "cd frontend && npm run lint",
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
-
     "test:chaos": "node scripts/chaos/kill-backend-mid-rebalance.mjs",
-
     "clean": "npm run clean:all",
     "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
   },
