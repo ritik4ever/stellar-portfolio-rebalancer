@@ -34,5 +34,3 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
   )
 }
 
-</parameter>
-</write_to_file>

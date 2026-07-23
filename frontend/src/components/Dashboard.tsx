@@ -991,17 +991,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
-import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
 
-...
-    const refreshData = useCallback(async () => {
-        await Promise.all([
-            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
-            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
-            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
-        ])
-    }, [queryClient])
-...
                             <PriceTracker />
                         </div>
                     </div>

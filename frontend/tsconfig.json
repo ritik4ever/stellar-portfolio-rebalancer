@@ -26,6 +26,12 @@
     "include": [
         "src"
     ],
+    "exclude": [
+        "src/stories",
+        "src/**/*.stories.ts",
+        "src/**/*.stories.tsx",
+        "src/components/upstream_dashboard.tsx"
+    ],
     "references": [
         {
             "path": "./tsconfig.node.json"
