@@ -392,12 +392,12 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     allocations.set(asset2.clone(), 5000);
 
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    client.deposit(&pid, &asset1, &1000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &10_000_000, &String::from_str(&env, ""));
 
     let recipient = Address::generate(&env);
     let config = FeeConfig {
         platform_name: String::from_str(&env, "Acme Vault"),
-        fee_bps: 100,
+        fee_bps: 20,
         fee_recipient: recipient,
         enabled: true,
     };
@@ -410,8 +410,8 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     client.execute_rebalance(&pid, &Map::new(&env));
 
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 495);
-    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 495);
+    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 4_990_000);
+    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 4_990_000);
 }
 
 #[test]
@@ -1627,7 +1627,6 @@ fn test_capabilities() {
 }
 
 #[test]
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 fn test_capability_summary() {
     let env = Env::default();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
@@ -2319,4 +2318,214 @@ fn test_get_config_view_emergency_stop() {
     assert_eq!(config_view.reflector_address, reflector_id);
     assert_eq!(config_view.emergency_stop, true);
     assert_eq!(config_view.portfolio, PortfolioOption::None);
+}
+
+// ── Recurring Deposits ───────────────────────────────────────────────────
+
+#[test]
+fn test_schedule_recurring_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.schedule_recurring_deposit(&pid, &1000, &asset, &3600);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset.clone()).unwrap_or(0), 0);
+}
+
+#[test]
+fn test_execute_recurring_deposit_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.schedule_recurring_deposit(&pid, &1000, &asset, &3600);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 5000;
+    });
+
+    client.execute_recurring_deposit(&pid);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset.clone()).unwrap(), 1000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #30)")]
+fn test_execute_recurring_deposit_premature() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.schedule_recurring_deposit(&pid, &1000, &asset, &3600);
+
+    // Execute first time (should succeed since last_executed is 0)
+    client.execute_recurring_deposit(&pid);
+
+    // Try again before interval has elapsed
+    env.ledger().with_mut(|li| {
+        li.timestamp = 2000;
+    });
+
+    client.execute_recurring_deposit(&pid);
+}
+
+#[test]
+fn test_three_consecutive_deposit_cycles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let deposit_amount: i128 = 500;
+    let interval: u64 = 1000;
+    client.schedule_recurring_deposit(&pid, &deposit_amount, &asset, &interval);
+
+    // Cycle 1
+    env.ledger().with_mut(|li| {
+        li.timestamp = 2000;
+    });
+    client.execute_recurring_deposit(&pid);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.current_balances.get(asset.clone()).unwrap(),
+        500,
+        "After cycle 1: expected 500"
+    );
+
+    // Cycle 2
+    env.ledger().with_mut(|li| {
+        li.timestamp = 4000;
+    });
+    client.execute_recurring_deposit(&pid);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.current_balances.get(asset.clone()).unwrap(),
+        1000,
+        "After cycle 2: expected 1000"
+    );
+
+    // Cycle 3
+    env.ledger().with_mut(|li| {
+        li.timestamp = 6000;
+    });
+    client.execute_recurring_deposit(&pid);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.current_balances.get(asset.clone()).unwrap(),
+        1500,
+        "After cycle 3: expected 1500"
+    );
+}
+
+#[test]
+fn test_cancel_recurring_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.schedule_recurring_deposit(&pid, &1000, &asset, &3600);
+    client.cancel_recurring_deposit(&pid);
+
+    // After cancel, execute should fail
+    env.ledger().with_mut(|li| {
+        li.timestamp = 5000;
+    });
+    let result = client.try_execute_recurring_deposit(&pid);
+    assert_eq!(result, Err(Ok(Error::RecurringDepositNotConfigured)));
+}
+
+#[test]
+fn test_execute_recurring_deposit_no_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let result = client.try_execute_recurring_deposit(&pid);
+    assert_eq!(result, Err(Ok(Error::RecurringDepositNotConfigured)));
 }

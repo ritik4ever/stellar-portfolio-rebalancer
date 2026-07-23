@@ -7,7 +7,6 @@ pub const DEFAULT_ASSET_DECIMALS: u32 = 7;
 pub const MAX_ASSET_DECIMALS: u32 = 18;
 pub const SLIPPAGE_POLICY_VERSION_V1: u32 = 1;
 pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 /// Contract version representing the overall deployed logic version.
 pub const CONTRACT_VERSION: u32 = 1;
 /// Contract event schema version matching backend expected schema version.
@@ -123,6 +122,26 @@ pub struct UpgradeEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringDeposit {
+    pub amount: i128,
+    pub asset: Address,
+    pub interval_seconds: u64,
+    pub last_executed: u64,
+    pub owner: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringDepositExecutedEvent {
+    pub portfolio_id: u64,
+    pub amount: i128,
+    pub asset: Address,
+    pub timestamp: u64,
+    pub rebalance_triggered: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
     ReflectorAddress,
@@ -136,6 +155,7 @@ pub enum DataKey {
     UpgradeAuthority,
     WasmHash,
     LastTimestamp,
+    RecurringDeposit(u64),
 }
 
 #[contracterror]
@@ -170,6 +190,9 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    RecurringDepositNotConfigured = 29,
+    RecurringDepositTooSoon = 30,
+    InvalidInterval = 31,
 }
 
 #[contracttype]
