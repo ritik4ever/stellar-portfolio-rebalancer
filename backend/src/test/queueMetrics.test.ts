@@ -8,17 +8,20 @@ const queueNames = {
     ANALYTICS_SNAPSHOT: 'analytics-snapshot',
 }
 
-const buildQueue = (counts: { waiting?: number; active?: number; completed?: number; failed?: number; delayed?: number }) => ({
-    getWaitingCount: vi.fn().mockResolvedValue(counts.waiting ?? 0),
-    getActiveCount: vi.fn().mockResolvedValue(counts.active ?? 0),
-    getCompletedCount: vi.fn().mockResolvedValue(counts.completed ?? 0),
-    getFailedCount: vi.fn().mockResolvedValue(counts.failed ?? 0),
-    getDelayedCount: vi.fn().mockResolvedValue(counts.delayed ?? 0),
+const buildQueue = (name: string, counts: { waiting?: number; active?: number; completed?: number; failed?: number; delayed?: number }) => ({
+    name,
+    getJobCounts: vi.fn().mockResolvedValue({
+        waiting: counts.waiting ?? 0,
+        active: counts.active ?? 0,
+        completed: counts.completed ?? 0,
+        failed: counts.failed ?? 0,
+        delayed: counts.delayed ?? 0,
+    }),
 })
 
-const mockPortfolioCheckQueue = buildQueue({ waiting: 1 })
-const mockRebalanceQueue = buildQueue({ active: 2, failed: 3 })
-const mockAnalyticsSnapshotQueue = buildQueue({ delayed: 4 })
+const mockPortfolioCheckQueue = buildQueue('portfolio-check', { waiting: 1 })
+const mockRebalanceQueue = buildQueue('rebalance', { active: 2, failed: 3 })
+const mockAnalyticsSnapshotQueue = buildQueue('analytics-snapshot', { delayed: 4 })
 
 vi.mock('../queue/connection.js', () => ({
     isRedisAvailable: mockIsRedisAvailable,
@@ -59,15 +62,15 @@ describe('queue metrics service', () => {
     })
 
     it('logs actionable warnings and exports zeroes when a queue count cannot be collected', async () => {
-        mockRebalanceQueue.getFailedCount.mockRejectedValueOnce(new Error('redis read failed'))
+        mockRebalanceQueue.getJobCounts.mockRejectedValueOnce(new Error('redis read failed'))
         const { getQueueMetrics } = await import('../queue/queueMetrics.js')
 
         const result = await getQueueMetrics()
 
         expect(result.queues.rebalance).toEqual({ waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 })
         expect(mockLoggerWarn).toHaveBeenCalledWith(
-            '[queueMetrics] Failed to collect queue metrics',
-            { queue: 'rebalance', error: 'Error: redis read failed' }
+            '[queueMetrics] Failed to get stats for queue rebalance',
+            expect.objectContaining({ error: expect.any(Error) })
         )
     })
 
