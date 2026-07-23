@@ -206,6 +206,7 @@ function App() {
             reconnect: () => walletManager.reconnect(),
             checkConsent,
             authLogin,
+            getAutoReconnect: () => !!walletManager.getPublicKey(),
         })
 
         if (result.outcome === 'no_wallet') {
@@ -433,7 +434,7 @@ function App() {
                     onBack={() => handleNavigate('landing')}
                 />
             ) : embedPortfolioId ? (
-                <EmbedWidget id={embedPortfolioId} />
+                <div className="p-4">Embedded view for portfolio {embedPortfolioId}</div>
             ) : publicShareHash ? (
                 <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (

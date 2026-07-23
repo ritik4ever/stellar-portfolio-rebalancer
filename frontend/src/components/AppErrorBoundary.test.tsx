@@ -1,3 +1,4 @@
+import React from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
@@ -10,7 +11,7 @@ vi.mock('../observability', () => ({
 import { AppErrorBoundary } from './AppErrorBoundary'
 import { Sentry } from '../observability'
 
-function Bomb() {
+const Bomb: React.FC = () => {
     throw new Error('Test error')
 }
 

@@ -8,34 +8,34 @@ describe('DriftGauge snapshot', () => {
   })
 
   it('renders drift within threshold', () => {
-    const { container } = render(<DriftGauge drift={2.5} threshold={5} />)
+    const { container } = render(<DriftGauge asset={{ name: 'XLM', target: 50, current: 52.5, threshold: 5 }} />)
     expect(container).toMatchSnapshot()
   })
 
   it('renders drift approaching threshold', () => {
-    const { container } = render(<DriftGauge drift={4.2} threshold={5} />)
+    const { container } = render(<DriftGauge asset={{ name: 'XLM', target: 50, current: 54.2, threshold: 5 }} />)
     expect(container).toMatchSnapshot()
   })
 
   it('renders drift exceeding threshold', () => {
-    const { container } = render(<DriftGauge drift={6.8} threshold={5} />)
+    const { container } = render(<DriftGauge asset={{ name: 'XLM', target: 50, current: 56.8, threshold: 5 }} />)
     expect(container).toMatchSnapshot()
   })
 
   it('renders with custom label', () => {
     const { container } = render(
-      <DriftGauge drift={1.2} threshold={5} label="Max Drift" />
+      <DriftGauge asset={{ name: 'Max Drift', target: 50, current: 51.2, threshold: 5 }} />
     )
     expect(container).toMatchSnapshot()
   })
 
   it('renders zero drift', () => {
-    const { container } = render(<DriftGauge drift={0} threshold={5} />)
+    const { container } = render(<DriftGauge asset={{ name: 'XLM', target: 50, current: 50, threshold: 5 }} />)
     expect(container).toMatchSnapshot()
   })
 
   it('renders negative drift', () => {
-    const { container } = render(<DriftGauge drift={-3.5} threshold={5} />)
+    const { container } = render(<DriftGauge asset={{ name: 'XLM', target: 50, current: 46.5, threshold: 5 }} />)
     expect(container).toMatchSnapshot()
   })
 })

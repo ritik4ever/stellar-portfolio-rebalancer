@@ -9,13 +9,16 @@
  *   - Submit blocked until all fields and total are valid
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
 // TanStack Query Mutations
 import {
   buildRollbackMessage,
   useCreatePortfolioMutation,
+  loadPortfolioCloneDraft,
+  clearPortfolioCloneDraft,
 } from "../hooks/mutations/usePortfolioMutations";
+import type { PortfolioCloneDraft } from "../hooks/mutations/usePortfolioMutations";
 import {
   Plus,
   Trash2,
@@ -26,12 +29,20 @@ import {
   User,
   Zap,
   RefreshCw,
+  RotateCcw,
+  X,
 } from "lucide-react";
 
 import ThemeToggle from "./ThemeToggle";
-import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
-import { percentageToBps } from "../utils/calculations";
+import AssetSelector from "./AssetSelector";
+import { percentageToBps, remainingAllocation } from "../utils/calculations";
 import BulkPortfolioImport from "./BulkPortfolioImport";
+import {
+  type PortfolioSetupDraft,
+  loadPortfolioSetupDraft,
+  savePortfolioSetupDraft,
+  clearPortfolioSetupDraft,
+} from "../hooks/usePortfolio";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -182,7 +193,20 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     loadPortfolioCloneDraft(),
   );
 
-
+  const [draftPromptResolved, setDraftPromptResolved] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(() => {
+    const result = loadPortfolioSetupDraft(publicKey);
+    if (result.status === 'loaded') return result.draft;
+    return null;
+  });
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const hasMountedDraftSaver = useRef(false);
+  const assetsLoading = false;
+  const selectableAssets = DEFAULT_ASSET_OPTIONS.map((opt) => ({
+    symbol: opt.value,
+    label: opt.label,
+  }));
 
   useEffect(() => {
     if (!draftPromptResolved) return
@@ -223,7 +247,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const restoreDraft = () => {
     if (!pendingDraft) return
     setAllocations(
-      pendingDraft.allocations.map((allocation) => ({ ...allocation })),
+      pendingDraft.allocations.map((allocation: { asset: string; percentage: number }) => ({ ...allocation })),
     )
     setThreshold(pendingDraft.threshold)
     setSlippageTolerance(pendingDraft.slippageTolerance)
@@ -263,7 +287,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     if (!draft) return
 
     setCloneDraft(draft);
-    setAllocations(draft.allocations.map((row) => ({ ...row })));
+    setAllocations(draft.allocations.map((row: { asset: string; percentage: number }) => ({ ...row })));
     setThreshold(draft.threshold);
     setSlippageTolerance(draft.slippageTolerance);
     setStrategy(draft.strategy || "threshold");
@@ -376,7 +400,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   /** Adds a new allocation row using the first asset not already in the list */
   const addAllocation = () => {
     const unusedAssets = selectableAssets.filter(
-      (asset) => !allocations.some((alloc) => alloc.asset === asset.symbol),
+      (asset: { symbol: string; label: string }) => !allocations.some((alloc) => alloc.asset === asset.symbol),
     )
     if (unusedAssets.length > 0) {
       setAllocations([

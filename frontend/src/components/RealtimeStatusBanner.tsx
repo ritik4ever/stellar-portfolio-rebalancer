@@ -4,7 +4,7 @@ import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 import ReadinessDrilldown from './ReadinessDrilldown'
 
 const RealtimeStatusBanner: React.FC = () => {
-    const { state, reconnect, reconnectInfo, report, readinessLoading, readinessError } = useRealtimeConnection()
+    const { state, reconnect, reconnectInfo } = useRealtimeConnection()
     const showDrilldown = false
 
     if (state === 'connected') {
@@ -21,9 +21,9 @@ const RealtimeStatusBanner: React.FC = () => {
                 </div>
                 {showDrilldown && (
                     <ReadinessDrilldown
-                        report={report}
-                        loading={readinessLoading}
-                        loadError={readinessError}
+                        report={null as any}
+                        loading={false}
+                        loadError={null as any}
                     />
                 )}
             </div>
@@ -77,9 +77,9 @@ const RealtimeStatusBanner: React.FC = () => {
             </div>
             {showDrilldown && (
                 <ReadinessDrilldown
-                    report={report}
-                    loading={readinessLoading}
-                    loadError={readinessError}
+                    report={null as any}
+                    loading={false}
+                    loadError={null as any}
                 />
             )}
         </div>
