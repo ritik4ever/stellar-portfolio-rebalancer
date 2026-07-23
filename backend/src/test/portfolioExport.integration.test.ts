@@ -501,4 +501,3 @@ describe('Ownership enforcement (auth enabled)', () => {
         expect(res.body.userAddress).toBe(OWNER_ADDRESS)
     })
 })
-})

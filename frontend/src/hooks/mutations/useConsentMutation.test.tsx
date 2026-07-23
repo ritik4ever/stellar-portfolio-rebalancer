@@ -63,7 +63,9 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-
+        act(() => {
+            result.current.mutate()
+        })
 
         // onMutate is async (awaits cancelQueries) so wait for optimistic data to appear
         await waitFor(() => {
@@ -87,6 +89,9 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
+        await act(async () => {
+            try { await result.current.mutateAsync() } catch { /* expected */ }
+        })
 
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
     })
@@ -137,6 +142,9 @@ describe('useRevokeConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
+        await act(async () => {
+            try { await result.current.mutateAsync() } catch { /* expected */ }
+        })
 
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: true })
     })
