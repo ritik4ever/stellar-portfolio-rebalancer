@@ -29,11 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure testnet secret exists
+      - name: Check testnet secret
+        id: check_secret
         run: |
           if [ -z "${STELLAR_SECRET_KEY}" ]; then
-            echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
-            exit 1
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::STELLAR_TESTNET_SECRET_KEY not configured — deploy steps will be skipped"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Rust
@@ -109,6 +112,7 @@ jobs:
           path: contracts/bench_summary.md
 
       - name: Deploy and initialize on testnet
+        if: steps.check_secret.outputs.available == 'true'
         working-directory: ./contracts
         run: |
           soroban network add testnet --global \
