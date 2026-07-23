@@ -18,9 +18,21 @@ import { logger } from "../utils/logger.js";
 type ReadinessState = "ready" | "not_ready" | "disabled";
 
 // ── Readiness cache ─────────────────────────────────────────────────────────
+export interface ReadinessReport {
+  status: "ready" | "not_ready" | "disabled";
+  timestamp: string;
+  uptimeSeconds: number;
+  checks: Record<string, ReadinessCheck>;
+  probeBypass: {
+    probePaths: string[];
+    loopbackBypassEnabled: boolean;
+    secretConfigured: boolean;
+  };
+}
+
 interface CacheEntry {
-  report: object
-  expiresAt: number
+  report: ReadinessReport;
+  expiresAt: number;
 }
 
 let cacheTtlMs = parseInt(process.env.READINESS_CACHE_TTL_MS || "2000", 10)
