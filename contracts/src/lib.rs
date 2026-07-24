@@ -5,10 +5,8 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String};
 
-use crate::strategies::dca;
+
 
 mod strategies;
 mod reflector;
@@ -22,7 +20,6 @@ pub use types::*;
 #[contract]
 pub struct PortfolioRebalancer;
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 fn validate_slippage_policy_version(version: u32) -> bool {
     version == CURRENT_SLIPPAGE_POLICY_VERSION
 }
@@ -88,18 +85,6 @@ impl PortfolioRebalancer {
         if target_allocations.len() > MAX_PORTFOLIO_ASSETS {
             return Err(Error::TooManyAssets);
         }
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-
-        if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
-            return Err(Error::InvalidThreshold);
-        }
-
-        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance) {
-            return Err(Error::InvalidSlippageTolerance);
-        }
-
-        if !validate_slippage_policy_version(slippage_policy_version) {
-
         if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
             return Err(Error::InvalidThreshold);
         }
@@ -110,7 +95,6 @@ impl PortfolioRebalancer {
         }
 
         if !portfolio::validate_slippage_policy_version(slippage_policy_version) {
-
             return Err(Error::UnsupportedSlippagePolicyVersion);
         }
 
@@ -134,9 +118,6 @@ impl PortfolioRebalancer {
         };
 
         let _estimated_footprint =
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-            // portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
-
             portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
 
 
@@ -260,48 +241,25 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
-        let total_value = match portfolio::calculate_portfolio_value(
-            &env,
-            &portfolio.current_balances,
-            &portfolio.asset_decimals,
-            &reflector_client,
-        ) {
-            Ok(val) => val,
-            Err(_) => return false,
-        };
-
-        if total_value == 0 {
-            return false;
-        }
-
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
         let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
         if let Ok(p) = preview {
+            if p.total_value == 0 {
+                return false;
+            }
+            for (asset, _) in portfolio.target_allocations.iter() {
+                if let Some(reason) = p.skip_reasons.get(asset) {
+                    match reason {
+                        AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             p.rebalance_needed
         } else {
             false
         }
-
-        for (asset, target_pct) in portfolio.target_allocations.iter() {
-            let balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
-            {
-                let asset_value = portfolio::balance_to_value(balance, price_data.price);
-                let current_pct =
-                    ((asset_value * ALLOCATION_DENOMINATOR as i128) / total_value) as u32;
-                let drift = if current_pct >= target_pct {
-                    current_pct - target_pct
-                } else {
-                    target_pct - current_pct
-                };
-                if drift > portfolio.rebalance_threshold * (ALLOCATION_DENOMINATOR / 100) {
-                    return true;
-                }
-            }
-        }
-
-        false
 
     }
 
@@ -373,11 +331,7 @@ impl PortfolioRebalancer {
             ),
             (portfolio_id, current_steward, new_steward),
         );
-        env.events()
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-            .publish(("portfolio", "steward_transferred"), (portfolio_id, current_steward, new_steward));
 
-            .publish((symbol_short!("portfolio"), Symbol::new(&env, "steward_transferred")), (portfolio_id, current_steward, new_steward));
 
         Ok(())
     }
@@ -394,7 +348,6 @@ impl PortfolioRebalancer {
             .unwrap_or(portfolio.user)
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     pub fn version(_env: Env) -> u32 {
         CONTRACT_VERSION
     }
@@ -412,7 +365,6 @@ impl PortfolioRebalancer {
         flags
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     pub fn capability_summary(env: Env) -> ContractCapabilitySummary {
         ContractCapabilitySummary {
             version: Self::version(env.clone()),
@@ -435,7 +387,7 @@ impl PortfolioRebalancer {
         }
         env.storage().instance().set(&DataKey::FeeConfig, &config);
         env.events()
-            .publish(Symbol::new(&env, "FeeConfigUpdated"), config);
+            .publish((Symbol::new(&env, "FeeConfigUpdated"),), config);
     }
 
     pub fn get_fee_config(env: Env) -> FeeConfig {
@@ -472,37 +424,27 @@ impl PortfolioRebalancer {
         );
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     /// Returns the minimum allowed rebalance threshold percentage.
-
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     /// Returns the maximum allowed rebalance threshold percentage.
-
     pub fn max_rebalance_threshold(_env: Env) -> u32 {
         MAX_REBALANCE_THRESHOLD
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     /// Returns the minimum allowed slippage tolerance in basis points.
-
     pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
         MIN_SLIPPAGE_TOLERANCE_BPS
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     /// Returns the maximum allowed slippage tolerance in basis points.
-
     pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     /// Returns the maximum number of assets allowed in a portfolio.
-
     pub fn max_portfolio_assets(_env: Env) -> u32 {
         MAX_PORTFOLIO_ASSETS
     }
@@ -531,6 +473,86 @@ impl PortfolioRebalancer {
         )
     }
 
+    /// Returns per-asset allocation drift using live oracle prices.
+    ///
+    /// This is a read-only view — no `require_auth` is needed.
+    ///
+    /// The drift values are computed with the **identical** logic used by
+    /// `build_rebalance_preview` (and therefore `execute_rebalance`).
+    /// Specifically, `current_pct`, `target_pct`, `drift_pct`, and
+    /// `needs_rebalance` are sourced directly from `threshold_decisions`,
+    /// so what you see here is exactly what a rebalance execution would act on.
+    ///
+    /// Portfolios with no assets, or with a total value of zero, return an
+    /// empty `Vec` rather than an error.
+    pub fn get_drift_preview(env: Env, portfolio_id: u64) -> Vec<AssetDrift> {
+        // Load portfolio; return empty vec if not found.
+        let portfolio: Portfolio = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+        {
+            Some(p) => p,
+            None => return Vec::new(&env),
+        };
+
+        // Short-circuit for portfolios that have no tracked assets.
+        if portfolio.target_allocations.is_empty() {
+            return Vec::new(&env);
+        }
+
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+
+        // Delegate entirely to build_rebalance_preview so we share the same
+        // oracle-price sourcing, staleness checks, current_pct calculation and
+        // threshold comparison as the actual rebalance path.
+        let preview = match portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client)
+        {
+            Ok(p) => p,
+            // On any oracle error return an empty vec (read-only; never panics).
+            Err(_) => return Vec::new(&env),
+        };
+
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(reason) = preview.skip_reasons.get(asset) {
+                match reason {
+                    AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                        return Vec::new(&env);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // If total value is zero no allocation percentages are meaningful.
+        if preview.total_value == 0 {
+            return Vec::new(&env);
+        }
+
+        let mut result: Vec<AssetDrift> = Vec::new(&env);
+
+        for (asset, target_pct) in portfolio.target_allocations.iter() {
+            // Assets whose price was stale or missing will not appear in
+            // threshold_decisions; omit them from the drift preview too.
+            if let Some(decision) = preview.threshold_decisions.get(asset.clone()) {
+                result.push_back(AssetDrift {
+                    asset,
+                    current_pct: decision.current_percent,
+                    target_pct,
+                    drift_pct: decision.drift,
+                    needs_rebalance: decision.exceeds_threshold,
+                });
+            }
+        }
+
+        result
+    }
+
     pub fn pause_portfolio(env: Env, portfolio_id: u64, reason: PauseReason) {
         let mut portfolio: Portfolio = env
             .storage()
@@ -550,8 +572,6 @@ impl PortfolioRebalancer {
             .get(&DataKey::ContractPauseReason)
             .unwrap_or(PauseReason::None)
     }
-
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 
     pub fn get_config_view(env: Env, portfolio_id: u64) -> ConfigView {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -661,8 +681,6 @@ impl PortfolioRebalancer {
 
         let mut portfolio = Self::load_portfolio(env, portfolio_id)?;
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-
         // Issue #861: validate allocations sum to exactly ALLOCATION_DENOMINATOR (10000 bps)
         if !portfolio::validate_allocations(&portfolio.target_allocations) {
             return Err(Error::InvalidAllocationSum);
@@ -699,35 +717,23 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-        let mut current_prices = Map::new(&env);
-
-        let mut current_prices = Map::new(env);
+        let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
 
         for (asset, _) in portfolio.target_allocations.iter() {
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
-            {
-                current_prices.set(asset.clone(), price_data.price);
-            } else {
-                return Err(Error::MissingPrice);
+            if let Some(reason) = preview.skip_reasons.get(asset) {
+                match reason {
+                    AssetSkipReason::MissingPrice => return Err(Error::MissingPrice),
+                    AssetSkipReason::StalePrice => return Err(Error::StaleData),
+                    _ => {}
+                }
             }
         }
 
-        let total_value = match portfolio::calculate_portfolio_value(
-            env,
-            &portfolio.current_balances,
-            &portfolio.asset_decimals,
-            &reflector_client,
-        ) {
-            Ok(v) => v,
-            Err(_) => return Err(Error::StaleData),
-        };
-
+        let total_value = preview.total_value;
         let mut snapshot = portfolio.clone();
         snapshot.total_value = total_value;
 
-        let trades = portfolio::calculate_rebalance_trades(env, &snapshot, &current_prices);
+        let trades = preview.candidate_trades;
 
         let fee_config = Self::get_fee_config(env.clone());
         let effective_fee_bps = if fee_config.enabled {
@@ -742,20 +748,6 @@ impl PortfolioRebalancer {
             break;
         }
         if has_actual_balances {
-            let total_value = match portfolio::calculate_portfolio_value(
-                env,
-                &portfolio.current_balances,
-                &portfolio.asset_decimals,
-                &reflector_client,
-            ) {
-                Ok(v) => v,
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-                Err(_) => return Err(Error::MissingPrice),
-
-                Err(_) => return Err(Error::StaleData),
-
-            };
-
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client
@@ -768,12 +760,7 @@ impl PortfolioRebalancer {
                         .asset_decimals
                         .get(asset.clone())
                         .unwrap_or(DEFAULT_ASSET_DECIMALS);
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
-                    let expected_value = (total_value * target_pct as i128) / 100;
 
-                    let expected_value = (total_value * target_pct as i128) / ALLOCATION_DENOMINATOR as i128;
-
-                    let decimals = portfolio.asset_decimals.get(asset.clone()).unwrap_or(DEFAULT_ASSET_DECIMALS);
                     let expected_balance =
                         portfolio::value_to_balance(expected_value, price, decimals);
                     let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);

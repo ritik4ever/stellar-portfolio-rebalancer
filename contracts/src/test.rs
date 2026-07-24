@@ -392,12 +392,12 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     allocations.set(asset2.clone(), 5000);
 
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    client.deposit(&pid, &asset1, &1000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &10_000_000, &String::from_str(&env, ""));
 
     let recipient = Address::generate(&env);
     let config = FeeConfig {
         platform_name: String::from_str(&env, "Acme Vault"),
-        fee_bps: 100,
+        fee_bps: 50,
         fee_recipient: recipient,
         enabled: true,
     };
@@ -410,8 +410,8 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     client.execute_rebalance(&pid, &Map::new(&env));
 
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 495);
-    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 495);
+    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 4_975_000);
+    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 4_975_000);
 }
 
 #[test]
@@ -1627,7 +1627,6 @@ fn test_capabilities() {
 }
 
 #[test]
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 fn test_capability_summary() {
     let env = Env::default();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
@@ -2319,4 +2318,107 @@ fn test_get_config_view_emergency_stop() {
     assert_eq!(config_view.reflector_address, reflector_id);
     assert_eq!(config_view.emergency_stop, true);
     assert_eq!(config_view.portfolio, PortfolioOption::None);
+}
+
+// ── get_drift_preview tests ──────────────────────────────────────────────────
+
+#[test]
+fn test_get_drift_preview_balanced_no_needs_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 5000u32);
+    allocations.set(asset2.clone(), 5000u32);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Deposit equal amounts at equal oracle prices → zero drift.
+    client.deposit(&pid, &asset1, &100i128, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100i128, &String::from_str(&env, ""));
+
+    let drifts = client.get_drift_preview(&pid);
+    assert_eq!(drifts.len(), 2);
+    for i in 0..drifts.len() {
+        let d = drifts.get(i).unwrap();
+        assert_eq!(d.target_pct, 5000u32);
+        assert_eq!(d.current_pct, 5000u32);
+        assert_eq!(d.drift_pct, 0u32);
+        assert!(!d.needs_rebalance, "balanced portfolio should not need rebalance");
+    }
+}
+
+#[test]
+fn test_get_drift_preview_imbalanced_needs_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 5000u32);
+    allocations.set(asset2.clone(), 5000u32);
+
+    // Use a tight threshold (1 %) so even small imbalance triggers rebalance.
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 1, 50);
+
+    // Deposit very unequal amounts to create a large drift.
+    client.deposit(&pid, &asset1, &900i128, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100i128, &String::from_str(&env, ""));
+
+    let drifts = client.get_drift_preview(&pid);
+    assert_eq!(drifts.len(), 2);
+
+    // At least one asset must report needs_rebalance == true.
+    let any_needs = drifts.iter().any(|d| d.needs_rebalance);
+    assert!(any_needs, "imbalanced portfolio must have at least one asset needing rebalance");
+
+    // drift_pct must be the same as what build_rebalance_preview computes via
+    // preview_rebalance threshold_decisions — cross-check via preview_rebalance.
+    let preview = client.preview_rebalance(&pid);
+    for i in 0..drifts.len() {
+        let d = drifts.get(i).unwrap();
+        let td = preview.threshold_decisions.get(d.asset.clone()).unwrap();
+        assert_eq!(d.current_pct, td.current_percent, "current_pct must match preview");
+        assert_eq!(d.drift_pct, td.drift, "drift_pct must match preview threshold_decision");
+        assert_eq!(d.needs_rebalance, td.exceeds_threshold, "needs_rebalance must match preview");
+    }
+}
+
+#[test]
+fn test_get_drift_preview_unknown_portfolio_returns_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // portfolio_id 9999 was never created.
+    let drifts = client.get_drift_preview(&9999u64);
+    assert_eq!(drifts.len(), 0, "unknown portfolio must return empty vec, not panic");
 }
