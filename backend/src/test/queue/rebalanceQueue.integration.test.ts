@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { RedisMemoryServer } from 'redis-memory-server';
-import IORedis from 'ioredis';
+import { Redis as IORedis } from 'ioredis';
 
 // Mock connection options to dynamically use the in-memory Redis URL
 vi.mock('../../queue/connection.js', async (importOriginal) => {

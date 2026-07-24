@@ -7,7 +7,8 @@ vi.mock('../../hooks/queries/useAssetsQuery', () => ({
 }))
 
 vi.mock('../../hooks/mutations/usePortfolioMutations', () => ({
-  useCreatePortfolioMutation: () => ({ mutateAsync: async () => ({}), isPending: false })
+  useCreatePortfolioMutation: () => ({ mutateAsync: async () => ({}), isPending: false }),
+  loadPortfolioCloneDraft: vi.fn().mockResolvedValue({})
 }))
 
 import PortfolioSetup from '../PortfolioSetup'
@@ -20,4 +21,5 @@ describe('PortfolioSetup quick-start empty state', () => {
     expect(screen.getByText(/Quick start/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Try Balanced Template/i })).toBeTruthy()
   })
+})
 })

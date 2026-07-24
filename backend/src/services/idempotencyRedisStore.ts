@@ -1,4 +1,4 @@
-import Redis from 'ioredis'
+import { Redis } from 'ioredis'
 import { REDIS_URL, redisProbe } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 

@@ -51,6 +51,7 @@ vi.mock('./AssetSelector', () => ({
 
 const mockMutateAsync = vi.fn()
 const mockImportMutateAsync = vi.fn()
+const mockLoadPortfolioCloneDraft = vi.fn().mockResolvedValue({})
 vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
   buildRollbackMessage: (error: unknown, action = "portfolio update") => {
     const detail =
@@ -65,6 +66,7 @@ vi.mock("../hooks/mutations/usePortfolioMutations", () => ({
     mutateAsync: mockImportMutateAsync,
     isPending: false,
   }),
+  loadPortfolioCloneDraft: mockLoadPortfolioCloneDraft,
 }));
 
 const mockAssets = [

@@ -1,5 +1,6 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, vi } from 'vitest'
 
 // Mock the hooks used by Dashboard to control returned data
@@ -22,9 +23,18 @@ vi.mock('../../hooks/mutations/usePortfolioMutations', () => ({
 
 import Dashboard from '../Dashboard'
 
+function renderWithProviders(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  })
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
+
 describe('Dashboard empty state', () => {
   it('shows no-portfolios empty state for connected user with no portfolios', () => {
-    render(<Dashboard onNavigate={() => {}} publicKey={'GABC1234'} />)
+    renderWithProviders(<Dashboard onNavigate={() => {}} publicKey={'GABC1234'} />)
     expect(screen.getByText(/No portfolios yet/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Create Portfolio/i })).toBeTruthy()
   })
