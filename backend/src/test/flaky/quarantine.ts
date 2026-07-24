@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { it, test, describe } from 'vitest';
+import type { TestFunction } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Load registry
@@ -83,7 +84,7 @@ const mode = process.env.QUARANTINE_MODE ?? 'skip';
 // Public API
 // ---------------------------------------------------------------------------
 
-type TestFn = typeof it;
+type TestFn = TestFunction<any>;
 
 /**
  * Wraps a vitest `it` / `test` function so that tests registered with a
@@ -95,21 +96,23 @@ export function quarantineIf(id: string, testFn: TestFn): TestFn {
 
   if (mode === 'run') {
     // Run it but annotate with a console note so failures are visible.
-    return ((title: string, fn: () => unknown, timeout?: number) => {
+    const wrappedFn = ((title: string, fn: () => unknown, timeout?: number) => {
       console.info(
         `[quarantine:run] "${title}" (${id}) — issue: ${entry.issue} — owner: ${entry.owner}`
       );
       return testFn(title, fn, timeout);
     }) as TestFn;
+    return wrappedFn;
   }
 
   // Default: skip and emit a note so maintainers see it in verbose output.
-  return ((title: string, _fn: () => unknown, _timeout?: number) => {
+  const skippedFn = ((title: string, _fn: () => unknown, _timeout?: number) => {
     return testFn.skip(
       `[QUARANTINED] ${title} — reason: ${entry.reason} — issue: ${entry.issue}`,
       () => {}
     );
   }) as TestFn;
+  return skippedFn;
 }
 
 /**

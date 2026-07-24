@@ -3,6 +3,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { logger } from '../utils/logger.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+    validateStartupConfigOrThrow,
+    buildStartupSummary,
+    getFeatureFlags,
+    isFeatureFlagEnabled,
+    clearFeatureFlagsCache,
+} from '../config/featureFlags.js'
 
 const ORIGINAL_ENV = { ...process.env }
 

@@ -9,7 +9,7 @@ import { PROTOCOL_VERSION, HEARTBEAT_INTERVAL_MS } from "../types/websocket.js";
 function connectAndAwaitGreeting(
   port: number,
   query = "",
-): Promise<{ ws: WebSocket; greeting: Record<string, unknown> }> {
+): Promise<{ ws: WebSocket; greeting: { type: string; payload?: Record<string, unknown> } }> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}${query}`);
     ws.once("message", (data) =>
@@ -19,7 +19,7 @@ function connectAndAwaitGreeting(
   });
 }
 
-function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
+function waitForMessage(ws: WebSocket): Promise<{ type: string; payload?: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Message timeout")), 3000);
     ws.once("message", (data) => {
@@ -32,7 +32,7 @@ function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
 async function connectAndSubscribe(
   port: number,
   query = "",
-): Promise<{ ws: WebSocket; greeting: Record<string, unknown>; subscribed: Record<string, unknown> }> {
+): Promise<{ ws: WebSocket; greeting: { type: string; payload?: Record<string, unknown> }; subscribed: { type: string; payload?: Record<string, unknown> } }> {
   const { ws, greeting } = await connectAndAwaitGreeting(port, query);
   ws.send(
     JSON.stringify({
