@@ -22,4 +22,3 @@ describe('PortfolioSetup quick-start empty state', () => {
     expect(screen.getByRole('button', { name: /Try Balanced Template/i })).toBeTruthy()
   })
 })
-})
