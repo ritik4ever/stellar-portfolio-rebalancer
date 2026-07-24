@@ -93,6 +93,35 @@ export class PortfolioStorage {
         return id
     }
 
+    async clonePortfolio(originalId: string, name?: string): Promise<Portfolio | undefined> {
+        const original = await this.getPortfolio(originalId)
+        if (!original) return undefined
+        const id = randomUUID()
+        const now = new Date().toISOString()
+        const cloneName = name !== undefined ? name : original.name
+        const cloned: Portfolio = {
+            ...original,
+            id,
+            name: cloneName,
+            createdAt: now,
+            lastRebalance: now,
+            version: 1
+        }
+        if (isDbConfigured()) {
+            await portfolioDb.dbCreatePortfolio(
+                id,
+                cloned.userAddress,
+                cloned.allocations,
+                cloned.threshold,
+                cloned.balances,
+                cloned.totalValue,
+                cloned.slippageTolerancePercent ?? cloned.slippageTolerance ?? 1
+            )
+        }
+        this.cacheSet(cloned)
+        return cloned
+    }
+
     async getPortfolio(id: string): Promise<Portfolio | undefined> {
         return this.cacheGet(id)
     }

@@ -34,6 +34,11 @@ export const createPortfolioSchema = z.object({
     }).optional(),
 }).strict();
 
+// Schema for POST /portfolio/:id/clone
+export const clonePortfolioSchema = z.object({
+    name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name cannot exceed 100 characters').optional()
+}).strict();
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({

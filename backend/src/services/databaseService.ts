@@ -35,6 +35,7 @@ export interface RebalanceHistoryQueryOptions {
 interface PortfolioRow {
   id: string;
   user_address: string;
+  name?: string | null;
   allocations: string;
   threshold: number;
   slippage_tolerance_percent?: number;
@@ -337,6 +338,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
   return {
     id: row.id,
     userAddress: row.user_address,
+    name: row.name ?? undefined,
     allocations: safeJsonParse(
       row.allocations,
       {},
@@ -446,6 +448,10 @@ export class DatabaseService {
         "ALTER TABLE portfolios ADD COLUMN strategy_config TEXT DEFAULT '{}'",
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
+    }
+    if (!cols.some((c) => c.name === "name")) {
+      this.db.exec("ALTER TABLE portfolios ADD COLUMN name TEXT");
+      logger.info("[DB] Migration: added name column to portfolios");
     }
 
     const consentCols = this.db
@@ -601,6 +607,43 @@ export class DatabaseService {
       throw new Error(
         `Failed to create portfolio with balances for user '${userAddress}': ${err}`,
       );
+    }
+  }
+
+  clonePortfolio(originalId: string, name?: string): Portfolio | undefined {
+    try {
+      const original = this.getPortfolio(originalId);
+      if (!original) return undefined;
+
+      const id = generateId();
+      const now = new Date().toISOString();
+      const cloneName = name !== undefined ? name : original.name;
+
+      this.db
+        .prepare(
+          `
+                INSERT INTO portfolios (id, user_address, name, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `,
+        )
+        .run(
+          id,
+          original.userAddress,
+          cloneName ?? null,
+          JSON.stringify(original.allocations),
+          original.threshold,
+          original.slippageTolerancePercent ?? original.slippageTolerance ?? 1,
+          JSON.stringify(original.balances || {}),
+          original.totalValue || 0,
+          now,
+          now,
+          original.strategy || "threshold",
+          JSON.stringify(original.strategyConfig || {}),
+        );
+
+      return this.getPortfolio(id);
+    } catch (err) {
+      throw new Error(`Failed to clone portfolio '${originalId}': ${err}`);
     }
   }
 
