@@ -22,7 +22,7 @@ const REQUIRED_STARTUP_ENV = {
 
 describe('index startup self-test flag', () => {
     let envBackup: NodeJS.ProcessEnv
-    let exitCodeBackup: number | undefined
+    let exitCodeBackup: string | number | undefined
 
     beforeEach(() => {
         vi.clearAllMocks()

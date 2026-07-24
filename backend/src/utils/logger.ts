@@ -25,8 +25,10 @@ const baseLogger = pino({
         const fields: Record<string, string> = {}
         if (requestId) fields.requestId = requestId
         if (correlationId) fields.correlation_id = correlationId
-        if (ctxTraceId || otelTraceId) fields.trace_id = ctxTraceId || otelTraceId
-        if (ctxSpanId || otelSpanId) fields.span_id = ctxSpanId || otelSpanId
+        const traceId = ctxTraceId || otelTraceId
+        if (traceId) fields.trace_id = traceId
+        const spanId = ctxSpanId || otelSpanId
+        if (spanId) fields.span_id = spanId
         return fields
     },
     hooks: {

@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
-import { vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 // Mock the hooks used by Dashboard to control returned data
 vi.mock('../../hooks/queries/usePortfolioQuery', () => ({
