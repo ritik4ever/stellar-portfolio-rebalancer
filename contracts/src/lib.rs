@@ -10,9 +10,14 @@ use soroban_sdk::{
 
 mod strategies;
 mod reflector;
+mod portfolio;
+mod events;
+mod templates;
 #[cfg(test)]
 mod test;
 mod types;
+
+use strategies::dca;
 
 pub use reflector::*;
 pub use types::*;
@@ -75,7 +80,85 @@ impl PortfolioRebalancer {
         slippage_policy_version: u32,
     ) -> Result<u64, Error> {
         user.require_auth();
+        Self::create_portfolio_internal(
+            &env,
+            user,
+            target_allocations,
+            asset_decimals,
+            rebalance_threshold,
+            slippage_tolerance,
+            slippage_policy_version,
+        )
+    }
 
+    /// Admin-only: store a new named on-chain allocation template.
+    ///
+    /// Templates are on-chain data (persistent storage), not hardcoded
+    /// constants, so the set of available templates can grow over time
+    /// without a contract upgrade.
+    pub fn create_template(
+        env: Env,
+        name: String,
+        allocations: Map<Address, u32>,
+    ) -> Result<(), Error> {
+        templates::create_template(&env, name, allocations)
+    }
+
+    /// Admin-only: change the allocations of an existing named template.
+    pub fn update_template(
+        env: Env,
+        name: String,
+        allocations: Map<Address, u32>,
+    ) -> Result<(), Error> {
+        templates::update_template(&env, name, allocations)
+    }
+
+    /// Public view: fetch a template's stored target allocations, if any.
+    pub fn get_template(env: Env, name: String) -> Option<Map<Address, u32>> {
+        templates::get_template(&env, name)
+    }
+
+    /// Public view: list the names of all known templates.
+    pub fn list_templates(env: Env) -> Vec<String> {
+        templates::list_templates(&env)
+    }
+
+    /// Create a portfolio using the allocations stored under a named
+    /// template, instead of passing `target_allocations` explicitly.
+    pub fn create_portfolio_from_template(
+        env: Env,
+        user: Address,
+        template_name: String,
+        asset_decimals: Map<Address, u32>,
+        rebalance_threshold: u32,
+        slippage_tolerance: u32,
+        slippage_policy_version: u32,
+    ) -> Result<u64, Error> {
+        user.require_auth();
+
+        let target_allocations = templates::get_template(&env, template_name)
+            .ok_or(Error::TemplateNotFound)?;
+
+        Self::create_portfolio_internal(
+            &env,
+            user,
+            target_allocations,
+            asset_decimals,
+            rebalance_threshold,
+            slippage_tolerance,
+            slippage_policy_version,
+        )
+    }
+
+    fn create_portfolio_internal(
+        env: &Env,
+        user: Address,
+        target_allocations: Map<Address, u32>,
+        asset_decimals: Map<Address, u32>,
+        rebalance_threshold: u32,
+        slippage_tolerance: u32,
+        slippage_policy_version: u32,
+    ) -> Result<u64, Error> {
         if !portfolio::validate_allocations(&target_allocations) {
             return Err(Error::InvalidAllocation);
         }
@@ -106,19 +189,19 @@ impl PortfolioRebalancer {
         let portfolio = Portfolio {
             user: user.clone(),
             target_allocations,
-            current_balances: Map::new(&env),
+            current_balances: Map::new(env),
             asset_decimals,
             rebalance_threshold,
             slippage_tolerance,
             slippage_policy_version,
-            last_rebalance: guard_ledger_timestamp(&env),
+            last_rebalance: guard_ledger_timestamp(env),
             total_value: 0,
             is_active: true,
             pause_reason: PauseReason::None,
         };
 
         let _estimated_footprint =
-            portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
+            portfolio::validate_portfolio_storage_footprint(env, portfolio_id, &portfolio)?;
 
 
         env.storage()
@@ -129,7 +212,7 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
-        portfolio::emit_portfolio_created(&env, portfolio_id, user);
+        portfolio::emit_portfolio_created(env, portfolio_id, user);
         Ok(portfolio_id)
     }
 

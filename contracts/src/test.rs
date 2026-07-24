@@ -2422,3 +2422,238 @@ fn test_get_drift_preview_unknown_portfolio_returns_empty() {
     let drifts = client.get_drift_preview(&9999u64);
     assert_eq!(drifts.len(), 0, "unknown portfolio must return empty vec, not panic");
 }
+
+// ── Issue #967: on-chain portfolio templates ────────────────────────────
+
+#[test]
+fn test_create_and_get_template() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 6000);
+    allocations.set(asset2.clone(), 4000);
+
+    let name = String::from_str(&env, "Conservative");
+    client.create_template(&name, &allocations);
+
+    let stored = client.get_template(&name).unwrap();
+    assert_eq!(stored.get(asset1).unwrap(), 6000);
+    assert_eq!(stored.get(asset2).unwrap(), 4000);
+
+    let names = client.list_templates();
+    assert_eq!(names.len(), 1);
+    assert_eq!(names.get(0).unwrap(), name);
+}
+
+#[test]
+fn test_get_template_unknown_returns_none() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let name = String::from_str(&env, "DoesNotExist");
+    assert_eq!(client.get_template(&name), None);
+}
+
+#[test]
+#[should_panic]
+fn test_create_template_non_admin_rejected() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    let asset = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset, 10000);
+    let name = String::from_str(&env, "Aggressive");
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "create_template",
+                args: (&name, &allocations).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .create_template(&name, &allocations);
+}
+
+#[test]
+fn test_create_template_invalid_allocation_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset, 9000); // does not sum to 10000
+    let name = String::from_str(&env, "Balanced");
+
+    let result = client.try_create_template(&name, &allocations);
+    assert_eq!(result, Err(Ok(Error::InvalidAllocation)));
+}
+
+#[test]
+fn test_create_template_duplicate_name_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset, 10000);
+    let name = String::from_str(&env, "Balanced");
+
+    client.create_template(&name, &allocations);
+    let result = client.try_create_template(&name, &allocations);
+    assert_eq!(result, Err(Ok(Error::TemplateAlreadyExists)));
+}
+
+#[test]
+fn test_update_template_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 10000);
+    let name = String::from_str(&env, "Balanced");
+    client.create_template(&name, &allocations);
+
+    let mut updated = Map::new(&env);
+    updated.set(asset1.clone(), 5000);
+    updated.set(asset2.clone(), 5000);
+    client.update_template(&name, &updated);
+
+    let stored = client.get_template(&name).unwrap();
+    assert_eq!(stored.get(asset1).unwrap(), 5000);
+    assert_eq!(stored.get(asset2).unwrap(), 5000);
+
+    // Registry should not gain a duplicate entry from the update.
+    assert_eq!(client.list_templates().len(), 1);
+}
+
+#[test]
+fn test_update_template_unknown_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset, 10000);
+    let name = String::from_str(&env, "Ghost");
+
+    let result = client.try_update_template(&name, &allocations);
+    assert_eq!(result, Err(Ok(Error::TemplateNotFound)));
+}
+
+#[test]
+fn test_create_portfolio_from_template() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 6000);
+    allocations.set(asset2.clone(), 4000);
+    let name = String::from_str(&env, "Conservative");
+    client.create_template(&name, &allocations);
+
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let portfolio_id = client.create_portfolio_from_template(
+        &user,
+        &name,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+
+    assert!(portfolio_id > 0);
+    let portfolio = client.get_portfolio(&portfolio_id);
+    assert_eq!(portfolio.user, user);
+    assert_eq!(portfolio.target_allocations.get(asset1).unwrap(), 6000);
+    assert_eq!(portfolio.target_allocations.get(asset2).unwrap(), 4000);
+}
+
+#[test]
+fn test_create_portfolio_from_unknown_template_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset = Address::generate(&env);
+    let mut asset_decimals = Map::new(&env);
+    asset_decimals.set(asset, DEFAULT_ASSET_DECIMALS);
+    let name = String::from_str(&env, "Nonexistent");
+
+    let result = client.try_create_portfolio_from_template(
+        &user,
+        &name,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    assert_eq!(result, Err(Ok(Error::TemplateNotFound)));
+}

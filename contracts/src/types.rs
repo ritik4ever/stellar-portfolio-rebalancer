@@ -136,6 +136,8 @@ pub enum DataKey {
     WasmHash,
     LastTimestamp,
     DCAConfig(u64),
+    Template(String),
+    TemplateNames,
 }
 
 #[contracttype]
@@ -180,6 +182,8 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    TemplateNotFound = 29,
+    TemplateAlreadyExists = 30,
 }
 
 #[contracttype]

@@ -5,6 +5,7 @@ Contract source:
 - `contracts/src/lib.rs`
 - `contracts/src/types.rs`
 - `contracts/src/portfolio.rs`
+- `contracts/src/templates.rs`
 - `contracts/src/reflector.rs`
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
@@ -69,6 +70,53 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Notes:** The contract exposes `get_portfolio` to read portfolio contents by
   id. Consumers should store the returned id along with the portfolio metadata
   to maintain a canonical reference.
+
+### `create_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only: stores a new named on-chain allocation template. Templates
+  are persistent contract storage, not hardcoded contract logic, so new named
+  presets (e.g. "Conservative", "Balanced", "Aggressive") can be added or
+  changed without a contract upgrade.
+- **Parameters:**
+  - `name`: Template name; must not already be in use.
+  - `allocations`: Target allocations per asset (`Address -> percentage`), same shape and validation as `create_portfolio`'s `target_allocations`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::InvalidAllocation)` — allocations do not sum to 100% or contain a zero percentage.
+  - `Err(Error::TemplateAlreadyExists)` — a template with this name already exists; use `update_template` instead.
+- **Preconditions:** `admin.require_auth()` succeeds.
+
+### `update_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only: replaces the allocations of an existing named template.
+- **Parameters:** Same as `create_template`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::InvalidAllocation)`
+  - `Err(Error::TemplateNotFound)` — no template with this name exists; use `create_template` instead.
+- **Preconditions:** `admin.require_auth()` succeeds.
+
+### `get_template(env: Env, name: String) -> Option<Map<Address, u32>>`
+
+- **Purpose:** Public read-only view of a template's stored allocations.
+- **Returns:** `Some(allocations)` if the template exists, `None` otherwise.
+- **Preconditions:** None; callable without signing.
+
+### `list_templates(env: Env) -> Vec<String>`
+
+- **Purpose:** Public read-only view of all known template names, in creation order.
+- **Preconditions:** None; callable without signing.
+
+### `create_portfolio_from_template(env: Env, user: Address, template_name: String, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
+
+- **Purpose:** Creates a new user portfolio using the allocations stored under a named
+  template instead of passing `target_allocations` directly. Shares the same
+  validation, storage-footprint checks, and `("portfolio","created")` event
+  emission as `create_portfolio`.
+- **Parameters:** Same as `create_portfolio`, except `target_allocations` is replaced by `template_name`.
+- **Returns:** `Ok(portfolio_id)` or any error `create_portfolio` can return, plus:
+  - `Err(Error::TemplateNotFound)` — no template with this name exists.
+- **Preconditions:**
+  - `user.require_auth()` succeeds.
+  - A template named `template_name` exists.
 
 ### `get_portfolio(env: Env, portfolio_id: u64) -> Portfolio`
 
@@ -290,6 +338,9 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `25` | `AssetNotSupported` | An asset in the portfolio has no price data available from the Reflector oracle. | Verify the asset is listed in the Reflector oracle. Check the asset's contract address or Stellar issuer is correctly specified. |
 | `26` | `InvalidAmount` | A deposit or trade amount is zero, negative, or below the minimum trade size. | Provide a positive amount greater than the minimum trade size. |
 | `27` | `WithdrawFailed` | A withdrawal operation could not be completed. | Check that the portfolio has sufficient balance and is not paused. Verify the withdrawal amount does not exceed available balances. |
+| `28` | `InvalidAllocationSum` | A portfolio's target allocations no longer sum to exactly 100% at rebalance time. | Update the portfolio's target allocations so they sum to exactly 100% before retrying. |
+| `29` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
+| `30` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 
