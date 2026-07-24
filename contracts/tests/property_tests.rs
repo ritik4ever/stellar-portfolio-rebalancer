@@ -12,9 +12,9 @@
 //!
 //! | ID   | Property                                 | Invariant statement                                                             |
 //! |------|------------------------------------------|---------------------------------------------------------------------------------|
-//! | P1a  | Valid allocations accepted               | Any non-empty `u32` vector that sums to 100 with no zeroes → `validate` = true  |
-//! | P1b  | Invalid allocations rejected             | Vectors with sum ≠ 100, zeroes, or empty → `validate` = false                  |
-//! | P2a  | Drift always in `[0, 100]`              | `compute_drift(c, t)` ∈ `[0, 100]` for all `c ∈ [0,100]`, `t ∈ [1,100]`      |
+//! | P1a  | Valid allocations accepted               | Any non-empty `u32` vector that sums to 10000 with no zeroes → `validate` = true  |
+//! | P1b  | Invalid allocations rejected             | Vectors with sum ≠ 10000, zeroes, or empty → `validate` = false                  |
+//! | P2a  | Drift always in `[0, 10000]`              | `compute_drift(c, t)` ∈ `[0, 10000]` for all `c ∈ [0,10000]`, `t ∈ [1,10000]`      |
 //! | P2b  | Drift is symmetric                       | `drift(a, b) == drift(b, a)` for all a, b                                      |
 //! | P2c  | Zero drift at equality                   | `drift(p, p) == 0` for all p                                                    |
 //! | P3a  | Rebalance idempotency at zero drift      | `trade_amount == 0` when `current_balance == target_balance`                    |
@@ -34,9 +34,10 @@ use proptest::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// Returns `true` iff the allocation slice is non-empty, every element is
-/// non-zero, no overflow occurs, and the total equals exactly 100.
+/// non-zero, no overflow occurs, and the total equals exactly 10000.
 ///
-/// Mirrors [`portfolio::validate_allocations`] in the Soroban contract.
+/// Mirrors [`portfolio::validate_allocations`] in the Soroban contract,
+/// which uses `ALLOCATION_DENOMINATOR = 10_000` (basis points).
 fn validate_allocations_pure(allocations: &[u32]) -> bool {
     if allocations.is_empty() {
         return false;
@@ -51,7 +52,7 @@ fn validate_allocations_pure(allocations: &[u32]) -> bool {
             None => return false, // overflow → invalid
         };
     }
-    total == 100
+    total == 10000
 }
 
 /// Computes the absolute percentage-point drift between `current_percent` and
@@ -82,7 +83,7 @@ fn compute_trade_amount(
         return 0;
     }
     const REFLECTOR_PRICE_DECIMALS: u32 = 14;
-    let target_value = (total_value * target_percent as i128) / 100;
+    let target_value = (total_value * target_percent as i128) / 10000;
     let target_balance = (target_value * 10i128.pow(REFLECTOR_PRICE_DECIMALS)) / price;
     target_balance - current_balance
 }
@@ -94,19 +95,19 @@ fn compute_trade_amount(
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10_000))]
 
-    /// **P1a** – A valid allocation vector (non-empty, all non-zero, sums to 100)
+    /// **P1a** – A valid allocation vector (non-empty, all non-zero, sums to 10000)
     /// must always be accepted by `validate_allocations_pure`.
     #[test]
     fn property_valid_allocations_always_accepted(
-        // Generate 1–9 parts whose sum < 100, then append the remainder to
-        // make the total exactly 100.
-        parts in proptest::collection::vec(1u32..=97u32, 1..=9usize),
+        // Generate 1–9 parts whose sum < 10000, then append the remainder to
+        // make the total exactly 10000.
+        parts in proptest::collection::vec(1u32..=9997u32, 1..=9usize),
     ) {
         let sum: u64 = parts.iter().map(|&x| x as u64).sum();
-        // Skip inputs where the partial sum already reaches or exceeds 100,
+        // Skip inputs where the partial sum already reaches or exceeds 10000,
         // or the remainder would be 0 (violating the non-zero constraint).
-        prop_assume!(sum < 100);
-        let remainder = 100u32 - sum as u32;
+        prop_assume!(sum < 10000);
+        let remainder = 10000u32 - sum as u32;
         prop_assume!(remainder >= 1);
 
         let mut allocations = parts.clone();
@@ -114,7 +115,7 @@ proptest! {
 
         prop_assert!(
             validate_allocations_pure(&allocations),
-            "expected valid for {:?} (sum=100)", allocations
+            "expected valid for {:?} (sum=10000)", allocations
         );
     }
 
@@ -124,16 +125,16 @@ proptest! {
     /// We categorise invalid vectors as:
     ///   • empty
     ///   • containing a zero element
-    ///   • summing to a value other than 100
+    ///   • summing to a value other than 10000
     #[test]
     fn property_invalid_allocations_always_rejected(
-        raw in proptest::collection::vec(0u32..=200u32, 0..=12usize),
+        raw in proptest::collection::vec(0u32..=20000u32, 0..=12usize),
     ) {
         let real_sum: u64 = raw.iter().map(|&x| x as u64).sum();
         let has_zero  = raw.iter().any(|&x| x == 0);
         let is_empty  = raw.is_empty();
 
-        let should_be_invalid = is_empty || has_zero || real_sum != 100;
+        let should_be_invalid = is_empty || has_zero || real_sum != 10000;
 
         if should_be_invalid {
             prop_assert!(
@@ -152,17 +153,17 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10_000))]
 
-    /// **P2a** – Drift is always within `[0, 100]` for any valid current and
+    /// **P2a** – Drift is always within `[0, 10000]` for any valid current and
     /// target percentages.
     #[test]
     fn property_drift_always_in_valid_range(
-        current_percent in 0u32..=100u32,
-        target_percent  in 1u32..=100u32,
+        current_percent in 0u32..=10000u32,
+        target_percent  in 1u32..=10000u32,
     ) {
         let drift = compute_drift(current_percent, target_percent);
         prop_assert!(
-            drift <= 100,
-            "drift {} out of [0,100] for current={} target={}",
+            drift <= 10000,
+            "drift {} out of [0,10000] for current={} target={}",
             drift, current_percent, target_percent
         );
     }
@@ -170,8 +171,8 @@ proptest! {
     /// **P2b** – Drift is symmetric: `drift(a, b) == drift(b, a)`.
     #[test]
     fn property_drift_is_symmetric(
-        a in 0u32..=100u32,
-        b in 0u32..=100u32,
+        a in 0u32..=10000u32,
+        b in 0u32..=10000u32,
     ) {
         prop_assert_eq!(
             compute_drift(a, b),
@@ -182,7 +183,7 @@ proptest! {
 
     /// **P2c** – Drift of equal percentages is always 0.
     #[test]
-    fn property_drift_zero_when_equal(pct in 0u32..=100u32) {
+    fn property_drift_zero_when_equal(pct in 0u32..=10000u32) {
         prop_assert_eq!(
             compute_drift(pct, pct),
             0u32,
@@ -204,14 +205,14 @@ proptest! {
     /// return exactly 0 for any valid price and total_value.
     #[test]
     fn property_rebalance_idempotent_at_zero_drift(
-        target_percent in 1u32..=100u32,
+        target_percent in 1u32..=10000u32,
         total_value    in 1i128..=1_000_000_000_000i128,
         price          in 1i128..=1_000_000_000_000_000_000i128,
     ) {
         const PRICE_DECIMALS: u32 = 14;
 
         // Derive the exact target_balance using the same formula as the contract.
-        let target_value   = (total_value * target_percent as i128) / 100;
+        let target_value   = (total_value * target_percent as i128) / 10000;
         let target_balance = (target_value * 10i128.pow(PRICE_DECIMALS)) / price;
 
         // When current == target, trade must be 0 (idempotent).
@@ -232,14 +233,14 @@ proptest! {
     /// • Under-weight (current < target) → trade ≥ 0 (buy)
     #[test]
     fn property_trade_sign_matches_weight_direction(
-        target_percent in 1u32..=100u32,
+        target_percent in 1u32..=10000u32,
         total_value    in 1i128..=1_000_000_000_000i128,
         price          in 1i128..=1_000_000_000_000_000_000i128,
         surplus        in 1i128..=1_000_000_000i128,
     ) {
         const PRICE_DECIMALS: u32 = 14;
 
-        let target_value   = (total_value * target_percent as i128) / 100;
+        let target_value   = (total_value * target_percent as i128) / 10000;
         let target_balance = (target_value * 10i128.pow(PRICE_DECIMALS)) / price;
 
         // Over-weight: current > target → should produce a sell (≤ 0).
