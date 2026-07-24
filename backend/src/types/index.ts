@@ -66,6 +66,7 @@ export interface Portfolio {
     createdAt: string
     lastRebalance: string
     version: number
+    costBasis?: Record<string, number>
 }
 
 export type RebalanceTrigger = 'auto' | 'manual' | 'system'

@@ -2523,7 +2523,7 @@ fn test_auto_nav_snapshot_on_rebalance() {
 
     env.ledger().with_mut(|li| {
         li.sequence_number = 10;
-        li.timestamp = 1000;
+        li.timestamp = 4000;
     });
 
     // Execute rebalance
@@ -2536,7 +2536,7 @@ fn test_auto_nav_snapshot_on_rebalance() {
     assert_eq!(history.len(), 1);
     let snapshot = history.get(0).unwrap();
     assert_eq!(snapshot.sequence, 10);
-    assert_eq!(snapshot.timestamp, 1000);
+    assert_eq!(snapshot.timestamp, 4000);
     assert_eq!(snapshot.usd_nav, 100_000000000);
 }
 
@@ -2590,3 +2590,144 @@ fn test_benchmark_nav_operations() {
     std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
     std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
 }
+
+// ── Tax loss harvesting tests ───────────────────────────────────────────────
+
+mod tax_mock_reflector {
+    use crate::reflector::{Asset, PriceData};
+    use soroban_sdk::{contract, contractimpl, Env, Symbol, Vec, Address};
+
+    #[contract]
+    pub struct ConfigurableReflector;
+
+    #[contractimpl]
+    impl ConfigurableReflector {
+        pub fn base(env: Env) -> Asset {
+            Asset::Other(Symbol::new(&env, "USD"))
+        }
+        pub fn assets(env: Env) -> Vec<Asset> {
+            Vec::new(&env)
+        }
+        pub fn decimals(env: Env) -> u32 {
+            14
+        }
+        pub fn lastprice(env: Env, asset: Asset) -> Option<PriceData> {
+            let price: i128 = match asset {
+                Asset::Stellar(addr) => env.storage().instance().get(&addr).unwrap_or(100_00000000000000i128),
+                _ => 100_00000000000000i128,
+            };
+            Some(PriceData {
+                price,
+                timestamp: env.ledger().timestamp(),
+            })
+        }
+        pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
+            Some(100_00000000000000i128)
+        }
+        // Helper to set price
+        pub fn set_price(env: Env, asset: Address, price: i128) {
+            env.storage().instance().set(&asset, &price);
+        }
+    }
+}
+
+#[test]
+fn test_tax_loss_harvesting() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    
+    // Register the configurable mock reflector
+    let reflector_id = env.register_contract(None, tax_mock_reflector::ConfigurableReflector);
+    let reflector_client = tax_mock_reflector::ConfigurableReflectorClient::new(&env, &reflector_id);
+    
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let asset3 = Address::generate(&env);
+
+    // Set initial prices in reflector:
+    // Asset 1 = 100
+    // Asset 2 = 200
+    // Asset 3 = 300
+    reflector_client.set_price(&asset1, &100_00000000000000i128);
+    reflector_client.set_price(&asset2, &200_00000000000000i128);
+    reflector_client.set_price(&asset3, &300_00000000000000i128);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 3333u32);
+    allocations.set(asset2.clone(), 3333u32);
+    allocations.set(asset3.clone(), 3334u32);
+
+    let mut asset_decimals = Map::new(&env);
+    asset_decimals.set(asset1.clone(), 7u32);
+    asset_decimals.set(asset2.clone(), 7u32);
+    asset_decimals.set(asset3.clone(), 7u32);
+
+    // Create portfolio -> this should store the initial cost basis
+    let pid = client.create_portfolio(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5u32, // rebalance_threshold
+        &50u32, // slippage_tolerance
+        &1u32, // slippage_policy_version
+    );
+
+    // Verify initial candidates is empty (since current price == cost basis)
+    let candidates = client.get_loss_harvest_candidates(&pid, &5u32);
+    assert_eq!(candidates.len(), 0);
+
+    // Change prices to simulate a drop:
+    // Asset 1: 100 -> 90 (10% drop, which is > 5% threshold)
+    // Asset 2: 200 -> 195 (2.5% drop, which is < 5% threshold)
+    // Asset 3: 300 -> 240 (20% drop, which is > 5% threshold)
+    reflector_client.set_price(&asset1, &90_00000000000000i128);
+    reflector_client.set_price(&asset2, &195_00000000000000i128);
+    reflector_client.set_price(&asset3, &240_00000000000000i128);
+
+    // Get candidates with 5% threshold
+    let candidates = client.get_loss_harvest_candidates(&pid, &5u32);
+    
+    // Candidates should be:
+    // 1. Asset 3 (20% loss, i.e., 2000 bps)
+    // 2. Asset 1 (10% loss, i.e., 1000 bps)
+    // Asset 2 is skipped because 2.5% loss is below the 5% threshold.
+    assert_eq!(candidates.len(), 2);
+    
+    let first = candidates.get(0).unwrap();
+    assert_eq!(first.asset, asset3);
+    assert_eq!(first.cost_basis, 300_00000000000000i128);
+    assert_eq!(first.current_price, 240_00000000000000i128);
+    assert_eq!(first.loss_pct, 2000); // 20.00% represented as basis points (2000)
+
+    let second = candidates.get(1).unwrap();
+    assert_eq!(second.asset, asset1);
+    assert_eq!(second.cost_basis, 100_00000000000000i128);
+    assert_eq!(second.current_price, 90_00000000000000i128);
+    assert_eq!(second.loss_pct, 1000); // 10.00% represented as basis points (1000)
+
+    // Execute rebalance -> should update the cost basis to the new prices (90, 195, 240)
+    let empty_balances = Map::new(&env);
+    env.ledger().with_mut(|li| {
+        li.timestamp = 5000;
+    });
+    client.execute_rebalance(&pid, &empty_balances);
+
+    // After rebalance, the cost basis is updated to:
+    // Asset 1 = 90
+    // Asset 2 = 195
+    // Asset 3 = 240
+    // So the candidates with the same prices should now be 0!
+    let candidates_after = client.get_loss_harvest_candidates(&pid, &5u32);
+    assert_eq!(candidates_after.len(), 0);
+}
+

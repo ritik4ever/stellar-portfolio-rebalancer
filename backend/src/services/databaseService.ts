@@ -50,6 +50,7 @@ interface PortfolioRow {
   version: number;
   strategy?: string;
   strategy_config?: string;
+  cost_basis?: string;
 }
 
 interface PortfolioDraftRow {
@@ -160,7 +161,8 @@ CREATE TABLE IF NOT EXISTS portfolios (
     total_value   REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     last_rebalance TEXT NOT NULL,
-    version       INTEGER NOT NULL DEFAULT 1
+    version       INTEGER NOT NULL DEFAULT 1,
+    cost_basis    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS rebalance_history (
@@ -487,6 +489,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
           `portfolio(${row.id}).strategy_config`,
         )
       : undefined,
+    costBasis: safeJsonParse(row.cost_basis, {}, `portfolio(${row.id}).cost_basis`),
   };
 }
 
@@ -700,6 +703,12 @@ export class DatabaseService {
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
     }
+    if (!cols.some((c) => c.name === "cost_basis")) {
+      this.db.exec(
+        "ALTER TABLE portfolios ADD COLUMN cost_basis TEXT",
+      );
+      logger.info("[DB] Migration: added cost_basis column to portfolios");
+    }
 
     const consentCols = this.db
       .prepare("PRAGMA table_info(legal_consent)")
@@ -802,6 +811,27 @@ export class DatabaseService {
   // Portfolio methods (PortfolioStorage parity)
   // ──────────────────────────────────────────
 
+  getCostBasisEstimate(allocations: Record<string, number>): Record<string, number> {
+    const costBasis: Record<string, number> = {};
+    const fallback: Record<string, number> = {
+      XLM: 0.45,
+      USDC: 1.0,
+      BTC: 85000,
+      ETH: 3400,
+      yXLM: 0.47,
+      AQUA: 0.001,
+    };
+    for (const asset of Object.keys(allocations)) {
+      const snapshot = this.getLatestPriceSnapshot(asset);
+      if (snapshot && snapshot.price > 0) {
+        costBasis[asset] = snapshot.price;
+      } else {
+        costBasis[asset] = fallback[asset] ?? 1.0;
+      }
+    }
+    return costBasis;
+  }
+
   createPortfolio(
     userAddress: string,
     allocations: Record<string, number>,
@@ -814,11 +844,12 @@ export class DatabaseService {
       try {
         const id = generateId();
         const now = new Date().toISOString();
+        const costBasis = this.getCostBasisEstimate(allocations);
         this.db
           .prepare(
             `
-                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config, cost_basis)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             `,
           )
           .run(
@@ -833,6 +864,7 @@ export class DatabaseService {
             now,
             strategy,
             JSON.stringify(strategyConfig),
+            JSON.stringify(costBasis),
           );
         return id;
       } catch (err) {
@@ -859,11 +891,12 @@ export class DatabaseService {
         (sum, bal) => sum + bal,
         0,
       );
+      const costBasis = this.getCostBasisEstimate(allocations);
       this.db
         .prepare(
           `
-                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config, cost_basis)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             `,
         )
         .run(
@@ -878,6 +911,7 @@ export class DatabaseService {
           now,
           strategy,
           JSON.stringify(strategyConfig),
+          JSON.stringify(costBasis),
         );
       return id;
     } catch (err) {
@@ -959,7 +993,7 @@ export class DatabaseService {
               `
                     UPDATE portfolios
                     SET user_address = ?, name = ?, description = ?, allocations = ?, threshold = ?, balances = ?,
-                        total_value = ?, last_rebalance = ?, version = version + 1
+                        total_value = ?, last_rebalance = ?, cost_basis = ?, version = version + 1
                     WHERE id = ? AND version = ?
                 `,
             )
@@ -972,6 +1006,7 @@ export class DatabaseService {
               JSON.stringify(merged.balances),
               merged.totalValue,
               merged.lastRebalance,
+              merged.costBasis ? JSON.stringify(merged.costBasis) : null,
               id,
               expectedVersion,
             );
@@ -993,7 +1028,7 @@ export class DatabaseService {
               `
                     UPDATE portfolios
                     SET user_address = ?, allocations = ?, threshold = ?, balances = ?,
-                        total_value = ?, last_rebalance = ?, version = version + 1
+                        total_value = ?, last_rebalance = ?, cost_basis = ?, version = version + 1
                     WHERE id = ?
                 `,
             )
@@ -1004,6 +1039,7 @@ export class DatabaseService {
               JSON.stringify(merged.balances),
               merged.totalValue,
               merged.lastRebalance,
+              merged.costBasis ? JSON.stringify(merged.costBasis) : null,
               id,
             );
         }

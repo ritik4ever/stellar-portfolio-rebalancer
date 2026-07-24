@@ -6,9 +6,13 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
+mod events;
 mod nav;
 mod portfolio;
 mod reflector;
+mod tax;
+#[path = "strategies/dca.rs"]
+mod dca;
 #[cfg(test)]
 mod test;
 mod types;
@@ -127,6 +131,26 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+
+        // Store initial cost basis
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+        let mut cost_basis = Map::new(&env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            let price = reflector_client
+                .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+                .map(|p| p.price)
+                .unwrap_or(0);
+            cost_basis.set(asset.clone(), price);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::CostBasis(portfolio_id), &cost_basis);
+
         portfolio::emit_portfolio_created(&env, portfolio_id, user);
         Ok(portfolio_id)
     }
@@ -788,6 +812,18 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
 
+        let mut cost_basis = Map::new(env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            let price = reflector_client
+                .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+                .map(|p| p.price)
+                .unwrap_or(0);
+            cost_basis.set(asset.clone(), price);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::CostBasis(portfolio_id), &cost_basis);
+
         if let Some(admin) = override_admin {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
         }
@@ -809,6 +845,14 @@ impl PortfolioRebalancer {
 
     pub fn get_nav_history(env: Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
         nav::get_nav_history(&env, portfolio_id, limit)
+    }
+
+    pub fn get_loss_harvest_candidates(
+        env: Env,
+        portfolio_id: u64,
+        threshold_pct: u32,
+    ) -> Result<Vec<LossHarvestCandidate>, Error> {
+        tax::get_loss_harvest_candidates(&env, portfolio_id, threshold_pct)
     }
 }
 

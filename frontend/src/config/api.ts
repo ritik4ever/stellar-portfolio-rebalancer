@@ -126,6 +126,134 @@ export const API_CONFIG = {
         READINESS: '/readiness',
         ROOT: '/',
         /** Versionless auth namespace (matches backend `app.use('/api/auth', authRouter)`) */
+import { browserPriceService } from '../services/browserPriceService'
+import {
+    announceAuthSessionExpired,
+    getAccessToken,
+    refresh,
+} from '../services/authService'
+import {
+    debugLog,
+    getFrontendDebugConfig,
+    logApiRequest,
+    logApiResponse,
+} from '../utils/debug'
+import { getApiResourceRoot } from './apiVersion'
+
+/** Resolved once at load; see `getApiResourceRoot` and `frontend/src/config/apiVersion.ts`. */
+export const API_RESOURCE_ROOT = getApiResourceRoot()
+
+export interface ApiErrorPayload {
+    code: string
+    message: string
+    details?: unknown
+}
+
+export interface ApiEnvelope<T> {
+    success: boolean
+    data: T | null
+    error: ApiErrorPayload | null
+    timestamp: string
+    meta?: Record<string, unknown>
+}
+
+export class ApiClientError extends Error {
+    status: number
+    code: string
+    details?: unknown
+
+    constructor(message: string, status: number, code: string, details?: unknown) {
+        super(message)
+        this.name = 'ApiClientError'
+        this.status = status
+        this.code = code
+        this.details = details
+    }
+}
+
+function getErrorCode(body: unknown): string | undefined {
+    if (!body || typeof body !== 'object') return undefined
+    const error = (body as { error?: { code?: unknown } }).error
+    return typeof error?.code === 'string' ? error.code : undefined
+}
+
+const getBaseUrl = (): string => {
+    // In Vite, environment variables need VITE_ prefix to be available in browser
+    const viteEnv = (import.meta as any).env
+    if (viteEnv?.VITE_API_URL) {
+        return viteEnv.VITE_API_URL
+    }
+
+    if (typeof window !== 'undefined') {
+        const hostname = window.location.hostname
+        const isDev = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')
+
+        if (isDev) {
+            return 'http://localhost:3001'
+        }
+
+        // Production fallback
+        return 'https://stellar-portfolio-rebalancer.onrender.com'
+    }
+
+    // Server-side fallback
+    const isProd = viteEnv?.PROD
+    return isProd
+        ? 'https://stellar-portfolio-rebalancer.onrender.com'
+        : 'http://localhost:3001'
+}
+
+/**
+ * Determines if browser-side price fetching should be used.
+ * 
+ * Environment-aware fallback strategy:
+ * - Production: Disabled (always use backend prices) unless VITE_ENABLE_BROWSER_PRICE_DEBUG=true
+ * - Development: Enabled (prefer browser prices, fallback to backend on error)
+ * - Demo mode: Can be enabled via VITE_ENABLE_BROWSER_PRICE_DEBUG flag
+ * 
+ * This prevents silent backend failures in production while allowing convenience in development.
+ */
+function shouldUseBrowserPrices(): boolean {
+    const viteEnv = (import.meta as any).env
+    
+    // Explicit debug flag allows browser prices even in production
+    if (viteEnv?.VITE_ENABLE_BROWSER_PRICE_DEBUG === 'true') {
+        debugLog('Browser price fallback enabled via debug flag')
+        return true
+    }
+    
+    // Production: default to backend (prefer explicit backend prices)
+    if (viteEnv?.PROD === true || viteEnv?.MODE === 'production') {
+        debugLog('Browser price fallback disabled in production (use backend prices)')
+        return false
+    }
+    
+    // Development: default to browser prices
+    debugLog('Browser price fallback enabled in development')
+    return true
+}
+
+export const API_CONFIG = {
+    BASE_URL: getBaseUrl(),
+    WEBSOCKET_URL: getBaseUrl().replace(/^http/, 'ws'),
+
+    /**
+     * Environment-aware price fallback strategy.
+     * - Production: false (always use backend prices)
+     * - Development: true (prefer browser prices, fallback to backend on error)
+     * - Demo/Debug mode: true if VITE_ENABLE_BROWSER_PRICE_DEBUG=true
+     */
+    USE_BROWSER_PRICES: shouldUseBrowserPrices(),
+
+    TIMEOUT: 15000,
+    RETRY_ATTEMPTS: 3,
+    RETRY_DELAY: 1000,
+
+    ENDPOINTS: {
+        HEALTH: '/health',
+        READINESS: '/readiness',
+        ROOT: '/',
+        /** Versionless auth namespace (matches backend `app.use('/api/auth', authRouter)`) */
         AUTH_LOGIN: '/api/auth/login',
         AUTH_REFRESH: '/api/auth/refresh',
         AUTH_LOGOUT: '/api/auth/logout',
@@ -133,6 +261,8 @@ export const API_CONFIG = {
         PORTFOLIO_IMPORT: `${API_RESOURCE_ROOT}/portfolio/import`,
         USER_PORTFOLIOS: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}`,
+        PORTFOLIO_TAX_LOSS_CANDIDATES: (id: string, threshold: number) =>
+            `${API_RESOURCE_ROOT}/portfolio/${id}/tax-loss-candidates?threshold_pct=${threshold}`,
         PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
