@@ -8,6 +8,10 @@ use soroban_sdk::{
 
 mod deposits;
 mod portfolio;
+
+
+
+mod strategies;
 mod reflector;
 #[cfg(test)]
 mod test;
@@ -96,6 +100,12 @@ impl PortfolioRebalancer {
         }
 
         if !validate_slippage_policy_version(slippage_policy_version) {
+        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance)
+        {
+            return Err(Error::InvalidSlippageTolerance);
+        }
+
+        if !portfolio::validate_slippage_policy_version(slippage_policy_version) {
             return Err(Error::UnsupportedSlippagePolicyVersion);
         }
 
@@ -397,10 +407,24 @@ impl PortfolioRebalancer {
 
         let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
         if let Ok(p) = preview {
+            if p.total_value == 0 {
+                return false;
+            }
+            for (asset, _) in portfolio.target_allocations.iter() {
+                if let Some(reason) = p.skip_reasons.get(asset) {
+                    match reason {
+                        AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             p.rebalance_needed
         } else {
             false
         }
+
     }
 
     pub fn execute_rebalance(
@@ -434,6 +458,16 @@ impl PortfolioRebalancer {
             .set(&DataKey::ContractPauseReason, &reason);
     }
 
+    // DCA configuration
+    pub fn configure_dca(env: Env, portfolio_id: u64, enabled: bool, amount: i128, interval: u64) -> Result<(), Error> {
+        dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
+    }
+
+    // DCA execution
+    pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        dca::execute_dca(&env, portfolio_id)
+    }
+
     pub fn transfer_stewardship(
         env: Env,
         portfolio_id: u64,
@@ -461,6 +495,8 @@ impl PortfolioRebalancer {
             ),
             (portfolio_id, current_steward, new_steward),
         );
+
+
         Ok(())
     }
 
@@ -520,6 +556,8 @@ impl PortfolioRebalancer {
             (Symbol::new(&env, "FeeConfigUpdated"),),
             config,
         );
+        env.events()
+            .publish((Symbol::new(&env, "FeeConfigUpdated"),), config);
     }
 
     pub fn get_fee_config(env: Env) -> FeeConfig {
@@ -558,35 +596,30 @@ impl PortfolioRebalancer {
 
 
     /// Returns the minimum allowed rebalance threshold percentage.
-
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD
     }
 
 
     /// Returns the maximum allowed rebalance threshold percentage.
-
     pub fn max_rebalance_threshold(_env: Env) -> u32 {
         MAX_REBALANCE_THRESHOLD
     }
 
 
     /// Returns the minimum allowed slippage tolerance in basis points.
-
     pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
         MIN_SLIPPAGE_TOLERANCE_BPS
     }
 
 
     /// Returns the maximum allowed slippage tolerance in basis points.
-
     pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
 
 
     /// Returns the maximum number of assets allowed in a portfolio.
-
     pub fn max_portfolio_assets(_env: Env) -> u32 {
         MAX_PORTFOLIO_ASSETS
     }
@@ -613,6 +646,86 @@ impl PortfolioRebalancer {
                 total_value: 0,
             },
         )
+    }
+
+    /// Returns per-asset allocation drift using live oracle prices.
+    ///
+    /// This is a read-only view — no `require_auth` is needed.
+    ///
+    /// The drift values are computed with the **identical** logic used by
+    /// `build_rebalance_preview` (and therefore `execute_rebalance`).
+    /// Specifically, `current_pct`, `target_pct`, `drift_pct`, and
+    /// `needs_rebalance` are sourced directly from `threshold_decisions`,
+    /// so what you see here is exactly what a rebalance execution would act on.
+    ///
+    /// Portfolios with no assets, or with a total value of zero, return an
+    /// empty `Vec` rather than an error.
+    pub fn get_drift_preview(env: Env, portfolio_id: u64) -> Vec<AssetDrift> {
+        // Load portfolio; return empty vec if not found.
+        let portfolio: Portfolio = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+        {
+            Some(p) => p,
+            None => return Vec::new(&env),
+        };
+
+        // Short-circuit for portfolios that have no tracked assets.
+        if portfolio.target_allocations.is_empty() {
+            return Vec::new(&env);
+        }
+
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+
+        // Delegate entirely to build_rebalance_preview so we share the same
+        // oracle-price sourcing, staleness checks, current_pct calculation and
+        // threshold comparison as the actual rebalance path.
+        let preview = match portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client)
+        {
+            Ok(p) => p,
+            // On any oracle error return an empty vec (read-only; never panics).
+            Err(_) => return Vec::new(&env),
+        };
+
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(reason) = preview.skip_reasons.get(asset) {
+                match reason {
+                    AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                        return Vec::new(&env);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // If total value is zero no allocation percentages are meaningful.
+        if preview.total_value == 0 {
+            return Vec::new(&env);
+        }
+
+        let mut result: Vec<AssetDrift> = Vec::new(&env);
+
+        for (asset, target_pct) in portfolio.target_allocations.iter() {
+            // Assets whose price was stale or missing will not appear in
+            // threshold_decisions; omit them from the drift preview too.
+            if let Some(decision) = preview.threshold_decisions.get(asset.clone()) {
+                result.push_back(AssetDrift {
+                    asset,
+                    current_pct: decision.current_percent,
+                    target_pct,
+                    drift_pct: decision.drift,
+                    needs_rebalance: decision.exceeds_threshold,
+                });
+            }
+        }
+
+        result
     }
 
     pub fn pause_portfolio(env: Env, portfolio_id: u64, reason: PauseReason) {
@@ -821,31 +934,23 @@ impl PortfolioRebalancer {
 
 
         let mut current_prices = Map::new(env);
+        let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
 
         for (asset, _) in portfolio.target_allocations.iter() {
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
-            {
-                current_prices.set(asset.clone(), price_data.price);
-            } else {
-                return Err(Error::MissingPrice);
+            if let Some(reason) = preview.skip_reasons.get(asset) {
+                match reason {
+                    AssetSkipReason::MissingPrice => return Err(Error::MissingPrice),
+                    AssetSkipReason::StalePrice => return Err(Error::StaleData),
+                    _ => {}
+                }
             }
         }
 
-        let total_value = match portfolio::calculate_portfolio_value(
-            env,
-            &portfolio.current_balances,
-            &portfolio.asset_decimals,
-            &reflector_client,
-        ) {
-            Ok(v) => v,
-            Err(_) => return Err(Error::StaleData),
-        };
-
+        let total_value = preview.total_value;
         let mut snapshot = portfolio.clone();
         snapshot.total_value = total_value;
 
-        let trades = portfolio::calculate_rebalance_trades(env, &snapshot, &current_prices);
+        let trades = preview.candidate_trades;
 
         let fee_config = Self::get_fee_config(env.clone());
         let effective_fee_bps = if fee_config.enabled {
@@ -882,6 +987,7 @@ impl PortfolioRebalancer {
                         .asset_decimals
                         .get(asset.clone())
                         .unwrap_or(DEFAULT_ASSET_DECIMALS);
+
                     let expected_balance =
                         portfolio::value_to_balance(expected_value, price, decimals);
                     let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);
