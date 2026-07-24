@@ -1,5 +1,7 @@
 # Stellar Portfolio Rebalancer Contract Makefile
 
+WASM_RELEASE := target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+WASM_OPTIMIZED := target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm
 
 
 # Default target
@@ -13,33 +15,47 @@ build:
 # Build with optimization
 build-optimized:
 	cargo build --target wasm32-unknown-unknown --release
-	@if command -v soroban >/dev/null 2>&1; then \
-		soroban contract optimize --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm; \
-	else \
-		echo "Soroban CLI not found. Install it for optimization."; \
-	fi
+	@$(MAKE) optimize-wasm
 	@$(MAKE) hash
+
+# Optimize release wasm with Binaryen
+optimize-wasm:
+	@if [ ! -f "$(WASM_RELEASE)" ]; then \
+		echo "WASM $(WASM_RELEASE) not found. Run 'make build' first."; \
+		exit 1; \
+	fi
+	@if command -v wasm-opt >/dev/null 2>&1; then \
+		wasm-opt -O3 "$(WASM_RELEASE)" -o "$(WASM_OPTIMIZED)"; \
+		orig_size=$$(wc -c < "$(WASM_RELEASE)"); \
+		opt_size=$$(wc -c < "$(WASM_OPTIMIZED)"); \
+		reduction=$$(awk "BEGIN { printf \"%.2f\", (1 - ($$opt_size / $$orig_size)) * 100 }"); \
+		echo "Optimized wasm with wasm-opt -O3"; \
+		echo "Size: $$orig_size -> $$opt_size bytes ($$reduction% smaller)"; \
+	else \
+		echo "wasm-opt not found. Install Binaryen to optimize WASM artifacts."; \
+		exit 1; \
+	fi
 
 # Calculate WASM hash
 hash:
-	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm ]; then \
+	@if [ -f "$(WASM_RELEASE)" ]; then \
 		if command -v sha256sum >/dev/null 2>&1; then \
-			echo -n "WASM Hash (Release):    " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+			echo -n "WASM Hash (Release):    " && sha256sum "$(WASM_RELEASE)" | cut -d' ' -f1; \
 		elif command -v shasum >/dev/null 2>&1; then \
-			echo -n "WASM Hash (Release):    " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | cut -d' ' -f1; \
+			echo -n "WASM Hash (Release):    " && shasum -a 256 "$(WASM_RELEASE)" | cut -d' ' -f1; \
 		else \
-			echo -n "WASM Hash (Release):    " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm | awk '{print $$NF}'; \
+			echo -n "WASM Hash (Release):    " && openssl dgst -sha256 "$(WASM_RELEASE)" | awk '{print $$NF}'; \
 		fi; \
 	else \
-		echo "WASM target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm not found. Build it first."; \
+		echo "WASM $(WASM_RELEASE) not found. Build it first."; \
 	fi
-	@if [ -f target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm ]; then \
+	@if [ -f "$(WASM_OPTIMIZED)" ]; then \
 		if command -v sha256sum >/dev/null 2>&1; then \
-			echo -n "WASM Hash (Optimized):  " && sha256sum target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+			echo -n "WASM Hash (Optimized):  " && sha256sum "$(WASM_OPTIMIZED)" | cut -d' ' -f1; \
 		elif command -v shasum >/dev/null 2>&1; then \
-			echo -n "WASM Hash (Optimized):  " && shasum -a 256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | cut -d' ' -f1; \
+			echo -n "WASM Hash (Optimized):  " && shasum -a 256 "$(WASM_OPTIMIZED)" | cut -d' ' -f1; \
 		else \
-			echo -n "WASM Hash (Optimized):  " && openssl dgst -sha256 target/wasm32-unknown-unknown/release/portfolio_rebalancer.optimized.wasm | awk '{print $$NF}'; \
+			echo -n "WASM Hash (Optimized):  " && openssl dgst -sha256 "$(WASM_OPTIMIZED)" | awk '{print $$NF}'; \
 		fi; \
 	fi
 
@@ -134,6 +150,9 @@ install-tools:
 		echo "Adding WASM target..."; \
 		rustup target add wasm32-unknown-unknown; \
 	fi
+	@if ! command -v wasm-opt >/dev/null 2>&1; then \
+		echo "Warning: wasm-opt not found. Install Binaryen to enable make build-optimized."; \
+	fi
 
 # Local Soroban testnet bootstrap for fresh clones
 setup-testnet:
@@ -181,6 +200,7 @@ help:
 	@echo "Available targets:"
 	@echo "  build           - Build the contract"
 	@echo "  build-optimized - Build with optimization"
+	@echo "  optimize-wasm   - Run wasm-opt -O3 on release wasm"
 	@echo "  test            - Run tests"
 	@echo "  bench           - Run gas benchmark tests"
 	@echo "  clean           - Clean build artifacts"
