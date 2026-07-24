@@ -252,3 +252,13 @@ pub struct NavSnapshot {
     pub sequence: u32,
     pub timestamp: u64,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CircuitBreakerConfig {
+    pub enabled: bool,
+    pub threshold: u64,
+    pub cooldown: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+}

@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, Map};
 use crate::reflector::ReflectorClient;
-use crate::types::{CircuitBreakerConfig, Error};
+// use crate::types::{CircuitBreakerConfig, Error};
 
 pub fn check_volatility(
     env: &Env,
