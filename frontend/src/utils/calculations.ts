@@ -13,6 +13,16 @@ export function calculateRelativeMovement(changeA: number, changeB: number): {
   return { leader: 'equal', relativeChange: 0 }
 }
 
+export const ALLOCATION_DENOMINATOR = 10000
+
+export function percentageToBps(pct: number): number {
+  return Math.round(pct * 100)
+}
+
+export function bpsToPercentage(bps: number): number {
+  return bps / 100
+}
+
 export function remainingAllocation(
   allocations: Array<{ percentage: number }>,
 ): number {
@@ -24,10 +34,11 @@ export const calculateRebalanceTrades = (portfolio: any): Trade[] => {
     const trades: Trade[] = []
 
     for (const asset of portfolio.allocations) {
-        const drift = asset.current - asset.target
+        const targetPercentage = bpsToPercentage(asset.target)
+        const drift = asset.current - targetPercentage
 
         if (Math.abs(drift) > portfolio.threshold) {
-            const targetValue = (portfolio.totalValue * asset.target) / 100
+            const targetValue = (portfolio.totalValue * asset.target) / ALLOCATION_DENOMINATOR
             const difference = targetValue - asset.amount
 
             if (Math.abs(difference) > 10) {

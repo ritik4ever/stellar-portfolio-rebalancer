@@ -105,6 +105,23 @@ export const useCreatePortfolioMutation = () => {
   });
 };
 
+export const useImportPortfolioMutation = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: any) => api.post<any>(ENDPOINTS.PORTFOLIO_IMPORT, data),
+    onSuccess: async (data: any) => {
+      await queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+      if (data?.portfolioId) {
+        await queryClient.invalidateQueries({ queryKey: portfolioKeys.detail(data.portfolioId) });
+      }
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+    },
+  });
+};
+
 export const useExecuteRebalanceMutation = (portfolioId: string | null) => {
   const queryClient = useQueryClient();
 

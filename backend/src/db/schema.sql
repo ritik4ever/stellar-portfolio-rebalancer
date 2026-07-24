@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS rebalance_events (
     trigger VARCHAR(512) NOT NULL,
     trades INTEGER NOT NULL DEFAULT 0,
     gas_used VARCHAR(64) NOT NULL DEFAULT '',
+    fee_paid NUMERIC NOT NULL DEFAULT 0,
+    slippage_bps NUMERIC NOT NULL DEFAULT 0,
     status VARCHAR(32) NOT NULL CHECK (status IN ('completed', 'failed', 'pending')),
     is_automatic BOOLEAN NOT NULL DEFAULT FALSE,
     event_source VARCHAR(32) NOT NULL DEFAULT 'offchain',

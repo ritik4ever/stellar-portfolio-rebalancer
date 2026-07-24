@@ -5,6 +5,7 @@ import { logger } from "../utils/logger.js";
 export const QUEUE_NAMES = {
   PORTFOLIO_CHECK: "portfolio-check",
   REBALANCE: "rebalance",
+  AUTO_REBALANCE_CHECK: "auto-rebalance-check",
   ANALYTICS_SNAPSHOT: "analytics-snapshot",
   ANALYTICS_COMPACTION: "analytics-compaction",
   IDEMPOTENCY_CLEANUP: "idempotency-cleanup",
@@ -12,6 +13,7 @@ export const QUEUE_NAMES = {
   DLQ: "dead-letter-queue",
   PRICE_HISTORY_SNAPSHOT: "price-history-snapshot",
   PRICE_HISTORY_PRUNE: "price-history-prune",
+  USER_ALERTS: "user-alerts",
 } as const;
 
 export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
@@ -67,8 +69,18 @@ export interface DLQJobData {
   payload: any;
 }
 
+export interface AutoRebalanceCheckJobData {
+  triggeredBy?: "scheduler" | "manual" | "startup" | "recovery";
+  correlationId?: string;
+}
+
 export interface PriceHistoryJobData {
     triggeredBy?: 'scheduler' | 'startup'
+}
+
+export interface UserAlertsJobData {
+    triggeredBy?: 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
 }
 
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
@@ -79,8 +91,11 @@ let analyticsSnapshotQueue: Queue<AnalyticsSnapshotJobData> | null = null;
 let analyticsCompactionQueue: Queue<AnalyticsCompactionJobData> | null = null;
 let idempotencyCleanupQueue: Queue<IdempotencyCleanupJobData> | null = null;
 let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> | null = null;
+let autoRebalanceCheckQueue: Queue<AutoRebalanceCheckJobData> | null = null;
 let priceHistorySnapshotQueue: Queue<PriceHistoryJobData> | null = null;
 let priceHistoryPruneQueue: Queue<PriceHistoryJobData> | null = null;
+let userAlertsQueue: Queue<UserAlertsJobData> | null = null;
+let dlqQueue: Queue<DLQJobData> | null = null;
 
 function getDefaultJobOptions() {
   return {
@@ -119,6 +134,21 @@ export function getRebalanceQueue(): Queue<RebalanceJobData> | null {
       logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.REBALANCE}`);
     }
     return rebalanceQueue;
+  } catch {
+    return null;
+  }
+}
+
+export function getAutoRebalanceCheckQueue(): Queue<AutoRebalanceCheckJobData> | null {
+  try {
+    if (!autoRebalanceCheckQueue) {
+      autoRebalanceCheckQueue = new Queue(QUEUE_NAMES.AUTO_REBALANCE_CHECK, {
+        connection: getConnectionOptions(),
+        defaultJobOptions: getDefaultJobOptions(),
+      });
+      logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.AUTO_REBALANCE_CHECK}`);
+    }
+    return autoRebalanceCheckQueue;
   } catch {
     return null;
   }
@@ -169,8 +199,6 @@ export function getIdempotencyCleanupQueue(): Queue<IdempotencyCleanupJobData> |
   }
 }
 
-let dlqQueue: Queue<DLQJobData> | null = null;
-
 export function getDLQQueue(): Queue<DLQJobData> | null {
   try {
     if (!dlqQueue) {
@@ -204,21 +232,6 @@ export function getPortfolioExportQueue(): Queue<PortfolioExportJobData, Portfol
     }
 }
 
-export function getQueueByName(name: string): Queue<any, any> | null {
-  const queueMap: Record<string, () => any> = {
-    [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
-    [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
-    [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
-    [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
-    [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
-    [QUEUE_NAMES.DLQ]: getDLQQueue,
-    [QUEUE_NAMES.PRICE_HISTORY_SNAPSHOT]: getPriceHistorySnapshotQueue,
-    [QUEUE_NAMES.PRICE_HISTORY_PRUNE]: getPriceHistoryPruneQueue,
-  };
-
-  const getter = queueMap[name];
-  return getter ? getter() : null;
-}
 
 export function getPriceHistorySnapshotQueue(): Queue<PriceHistoryJobData> | null {
     try {
@@ -248,12 +261,46 @@ export function getPriceHistoryPruneQueue(): Queue<PriceHistoryJobData> | null {
     }
 }
 
+export function getUserAlertsQueue(): Queue<UserAlertsJobData> | null {
+    try {
+        if (!userAlertsQueue) {
+            userAlertsQueue = new Queue(QUEUE_NAMES.USER_ALERTS, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.USER_ALERTS}`)
+        }
+        return userAlertsQueue
+    } catch {
+        return null
+    }
+}
+
+export function getQueueByName(name: string): Queue<any, any> | null {
+  const queueMap: Record<string, () => any> = {
+    [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
+    [QUEUE_NAMES.REBALANCE]: getRebalanceQueue,
+    [QUEUE_NAMES.ANALYTICS_SNAPSHOT]: getAnalyticsSnapshotQueue,
+    [QUEUE_NAMES.ANALYTICS_COMPACTION]: getAnalyticsCompactionQueue,
+    [QUEUE_NAMES.IDEMPOTENCY_CLEANUP]: getIdempotencyCleanupQueue,
+    [QUEUE_NAMES.PORTFOLIO_EXPORT]: getPortfolioExportQueue,
+    [QUEUE_NAMES.DLQ]: getDLQQueue,
+    [QUEUE_NAMES.PRICE_HISTORY_SNAPSHOT]: getPriceHistorySnapshotQueue,
+    [QUEUE_NAMES.PRICE_HISTORY_PRUNE]: getPriceHistoryPruneQueue,
+    [QUEUE_NAMES.USER_ALERTS]: getUserAlertsQueue,
+  };
+
+  const getter = queueMap[name];
+  return getter ? getter() : null;
+}
+
 // ─── Graceful Close ───────────────────────────────────────────────────────────
 
 export async function closeAllQueues(): Promise<void> {
   await Promise.all([
     portfolioCheckQueue?.close(),
     rebalanceQueue?.close(),
+    autoRebalanceCheckQueue?.close(),
     analyticsSnapshotQueue?.close(),
     analyticsCompactionQueue?.close(),
     idempotencyCleanupQueue?.close(),
@@ -261,9 +308,11 @@ export async function closeAllQueues(): Promise<void> {
     dlqQueue?.close(),
     priceHistorySnapshotQueue?.close(),
     priceHistoryPruneQueue?.close(),
+    userAlertsQueue?.close(),
   ]);
   portfolioCheckQueue = null;
   rebalanceQueue = null;
+  autoRebalanceCheckQueue = null;
   analyticsSnapshotQueue = null;
   analyticsCompactionQueue = null;
   idempotencyCleanupQueue = null;
@@ -271,5 +320,6 @@ export async function closeAllQueues(): Promise<void> {
   dlqQueue = null;
   priceHistorySnapshotQueue = null;
   priceHistoryPruneQueue = null;
+  userAlertsQueue = null;
   logger.info("[QUEUE] All queues closed");
 }

@@ -216,4 +216,103 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
             expect([200, 404]).toContain(res.status) // auth passed, business logic decides outcome
         })
     })
+
+    // ── POST /api/admin/db/explain ─────────────────────────────────────────────
+
+    describe('POST /api/admin/db/explain', () => {
+        it('returns 401 without admin headers', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .send({ queryId: 'get_all_portfolios' })
+            expect(res.status).toBe(401)
+        })
+
+        it('returns 403 for a key not in ADMIN_PUBLIC_KEYS', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .set(makeAdminHeaders(nonAdminKp))
+                .send({ queryId: 'get_all_portfolios' })
+            expect(res.status).toBe(403)
+        })
+
+        it('returns 400 for missing queryId', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .set(makeAdminHeaders(adminKp))
+                .send({})
+            expect(res.status).toBe(400)
+            expect(res.body.error).toBe('VALIDATION_ERROR')
+        })
+
+        it('returns 400 for invalid queryId', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .set(makeAdminHeaders(adminKp))
+                .send({ queryId: 'invalid_query' })
+            expect(res.status).toBe(400)
+            expect(res.body.error).toBe('VALIDATION_ERROR')
+        })
+
+        it('returns 200 with explain plan for valid admin and queryId', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .set(makeAdminHeaders(adminKp))
+                .send({ queryId: 'get_portfolio_count' })
+            expect(res.status).toBe(200)
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.queryId).toBe('get_portfolio_count')
+            expect(res.body.data.explainPlan).toBeDefined()
+            expect(res.body.data.explainExecutionTimeMs).toBeDefined()
+            expect(res.body.data.queryExecutionTimeMs).toBeDefined()
+        })
+
+        it('includes estimated and actual row counts in response', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .set(makeAdminHeaders(adminKp))
+                .send({ queryId: 'get_all_portfolios' })
+            expect(res.status).toBe(200)
+            expect(res.body.data.estimatedRows).toBeDefined()
+            expect(res.body.data.actualRows).toBeDefined()
+            expect(res.body.data.rowCount).toBeDefined()
+        })
+
+        it('handles parameterized queries', async () => {
+            const res = await request(app)
+                .post('/api/admin/db/explain')
+                .set(makeAdminHeaders(adminKp))
+                .send({ queryId: 'get_portfolio_by_id', params: ['test-id'] })
+            expect(res.status).toBe(200)
+            expect(res.body.data.queryId).toBe('get_portfolio_by_id')
+        })
+    })
+
+    // ── GET /api/admin/db/queries ─────────────────────────────────────────────
+
+    describe('GET /api/admin/db/queries', () => {
+        it('returns 401 without admin headers', async () => {
+            const res = await request(app).get('/api/admin/db/queries')
+            expect(res.status).toBe(401)
+        })
+
+        it('returns 403 for a key not in ADMIN_PUBLIC_KEYS', async () => {
+            const res = await request(app)
+                .get('/api/admin/db/queries')
+                .set(makeAdminHeaders(nonAdminKp))
+            expect(res.status).toBe(403)
+        })
+
+        it('returns 200 with list of available queries for valid admin', async () => {
+            const res = await request(app)
+                .get('/api/admin/db/queries')
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(200)
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.queries).toBeDefined()
+            expect(Array.isArray(res.body.data.queries)).toBe(true)
+            expect(res.body.data.queries.length).toBeGreaterThan(0)
+            expect(res.body.data.queries[0]).toHaveProperty('id')
+            expect(res.body.data.queries[0]).toHaveProperty('query')
+        })
+    })
 })

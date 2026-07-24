@@ -226,7 +226,11 @@ export const metricsMiddleware = (
 };
 
 export async function getMetricsPayload(): Promise<string> {
-  return register.metrics();
+  return await register.metrics();
+}
+
+export function getMetricsContentType(): string {
+  return register.contentType;
 }
 
 export function recordCacheOperation(operation: "hit" | "miss" | "eviction" | "update", asset: string): void {

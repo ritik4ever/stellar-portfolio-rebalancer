@@ -11,6 +11,7 @@ import {
 } from '../services/authService.js'
 import { createChallenge, verifyChallenge, InvalidSignatureError } from '../services/stellarAuthService.js'
 import { requireJwt } from '../middleware/requireJwt.js'
+import { authRateLimiter } from '../middleware/rateLimit.js'
 import { validateRequest } from '../middleware/validate.js'
 import { challengeSchema, loginSchema, refreshTokenSchema, logoutSchema, logoutAllSchema } from './validation.js'
 import { ok, fail } from '../utils/apiResponse.js'

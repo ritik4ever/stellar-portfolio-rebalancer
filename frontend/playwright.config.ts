@@ -41,8 +41,9 @@ export default defineConfig({
     },
     {
       name: 'visual-regression',
+      testDir: './tests/visual',
       testMatch: [
-        /auth\.spec\.ts/,
+        /dashboard\.spec\.ts/,
         /portfolio-create\.spec\.ts/,
         /rebalance-history\.spec\.ts/,
       ],
@@ -52,6 +53,7 @@ export default defineConfig({
         deviceScaleFactor: 1,
         screenshot: 'on',
       },
+      snapshotPathTemplate: '{testDir}/baselines/{testFileName}/{arg}{ext}',
     },
     {
       name: 'firefox',

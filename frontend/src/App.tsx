@@ -37,8 +37,11 @@ import {
 } from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
+import PortfolioWizard from './pages/PortfolioWizard'
+import Compare from './pages/Compare'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
+import OnboardingChecklist from './components/OnboardingChecklist'
 
 function App() {
     const queryClient = useQueryClient()
@@ -77,6 +80,14 @@ function App() {
     const [publicShareHash, setPublicShareHash] = useState<string | null>(() => {
         if (typeof window !== 'undefined') {
             const match = window.location.pathname.match(/^\/public\/([a-zA-Z0-9-]+)/)
+            return match ? match[1] : null
+        }
+        return null
+    })
+
+    const [embedPortfolioId, setEmbedPortfolioId] = useState<string | null>(() => {
+        if (typeof window !== 'undefined') {
+            const match = window.location.pathname.match(/^\/embed\/portfolio\/([a-zA-Z0-9-]+)/)
             return match ? match[1] : null
         }
         return null
@@ -348,6 +359,7 @@ function App() {
                 }}
             />
             <Onboarding />
+            <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
                 <div
                     className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-xl dark:border-amber-900 dark:bg-amber-950/80 dark:text-amber-50"
@@ -420,6 +432,8 @@ function App() {
                     doc={legalDoc}
                     onBack={() => handleNavigate('landing')}
                 />
+            ) : embedPortfolioId ? (
+                <EmbedWidget id={embedPortfolioId} />
             ) : publicShareHash ? (
                 <PublicPortfolio hash={publicShareHash} />
             ) : currentView === 'landing' ? (
@@ -478,6 +492,20 @@ function App() {
             ) : currentView === 'setup' ? (
                 <ErrorBoundary fallbackTitle="Portfolio Setup">
                     <PortfolioSetup
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'wizard' ? (
+                <ErrorBoundary fallbackTitle="Portfolio Wizard">
+                    <PortfolioWizard
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'compare' ? (
+                <ErrorBoundary fallbackTitle="Compare Portfolios">
+                    <Compare
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
                     />

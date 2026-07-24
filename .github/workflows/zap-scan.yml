@@ -1,0 +1,192 @@
+name: OWASP ZAP Security Scan
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Staging URL to scan (leave empty to spin up locally)'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      target_url:
+        description: 'Staging URL to scan'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  zap-scan:
+    name: OWASP ZAP Passive Scan
+    runs-on: ubuntu-latest
+    env:
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_CONTRACT_ADDRESS: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      DEMO_MODE: 'true'
+      ALLOW_DEMO_BALANCE_FALLBACK: 'true'
+      JWT_SECRET: zap-ci-jwt-secret-at-least-32-characters-long
+      DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/stellartest
+      PGUSER: testuser
+      PGPASSWORD: testpassword
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGDATABASE: stellartest
+      PORT: 3001
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: stellartest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Determine scan target
+        id: target
+        run: |
+          URL="${{ inputs.target_url }}"
+          if [ -z "$URL" ]; then
+            echo "mode=local" >> "$GITHUB_OUTPUT"
+            echo "url=http://localhost:3001" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=remote" >> "$GITHUB_OUTPUT"
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Local stack (only when no external target is provided) ──────────────
+      - name: Install dependencies
+        if: steps.target.outputs.mode == 'local'
+        run: npm run install:all
+
+      - name: Migrate and seed database
+        if: steps.target.outputs.mode == 'local'
+        run: npm run db:reset:staging
+        working-directory: ./backend
+
+      - name: Build backend
+        if: steps.target.outputs.mode == 'local'
+        run: npm run build
+        working-directory: ./backend
+
+      - name: Start backend
+        if: steps.target.outputs.mode == 'local'
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              echo "Backend healthy"
+              exit 0
+            fi
+            echo "Waiting for backend... ($i/30)"
+            sleep 2
+          done
+          echo "::error::Backend did not become healthy"
+          exit 1
+        working-directory: ./backend
+
+      # ── ZAP passive scan ─────────────────────────────────────────────────────
+      - name: Create report directory
+        run: mkdir -p zap-results && chmod 777 zap-results
+
+      - name: Pull ZAP image
+        run: docker pull ghcr.io/zaproxy/zaproxy:stable
+
+      - name: Run ZAP baseline (passive) scan
+        # Exit code 1 = warnings, exit code 2 = failures — capture both and
+        # evaluate severity ourselves so we can differentiate warn vs block.
+        run: |
+          docker run --rm \
+            --network host \
+            -v "$GITHUB_WORKSPACE/zap-results:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t "${{ steps.target.outputs.url }}" \
+              -J /zap/wrk/zap-report.json \
+              -r /zap/wrk/zap-report.html \
+              -I
+        continue-on-error: true
+
+      # ── Severity gate ─────────────────────────────────────────────────────────
+      - name: Check for high-severity findings
+        id: severity-check
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const reportPath = './zap-results/zap-report.json';
+
+          if (!fs.existsSync(reportPath)) {
+            console.error('::error::ZAP report not found — scan may have failed to start.');
+            process.exit(1);
+          }
+
+          const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+          const sites = report.site || [];
+          const HIGH = 3;
+          const findings = { high: [], medium: [], low: [], info: [] };
+
+          for (const site of sites) {
+            for (const alert of (site.alerts || [])) {
+              const risk = parseInt(alert.riskcode, 10);
+              const entry = `${alert.name} [${alert.riskdesc}] — ${alert.count} instance(s)`;
+              if (risk >= HIGH) findings.high.push(entry);
+              else if (risk === 2) findings.medium.push(entry);
+              else if (risk === 1) findings.low.push(entry);
+              else findings.info.push(entry);
+            }
+          }
+
+          const total =
+            findings.high.length + findings.medium.length +
+            findings.low.length + findings.info.length;
+
+          console.log(`\n=== ZAP Scan Summary (${total} alert type(s)) ===`);
+          for (const [level, items] of Object.entries(findings)) {
+            if (items.length) {
+              console.log(`\n${level.toUpperCase()} (${items.length}):`);
+              items.forEach(i => console.log(`  • ${i}`));
+            }
+          }
+
+          if (findings.high.length > 0) {
+            console.error(
+              `\n::error::Deploy blocked — ${findings.high.length} HIGH-severity finding(s) detected.`
+            );
+            process.exit(2);
+          }
+
+          if (findings.medium.length > 0) {
+            console.log(
+              `\n::warning::${findings.medium.length} MEDIUM-severity finding(s). Review before next release.`
+            );
+          }
+
+          console.log('\nPassed — no HIGH-severity findings.');
+          EOF
+
+      # ── Artifacts ─────────────────────────────────────────────────────────────
+      - name: Upload ZAP HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: |
+            zap-results/zap-report.html
+            zap-results/zap-report.json
+          retention-days: 30

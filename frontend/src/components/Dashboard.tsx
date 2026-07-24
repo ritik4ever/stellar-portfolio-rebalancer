@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Share2 } from 'lucide-react'
+import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Plus, CheckCircle, Zap, Copy, Share2, Settings, WalletCards } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
@@ -13,8 +13,10 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+
+import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
 import { buildPortfolioCloneDraft, savePortfolioCloneDraft, loadPortfolioCloneDraft, clearPortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
@@ -27,6 +29,7 @@ import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
 import { usePortfolioExport } from '../hooks/usePortfolio'
+import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -38,6 +41,7 @@ type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknow
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+    const [candlestickAsset, setCandlestickAsset] = useState<string>('XLM')
 
     const { isDark } = useTheme()
     const queryClient = useQueryClient()
@@ -62,6 +66,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         refetch: refetchPortfolioDetails,
     } = usePortfolioDetails(latestPortfolioId)
 
+    const { connectionState: liveFeedState } = usePortfolioLiveFeed(latestPortfolioId || null)
+
     const {
         data: priceBundle,
         isLoading: pricesLoading,
@@ -69,6 +75,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         refetch: refetchPrices,
     } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
+    const { data: costSummary, isLoading: costSummaryLoading } = usePortfolioCostSummary(latestPortfolioId)
 
     const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
     const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
@@ -129,8 +136,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         allocationData.splice(0, allocationData.length, ...allocationsArray)
     }
 
-    const missingPriceAssets = allocationData.filter((asset: any) => {
-        const row = prices[asset.name]
+    // Build drift gauge data — map target % and live current % per asset.
+    // "current" comes from portfolio allocations when available; falls back to target
+    // so the gauge still renders (showing 0 drift) before live data arrives.
+    const driftGaugeAssets: DriftGaugeAsset[] = allocationData.map((asset: any) => {
+        // portfolioData.allocations may be an array of { asset, target, current } or
+        // an object { assetSymbol: pct }. Resolve current from the raw portfolio data.
+        let current: number = asset.value // default: same as target (0 drift)
+        const rawAlloc = portfolioData?.allocations
+        if (Array.isArray(rawAlloc)) {
+            const match = rawAlloc.find((a: any) => (a.asset ?? a.name) === asset.name)
+            if (match) {
+                current = typeof match.current === 'number' ? match.current : asset.value
+            }
+        }
+        const threshold =
+            typeof (portfolioData as any)?.threshold === 'number'
+                ? (portfolioData as any).threshold
+                : 5 // sane default
+        return { name: asset.name, target: asset.value, current, threshold }
+    })
+
+    const missingPriceAssets = allocationData.filter((asset: any) => {        const row = prices[asset.name]
         return !row || row.price === undefined || row.price === null
     })
     const pricedAssets = allocationData.length - missingPriceAssets.length
@@ -519,6 +546,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         {shareLink ? 'Sharing' : 'Share'}
                                     </button>
                                 ) : null}
+                                <button type="button" onClick={() => onNavigate('wizard')}
+                                    className="border border-blue-600 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-500 dark:hover:bg-blue-900/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+                                    title="Use step-by-step wizard to create a portfolio">
+                                    ✨ Wizard
+                                </button>
                                 <button type="button" onClick={() => onNavigate('setup')}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                                     {dashboardCopy.createPortfolio}
@@ -756,8 +788,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         </p>
                                     )}
                                     <div className="mb-4">
-                                        <div className="text-3xl font-bold text-gray-900 dark:text-white">
+                                        <div className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
                                             ${portfolioData?.totalValue?.toLocaleString() || '0'}
+                                            {liveFeedState === 'connected' && (
+                                                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400">
+                                                    <span className="w-1.5 h-1.5 mr-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                                                    LIVE
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex items-center mt-1">
                                             <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
@@ -840,6 +878,52 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 </motion.div>
                             )}
 
+                            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Cost Summary</h3>
+                                    <WalletCards className="w-5 h-5 text-blue-500" aria-hidden />
+                                </div>
+                                {costSummaryLoading ? (
+                                    <div className="space-y-3" aria-busy="true">
+                                        <div className="h-5 w-28 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                        <div className="h-5 w-36 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                        <div className="h-5 w-32 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3 text-sm">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Total fees paid</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {(costSummary?.total_fees_paid ?? 0).toFixed(4)} XLM
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Avg slippage</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {(costSummary?.avg_slippage_bps ?? 0).toFixed(2)} bps
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Cost per rebalance</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {(costSummary?.cost_per_rebalance ?? 0).toFixed(4)} XLM
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Total rebalances</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {costSummary?.total_rebalances ?? 0}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Drift Gauges — live allocation drift per asset */}
+                            {driftGaugeAssets.length > 0 && (
+                                <DriftGaugeGrid assets={driftGaugeAssets} title="Live Allocation Drift" />
+                            )}
+
                             {/* Allocation Chart */}
                             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
                                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Allocation</h3>
@@ -907,6 +991,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
+import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
+
+...
+    const refreshData = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
+            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
+        ])
+    }, [queryClient])
+...
                             <PriceTracker />
                         </div>
                     </div>
@@ -915,6 +1010,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 {/* Analytics Tab */}
                 {activeTab === 'analytics' && (
                     <div className="space-y-6">
+                        {/* Asset selector for candlestick chart */}
+                        {allocationData.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm text-gray-500 dark:text-gray-400">Price chart:</span>
+                                {allocationData.map((asset: any) => (
+                                    <button
+                                        key={asset.name}
+                                        type="button"
+                                        onClick={() => setCandlestickAsset(asset.name)}
+                                        aria-pressed={candlestickAsset === asset.name}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                                            candlestickAsset === asset.name
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                        }`}
+                                    >
+                                        {asset.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <PriceCandlestick
+                            asset={candlestickAsset}
+                            portfolioCreatedAt={(portfolioData as any)?.createdAt ?? null}
+                            portfolioId={portfolioData?.id ?? null}
+                            onRebalanceClick={(_ev: CandlestickRebalanceEvent) => {}}
+                        />
                         <PerformanceChart portfolioId={portfolioData?.id || null} />
                         <AllocationHistory portfolioId={portfolioData?.id || null} />
                     </div>

@@ -24,7 +24,7 @@ describe('SDK codegen setup (#887)', () => {
     it('frontend/src/api/generated directory is tracked in git (.gitkeep)', () => {
         const gitkeepPath = resolve(
             __dirname,
-            '..', '..', '..', '..', 'frontend', 'src', 'api', 'generated', '.gitkeep'
+            '..', '..', '..', 'frontend', 'src', 'api', 'generated', '.gitkeep'
         )
         expect(existsSync(gitkeepPath)).toBe(true)
     })

@@ -40,6 +40,8 @@
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
 
+    "test:chaos": "node scripts/chaos/kill-backend-mid-rebalance.mjs",
+
     "clean": "npm run clean:all",
     "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
   },

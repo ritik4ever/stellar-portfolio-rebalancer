@@ -24,7 +24,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -251,7 +251,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                             },
                             "val": {
-                              "u32": 100
+                              "u32": 10000
                             }
                           }
                         ]
@@ -629,7 +629,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -757,10 +757,10 @@
           "v0": {
             "topics": [
               {
-                "string": "portfolio"
+                "symbol": "portfolio"
               },
               {
-                "string": "steward_transferred"
+                "symbol": "steward_transferred"
               }
             ],
             "data": {

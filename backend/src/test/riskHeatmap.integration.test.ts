@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RiskManagementService } from '../services/riskManagements.js'
 import { ReflectorService } from '../services/reflector.js'
-import { portfoliosRouter } from '../api/portfolios.routes.js'
+import { portfolioRouter } from '../api/routes.js'
 import type { PricesMap } from '../types/index.js'
 
 // Helper to build price series
@@ -158,7 +158,7 @@ describe('Portfolio Risk Heatmap API Integration Tests', () => {
         app = express()
         app.use(cors())
         app.use(express.json())
-        app.use('/api', portfoliosRouter)
+        app.use('/api', portfolioRouter)
 
         // Pre-create a portfolio for testing
         const createRes = await request(app)

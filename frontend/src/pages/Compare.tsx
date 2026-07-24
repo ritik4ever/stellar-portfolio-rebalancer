@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
-import { useUserPortfolios, usePortfolioDetails } from '../hooks/queries/usePortfolioQuery'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import { ArrowLeft, CheckCircle2, XCircle, TrendingUp, TrendingDown, Activity, Gauge, RotateCcw } from 'lucide-react'
+import { useUserPortfolios } from '../hooks/queries/usePortfolioQuery'
+import { usePortfolioCompare } from '../hooks/queries/useAnalyticsQuery'
 import { useTranslation } from 'react-i18next'
 
 interface PortfolioCompareProps {
@@ -22,6 +23,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
   })
 
   const { data: portfolios } = useUserPortfolios(publicKey)
+  const { data: compareData, isLoading, error } = usePortfolioCompare(selectedPortfolioIds)
 
   const selectedPortfolios = portfolios?.filter(p => selectedPortfolioIds.includes(p.id)) || []
 
@@ -43,11 +45,11 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
 
   const getAllocationData = (portfolio: any) => {
     if (!portfolio?.allocations) return []
-    
-    const allocations = Array.isArray(portfolio.allocations) 
-      ? portfolio.allocations 
+
+    const allocations = Array.isArray(portfolio.allocations)
+      ? portfolio.allocations
       : Object.entries(portfolio.allocations).map(([asset, percentage]) => ({ asset, percentage }))
-    
+
     return allocations.map((alloc: any, index: number) => ({
       name: alloc.asset || alloc.name,
       value: alloc.percentage || alloc.target || 0,
@@ -55,13 +57,15 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
     }))
   }
 
-  const getPortfolioMetrics = (portfolio: any) => {
-    return {
-      totalValue: portfolio?.totalValue || 0,
-      dayChange: portfolio?.dayChange || 0,
-      needsRebalance: portfolio?.needsRebalance || false,
-      lastRebalance: portfolio?.lastRebalance || 'Never'
-    }
+  const formatPct = (value: number | undefined | null, decimals = 2) => {
+    if (value == null) return '—'
+    const sign = value >= 0 ? '+' : ''
+    return `${sign}${value.toFixed(decimals)}%`
+  }
+
+  const formatNumber = (value: number | undefined | null, decimals = 2) => {
+    if (value == null) return '—'
+    return value.toFixed(decimals)
   }
 
   if (!publicKey) {
@@ -101,7 +105,6 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
           </div>
         </div>
 
-        {/* Portfolio Selection */}
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('compare.selectPortfolios')}</h2>
           {portfolios && portfolios.length > 0 ? (
@@ -135,10 +138,8 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
           )}
         </div>
 
-        {/* Comparison View */}
         {selectedPortfolioIds.length >= 2 && (
           <div className="space-y-6">
-            {/* Allocation Charts */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('compare.allocation')}</h2>
               <div className={`grid gap-6 ${selectedPortfolioIds.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-3'}`}>
@@ -184,79 +185,110 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
               </div>
             </div>
 
-            {/* Key Metrics */}
+            {/* Comparison Table */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('compare.metrics')}</h2>
-              <div className={`grid gap-4 ${selectedPortfolioIds.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-3'}`}>
-                {selectedPortfolios.map((portfolio) => {
-                  const metrics = getPortfolioMetrics(portfolio)
-                  return (
-                    <div key={portfolio.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                      <h3 className="font-medium text-gray-900 dark:text-white mb-3">
-                        {portfolio.name || portfolio.id}
-                      </h3>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">{t('dashboard.portfolioValue')}</span>
-                          <span className="font-medium text-gray-900 dark:text-white">${metrics.totalValue.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">24h Change</span>
-                          <span className={`font-medium ${metrics.dayChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {metrics.dayChange >= 0 ? '+' : ''}{metrics.dayChange.toFixed(2)}%
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">{t('dashboard.rebalanceNeeded')}</span>
-                          {metrics.needsRebalance ? (
-                            <XCircle className="w-5 h-5 text-orange-500" />
-                          ) : (
-                            <CheckCircle2 className="w-5 h-5 text-green-500" />
-                          )}
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">Last Rebalance</span>
-                          <span className="font-medium text-gray-900 dark:text-white">{metrics.lastRebalance}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
 
-            {/* Performance Comparison */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('compare.performance')}</h2>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={selectedPortfolios.map((p, i) => ({
-                    name: p.name || p.id,
-                    value: p.totalValue || 0,
-                    color: COLORS[i % COLORS.length]
-                  }))}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-                    <XAxis 
-                      dataKey="name" 
-                      className="text-gray-600 dark:text-gray-400"
-                      tick={{ fill: 'currentColor' }}
-                    />
-                    <YAxis 
-                      className="text-gray-600 dark:text-gray-400"
-                      tick={{ fill: 'currentColor' }}
-                    />
-                    <Tooltip />
-                    <Legend />
-                    <Line 
-                      type="monotone" 
-                      dataKey="value" 
-                      stroke="#3B82F6" 
-                      strokeWidth={2}
-                      dot={{ fill: '#3B82F6', r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+                </div>
+              ) : error ? (
+                <div className="text-center py-8 text-red-500">
+                  Failed to load comparison data. Please try again.
+                </div>
+              ) : compareData?.portfolios ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-700">
+                        <th className="text-left py-3 px-4 text-gray-600 dark:text-gray-400 font-medium">Metric</th>
+                        {compareData.portfolios.map((p: any) => (
+                          <th key={p.portfolioId} className="text-center py-3 px-4 text-gray-900 dark:text-white font-medium">
+                            {p.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-3 px-4 text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          Total Return
+                        </td>
+                        {compareData.portfolios.map((p: any) => (
+                          <td key={p.portfolioId} className={`text-center py-3 px-4 font-medium ${
+                            p.totalReturnPct >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {formatPct(p.totalReturnPct)}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-3 px-4 text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-orange-500" />
+                          Volatility
+                        </td>
+                        {compareData.portfolios.map((p: any) => (
+                          <td key={p.portfolioId} className="text-center py-3 px-4 font-medium text-gray-900 dark:text-white">
+                            {formatNumber(p.volatility)}%
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-3 px-4 text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                          <TrendingDown className="w-4 h-4 text-red-500" />
+                          Max Drawdown
+                        </td>
+                        {compareData.portfolios.map((p: any) => (
+                          <td key={p.portfolioId} className="text-center py-3 px-4 font-medium text-red-600">
+                            {formatPct(p.maxDrawdown)}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-3 px-4 text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                          <Gauge className="w-4 h-4 text-blue-500" />
+                          Sharpe Ratio
+                        </td>
+                        {compareData.portfolios.map((p: any) => (
+                          <td key={p.portfolioId} className={`text-center py-3 px-4 font-medium ${
+                            p.sharpeRatio >= 1 ? 'text-green-600' : p.sharpeRatio >= 0 ? 'text-yellow-600' : 'text-red-600'
+                          }`}>
+                            {formatNumber(p.sharpeRatio, 3)}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-3 px-4 text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                          <RotateCcw className="w-4 h-4 text-purple-500" />
+                          Rebalance Count
+                        </td>
+                        {compareData.portfolios.map((p: any) => (
+                          <td key={p.portfolioId} className="text-center py-3 px-4 font-medium text-gray-900 dark:text-white">
+                            {p.rebalanceCount ?? '—'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-3 px-4 text-gray-600 dark:text-gray-400">
+                          Portfolio Value
+                        </td>
+                        {compareData.portfolios.map((p: any) => (
+                          <td key={p.portfolioId} className="text-center py-3 px-4 font-medium text-gray-900 dark:text-white">
+                            ${(p.totalValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                  {compareData.timeRange?.from && (
+                    <p className="mt-4 text-xs text-gray-400 text-center">
+                      Period: {new Date(compareData.timeRange.from).toLocaleDateString()} — {compareData.timeRange.to ? new Date(compareData.timeRange.to).toLocaleDateString() : 'Present'}
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         )}

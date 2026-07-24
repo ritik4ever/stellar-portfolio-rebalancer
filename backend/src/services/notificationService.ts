@@ -251,6 +251,28 @@ class EmailProvider implements NotificationProvider {
     );
   }
 
+  async sendRaw(options: { to: string; subject: string; html: string; text: string }): Promise<void> {
+    if (!this.transporter) {
+      logger.warn("Cannot send raw email - transporter not available");
+      return;
+    }
+
+    const mailOptions = {
+      from: process.env.SMTP_FROM || "noreply@stellarportfolio.com",
+      to: options.to,
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+    };
+
+    const info = await this.transporter.sendMail(mailOptions);
+    logger.info("Raw email sent successfully", {
+      to: options.to,
+      subject: options.subject,
+      messageId: info.messageId,
+    });
+  }
+
   private formatTextEmail(payload: NotificationPayload): string {
     return `
 ${payload.title}
@@ -460,6 +482,39 @@ export class NotificationService {
       } catch (error) {
         logger.error('Error processing digest for user', { userId, error: error instanceof Error ? error.message : String(error) })
       }
+    }
+  }
+
+  /**
+   * Send a raw email directly through the email provider without
+   * wrapping it in a NotificationPayload. Used by the digest module
+   * for portfolio summary emails.
+   */
+  async sendRawEmail(options: { to: string; subject: string; html: string; text: string }): Promise<void> {
+    const emailProvider = this.providers.find(
+      (p) => p instanceof EmailProvider
+    ) as EmailProvider | undefined;
+
+    if (!emailProvider) {
+      logger.warn("Email provider not available for raw email");
+      return;
+    }
+
+    await emailProvider.sendRaw(options);
+  }
+
+  /**
+   * Verify an unsubscribe token (HMAC-SHA256 of userId).
+   * Used by the digest unsubscribe link to allow one-click unsubscribes
+   * without requiring a JWT.
+   */
+  static verifyUnsubscribeToken(userId: string, token: string): boolean {
+    const secret = process.env.UNSUBSCRIBE_SECRET || process.env.SMTP_PASS || 'stellar-unsubscribe-key'
+    const expected = createHmac('sha256', secret).update(userId).digest('hex')
+    try {
+      return timingSafeEqual(Buffer.from(token, 'hex'), Buffer.from(expected, 'hex'))
+    } catch {
+      return false
     }
   }
 

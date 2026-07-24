@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockRunStartupSelfTest = vi.fn()
-const mockFormatStartupSelfTestReport = vi.fn()
+const { mockRunStartupSelfTest, mockFormatStartupSelfTestReport } = vi.hoisted(() => ({
+    mockRunStartupSelfTest: vi.fn(),
+    mockFormatStartupSelfTestReport: vi.fn(),
+}))
 
 vi.mock('../monitoring/startupSelfTest.js', () => ({
     runStartupSelfTest: mockRunStartupSelfTest,

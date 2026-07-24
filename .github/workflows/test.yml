@@ -198,7 +198,7 @@ jobs:
           NODE_ENV: test
         # Use a custom reporter so failures are clearly labeled as quarantined.
         run: |
-          npm test -- \
+          npm run test:ci -- \
             --reporter=verbose \
             --reporter=github-actions \
             2>&1 | tee quarantine-run.log || true

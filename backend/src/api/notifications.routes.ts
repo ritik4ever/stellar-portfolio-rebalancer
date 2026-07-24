@@ -148,6 +148,31 @@ notificationsRouter.get('/notifications/logs', requireJwtWhenEnabled, validateQu
     }
 })
 
+// Unsubscribe via email link (token-based, no JWT required)
+notificationsRouter.get('/notifications/unsubscribe', async (req: Request, res: Response) => {
+    try {
+        const userId = req.query.userId as string | undefined
+        const token = req.query.token as string | undefined
+
+        if (!userId || !token) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId and token query parameters are required')
+        }
+
+        if (!NotificationService.verifyUnsubscribeToken(userId, token)) {
+            return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired unsubscribe link')
+        }
+
+        notificationService.unsubscribe(userId)
+
+        logger.info('User unsubscribed via email link', { userId })
+
+        return ok(res, { message: 'Successfully unsubscribed from all notifications' })
+    } catch (error) {
+        logger.error('Failed to unsubscribe via email link', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 // Verify inbound webhook callback signature
 notificationsRouter.post('/notifications/webhook/callback', async (req: Request, res: Response) => {
     try {

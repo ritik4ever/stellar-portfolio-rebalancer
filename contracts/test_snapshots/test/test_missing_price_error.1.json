@@ -24,7 +24,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -229,7 +229,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                             },
                             "val": {
-                              "u32": 100
+                              "u32": 10000
                             }
                           }
                         ]
@@ -529,7 +529,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 100
+                        "u32": 10000
                       }
                     }
                   ]
@@ -663,7 +663,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Timestamp drift: too far in the future' from contract function 'Symbol(obj#121)'"
+                  "string": "caught panic 'Timestamp drift: too far in the future' from contract function 'Symbol(obj#143)'"
                 },
                 {
                   "u64": 1

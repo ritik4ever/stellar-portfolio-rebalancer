@@ -15,6 +15,28 @@ This guide provides step-by-step checklists for deploying the Stellar Portfolio 
 
 ---
 
+## Automated Promotion Pipeline
+
+The repository includes a GitHub Actions contract deploy workflow that promotes the same contract build through the three supported environments:
+
+- `push` to `main` deploys to `testnet` automatically after CI passes.
+- Pull requests from `release/**` branches deploy to `staging` for approval and verification.
+- Manual `workflow_dispatch` runs deploy to `mainnet` behind the GitHub environment approval gate.
+
+Each environment should provide the same GitHub environment variable names:
+
+- `STELLAR_SECRET_KEY`
+- `REFLECTOR_ADDRESS`
+
+After deployment, the workflow exports the deployed contract ID into these values for downstream steps and artifact capture:
+
+- `CONTRACT_ID`
+- `STELLAR_CONTRACT_ADDRESS`
+- `CONTRACT_ADDRESS`
+- `VITE_CONTRACT_ADDRESS`
+
+---
+
 ## Prerequisites (All Environments)
 
 - [ ] Rust toolchain installed: `rustup default stable`
