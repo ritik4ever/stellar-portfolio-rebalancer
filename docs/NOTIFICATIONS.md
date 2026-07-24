@@ -10,8 +10,27 @@ The Stellar Portfolio Rebalancer includes a comprehensive notification system th
 - **Webhook Notifications**: POST JSON payloads to custom endpoints
 - **Event Filtering**: Subscribe to specific event types
 - **User Preferences**: Per-user notification configuration
-- **Retry Logic**: Automatic retry for failed webhook deliveries
+- **Configurable backoff**: Provider-specific retry timing for email and webhooks (max attempts, initial delay, exponential multiplier, cap)
+- **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
 - **Non-blocking**: Notification failures don't affect core operations
+
+## Delivery backoff configuration
+
+Retry behavior is loaded at startup from environment variables (validated in `startupConfig`) and applied in `notificationService` via `deliverWithBackoff`.
+
+| Variable | Provider | Default | Description |
+|----------|----------|---------|-------------|
+| `WEBHOOK_TIMEOUT` | Webhook | `5000` | HTTP request timeout (ms) |
+| `WEBHOOK_RETRY_COUNT` | Webhook | `1` | Retries after the first failure (total attempts = `1 + WEBHOOK_RETRY_COUNT`) |
+| `WEBHOOK_RETRY_DELAY` | Webhook | `1000` | Initial backoff before the first webhook retry (ms) |
+| `WEBHOOK_MAX_BACKOFF_MS` | Webhook | `60000` | Maximum delay between webhook retries (ms) |
+| `WEBHOOK_BACKOFF_MULTIPLIER` | Webhook | `2` | Exponential multiplier per retry |
+| `EMAIL_MAX_ATTEMPTS` | Email | `3` | Total SMTP send attempts (including the first try) |
+| `EMAIL_INITIAL_BACKOFF_MS` | Email | `1000` | Initial backoff before the first email retry (ms) |
+| `EMAIL_MAX_BACKOFF_MS` | Email | `30000` | Maximum delay between email retries (ms) |
+| `EMAIL_BACKOFF_MULTIPLIER` | Email | `2` | Exponential multiplier per retry |
+
+On each failed attempt (before the final failure), the service logs a `retried` row with the scheduled backoff delay. After all attempts are exhausted, a `failed` row is written and an error is logged with `maxAttempts` and the last error message.
 
 ## Event Types
 

@@ -4,6 +4,14 @@ The HTTP API (versioning, envelopes, and endpoint overview) lives in the reposit
 
 **[API.md](../API.md)**
 
+## Contract error codes
+
+When the backend invokes the on-chain Soroban contract, failures surface as numeric
+error codes. The canonical mapping between contract error codes and HTTP API error
+responses is maintained in:
+
+**[CONTRACT_ABI.md → Canonical Error Mapping](../contracts/CONTRACT_ABI.md#canonical-error-mapping-contract--api)**
+
 ## Operational endpoints
 
 These unversioned endpoints support health checks and monitoring:

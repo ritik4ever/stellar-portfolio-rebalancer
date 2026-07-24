@@ -1,0 +1,179 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AllocationPieChart snapshot > renders chart with data 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+  >
+    <h3
+      class="text-lg font-semibold text-gray-900 dark:text-white mb-4"
+    >
+      Allocation
+    </h3>
+    <div
+      class="h-64 flex items-center justify-center"
+    >
+      <div>
+        <div>
+          <div>
+            <div />
+            <div />
+          </div>
+          <div />
+        </div>
+      </div>
+    </div>
+    <div
+      class="mt-4 space-y-2"
+    >
+      <div
+        class="flex items-center justify-between"
+      >
+        <div
+          class="flex items-center"
+        >
+          <div
+            class="w-3 h-3 rounded-full mr-2"
+            style="background-color: rgb(59, 130, 246);"
+          />
+          <span
+            class="text-sm text-gray-600 dark:text-gray-400"
+          >
+            XLM
+          </span>
+        </div>
+        <span
+          class="text-sm font-medium text-gray-900 dark:text-white"
+        >
+          40
+          %
+        </span>
+      </div>
+      <div
+        class="flex items-center justify-between"
+      >
+        <div
+          class="flex items-center"
+        >
+          <div
+            class="w-3 h-3 rounded-full mr-2"
+            style="background-color: rgb(16, 185, 129);"
+          />
+          <span
+            class="text-sm text-gray-600 dark:text-gray-400"
+          >
+            USDC
+          </span>
+        </div>
+        <span
+          class="text-sm font-medium text-gray-900 dark:text-white"
+        >
+          60
+          %
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`AllocationPieChart snapshot > renders empty state 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+  >
+    <h3
+      class="text-lg font-semibold text-gray-900 dark:text-white mb-4"
+    >
+      Allocation
+    </h3>
+    <div
+      class="h-64 flex items-center justify-center"
+    >
+      <div>
+        <div>
+          <div />
+          <div />
+        </div>
+      </div>
+    </div>
+    <div
+      class="mt-4 space-y-2"
+    />
+  </div>
+</div>
+`;
+
+exports[`AllocationPieChart snapshot > renders loading skeleton 1`] = `
+<div>
+  <div
+    aria-busy="true"
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="allocation-pie-chart-skeleton"
+  >
+    <div
+      class="w-32 h-6 bg-gray-300 dark:bg-gray-700 rounded mb-4 animate-pulse"
+    />
+    <div
+      class="h-48 flex items-center justify-center mb-4"
+    >
+      <div
+        class="w-40 h-40 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"
+      />
+    </div>
+  </div>
+</div>
+`;
+
+exports[`AllocationPieChart snapshot > renders single asset 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+  >
+    <h3
+      class="text-lg font-semibold text-gray-900 dark:text-white mb-4"
+    >
+      Allocation
+    </h3>
+    <div
+      class="h-64 flex items-center justify-center"
+    >
+      <div>
+        <div>
+          <div>
+            <div />
+          </div>
+          <div />
+        </div>
+      </div>
+    </div>
+    <div
+      class="mt-4 space-y-2"
+    >
+      <div
+        class="flex items-center justify-between"
+      >
+        <div
+          class="flex items-center"
+        >
+          <div
+            class="w-3 h-3 rounded-full mr-2"
+            style="background-color: rgb(59, 130, 246);"
+          />
+          <span
+            class="text-sm text-gray-600 dark:text-gray-400"
+          >
+            XLM
+          </span>
+        </div>
+        <span
+          class="text-sm font-medium text-gray-900 dark:text-white"
+        >
+          100
+          %
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;

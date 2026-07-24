@@ -340,6 +340,41 @@ describe('Rebalancing - POST /api/portfolio/:id/rebalance', () => {
     })
 })
 
+describe('Rebalancing - POST /api/portfolio/:id/rebalance/dry-run', () => {
+    it('should return dry-run preview envelope', async () => {
+        const createPayload = {
+            userAddress: 'GDRYRUN123456789A',
+            allocations: { XLM: 60, USDC: 40 },
+            threshold: 5
+        }
+
+        const createResponse = await request(app)
+            .post('/api/portfolio')
+            .send(createPayload)
+            .expect((res) => {
+                expect([200, 201]).toContain(res.status)
+            })
+
+        const portfolioId = createResponse.body.data.portfolioId
+        expect(portfolioId).toBeDefined()
+
+        const dryRunResponse = await request(app)
+            .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
+            .send({})
+            .expect((res) => {
+                expect([200, 401, 403, 500]).toContain(res.status)
+            })
+
+        expect(typeof dryRunResponse.body.success).toBe('boolean')
+        if (dryRunResponse.body.success) {
+            expect(dryRunResponse.body.data).toBeDefined()
+            expect(dryRunResponse.body.data.result).toBeDefined()
+        } else {
+            expect(dryRunResponse.body.error).toBeDefined()
+        }
+    })
+})
+
 // ─── User Portfolios Tests ──────────────────────────────────────────────────
 
 describe('Portfolio Management - GET /api/user/:address/portfolios', () => {

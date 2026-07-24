@@ -91,10 +91,10 @@ describe('getPortfolioExport — JSON', () => {
         expect(result!.contentType).toBe('application/json; charset=utf-8')
     })
 
-    it('filename matches portfolio_<8chars>_<timestamp>.json', async () => {
+    it('filename matches portfolio-<8chars>-export-<timestamp>.json', async () => {
         const result = await getPortfolioExport(PORTFOLIO_ID, 'json')
         expect(result!.filename).toMatch(
-            new RegExp(`^portfolio_${SAFE_ID}_${TIMESTAMP_RE.source}\\.json$`)
+            new RegExp(`^portfolio-${SAFE_ID}-export-${TIMESTAMP_RE.source}\\.json$`)
         )
     })
 
@@ -124,11 +124,11 @@ describe('getPortfolioExport — CSV', () => {
         expect(result!.contentType).toBe('text/csv; charset=utf-8')
     })
 
-    it('filename matches portfolio_<8chars>_rebalance_history_<timestamp>.csv', async () => {
+    it('filename matches portfolio-<8chars>-export-<timestamp>.csv', async () => {
         const result = await getPortfolioExport(PORTFOLIO_ID, 'csv')
         expect(result!.filename).toMatch(
             new RegExp(
-                `^portfolio_${SAFE_ID}_rebalance_history_${TIMESTAMP_RE.source}\\.csv$`
+                `^portfolio-${SAFE_ID}-export-${TIMESTAMP_RE.source}\\.csv$`
             )
         )
     })
@@ -151,10 +151,10 @@ describe('getPortfolioExport — PDF', () => {
         expect(result!.contentType).toBe('application/pdf')
     })
 
-    it('filename matches portfolio_<8chars>_report_<timestamp>.pdf', async () => {
+    it('filename matches portfolio-<8chars>-export-<timestamp>.pdf', async () => {
         const result = await getPortfolioExport(PORTFOLIO_ID, 'pdf')
         expect(result!.filename).toMatch(
-            new RegExp(`^portfolio_${SAFE_ID}_report_${TIMESTAMP_RE.source}\\.pdf$`)
+            new RegExp(`^portfolio-${SAFE_ID}-export-${TIMESTAMP_RE.source}\\.pdf$`)
         )
     })
 
@@ -225,7 +225,7 @@ describe('getPortfolioExport — filename stability', () => {
 
         it(`${fmt} filename embeds the first 8 chars of the portfolio id`, async () => {
             const result = await getPortfolioExport(PORTFOLIO_ID, fmt)
-            expect(result!.filename).toContain(`_${SAFE_ID}_`)
+            expect(result!.filename).toContain(`-${SAFE_ID}-`)
         })
 
         it(`${fmt} filename uses dashes only — no colons or dots in the timestamp`, async () => {

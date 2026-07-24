@@ -115,7 +115,11 @@ describe('buildReadinessReport', () => {
 
         expect(report.status).toBe('ready')
         expect(report.checks.database.status).toBe('ready')
+        expect(report.checks.database.details).toBeDefined()
+        expect(typeof (report.checks.database.details as any).latencyMs).toBe('number')
         expect(report.checks.queue.status).toBe('ready')
+        // queue check should include per-queue details
+        expect((report.checks.queue.details as any).queues).toBeDefined()
         expect(report.checks.workers.status).toBe('ready')
         expect(report.checks.contractEventIndexer.status).toBe('disabled')
         expect(report.checks.autoRebalancer.status).toBe('disabled')
@@ -135,6 +139,7 @@ describe('buildReadinessReport', () => {
 
         expect(report.status).toBe('not_ready')
         expect(report.checks.autoRebalancer.status).toBe('not_ready')
+        expect((report.checks.autoRebalancer.details as any).degradedReason).toBeDefined()
     })
 
     it('returns not_ready when indexer is enabled and contract event schema check failed', async () => {
@@ -154,6 +159,7 @@ describe('buildReadinessReport', () => {
         expect(report.status).toBe('not_ready')
         expect(report.checks.contractEventIndexer.status).toBe('not_ready')
         expect(report.checks.contractEventIndexer.message).toContain('mismatch')
+        expect((report.checks.contractEventIndexer.details as any).degradedReason).toBeDefined()
     })
 
     it('caches readiness report within TTL and serves from cache', async () => {

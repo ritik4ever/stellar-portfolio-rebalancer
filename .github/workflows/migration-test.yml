@@ -1,0 +1,116 @@
+name: Migration Round-Trip Test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/db/migrations/**'
+      - 'backend/src/db/migrate.ts'
+      - '.github/workflows/migration-test.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/db/migrations/**'
+      - 'backend/src/db/migrate.ts'
+      - '.github/workflows/migration-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  test-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: '-c max_connections=20'
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Make test scripts executable
+        run: |
+          chmod +x ./backend/scripts/schema-dump.mjs
+          chmod +x ./backend/scripts/test-migration-roundtrip.mjs
+
+      - name: Test migration round-trip
+        working-directory: ./backend
+        env:
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/test_db'
+        run: node ./scripts/test-migration-roundtrip.mjs --verbose
+
+      - name: Run migration status check
+        if: always()
+        working-directory: ./backend
+        env:
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/test_db'
+        run: npm run db:migrate -- --status
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Migration Round-Trip Test" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Coverage:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Apply all migrations" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dump database schema" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Rollback all migrations" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Apply all migrations again" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dump schema again" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Compare schema state (must be identical)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Result:**" >> $GITHUB_STEP_SUMMARY
+          if [ ${{ job.status }} = "success" ]; then
+            echo "✅ All migrations are reversible and idempotent" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Migration round-trip test failed - see logs above" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail fast on migration errors
+        if: failure()
+        run: |
+          echo "❌ Migration round-trip test failed!"
+          echo "This indicates one or more migrations:"
+          echo "  - Cannot be rolled back cleanly"
+          echo "  - Are not idempotent (applying twice gives different results)"
+          echo "  - Have syntax errors"
+          echo ""
+          echo "Review the logs above for the specific schema differences."
+          exit 1

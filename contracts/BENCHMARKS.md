@@ -32,3 +32,27 @@ From `contracts/`:
 ```bash
 make bench
 ```
+
+### Machine-Readable JSON Output
+
+To emit results in JSON format (suitable for CI diffing and automated comparison):
+
+```bash
+make bench-json
+```
+
+This produces `contracts/bench_results.json` with the following schema:
+
+```json
+[
+  {
+    "benchmark": "initialize",
+    "cpu": 1500000,
+    "baseline_cpu": 1500000,
+    "mem": 200000,
+    "baseline_mem": 200000
+  }
+]
+```
+
+CI artifact `bench-results-json` is uploaded on pull requests so that tooling can diff benchmark regressions across commits. See `.github/workflows/contract-smoke.yml` for the pipeline integration.

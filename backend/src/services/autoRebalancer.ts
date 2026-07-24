@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { StellarService } from './stellar.js'
+import { StellarService, type ExecuteRebalanceOptions, type RebalanceDryRunResult } from './stellar.js'
 import { ReflectorService } from './reflector.js'
 import { rebalanceHistoryService } from './serviceContainer.js'
 import { portfolioStorage } from './portfolioStorage.js'
@@ -9,6 +9,7 @@ import { logger, logAudit } from '../utils/logger.js'
 import { getPortfolioCheckQueue } from '../queue/queues.js'
 import { isRedisAvailable } from '../queue/connection.js'
 import { getRequestId } from '../utils/requestContext.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
 
 export class AutoRebalancerService {
     private stellarService: StellarService
@@ -109,6 +110,64 @@ await queue.add(
         logAudit('auto_rebalancer_force_check_enqueued', { backend: 'bullmq' })
     }
 
+    async dryRunPortfolioRebalance(
+        portfolioId: string,
+        options: ExecuteRebalanceOptions = {}
+    ): Promise<RebalanceDryRunResult> {
+        if (!portfolioId) {
+            throw new Error('Portfolio ID required')
+        }
+
+        logger.info('[AUTO-REBALANCER] Dry-run requested', { portfolioId })
+        return this.stellarService.dryRunRebalance(portfolioId, options)
+    }
+
+    /**
+     * Run a shadow rebalance check: compute decisions for all portfolios and record them
+     * as simulated events without executing any real trades.
+     */
+    async shadowCheck(): Promise<{ computed: number; recorded: number; errors: string[] }> {
+        const errors: string[] = []
+        let computed = 0
+        let recorded = 0
+
+        try {
+            const portfolios = await portfolioStorage.getAllPortfolios()
+            for (const portfolio of portfolios) {
+                try {
+                    const result = await this.stellarService.dryRunRebalance(portfolio.id)
+                    computed++
+                    if (result.canExecute && result.guardrails?.rebalanceRequired?.allowed) {
+                        await rebalanceHistoryService.recordRebalanceEvent({
+                            portfolioId: portfolio.id,
+                            trigger: result.trigger || 'Shadow rebalance check',
+                            trades: result.estimatedTrades?.length ?? 0,
+                            gasUsed: result.feeEstimate?.totalFeeXlm ? `${result.feeEstimate.totalFeeXlm} XLM` : '0 XLM',
+                            status: 'completed',
+                            isAutomatic: true,
+                            isSimulated: true,
+                            eventSource: 'simulated',
+                            details: {
+                                reason: result.trigger || 'Shadow rebalance decision',
+                                estimatedSlippageBps: result.estimatedTotalSlippageBps,
+                            },
+                        })
+                        recorded++
+                    }
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err)
+                    errors.push(`Portfolio ${portfolio.id}: ${msg}`)
+                }
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            errors.push(`shadowCheck failed: ${msg}`)
+        }
+
+        logger.info('[AUTO-REBALANCER] Shadow check complete', { computed, recorded, errors: errors.length })
+        return { computed, recorded, errors }
+    }
+
     /**
      * Get service status
      */
@@ -121,6 +180,7 @@ await queue.add(
         backend: string
         lastStartedAt?: string
         lastInitializationError?: string
+        shadowMode: boolean
     } {
         return {
             isRunning: this.isRunning,
@@ -131,6 +191,7 @@ await queue.add(
             backend: 'bullmq',
             lastStartedAt: this.lastStartedAt,
             lastInitializationError: this.lastInitializationError,
+            shadowMode: getFeatureFlags().enableShadowMode,
         }
     }
 

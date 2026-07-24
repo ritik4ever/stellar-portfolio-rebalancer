@@ -6,7 +6,9 @@ import { notificationsRouter } from './notifications.routes.js'
 import { debugRouter } from './debug.routes.js'
 import { consentRouter } from './consent.routes.js'
 import { assetsRouter } from './assets.routes.js'
-import { eventsRouter } from './events.routes.js'
+import { analyticsRouter } from './analytics.routes.js'
+import { adminRouter } from './admin.routes.js'
+
 
 export const portfolioRouter = Router()
 
@@ -17,5 +19,5 @@ portfolioRouter.use(notificationsRouter)
 portfolioRouter.use(debugRouter)
 portfolioRouter.use(consentRouter)
 portfolioRouter.use(assetsRouter)
-portfolioRouter.use(eventsRouter)
+portfolioRouter.use(analyticsRouter)
 
