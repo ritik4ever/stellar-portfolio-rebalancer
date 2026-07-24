@@ -7,7 +7,8 @@ use soroban_sdk::{
 };
 
 
-mod portfolio;
+
+mod strategies;
 mod reflector;
 #[cfg(test)]
 mod test;
@@ -291,6 +292,16 @@ impl PortfolioRebalancer {
         env.storage()
             .instance()
             .set(&DataKey::ContractPauseReason, &reason);
+    }
+
+    // DCA configuration
+    pub fn configure_dca(env: Env, portfolio_id: u64, enabled: bool, amount: i128, interval: u64) -> Result<(), Error> {
+        dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
+    }
+
+    // DCA execution
+    pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        dca::execute_dca(&env, portfolio_id)
     }
 
     pub fn transfer_stewardship(
