@@ -1,17 +1,22 @@
 #![no_std]
-#[cfg(test)]
-extern crate std;
 
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Vec, Symbol};
 
+mod circuit_breaker;
+mod dca;
+mod events;
+mod governance;
 mod nav;
 mod portfolio;
 mod reflector;
+mod types;
+mod upgrade;
+
 #[cfg(test)]
 mod test;
-mod types;
+
+#[cfg(test)]
+extern crate std;
 
 pub use reflector::*;
 pub use types::*;
@@ -336,7 +341,7 @@ impl PortfolioRebalancer {
             .set(&DataKey::Steward(portfolio_id), &new_steward);
         env.events().publish(
             (
-                symbol_short!("portfolio"),
+                Symbol::new(symbol_short!("portfolio")env, "portfolio"),
                 Symbol::new(&env, "steward_transferred"),
             ),
             (portfolio_id, current_steward, new_steward),

@@ -1,51 +1,31 @@
-use soroban_sdk::{Env, Address, symbol_short, Symbol, Map};
+// events.rs - Event definitions for portfolio rebalancer
 
-pub fn emit_portfolio_created(env: &Env, invoker: &Address, portfolio_id: u64, correlation_id: u64) {
+use soroban_sdk::{Address, Env, Symbol, Vec};
+
+pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, owner: Address) {
     env.events().publish(
-        (symbol_short!("created"), invoker.clone(), correlation_id),
-        portfolio_id,
+        (Symbol::new(env, "portfolio_created"),),
+        (portfolio_id, owner),
     );
 }
 
-pub fn emit_allocation_updated(env: &Env, invoker: &Address, portfolio_id: u64, correlation_id: u64) {
+pub fn emit_portfolio_updated(env: &Env, portfolio_id: u64, owner: Address) {
     env.events().publish(
-        (Symbol::new(env, "alloc_upd"), invoker.clone(), correlation_id),
-        portfolio_id,
+        (Symbol::new(env, "portfolio_updated"),),
+        (portfolio_id, owner),
     );
 }
 
-pub fn emit_rebalance_executed(env: &Env, invoker: &Address, portfolio_id: u64, correlation_id: u64) {
+pub fn emit_dca_executed(env: &Env, portfolio_id: u64, invoker: Address, timestamp: u64) {
     env.events().publish(
-        (Symbol::new(env, "rebalanced"), invoker.clone(), correlation_id),
-        portfolio_id,
+        (Symbol::new(env, "dca_executed"),),
+        (portfolio_id, invoker, timestamp),
     );
 }
 
-pub fn emit_circuit_breaker_triggered(env: &Env, invoker: &Address, portfolio_id: u64, correlation_id: u64) {
+pub fn emit_governance_action(env: &Env, action: Symbol, signers: Vec<Address>) {
     env.events().publish(
-        (Symbol::new(env, "cb_trip"), invoker.clone(), correlation_id),
-        portfolio_id,
+        (Symbol::new(env, "governance_action"),),
+        (action, signers),
     );
 }
-
-pub fn emit_admin_changed(env: &Env, invoker: &Address, new_admin: &Address, correlation_id: u64) {
-    env.events().publish(
-        (Symbol::new(env, "admin_upd"), invoker.clone(), correlation_id),
-        new_admin.clone(),
-    );
-}
-
-pub fn emit_paused(env: &Env, invoker: &Address, paused: bool, correlation_id: u64) {
-    env.events().publish(
-        (symbol_short!("paused"), invoker.clone(), correlation_id),
-        paused,
-    );
-}
-
-pub fn emit_dca_executed(env: &Env, invoker: &Address, portfolio_id: u64, amount: i128, purchases: Map<Address, i128>, timestamp: u64) {
-    env.events().publish(
-        (symbol_short!("dca_executed"), invoker.clone(), timestamp),
-        (portfolio_id, amount, purchases),
-    );
-}
-
