@@ -94,16 +94,13 @@ Then run migrations:
 
 ```bash
 cd backend
-npm run db:migrate          # apply all pending migrations
-npm run db:migrate -- --status # show applied/pending migrations
-npm run db:migrate -- --dry-run # preview without applying
+npm run db:migrate              # apply all pending migrations
+npm run db:migrate:status       # show applied/pending migrations
+npm run db:migrate:rollback     # roll back the last migration batch
+npm run db:migrate:dry-run      # preview SQL without executing
 ```
 
-To roll back the last migration:
-
-```bash
-npm run db:migrate -- --rollback
-```
+The `db:migrate:rollback` command reverts the last applied migration batch. Pass a number to roll back multiple batches (e.g. `-- --rollback 2`). Run `db:migrate:dry-run` to inspect the SQL that would be executed without making changes.
 
 For local SQLite development, leave `DATABASE_URL` unset. You can optionally set `DB_PATH`; otherwise the backend uses `./data/portfolio.db` from inside `backend`.
 
@@ -115,7 +112,9 @@ Start the backend and `DatabaseService` will create the SQLite schema on first r
 
 If you want a fresh local SQLite database, stop the backend and delete `backend/data/portfolio.db`, `backend/data/portfolio.db-wal`, and `backend/data/portfolio.db-shm`. The next backend start recreates the database automatically.
 
-Migration files live in `backend/src/db/migrations/`. Add new PostgreSQL migrations as `NNN_description.up.sql` / `.down.sql`. For SQLite schema changes, update `backend/src/services/databaseService.ts`.
+Migration files live in `backend/src/db/migrations/`. Each migration must have both an `.up.sql` and `.down.sql` file. Add new PostgreSQL migrations as `NNN_description.up.sql` / `.down.sql`. For SQLite schema changes, update `backend/src/services/databaseService.ts`.
+
+Migration state is persisted in the `schema_migrations` table, which tracks the version, name, and timestamp of every applied migration. The `db:migrate:rollback` command reads from this table to determine which batches to revert.
 
 ---
 
@@ -176,8 +175,9 @@ For how queues, workers, the contract indexer, and `/ready` interact in practice
 | ------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
 | `JWT_SECRET`             | Required for auth (≥32 chars) | Signs access and refresh tokens — never falls back to a built-in value |
 | `JWT_ACCESS_EXPIRY_SEC`  | No (default: 900)             | Access token TTL in seconds                                            |
-| `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800)          | Refresh token TTL in seconds                                           |
-| `ADMIN_PUBLIC_KEYS`      | Yes for admin routes          | Comma-separated Stellar public keys                                    |
+ | `JWT_REFRESH_EXPIRY_SEC` | No (default: 604800)          | Refresh token TTL in seconds                                           |
+ | `JWT_CLOCK_SKEW_SEC`     | No (default: 0)               | Allow issued-at/expiry tolerance for distributed deployments            |
+ | `ADMIN_PUBLIC_KEYS`      | Yes for admin routes          | Comma-separated Stellar public keys                                    |
 
 **Rules enforced at startup:**
 
@@ -392,6 +392,43 @@ STELLAR_CONTRACT_ADDRESS=C...YOUR_CONTRACT_ADDRESS
 STELLAR_REBALANCE_SECRET=S...YOUR_SIGNING_SECRET
 ```
 
+### Rebalance simulation snapshot tests
+
+Rebalance allocation snapshots provide deterministic validation of the rebalance logic:
+
+```bash
+cd backend
+npm test -- src/test/snapshots/rebalanceSnapshots.test.ts
+```
+
+After intentionally changing rebalance allocation logic, regenerate the snapshots:
+
+```bash
+cd backend
+npm run snapshots:regenerate
+```
+
+Commit the updated `src/test/snapshots/fixtures/rebalance-snapshots.json` alongside the logic change. The snapshot test will fail on unexpected allocation drift.
+
+### Event replay validation
+
+The contract event indexer supports replay validation for detecting duplicate, missing, or out-of-order events:
+
+```bash
+cd backend
+
+# Validate current event integrity
+npm run replay:verify
+
+# Replay events and persist checkpoints
+npm run replay:run
+
+# View replay status
+npx tsx scripts/verify-replay.ts status
+```
+
+Replay checkpoints are persisted to the database key-value store. The integrity hash is computed from ingested event IDs, portfolio IDs, timestamps, and statuses to detect state divergence.
+
 ### Contract tests
 
 ```bash
@@ -515,7 +552,18 @@ STELLAR_REBALANCE_SECRET=<TESTNET_SIGNER_SECRET>
 
 ---
 
-## 13. Commit message conventions
+## 13. Pull request requirements
+
+Every pull request must link to at least one issue using `Fixes #<issue-number>` in the PR description. If the change intentionally has no related issue, explain why in the `Rationale for no issue` section of the PR template.
+
+A CI check (`PR Lint`) runs on every PR to verify that the body references an issue or contains a rationale. PRs that fail this check are blocked from merging.
+
+This requirement ensures:
+- Backlog management stays traceable from issue to release notes.
+- Reviewers understand the motivation behind every change.
+- The changelog and release notes can be generated from structured PR metadata.
+
+## 14. Commit message conventions
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/). Each commit subject must match:
 
@@ -532,13 +580,13 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 - `docs: update API client examples`
 - `chore(deps): update stellar-sdk to v12.0.1`
 
-This convention powers the automated changelog (`npm run changelog:update`) and keeps release history consistent.
+This convention powers the automated release changelog and keeps release history consistent.
 
 ### CI enforcement
 
-Pull requests run a **Commit message lint** check (in the `Lint` workflow) that validates every commit in the PR against the format above. The check fails with a clear message listing any non-conforming commits.
+Pull requests run a **Commit message lint** check (in the `Lint` workflow) through commitlint. The check validates every commit in the PR against `commitlint.config.cjs` and fails with a clear message listing any non-conforming commits.
 
-Run the same check locally before opening a PR:
+The existing lightweight helper can still be used locally before opening a PR:
 
 ```bash
 # Check the current branch against origin/main
@@ -550,7 +598,20 @@ scripts/check-commit-messages.sh origin/main..HEAD
 
 If the check flags a commit, amend or rebase to fix the subject line, e.g. `git commit --amend` for the latest commit or `git rebase -i origin/main` for earlier ones.
 
-## 14. Optional local Git hooks
+## 14. Release notes automation
+
+Release notes are generated by release-please after conventional commits are merged to `main`. Maintainers should review and merge the release-please PR instead of editing `CHANGELOG.md` by hand during release preparation.
+
+Generated changelog sections are:
+
+- Features from `feat`
+- Bug Fixes from `fix`
+- Performance from `perf`
+- Breaking Changes from commits with `!` after the type/scope or a `BREAKING CHANGE:` footer
+
+The release workflow is configured in `.github/workflows/release-please.yml`, with changelog grouping in `.github/release-please-config.json` and the current release manifest in `.github/.release-please-manifest.json`.
+
+## 15. Optional local Git hooks
 
 Install the optional hook templates when you want fast feedback before committing or pushing:
 
@@ -580,15 +641,41 @@ Missing optional scripts are reported as skips. Any configured command that exit
 
 ---
 
-## Further reading
+---
+ 
+## Architecture Decision Records (ADRs)
 
+Major architectural decisions and their rationales are captured in **[docs/adr/](adr/README.md)**.
+
+### When to write an ADR
+
+- When introducing a new architectural pattern (e.g., switching to a new state management library).
+- When making a high-impact choice with significant trade-offs (e.g., choosing a specific database strategy).
+- When changing fundamental infrastructure or communication protocols.
+
+
+### How to contribute an ADR
+
+1. Copy `docs/adr/template.md` to a new file named `docs/adr/NNNN-my-decision-title.md`.
+2. Fill in the details (Context, Decision, Consequences).
+3. Submit as part of your Pull Request.
+
+---
+
+
+
+
+- [Branch protection and required checks](BRANCH_PROTECTION.md) — CI checks that block merges, merge requirements, common failure scenarios
 - [Maintainer Triage Guide](TRIAGE.md) — Issue and PR triage procedures for maintainers
 - [Operations handbook](OPERATIONS.md) — Redis, workers, indexer, health vs readiness, restarts
 - [OpenAPI source of truth and export workflow](../backend/docs/openapi.md)
 - [API reference](API.md)
 - [Database migrations](MIGRATION.md)
 - [Notification system](NOTIFICATIONS.md)
+- [Architecture Decision Records (ADRs)](adr/README.md) — Rationale for major design choices
 - [Rebalancing strategies](REBALANCING_STRATEGIES.md)
+
+- [Wallet bug report template](https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/.github/ISSUE_TEMPLATE/wallet_bug_report.md) — Structured reproduction details for wallet issues
 - [Demo Walkthrough](DEMO_WALKTHROUGH.md) — Visual guide to platform features
 
 ### Architecture and Design

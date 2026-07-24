@@ -10,6 +10,11 @@ export class WalletManager {
     private currentPublicKey: string | null = null
 
     async connect(walletType: WalletType): Promise<string> {
+        // Clear any stale state before attempting connection
+        this.clearStorage()
+        this.currentAdapter = null
+        this.currentPublicKey = null
+
         const adapter = getAdapter(walletType)
         if (!adapter) {
             throw new WalletError(`Wallet adapter not found: ${walletType}`, 'ADAPTER_NOT_FOUND', walletType)
@@ -31,6 +36,8 @@ export class WalletManager {
             return publicKey
         } catch (error) {
             this.clearStorage()
+            this.currentAdapter = null
+            this.currentPublicKey = null
             throw error
         }
     }

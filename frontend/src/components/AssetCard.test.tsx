@@ -15,6 +15,11 @@ describe('AssetCard', () => {
     })
 
     describe('Price formatting', () => {
+        it('renders skeleton while loading', () => {
+            render(<AssetCard isLoading={true} />)
+            expect(screen.getByTestId('asset-card-skeleton')).toBeInTheDocument()
+        })
+
         it('formats $0.00 correctly', () => {
             render(<AssetCard asset={mockAsset} price={{ price: 0, change: 5 }} />)
             expect(screen.getByTestId('price-value')).toHaveTextContent('$0.00')

@@ -19,6 +19,7 @@ import {
   markWorkerStarting,
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 
@@ -136,6 +137,7 @@ export function startPortfolioCheckWorker(): Worker | null {
       error: err.message,
       attemptsMade: j?.attemptsMade,
     });
+    void handleFinalFailure(j, err);
   });
 
   logger.info("[WORKER:portfolio-check] Worker started");

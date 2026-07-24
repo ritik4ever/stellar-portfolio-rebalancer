@@ -14,6 +14,8 @@ import {
     type RealtimeReconnectInfo,
 } from '../services/websocket.client'
 
+export type MessageListener = (data: Record<string, unknown>) => void
+
 export type RealtimeConnectionContextValue = {
     state: RealtimeConnectionState
     statusDetail: string | null
@@ -21,6 +23,7 @@ export type RealtimeConnectionContextValue = {
     reconnect: () => void
     disconnect: () => void
     send: (type: string, payload: unknown) => boolean
+    addMessageListener: (listener: MessageListener) => () => void
 }
 
 const RealtimeConnectionContext = createContext<RealtimeConnectionContextValue | null>(null)
@@ -30,6 +33,7 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
     const [statusDetail, setStatusDetail] = useState<string | null>(null)
     const [reconnectInfo, setReconnectInfo] = useState<RealtimeReconnectInfo | null>(null)
     const clientRef = useRef<RebalancerWSClient | null>(null)
+    const listenersRef = useRef<Set<MessageListener>>(new Set())
 
     useEffect(() => {
         if (typeof WebSocket === 'undefined') {
@@ -42,6 +46,15 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
             onStateChange: setState,
             onStatusDetail: setStatusDetail,
             onReconnectInfo: setReconnectInfo,
+            onMessage: (data) => {
+                listenersRef.current.forEach((listener) => {
+                    try {
+                        listener(data as Record<string, unknown>)
+                    } catch {
+                        // isolate listener errors
+                    }
+                })
+            },
         })
         clientRef.current = client
         client.connect()
@@ -71,9 +84,16 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
         return clientRef.current?.send(type, payload) ?? false
     }, [])
 
+    const addMessageListener = useCallback((listener: MessageListener) => {
+        listenersRef.current.add(listener)
+        return () => {
+            listenersRef.current.delete(listener)
+        }
+    }, [])
+
     const value = useMemo(
-        () => ({ state, statusDetail, reconnectInfo, reconnect, disconnect, send }),
-        [state, statusDetail, reconnectInfo, reconnect, disconnect, send],
+        () => ({ state, statusDetail, reconnectInfo, reconnect, disconnect, send, addMessageListener }),
+        [state, statusDetail, reconnectInfo, reconnect, disconnect, send, addMessageListener],
     )
 
     return (

@@ -1,0 +1,5 @@
+{
+  "$schema": "../../flaky/quarantine.schema.json",
+  "_comment": "Source of truth for quarantined (skipped) flaky tests. Edit via scripts/manage-flaky-tests.sh or manually. Every entry MUST have an owner and a GitHub issue link.",
+  "quarantined": []
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRebalanceConfirmationSummary } from './usePortfolioQuery'
+import { buildRebalanceConfirmationSummary, buildRebalancePreconditions } from './usePortfolioQuery'
 
 describe('buildRebalanceConfirmationSummary', () => {
     it('includes slippage tolerance when configured', () => {
@@ -30,5 +30,18 @@ describe('buildRebalanceConfirmationSummary', () => {
             hasHighGasWarning: false,
         })
         expect(summary.prices.some((line) => line.toLowerCase().includes('stale'))).toBe(true)
+    })
+
+    it('flags blocked preconditions for demo portfolios', () => {
+        const checks = buildRebalancePreconditions({
+            publicKey: 'GABC',
+            portfolioId: 'demo',
+            needsRebalance: true,
+            hasPartialPriceData: false,
+            tradeCount: 1,
+            hasHighGasWarning: false,
+        })
+        const portfolioCheck = checks.find((item) => item.id === 'portfolio')
+        expect(portfolioCheck?.ok).toBe(false)
     })
 })

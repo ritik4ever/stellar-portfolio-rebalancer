@@ -33,6 +33,13 @@ export interface NotificationPreferences {
 // Get or create the SQLite database instance for notifications
 let notificationDb: Database.Database | null = null
 
+export function closeNotificationDb(): void {
+    if (notificationDb) {
+        notificationDb.close()
+        notificationDb = null
+    }
+}
+
 function getDb(): Database.Database {
     if (!notificationDb) {
         const dbPath = process.env.DB_PATH || './data/portfolio.db'
@@ -72,6 +79,18 @@ function ensureNotificationTable() {
 
         CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
     `)
+    migrateNotificationLogColumns(db)
+}
+
+function migrateNotificationLogColumns(db: Database.Database): void {
+    const columns = db.prepare(`PRAGMA table_info(notification_logs)`).all() as Array<{ name: string }>
+    const names = new Set(columns.map((c) => c.name))
+    if (!names.has('attempt_number')) {
+        db.exec(`ALTER TABLE notification_logs ADD COLUMN attempt_number INTEGER`)
+    }
+    if (!names.has('backoff_delay_ms')) {
+        db.exec(`ALTER TABLE notification_logs ADD COLUMN backoff_delay_ms INTEGER`)
+    }
 }
 
 function rowToPreferences(r: NotificationPreferencesRow): NotificationPreferences {
@@ -203,6 +222,24 @@ export function dbGetAndDeleteDigestEventsBefore(cutoffIso: string): Notificatio
     }))
 }
 
+export function dbInitDefaultNotificationPreferences(userId: string): NotificationPreferences {
+    ensureNotificationTable()
+    const defaults: NotificationPreferences = {
+        userId,
+        emailEnabled: false,
+        webhookEnabled: false,
+        digestMode: 'immediate',
+        events: {
+            rebalance: true,
+            circuitBreaker: true,
+            priceMovement: true,
+            riskChange: true,
+        },
+    }
+    dbSaveNotificationPreferences(defaults)
+    return defaults
+}
+
 export function dbGetNotificationPreferences(userId: string): NotificationPreferences | undefined {
     ensureNotificationTable()
     const db = getDb()
@@ -237,6 +274,13 @@ export function dbDeleteNotificationPreferences(userId: string): boolean {
  * Represents a log entry for a notification delivery attempt.
  * Used for tracking provider success/failure and troubleshooting.
  */
+export interface NotificationLogMetadata {
+    attempt?: number
+    maxAttempts?: number
+    backoffDelayMs?: number
+    nextAttempt?: number
+}
+
 export interface NotificationLog {
     id: number
     userId: string
@@ -244,6 +288,8 @@ export interface NotificationLog {
     eventType: string
     status: 'sent' | 'failed' | 'retried' | 'skipped'
     errorMessage?: string
+    attemptNumber?: number
+    backoffDelayMs?: number
     createdAt: string
 }
 
@@ -261,7 +307,8 @@ export function dbLogNotificationOutcome(
     provider: 'email' | 'webhook',
     eventType: string,
     status: 'sent' | 'failed' | 'retried' | 'skipped',
-    errorMessage?: string
+    errorMessage?: string,
+    metadata?: NotificationLogMetadata
 ): void {
     ensureNotificationTable()
     const db = getDb()
@@ -269,9 +316,18 @@ export function dbLogNotificationOutcome(
     
     db.prepare(`
         INSERT INTO notification_logs 
-            (user_id, provider, event_type, status, error_message, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, provider, eventType, status, errorMessage || null, now)
+            (user_id, provider, event_type, status, error_message, created_at, attempt_number, backoff_delay_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        userId,
+        provider,
+        eventType,
+        status,
+        errorMessage || null,
+        now,
+        metadata?.attempt ?? null,
+        metadata?.backoffDelayMs ?? null,
+    )
 
     // Run 30-day retention cleanup. Note: SQLite uses 'now', '-30 days' for datetime math.
     // This effectively self-cleans old logs continuously during insertions.
@@ -305,6 +361,8 @@ export function dbGetNotificationLogs(userId: string, limit: number = 50): Notif
         eventType: r.event_type,
         status: r.status,
         errorMessage: r.error_message || undefined,
+        attemptNumber: r.attempt_number ?? undefined,
+        backoffDelayMs: r.backoff_delay_ms ?? undefined,
         createdAt: r.created_at
     }))
 }

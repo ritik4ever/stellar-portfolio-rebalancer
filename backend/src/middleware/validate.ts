@@ -15,13 +15,12 @@ export const validateRequest = (schema: ZodSchema) => {
                     message: issue.message
                 }));
 
-                logger.warn('Strict Validation Error', {
+                logger.warn('Validation failed', {
                     path: req.originalUrl,
-                    body: req.body,
                     errors: formattedErrors
                 });
 
-                return fail(res, 400, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
+                return fail(res, 422, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
             }
 
             req.body = result.data;
@@ -45,13 +44,12 @@ export const validateQuery = (schema: ZodSchema) => {
                     message: issue.message
                 }));
 
-                logger.warn('Query Validation Error', {
+                logger.warn('Query validation failed', {
                     path: req.originalUrl,
-                    query: req.query,
                     errors: formattedErrors
                 });
 
-                return fail(res, 400, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
+                return fail(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
             }
 
             req.query = result.data as typeof req.query;

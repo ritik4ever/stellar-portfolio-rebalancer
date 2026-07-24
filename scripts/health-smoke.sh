@@ -69,17 +69,17 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 # Checks are defined as parallel arrays (bash 3.2 compatible — no associative
-# arrays). Keep the indexes aligned across all five arrays.
+# arrays). Keep the indexes aligned across all six arrays.
 #   NAME      human-readable label
 #   PATH      request path appended to BASE_URL
 #   EXPECT    expected HTTP status code
 #   REQUIRED  "true" → a failure fails the whole run; "false" → warning only
 #   MATCH     optional substring that must appear in the response body
-CHECK_NAMES=(  "liveness"     "api-health"   "readiness" "metrics"  )
-CHECK_PATHS=(  "/health"      "/api/health"  "/ready"    "/metrics" )
-CHECK_EXPECT=( "200"          "200"          "200"       "200"      )
-CHECK_REQUIRED=( "true"       "true"         "false"     "false"    )
-CHECK_MATCH=(  "ok"           "status"       ""          ""         )
+CHECK_NAMES=(  "liveness"     "api-health"   "readiness" "api-root" "api-docs" "metrics"  )
+CHECK_PATHS=(  "/health"      "/api/health"  "/ready"    "/"        "/api-docs" "/metrics" )
+CHECK_EXPECT=( "200"          "200"          "200"       "200"      "200"       "200"      )
+CHECK_REQUIRED=( "true"       "true"         "false"     "false"    "false"     "false"    )
+CHECK_MATCH=(  "ok"           "status"       ""          ""         ""          ""         )
 
 echo "Health smoke test → ${BASE_URL}  (target: ${TARGET}, timeout: ${TIMEOUT}s)"
 echo "-------------------------------------------------------------------------"

@@ -80,12 +80,10 @@ async function getRedisClient() {
       }
 
       async quit() {
-        this.store.clear();
         return 'OK';
       }
 
       disconnect() {
-        this.store.clear();
       }
     }
 
@@ -100,7 +98,7 @@ async function getRedisClient() {
   }
 
   const redis = await import('ioredis');
-  return new redis.default(connectionOptions);
+  return new redis.Redis(connectionOptions);
 }
 
 /**

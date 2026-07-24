@@ -23,11 +23,10 @@ vi.mock("../services/reflector.js", () => {
   return { ReflectorService };
 });
 
-vi.mock("../services/rebalanceLock.js", () => ({
-  rebalanceLockService: {
-    acquireLock: vi.fn().mockResolvedValue(true),
-    releaseLock: vi.fn().mockResolvedValue(true),
-  },
+vi.mock("../queue/workers/workerRuntime.js", () => ({
+  acquireWorkerLock: vi.fn().mockResolvedValue(true),
+  releaseWorkerLock: vi.fn().mockResolvedValue(true),
+  createWorkerRuntimeStatus: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock("../services/portfolioStorage.js", () => ({
