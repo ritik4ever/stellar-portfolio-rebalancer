@@ -324,3 +324,97 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - Struct with `price: i128` and `timestamp: u64`.
 
 For call builders and generated client bindings, use Soroban CLI/SDK tooling against the compiled WASM artifact.
+
+## Cross-Chain Asset Bridging Compatibility
+
+### Overview
+
+This contract is designed to support cross-chain bridged assets (wrapped tokens) on Stellar. The contract treats all assets uniformly through the `Address` type, making it compatible with both native Stellar assets and assets bridged from other chains via protocols like:
+
+- Stellar USDC (bridged from Ethereum)
+- Wrapped BTC (wBTC) on Stellar
+- Other ERC-20 token bridges
+- Polkadot/Chainlink/Allbridge bridged assets
+
+### Asset Address Format
+
+All assets in the contract are represented as Stellar `Address` types:
+- **Native Stellar assets**: Use the standard Stellar asset address format (issuer contract address)
+- **Bridged assets**: Use the Stellar contract address of the wrapped token contract
+- **Cross-chain representations**: The contract does not distinguish between native and bridged assets at the protocol level
+
+### Oracle Price Feed Requirements
+
+The Reflector oracle must provide price data for all assets in a portfolio, including bridged assets:
+
+- **Price source**: Reflector oracle should aggregate prices from the asset's native chain when possible
+- **Price staleness**: Contract rejects price data older than `PRICE_MAX_AGE_SECONDS` (3600 seconds)
+- **Decimal precision**: Bridged assets may have different decimal precision than their native counterparts. Always specify correct decimals in `asset_decimals` during `create_portfolio`
+
+### Decimal Precision Considerations
+
+Cross-chain bridges may change decimal precision:
+
+- **Stellar native assets**: Typically 7 decimals
+- **Ethereum ERC-20**: Typically 18 decimals
+- **Bridged versions**: May retain or modify decimal precision
+
+**Critical**: Always verify and specify the correct decimal precision for each asset in the `asset_decimals` parameter when creating a portfolio. Incorrect decimals will cause valuation errors and failed rebalances.
+
+### Supported Bridge Protocols
+
+The contract is protocol-agnostic but compatible with assets from:
+
+- **Stellar USDC**: Circle's native Stellar USDC
+- **Allbridge**: Multi-chain bridge supporting various assets
+- **Polkadot**: Stellar-Polkadot bridge assets
+- **Chainlink CCIP**: Cross-chain interoperability protocol assets
+- **Custom bridges**: Any bridge that issues standard Stellar SAC (Stellar Asset Contract) tokens
+
+### Integration Guidelines
+
+When integrating bridged assets:
+
+1. **Verify asset contract**: Ensure the bridged asset is a valid Stellar SAC contract
+2. **Check oracle support**: Confirm Reflector oracle provides price feeds for the specific bridged asset
+3. **Specify correct decimals**: Use the exact decimal precision of the Stellar-wrapped version, not the native chain version
+4. **Test with small amounts**: Cross-chain bridges may have liquidity constraints; test with small deposits first
+5. **Monitor bridge status**: Some bridges may pause or deprecate; monitor bridge protocol status
+
+### Limitations and Considerations
+
+- **No native bridge detection**: Contract cannot verify if an asset is bridged vs native
+- **Bridge-specific risks**: Users assume bridge protocol risks (slippage, delays, bridge failures)
+- **Price correlation**: Bridged asset prices may temporarily diverge from native chain prices during bridge congestion
+- **Liquidity constraints**: Rebalancing may fail if DEX liquidity for bridged assets is insufficient
+- **Bridge fees**: Bridge fees are not accounted for in contract calculations; users must factor these in separately
+
+### Example: Bridged USDC Integration
+
+```rust
+// Example: Creating a portfolio with bridged USDC (18 decimals) vs native XLM (7 decimals)
+let mut allocations = Map::new(&env);
+allocations.set(xlm_address, 4000); // 40% XLM
+allocations.set(usdc_bridged_address, 6000); // 60% bridged USDC
+
+let mut decimals = Map::new(&env);
+decimals.set(xlm_address, 7); // XLM: 7 decimals
+decimals.set(usdc_bridged_address, 18); // Bridged USDC: 18 decimals (not 7 like native Stellar USDC)
+
+create_portfolio(env, user, allocations, decimals, threshold, slippage, policy_version)?;
+```
+
+### Security Considerations
+
+- **Bridge contract audit**: Only use assets from audited bridge protocols
+- **Oracle reliability**: Ensure Reflector oracle has reliable price feeds for bridged assets
+- **Smart contract risk**: Bridged assets introduce additional smart contract risk beyond the portfolio rebalancer
+- **Regulatory compliance**: Some bridged assets may have regulatory restrictions; verify compliance for your jurisdiction
+
+### Future Enhancements
+
+Potential future improvements for cross-chain support:
+- Native bridge protocol detection and warnings
+- Cross-chain price arbitrage detection
+- Bridge-specific risk parameters in portfolio configuration
+- Automatic decimal precision detection from asset contracts
