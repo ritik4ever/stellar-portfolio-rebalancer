@@ -7,7 +7,6 @@ pub const DEFAULT_ASSET_DECIMALS: u32 = 7;
 pub const MAX_ASSET_DECIMALS: u32 = 18;
 pub const SLIPPAGE_POLICY_VERSION_V1: u32 = 1;
 pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
 /// Contract version representing the overall deployed logic version.
 pub const CONTRACT_VERSION: u32 = 1;
 /// Contract event schema version matching backend expected schema version.
@@ -136,7 +135,19 @@ pub enum DataKey {
     UpgradeAuthority,
     WasmHash,
     LastTimestamp,
+    DCAConfig(u64),
+    NavHistory(u64),
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DCAConfig {
+    pub enabled: bool,
+    pub amount: i128, // Fixed USDC amount per execution (in smallest units)
+    pub interval: u64, // Execution interval in seconds
+    pub next_execution: u64, // Timestamp of next scheduled execution
+}
+
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -212,4 +223,32 @@ pub struct AssetValuation {
 pub struct PortfolioValuation {
     pub total_usd_value: i128,
     pub assets: Vec<AssetValuation>,
+}
+
+/// Per-asset allocation drift computed from live oracle prices.
+/// Only assets with available, non-stale oracle prices are included.
+/// The `needs_rebalance` flag is `true` when this asset's drift exceeds the
+/// portfolio's `rebalance_threshold`, matching exactly the check used by
+/// `build_rebalance_preview` and `execute_rebalance`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetDrift {
+    /// The on-chain asset address.
+    pub asset: Address,
+    /// Current allocation in basis points (0–10 000), computed from live prices.
+    pub current_pct: u32,
+    /// Target allocation in basis points as stored in the portfolio.
+    pub target_pct: u32,
+    /// Absolute drift in basis points: |current_pct - target_pct|.
+    pub drift_pct: u32,
+    /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
+    pub needs_rebalance: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NavSnapshot {
+    pub usd_nav: i128,
+    pub sequence: u32,
+    pub timestamp: u64,
 }

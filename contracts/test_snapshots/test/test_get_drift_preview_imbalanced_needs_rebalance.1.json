@@ -58,7 +58,7 @@
                   ]
                 },
                 {
-                  "u32": 5
+                  "u32": 1
                 },
                 {
                   "u32": 50
@@ -91,7 +91,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 200
+                    "lo": 900
                   }
                 },
                 {
@@ -135,6 +135,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -261,7 +262,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 200
+                                "lo": 900
                               }
                             }
                           },
@@ -308,7 +309,7 @@
                         "symbol": "rebalance_threshold"
                       },
                       "val": {
-                        "u32": 5
+                        "u32": 1
                       }
                     },
                     {
@@ -746,7 +747,7 @@
                   ]
                 },
                 {
-                  "u32": 5
+                  "u32": 1
                 },
                 {
                   "u32": 50
@@ -843,7 +844,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 200
+                    "lo": 900
                   }
                 },
                 {
@@ -882,7 +883,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 200
+                    "lo": 900
                   }
                 }
               ]
@@ -1027,7 +1028,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "check_rebalance_needed"
+                "symbol": "get_drift_preview"
               }
             ],
             "data": {
@@ -1354,11 +1355,612 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "check_rebalance_needed"
+                "symbol": "get_drift_preview"
               }
             ],
             "data": {
-              "bool": true
+              "vec": [
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "asset"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "current_pct"
+                      },
+                      "val": {
+                        "u32": 9000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "drift_pct"
+                      },
+                      "val": {
+                        "u32": 4000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "needs_rebalance"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "target_pct"
+                      },
+                      "val": {
+                        "u32": 5000
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "asset"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "current_pct"
+                      },
+                      "val": {
+                        "u32": 1000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "drift_pct"
+                      },
+                      "val": {
+                        "u32": 4000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "needs_rebalance"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "target_pct"
+                      },
+                      "val": {
+                        "u32": 5000
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "preview_rebalance"
+              }
+            ],
+            "data": {
+              "u64": 1
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "Stellar"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "price"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 10000000000000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "Stellar"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "price"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 10000000000000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "Stellar"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "price"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 10000000000000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "Stellar"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "lastprice"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "price"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 10000000000000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "preview_rebalance"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "candidate_trades"
+                  },
+                  "val": {
+                    "map": []
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "rebalance_needed"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "skip_reasons"
+                  },
+                  "val": {
+                    "map": [
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        },
+                        "val": {
+                          "u32": 3
+                        }
+                      },
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                        },
+                        "val": {
+                          "u32": 3
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "skipped_assets"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      },
+                      {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "threshold_decisions"
+                  },
+                  "val": {
+                    "map": [
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "current_percent"
+                              },
+                              "val": {
+                                "u32": 9000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "drift"
+                              },
+                              "val": {
+                                "u32": 4000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "exceeds_threshold"
+                              },
+                              "val": {
+                                "bool": true
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "target_percent"
+                              },
+                              "val": {
+                                "u32": 5000
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "current_percent"
+                              },
+                              "val": {
+                                "u32": 1000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "drift"
+                              },
+                              "val": {
+                                "u32": 4000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "exceeds_threshold"
+                              },
+                              "val": {
+                                "bool": true
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "target_percent"
+                              },
+                              "val": {
+                                "u32": 5000
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_value"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000
+                    }
+                  }
+                }
+              ]
             }
           }
         }
