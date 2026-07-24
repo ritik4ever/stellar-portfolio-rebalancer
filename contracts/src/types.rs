@@ -214,7 +214,7 @@ pub struct PortfolioValuation {
 }
 
 /// Per-asset allocation drift computed from live oracle prices.
-/// Returned by `get_drift_preview` for every asset in the portfolio.
+/// Only assets with available, non-stale oracle prices are included.
 /// The `needs_rebalance` flag is `true` when this asset's drift exceeds the
 /// portfolio's `rebalance_threshold`, matching exactly the check used by
 /// `build_rebalance_preview` and `execute_rebalance`.

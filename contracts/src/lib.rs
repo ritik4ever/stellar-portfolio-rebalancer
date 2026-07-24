@@ -240,22 +240,21 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
-        let total_value = match portfolio::calculate_portfolio_value(
-            &env,
-            &portfolio.current_balances,
-            &portfolio.asset_decimals,
-            &reflector_client,
-        ) {
-            Ok(val) => val,
-            Err(_) => return false,
-        };
-
-        if total_value == 0 {
-            return false;
-        }
-
         let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
         if let Ok(p) = preview {
+            if p.total_value == 0 {
+                return false;
+            }
+            for (asset, _) in portfolio.target_allocations.iter() {
+                if let Some(reason) = p.skip_reasons.get(asset) {
+                    match reason {
+                        AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             p.rebalance_needed
         } else {
             false
@@ -508,6 +507,17 @@ impl PortfolioRebalancer {
             Err(_) => return Vec::new(&env),
         };
 
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(reason) = preview.skip_reasons.get(asset) {
+                match reason {
+                    AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                        return Vec::new(&env);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // If total value is zero no allocation percentages are meaningful.
         if preview.total_value == 0 {
             return Vec::new(&env);
@@ -696,32 +706,23 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
-        let mut current_prices = Map::new(env);
+        let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
 
         for (asset, _) in portfolio.target_allocations.iter() {
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
-            {
-                current_prices.set(asset.clone(), price_data.price);
-            } else {
-                return Err(Error::MissingPrice);
+            if let Some(reason) = preview.skip_reasons.get(asset) {
+                match reason {
+                    AssetSkipReason::MissingPrice => return Err(Error::MissingPrice),
+                    AssetSkipReason::StalePrice => return Err(Error::StaleData),
+                    _ => {}
+                }
             }
         }
 
-        let total_value = match portfolio::calculate_portfolio_value(
-            env,
-            &portfolio.current_balances,
-            &portfolio.asset_decimals,
-            &reflector_client,
-        ) {
-            Ok(v) => v,
-            Err(_) => return Err(Error::StaleData),
-        };
-
+        let total_value = preview.total_value;
         let mut snapshot = portfolio.clone();
         snapshot.total_value = total_value;
 
-        let trades = portfolio::calculate_rebalance_trades(env, &snapshot, &current_prices);
+        let trades = preview.candidate_trades;
 
         let fee_config = Self::get_fee_config(env.clone());
         let effective_fee_bps = if fee_config.enabled {
@@ -736,17 +737,6 @@ impl PortfolioRebalancer {
             break;
         }
         if has_actual_balances {
-            let total_value = match portfolio::calculate_portfolio_value(
-                env,
-                &portfolio.current_balances,
-                &portfolio.asset_decimals,
-                &reflector_client,
-            ) {
-                Ok(v) => v,
-                Err(_) => return Err(Error::StaleData),
-
-            };
-
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client

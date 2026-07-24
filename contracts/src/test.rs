@@ -392,12 +392,12 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     allocations.set(asset2.clone(), 5000);
 
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    client.deposit(&pid, &asset1, &1000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &10_000_000, &String::from_str(&env, ""));
 
     let recipient = Address::generate(&env);
     let config = FeeConfig {
         platform_name: String::from_str(&env, "Acme Vault"),
-        fee_bps: 100,
+        fee_bps: 50,
         fee_recipient: recipient,
         enabled: true,
     };
@@ -410,8 +410,8 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     client.execute_rebalance(&pid, &Map::new(&env));
 
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 495);
-    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 495);
+    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 4_975_000);
+    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 4_975_000);
 }
 
 #[test]
@@ -2354,6 +2354,8 @@ fn test_get_drift_preview_balanced_no_needs_rebalance() {
     for i in 0..drifts.len() {
         let d = drifts.get(i).unwrap();
         assert_eq!(d.target_pct, 5000u32);
+        assert_eq!(d.current_pct, 5000u32);
+        assert_eq!(d.drift_pct, 0u32);
         assert!(!d.needs_rebalance, "balanced portfolio should not need rebalance");
     }
 }
