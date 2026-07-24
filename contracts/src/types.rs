@@ -137,6 +137,7 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    VolatilityConfig(u64),
 }
 
 #[contracttype]
@@ -146,6 +147,18 @@ pub struct DCAConfig {
     pub amount: i128, // Fixed USDC amount per execution (in smallest units)
     pub interval: u64, // Execution interval in seconds
     pub next_execution: u64, // Timestamp of next scheduled execution
+}
+
+/// Per-portfolio configuration for the volatility-based rebalance strategy.
+/// When `enabled`, `check_volatility_rebalance_needed` flags a rebalance once
+/// any asset's TWAP deviation crosses `threshold_bps` (basis points) within
+/// the trailing `window_seconds`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VolatilityStrategyConfig {
+    pub enabled: bool,
+    pub threshold_bps: u32,
+    pub window_seconds: u64,
 }
 
 
@@ -181,6 +194,7 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    InvalidVolatilityThreshold = 29,
 }
 
 #[contracttype]

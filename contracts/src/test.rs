@@ -83,6 +83,39 @@ mod reflector_contract {
     }
 }
 
+// Mock Reflector Contract whose last price diverges sharply from its TWAP,
+// used to exercise the volatility strategy's above-threshold path.
+mod reflector_volatile {
+    use crate::reflector::{Asset, PriceData};
+    use soroban_sdk::{contract, contractimpl, Env, Symbol, Vec};
+
+    #[contract]
+    pub struct VolatileReflector;
+
+    #[contractimpl]
+    impl VolatileReflector {
+        pub fn base(_env: Env) -> Asset {
+            Asset::Other(Symbol::new(&_env, "USD"))
+        }
+        pub fn assets(_env: Env) -> Vec<Asset> {
+            Vec::new(&_env)
+        }
+        pub fn decimals(_env: Env) -> u32 {
+            14
+        }
+        pub fn lastprice(env: Env, _asset: Asset) -> Option<PriceData> {
+            // 20% above the TWAP below.
+            Some(PriceData {
+                price: 120_00000000000000i128,
+                timestamp: env.ledger().timestamp(),
+            })
+        }
+        pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
+            Some(100_00000000000000i128)
+        }
+    }
+}
+
 mod reflector_with_missing_price {
     use crate::reflector::{Asset, PriceData};
     use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
@@ -2589,4 +2622,111 @@ fn test_benchmark_nav_operations() {
 
     std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
     std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
+}
+
+#[test]
+fn test_volatility_strategy_below_threshold_no_flag() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    // Last price == TWAP here, so deviation is 0 bps: always below threshold.
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+
+    client.configure_volatility_strategy(&pid, &true, &500u32, &600u64);
+
+    assert!(!client.check_volatility_rebalance_needed(&pid));
+}
+
+#[test]
+fn test_volatility_strategy_above_threshold_flags_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    // Last price is 20% above the TWAP (2000 bps deviation).
+    let reflector_id = env.register_contract(None, reflector_volatile::VolatileReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+
+    // Threshold set to 1000 bps (10%), well under the 2000 bps deviation.
+    client.configure_volatility_strategy(&pid, &true, &1000u32, &600u64);
+
+    assert!(client.check_volatility_rebalance_needed(&pid));
+}
+
+#[test]
+fn test_volatility_strategy_disabled_never_flags() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_volatile::VolatileReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+
+    // Never configured (and thus disabled by default) despite a large deviation.
+    assert!(!client.check_volatility_rebalance_needed(&pid));
+
+    // Explicitly disabled also never flags.
+    client.configure_volatility_strategy(&pid, &false, &1000u32, &600u64);
+    assert!(!client.check_volatility_rebalance_needed(&pid));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #29)")]
+fn test_volatility_strategy_rejects_invalid_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let result = client.try_configure_volatility_strategy(&pid, &true, &0u32, &600u64);
+    assert_eq!(result, Err(Ok(Error::InvalidVolatilityThreshold)));
+    client.configure_volatility_strategy(&pid, &true, &0u32, &600u64);
 }
