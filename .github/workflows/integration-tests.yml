@@ -30,12 +30,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust
+      - name: Setup Rust (pinned to 1.79)
         # Pin to 1.79 — soroban-env-host 21.2.1 breaks on newer Rust
         # (ChaCha20Rng: ed25519_dalek::CryptoRng trait bound error)
-        uses: dtolnay/rust-toolchain@1.79.0
-        with:
-          targets: wasm32-unknown-unknown
+        run: |
+          rustup toolchain install 1.79.0 --profile minimal --no-self-update
+          rustup default 1.79.0
+          rustup target add wasm32-unknown-unknown
 
       - name: Cache Cargo
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -79,12 +80,13 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Rust
+      - name: Setup Rust (pinned to 1.79)
         # Pin to 1.79 — soroban-env-host 21.2.1 breaks on newer Rust
         # (ChaCha20Rng: ed25519_dalek::CryptoRng trait bound error)
-        uses: dtolnay/rust-toolchain@1.79.0
-        with:
-          targets: wasm32-unknown-unknown
+        run: |
+          rustup toolchain install 1.79.0 --profile minimal --no-self-update
+          rustup default 1.79.0
+          rustup target add wasm32-unknown-unknown
 
       - name: Cache Cargo and Soroban
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
