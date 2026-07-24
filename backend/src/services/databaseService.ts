@@ -588,7 +588,9 @@ export class DatabaseService {
           .get() as { [key: string]: string };
         const current = row[pragma.name];
         const expected = pragma.expected;
-        const status = expected ? (current.toLowerCase() === expected.toLowerCase() ? "ok" : "warning") : "info";
+        const currentStr = current ? String(current).toLowerCase() : '';
+        const expectedStr = expected ? String(expected).toLowerCase() : '';
+        const status = expected ? (currentStr === expectedStr ? "ok" : "warning") : "info";
 
         results[pragma.name] = { current, expected, status };
 
