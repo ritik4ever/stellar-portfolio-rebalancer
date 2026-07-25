@@ -181,6 +181,7 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    TokenTransferFailed = 29,
 }
 
 #[contracttype]

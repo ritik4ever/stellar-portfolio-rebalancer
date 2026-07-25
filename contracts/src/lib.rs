@@ -3,7 +3,8 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
+    contract, contractimpl, symbol_short, token::TokenClient, Address, BytesN, Env, Map, String,
+    Symbol, Vec,
 };
 
 mod nav;
@@ -172,6 +173,9 @@ impl PortfolioRebalancer {
             .unwrap_or(portfolio.user.clone());
         steward.require_auth();
 
+        let token_client = TokenClient::new(&env, &asset);
+        token_client.transfer(&steward, &env.current_contract_address(), &amount);
+
         let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
         portfolio
             .current_balances
@@ -206,6 +210,9 @@ impl PortfolioRebalancer {
         if current_balance < amount {
             return Err(Error::InsufficientBalance);
         }
+
+        let token_client = TokenClient::new(&env, &asset);
+        token_client.transfer(&env.current_contract_address(), &portfolio.user, &amount);
 
         let new_balance = current_balance - amount;
         if new_balance == 0 {
@@ -720,6 +727,7 @@ impl PortfolioRebalancer {
         } else {
             0
         };
+        let fee_recipient = fee_config.fee_recipient;
 
         let mut has_actual_balances = false;
         for (_, _) in actual_balances.iter() {
@@ -770,13 +778,29 @@ impl PortfolioRebalancer {
             }
         }
 
+        let contract_address = env.current_contract_address();
         for (asset, amount) in trades.iter() {
+            let abs_amount = amount.abs();
             let fee_amount = if effective_fee_bps > 0 {
-                (amount.abs() * effective_fee_bps as i128) / 10000
+                (abs_amount * effective_fee_bps as i128) / 10000
             } else {
                 0
             };
             let effective_amount = amount - fee_amount;
+
+            let token_client = TokenClient::new(env, &asset);
+            if amount > 0 {
+                token_client.transfer(&steward, &contract_address, &abs_amount);
+                if fee_amount > 0 {
+                    token_client.transfer(&contract_address, &fee_recipient, &fee_amount);
+                }
+            } else if amount < 0 {
+                token_client.transfer(&contract_address, &steward, &abs_amount);
+                if fee_amount > 0 {
+                    token_client.transfer(&contract_address, &fee_recipient, &fee_amount);
+                }
+            }
+
             let current = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
             portfolio
                 .current_balances
