@@ -58,14 +58,15 @@ export interface Portfolio {
     allocations: Record<string, number>
     threshold: number
     slippageTolerancePercent?: number
-    slippageTolerance?: number        // Add this for backward compatibility
-    strategy?: RebalanceStrategyType   // Add this
-    strategyConfig?: RebalanceStrategyConfig  // Add this
+    slippageTolerance?: number
+    strategy?: RebalanceStrategyType
+    strategyConfig?: RebalanceStrategyConfig
     balances: Record<string, number>
     totalValue: number
     createdAt: string
     lastRebalance: string
     version: number
+    archivedAt?: string
 }
 
 export type RebalanceTrigger = 'auto' | 'manual' | 'system'
