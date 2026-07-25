@@ -3,7 +3,7 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
+    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
 mod circuit_breaker;
@@ -15,6 +15,8 @@ mod strategies;
 mod test;
 mod types;
 mod upgrade;
+
+use strategies::dca;
 
 pub use reflector::*;
 pub use types::*;
@@ -90,8 +92,7 @@ impl PortfolioRebalancer {
             return Err(Error::InvalidThreshold);
         }
 
-        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance)
-        {
+        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance) {
             return Err(Error::InvalidSlippageTolerance);
         }
 
@@ -241,6 +242,20 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
+        let total_value = match portfolio::calculate_portfolio_value(
+            &env,
+            &portfolio.current_balances,
+            &portfolio.asset_decimals,
+            &reflector_client,
+        ) {
+            Ok(val) => val,
+            Err(_) => return false,
+        };
+
+        if total_value == 0 {
+            return false;
+        }
+
         let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
         if let Ok(p) = preview {
             if p.total_value == 0 {
@@ -293,12 +308,10 @@ impl PortfolioRebalancer {
             .set(&DataKey::ContractPauseReason, &reason);
     }
 
-    // DCA configuration
     pub fn configure_dca(env: Env, portfolio_id: u64, enabled: bool, amount: i128, interval: u64) -> Result<(), Error> {
         strategies::dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
     }
 
-    // DCA execution
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
         strategies::dca::execute_dca(&env, portfolio_id)
     }
@@ -420,27 +433,22 @@ impl PortfolioRebalancer {
         );
     }
 
-    /// Returns the minimum allowed rebalance threshold percentage.
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD
     }
 
-    /// Returns the maximum allowed rebalance threshold percentage.
     pub fn max_rebalance_threshold(_env: Env) -> u32 {
         MAX_REBALANCE_THRESHOLD
     }
 
-    /// Returns the minimum allowed slippage tolerance in basis points.
     pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
         MIN_SLIPPAGE_TOLERANCE_BPS
     }
 
-    /// Returns the maximum allowed slippage tolerance in basis points.
     pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
 
-    /// Returns the maximum number of assets allowed in a portfolio.
     pub fn max_portfolio_assets(_env: Env) -> u32 {
         MAX_PORTFOLIO_ASSETS
     }
@@ -516,7 +524,6 @@ impl PortfolioRebalancer {
     /// Portfolios with no assets, or with a total value of zero, return an
     /// empty `Vec` rather than an error.
     pub fn get_drift_preview(env: Env, portfolio_id: u64) -> Vec<AssetDrift> {
-        // Load portfolio; return empty vec if not found.
         let portfolio: Portfolio = match env
             .storage()
             .persistent()
@@ -526,7 +533,6 @@ impl PortfolioRebalancer {
             None => return Vec::new(&env),
         };
 
-        // Short-circuit for portfolios that have no tracked assets.
         if portfolio.target_allocations.is_empty() {
             return Vec::new(&env);
         }
@@ -538,13 +544,9 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
-        // Delegate entirely to build_rebalance_preview so we share the same
-        // oracle-price sourcing, staleness checks, current_pct calculation and
-        // threshold comparison as the actual rebalance path.
         let preview = match portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client)
         {
             Ok(p) => p,
-            // On any oracle error return an empty vec (read-only; never panics).
             Err(_) => return Vec::new(&env),
         };
 
@@ -559,7 +561,6 @@ impl PortfolioRebalancer {
             }
         }
 
-        // If total value is zero no allocation percentages are meaningful.
         if preview.total_value == 0 {
             return Vec::new(&env);
         }
@@ -567,8 +568,6 @@ impl PortfolioRebalancer {
         let mut result: Vec<AssetDrift> = Vec::new(&env);
 
         for (asset, target_pct) in portfolio.target_allocations.iter() {
-            // Assets whose price was stale or missing will not appear in
-            // threshold_decisions; omit them from the drift preview too.
             if let Some(decision) = preview.threshold_decisions.get(asset.clone()) {
                 result.push_back(AssetDrift {
                     asset,
@@ -631,8 +630,6 @@ impl PortfolioRebalancer {
         }
     }
 
-    /// Issue #862: view function for current portfolio value in USD.
-    /// Callable without signing. Returns per-asset USD value and drift from target.
     pub fn get_portfolio_value_usd(
         env: Env,
         portfolio_id: u64,
@@ -711,7 +708,6 @@ impl PortfolioRebalancer {
 
         let mut portfolio = Self::load_portfolio(env, portfolio_id)?;
 
-        // Issue #861: validate allocations sum to exactly ALLOCATION_DENOMINATOR (10000 bps)
         if !portfolio::validate_allocations(&portfolio.target_allocations) {
             return Err(Error::InvalidAllocationSum);
         }
@@ -777,6 +773,17 @@ impl PortfolioRebalancer {
             break;
         }
         if has_actual_balances {
+            let total_value = match portfolio::calculate_portfolio_value(
+                env,
+                &portfolio.current_balances,
+                &portfolio.asset_decimals,
+                &reflector_client,
+            ) {
+                Ok(v) => v,
+                Err(_) => return Err(Error::StaleData),
+
+            };
+
             if total_value > 0 {
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client
@@ -789,7 +796,6 @@ impl PortfolioRebalancer {
                         .asset_decimals
                         .get(asset.clone())
                         .unwrap_or(DEFAULT_ASSET_DECIMALS);
-
                     let expected_balance =
                         portfolio::value_to_balance(expected_value, price, decimals);
                     let actual_balance = actual_balances.get(asset.clone()).unwrap_or(0);
@@ -821,6 +827,19 @@ impl PortfolioRebalancer {
             portfolio
                 .current_balances
                 .set(asset.clone(), current + effective_amount);
+
+            if fee_amount > 0 {
+                let token_client = token::Client::new(env, &asset);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &fee_config.fee_recipient,
+                    &fee_amount,
+                );
+                env.events().publish(
+                    (Symbol::new(env, "fee_collected"), asset.clone()),
+                    (fee_amount, fee_config.fee_recipient.clone(), current_time),
+                );
+            }
         }
         portfolio.total_value = total_value;
         portfolio.last_rebalance = current_time;
@@ -832,7 +851,23 @@ impl PortfolioRebalancer {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
         }
         portfolio::emit_portfolio_rebalanced(env, portfolio_id, current_time);
+
+        let snapshot = NavSnapshot {
+            usd_nav: total_value,
+            sequence: env.ledger().sequence(),
+            timestamp: current_time,
+        };
+        nav::save_nav_snapshot(env, portfolio_id, &snapshot)?;
+
         Ok(())
+    }
+
+    pub fn snapshot_nav(env: Env, portfolio_id: u64) -> Result<NavSnapshot, Error> {
+        nav::snapshot_nav(&env, portfolio_id)
+    }
+
+    pub fn get_nav_history(env: Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
+        nav::get_nav_history(&env, portfolio_id, limit)
     }
 }
 

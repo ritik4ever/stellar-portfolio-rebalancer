@@ -136,6 +136,7 @@ pub enum DataKey {
     WasmHash,
     LastTimestamp,
     DCAConfig(u64),
+    NavHistory(u64),
 }
 
 #[contracttype]
