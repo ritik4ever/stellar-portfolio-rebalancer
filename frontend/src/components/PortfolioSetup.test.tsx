@@ -656,6 +656,98 @@ describe('PortfolioSetup allocation validation', () => {
             expect(screen.queryByText(/remaining:/i)).toBeNull()
         })
     })
+
+    describe('strategy selector', () => {
+        it('switches between strategy types without losing unrelated form state', async () => {
+            renderSetup()
+            
+            // Set initial threshold and slippage values
+            const thresholdInput = screen.getByLabelText(/rebalance threshold/i)
+            const slippageInput = screen.getByLabelText(/max slippage/i)
+            fireEvent.change(thresholdInput, { target: { value: '8' } })
+            fireEvent.change(slippageInput, { target: { value: '2.5' } })
+            
+            // Switch to periodic strategy and set interval
+            const strategySelect = screen.getByLabelText(/rebalancing strategy/i)
+            fireEvent.change(strategySelect, { target: { value: 'periodic' } })
+            const intervalInput = screen.getByLabelText(/interval \(days\)/i)
+            fireEvent.change(intervalInput, { target: { value: '14' } })
+            
+            // Verify threshold and slippage are preserved
+            expect(thresholdInput).toHaveValue(8)
+            expect(slippageInput).toHaveValue(2.5)
+            
+            // Switch to volatility strategy
+            fireEvent.change(strategySelect, { target: { value: 'volatility' } })
+            const volatilityInput = screen.getByLabelText(/volatility threshold/i)
+            fireEvent.change(volatilityInput, { target: { value: '15' } })
+            
+            // Verify threshold and slippage are still preserved
+            expect(thresholdInput).toHaveValue(8)
+            expect(slippageInput).toHaveValue(2.5)
+            
+            // Switch back to threshold strategy
+            fireEvent.change(strategySelect, { target: { value: 'threshold' } })
+            
+            // Verify threshold and slippage are still preserved
+            expect(thresholdInput).toHaveValue(8)
+            expect(slippageInput).toHaveValue(2.5)
+            
+            // Verify strategy-specific fields are not shown for threshold
+            expect(screen.queryByLabelText(/interval \(days\)/i)).toBeNull()
+            expect(screen.queryByLabelText(/volatility threshold/i)).toBeNull()
+        })
+
+        it('shows correct config fields for each strategy type', () => {
+            renderSetup()
+            const strategySelect = screen.getByLabelText(/rebalancing strategy/i)
+            
+            // Threshold strategy - no extra fields
+            expect(screen.queryByLabelText(/interval \(days\)/i)).toBeNull()
+            expect(screen.queryByLabelText(/volatility threshold/i)).toBeNull()
+            expect(screen.queryByLabelText(/min days between rebalances/i)).toBeNull()
+            
+            // Periodic strategy - shows interval field
+            fireEvent.change(strategySelect, { target: { value: 'periodic' } })
+            expect(screen.getByLabelText(/interval \(days\)/i)).toBeTruthy()
+            expect(screen.queryByLabelText(/volatility threshold/i)).toBeNull()
+            
+            // Volatility strategy - shows volatility threshold field
+            fireEvent.change(strategySelect, { target: { value: 'volatility' } })
+            expect(screen.getByLabelText(/volatility threshold/i)).toBeTruthy()
+            expect(screen.queryByLabelText(/interval \(days\)/i)).toBeNull()
+            
+            // Custom strategy - shows min days field
+            fireEvent.change(strategySelect, { target: { value: 'custom' } })
+            expect(screen.getByLabelText(/min days between rebalances/i)).toBeTruthy()
+            expect(screen.queryByLabelText(/interval \(days\)/i)).toBeNull()
+            expect(screen.queryByLabelText(/volatility threshold/i)).toBeNull()
+        })
+
+        it('persists strategy selection in portfolio creation payload', async () => {
+            renderSetup('GTEST123')
+            
+            // Set strategy to periodic with interval
+            const strategySelect = screen.getByLabelText(/rebalancing strategy/i)
+            fireEvent.change(strategySelect, { target: { value: 'periodic' } })
+            const intervalInput = screen.getByLabelText(/interval \(days\)/i)
+            fireEvent.change(intervalInput, { target: { value: '21' } })
+            
+            // Submit the form
+            const submitButton = screen.getByRole('button', { name: /create portfolio/i })
+            fireEvent.click(submitButton)
+            
+            // Wait for mutation to be called
+            await waitFor(() => {
+                expect(mockMutateAsync).toHaveBeenCalled()
+            })
+            
+            // Verify the payload includes strategy and strategyConfig
+            const callArgs = mockMutateAsync.mock.calls[0][0]
+            expect(callArgs.strategy).toBe('periodic')
+            expect(callArgs.strategyConfig).toEqual({ intervalDays: 21 })
+        })
+    })
 })
 
 // ── remainingAllocation unit tests ───────────────────────────────────────────

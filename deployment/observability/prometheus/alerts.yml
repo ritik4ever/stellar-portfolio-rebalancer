@@ -110,6 +110,18 @@ groups:
           summary: Failed rebalance jobs detected
           description: The rebalance queue has failed jobs that need investigation. Cross-check the matching Sentry release and environment before investigating the worker.
 
+      - alert: RebalanceQueueBacklog
+        expr: stellar_portfolio_queue_jobs{queue="rebalance", state="waiting"} > 50
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: portfolio-engine
+          service: queue
+          runbook: https://github.com/anupam7984/stellar-portfolio-rebalancer/blob/main/docs/OPERATIONS.md#queue-operations-monitoring
+        annotations:
+          summary: Rebalance queue backlog exceeds threshold
+          description: The rebalance queue has accumulated {{ $value }} waiting jobs for more than 10 minutes. This indicates workers may be stuck or scaled down. Check the queue-operations dashboard and worker logs. See runbook for resolution steps.
+
   - name: queue-operations
     interval: 30s
     rules:
