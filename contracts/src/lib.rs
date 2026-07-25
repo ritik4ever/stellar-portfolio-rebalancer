@@ -7,12 +7,14 @@ use soroban_sdk::{
 };
 
 mod nav;
+mod oracle;
 mod portfolio;
 mod reflector;
 #[cfg(test)]
 mod test;
 mod types;
 
+pub use oracle::*;
 pub use reflector::*;
 pub use types::*;
 
@@ -354,6 +356,27 @@ impl PortfolioRebalancer {
             .persistent()
             .get(&DataKey::Steward(portfolio_id))
             .unwrap_or(portfolio.user)
+    }
+
+    pub fn set_coingecko_address(env: Env, address: Address) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CoinGeckoAddress, &address);
+    }
+
+    pub fn set_oracle_config(env: Env, config: OracleConfig) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleConfig, &config);
+    }
+
+    pub fn get_oracle_config(env: Env) -> OracleConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleConfig)
+            .unwrap_or(OracleConfig::default())
     }
 
     pub fn version(_env: Env) -> u32 {

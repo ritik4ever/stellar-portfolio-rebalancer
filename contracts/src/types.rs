@@ -137,6 +137,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    CoinGeckoAddress,
+    OracleConfig,
 }
 
 #[contracttype]
