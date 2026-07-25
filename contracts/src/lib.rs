@@ -13,6 +13,8 @@ mod strategies;
 #[cfg(test)]
 mod test;
 mod types;
+#[path = "strategies/volatility.rs"]
+mod volatility;
 
 use strategies::dca;
 
@@ -315,6 +317,26 @@ impl PortfolioRebalancer {
 
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
         dca::execute_dca(&env, portfolio_id)
+    }
+
+    pub fn configure_volatility_strategy(
+        env: Env,
+        portfolio_id: u64,
+        enabled: bool,
+        threshold_bps: u32,
+        window_seconds: u64,
+    ) -> Result<(), Error> {
+        volatility::configure_volatility_strategy(
+            &env,
+            portfolio_id,
+            enabled,
+            threshold_bps,
+            window_seconds,
+        )
+    }
+
+    pub fn check_volatility_rebalance_needed(env: Env, portfolio_id: u64) -> bool {
+        volatility::check_volatility_rebalance_needed(&env, portfolio_id)
     }
 
     pub fn transfer_stewardship(
