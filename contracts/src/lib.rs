@@ -6,6 +6,8 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
+#[path = "strategies/dca.rs"]
+mod dca;
 mod nav;
 mod portfolio;
 mod reflector;

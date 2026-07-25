@@ -6,40 +6,50 @@ For the frontend-facing view of supported methods, expected arguments, and grace
 
 ## Schema version
 
-- **Code constant:** `BACKEND_CONTRACT_EVENT_SCHEMA_VERSION` in `backend/src/config/contractEventSchema.ts`.
-- **Environment:** `CONTRACT_EVENT_SCHEMA_VERSION` (optional). If set, it **must** equal the code constant or every `syncOnce` call becomes a no-op and `lastError` describes the mismatch. Readiness treats an enabled indexer with a failed schema check as **not ready**.
+* **Code constant:** `BACKEND_CONTRACT_EVENT_SCHEMA_VERSION` in `backend/src/config/contractEventSchema.ts`.
+* **Environment:** `CONTRACT_EVENT_SCHEMA_VERSION` (optional). If set, it **must** equal the code constant or every `syncOnce` call becomes a no-op and `lastError` describes the mismatch. Readiness treats an enabled indexer with a failed schema check as **not ready**.
 
 Bump the constant when you change topic strings or tuple layouts expected below, and document the migration for deployers.
+
+## Correlation-ID module decision
+
+Contract events do not currently include application correlation IDs in their topics or payloads.
+
+The former `contracts/src/events.rs` module was removed because it was not declared by `contracts/src/lib.rs`, its correlation-ID helpers were not called by active contract entrypoints, and active portfolio events are already emitted from their existing contract modules.
+
+The remaining stale `events` import and DCA event call were removed from `contracts/src/strategies/dca.rs`. The existing DCA entrypoints remain available, but this maintenance change does not introduce a new DCA event or alter the documented event schema.
+
+Backend request correlation IDs remain an off-chain logging and request-context concern. Adding correlation IDs to on-chain events in the future should be handled as an intentional schema change, including contract entrypoint design, event payload updates, backend decoder changes, documentation, and schema-version review.
 
 ## Event conventions
 
 All portfolio lifecycle events share these rules (see `contracts/src/portfolio.rs` emit helpers):
 
-| Rule | Value |
-|------|--------|
-| Topic domain | `portfolio` (topic index 0) |
-| Payload index 0 | `portfolio_id: u64` |
-| Timestamps | `u64` ledger timestamp at the last payload field when present |
-| Asset + amount events | `(portfolio_id, asset: Address, amount: i128)` |
+| Rule                  | Value                                                         |
+| --------------------- | ------------------------------------------------------------- |
+| Topic domain          | `portfolio` (topic index 0)                                   |
+| Payload index 0       | `portfolio_id: u64`                                           |
+| Timestamps            | `u64` ledger timestamp at the last payload field when present |
+| Asset + amount events | `(portfolio_id, asset: Address, amount: i128)`                |
 
 ## Expected event topics and payloads
 
 Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
-| Topic[0] | Topic[1] | Payload shape (Rust tuple) | Indexed as |
-|----------|----------|------------------------------|------------|
-| `portfolio` | `created` | `(portfolio_id, user)` | `portfolio_created` |
-| `portfolio` | `deposit` | `(portfolio_id, asset, amount)` | `deposit` |
-| `portfolio` | `withdraw` | `(portfolio_id, asset, amount)` | `withdraw` |
-| `portfolio` | `rebalanced` | `(portfolio_id, timestamp)` | `rebalance_executed` |
-| `portfolio` | `cooldown_override` | `(portfolio_id, admin, timestamp)` | (audit only; not indexed by default) |
-| Topic[0] | Topic[1] | Payload shape (Rust) | Indexed as |
-|----------|----------|----------------------|------------|
-| `portfolio` | `created` | `(portfolio_id: u64, user: Address)` | `portfolio_created` |
-| `portfolio` | `deposit` | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit` |
-| `portfolio` | `rebalanced` | `(portfolio_id: u64, current_time: u64)` | `rebalance_executed` |
-| `portfolio` | `fee_charged` | `(portfolio_id: u64, recipient: Address, amount: i128)` | `fee_charged` |
-| `portfolio` | `upgraded` | `(from_hash: Bytes, to_hash: Bytes, timestamp: u64)` | `contract_upgraded` |
+| Topic[0]    | Topic[1]            | Payload shape (Rust tuple)                                        | Indexed as                           |
+| ----------- | ------------------- | ----------------------------------------------------------------- | ------------------------------------ |
+| `portfolio` | `created`           | `(portfolio_id, user)`                                            | `portfolio_created`                  |
+| `portfolio` | `deposit`           | `(portfolio_id, asset, amount)`                                   | `deposit`                            |
+| `portfolio` | `withdraw`          | `(portfolio_id, asset, amount)`                                   | `withdraw`                           |
+| `portfolio` | `rebalanced`        | `(portfolio_id, timestamp)`                                       | `rebalance_executed`                 |
+| `portfolio` | `cooldown_override` | `(portfolio_id, admin, timestamp)`                                | (audit only; not indexed by default) |
+| Topic[0]    | Topic[1]            | Payload shape (Rust)                                              | Indexed as                           |
+| ----------  | ----------          | ----------------------                                            | ------------                         |
+| `portfolio` | `created`           | `(portfolio_id: u64, user: Address)`                              | `portfolio_created`                  |
+| `portfolio` | `deposit`           | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit`                            |
+| `portfolio` | `rebalanced`        | `(portfolio_id: u64, current_time: u64)`                          | `rebalance_executed`                 |
+| `portfolio` | `fee_charged`       | `(portfolio_id: u64, recipient: Address, amount: i128)`           | `fee_charged`                        |
+| `portfolio` | `upgraded`          | `(from_hash: Bytes, to_hash: Bytes, timestamp: u64)`              | `contract_upgraded`                  |
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
 
@@ -47,12 +57,12 @@ The `deposit` event now includes a `memo: String` field at tuple index `3`. Back
 
 ## Payload parsing (backend)
 
-- **Portfolio id:** tuple index `0`, or object keys `portfolioId`, `portfolio_id`, `id`.
-- **User (created):** tuple index `1`, or object keys `user`, `userAddress`, `user_address`.
-- **Asset (deposit / withdraw):** tuple index `1`.
-- **Amount (deposit / withdraw):** tuple index `2`.
-- **Timestamp (rebalanced / cooldown_override):** tuple index `1` for rebalanced; index `2` for cooldown_override when admin is at index `1`.
-- **Memo (deposit):** tuple index `3`, or object keys `memo`.
+* **Portfolio id:** tuple index `0`, or object keys `portfolioId`, `portfolio_id`, `id`.
+* **User (created):** tuple index `1`, or object keys `user`, `userAddress`, `user_address`.
+* **Asset (deposit / withdraw):** tuple index `1`.
+* **Amount (deposit / withdraw):** tuple index `2`.
+* **Timestamp (rebalanced / cooldown_override):** tuple index `1` for rebalanced; index `2` for cooldown_override when admin is at index `1`.
+* **Memo (deposit):** tuple index `3`, or object keys `memo`.
 
 Events from other contracts or with unknown second topics are skipped without failing the batch.
 
@@ -63,6 +73,7 @@ The contract test suite emits canonical event sequences that backend integration
 ### Fixture usage
 
 1. Run the contract tests to generate snapshot files:
+
    ```bash
    cd contracts && cargo test
    ```
@@ -73,17 +84,17 @@ The contract test suite emits canonical event sequences that backend integration
 
 ### Available fixture files
 
-| Fixture | Events produced | Description |
-|---------|----------------|-------------|
-| `test_create_portfolio.1.json` | `portfolio.created` | Portfolio creation with allocations |
-| `test_deposit_valid.1.json` | `portfolio.created`, `portfolio.deposit` | Valid deposit with memo |
-| `test_deposit_with_memo.1.json` | `portfolio.created`, `portfolio.deposit` | Deposit with explicit reference memo |
-| `test_execute_rebalance_success.1.json` | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced` | Full rebalance lifecycle |
-| `test_set_fee_config.1.json` | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled |
+| Fixture                                 | Events produced                                                      | Description                          |
+| --------------------------------------- | -------------------------------------------------------------------- | ------------------------------------ |
+| `test_create_portfolio.1.json`          | `portfolio.created`                                                  | Portfolio creation with allocations  |
+| `test_deposit_valid.1.json`             | `portfolio.created`, `portfolio.deposit`                             | Valid deposit with memo              |
+| `test_deposit_with_memo.1.json`         | `portfolio.created`, `portfolio.deposit`                             | Deposit with explicit reference memo |
+| `test_execute_rebalance_success.1.json` | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced`     | Full rebalance lifecycle             |
+| `test_set_fee_config.1.json`            | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled    |
 
 ### Exporting fixtures for external use
 
-To export events as standalone JSON (e.g., for CI or backend tests):
+To export events as standalone JSON (for example, for CI or backend tests):
 
 ```bash
 # Copy relevant snapshots to a fixtures directory
@@ -95,11 +106,11 @@ The `test_contract_events_fixture_export` test in `contracts/src/test.rs` valida
 
 ## Operational notes
 
-- Indexer requires non-empty `CONTRACT_ADDRESS` or `STELLAR_CONTRACT_ADDRESS` and an RPC URL (see `backend/.env.example`).
-- Polling `start()` may not run unless something invokes it; history routes can call `syncOnce()` on demand.
+* Indexer requires non-empty `CONTRACT_ADDRESS` or `STELLAR_CONTRACT_ADDRESS` and an RPC URL (see `backend/.env.example`).
+* Polling `start()` may not run unless something invokes it; history routes can call `syncOnce()` on demand.
 
 ## Related tests
 
-- `contracts/src/test.rs` — Soroban contract tests that produce event snapshot fixtures.
-- `backend/src/test/contractEventSchema.test.ts` — version string parsing and mismatch behavior.
-- `contracts/src/test.rs` — Soroban integration tests and snapshot fixtures for contract calls.
+* `contracts/src/test.rs` — Soroban contract tests that produce event snapshot fixtures.
+* `backend/src/test/contractEventSchema.test.ts` — version string parsing and mismatch behavior.
+* `contracts/src/test.rs` — Soroban integration tests and snapshot fixtures for contract calls.
