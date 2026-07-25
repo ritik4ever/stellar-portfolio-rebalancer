@@ -2590,3 +2590,223 @@ fn test_benchmark_nav_operations() {
     std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
     std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
 }
+
+// ── Scheduler tests ─────────────────────────────────────────────
+
+fn setup_scheduler_test(env: &Env) -> (PortfolioRebalancerClient, Address, u64) {
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 50;
+        li.timestamp = 10_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(env);
+    let user = Address::generate(env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(env);
+    let asset = Address::generate(env);
+    allocations.set(asset.clone(), 10_000);
+    let pid = create_portfolio_with_defaults(env, &client, &user, &allocations, 5, 50);
+
+    // Deposit so the portfolio has value for rebalance
+    client.deposit(&pid, &asset, &10_000_000, &String::from_str(env, ""));
+
+    (client, user, pid)
+}
+
+#[test]
+fn test_schedule_rebalance_success() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    // Schedule at a future ledger sequence
+    client.schedule_rebalance(&pid, &100);
+
+    assert!(client.has_schedule(&pid));
+
+    let config = client.get_schedule(&pid);
+    assert_eq!(config.unwrap().target_sequence, 100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #29)")]
+fn test_schedule_rebalance_past_sequence_rejected() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    // Current sequence is 50; scheduling at 50 (not in the future) should fail
+    client.schedule_rebalance(&pid, &50);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #31)")]
+fn test_schedule_rebalance_already_exists() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+    // Second schedule on the same portfolio must fail
+    client.schedule_rebalance(&pid, &200);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #29)")]
+fn test_execute_scheduled_rebalance_premature() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+
+    // Current sequence is 50, target is 100 — must fail
+    let balances = Map::new(&env);
+    client.execute_scheduled_rebalance(&pid, &balances);
+}
+
+#[test]
+fn test_execute_scheduled_rebalance_on_time() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+
+    // Advance past the target sequence
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100;
+        li.timestamp = 20_000;
+    });
+
+    let balances = Map::new(&env);
+    client.execute_scheduled_rebalance(&pid, &balances);
+
+    // Schedule must be consumed after successful execution
+    assert!(!client.has_schedule(&pid));
+    assert!(client.get_schedule(&pid).is_none());
+
+    // Verify the portfolio was actually rebalanced (last_rebalance updated)
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 20_000);
+}
+
+#[test]
+fn test_execute_scheduled_rebalance_after_target() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+
+    // Advance well past the target sequence
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 500;
+        li.timestamp = 30_000;
+    });
+
+    let balances = Map::new(&env);
+    // Should succeed — beyond target is fine
+    client.execute_scheduled_rebalance(&pid, &balances);
+    assert!(!client.has_schedule(&pid));
+}
+
+#[test]
+fn test_cancel_scheduled_rebalance() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+    assert!(client.has_schedule(&pid));
+
+    client.cancel_scheduled_rebalance(&pid);
+    assert!(!client.has_schedule(&pid));
+    assert!(client.get_schedule(&pid).is_none());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #30)")]
+fn test_cancel_scheduled_rebalance_not_found() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    // Cancel without a schedule must fail
+    client.cancel_scheduled_rebalance(&pid);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #30)")]
+fn test_execute_after_cancel() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+    client.cancel_scheduled_rebalance(&pid);
+
+    // Advance past target — but schedule was canceled
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100;
+        li.timestamp = 20_000;
+    });
+
+    let balances = Map::new(&env);
+    client.execute_scheduled_rebalance(&pid, &balances);
+}
+
+#[test]
+fn test_has_schedule_and_get_schedule_no_schedule() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    assert!(!client.has_schedule(&pid));
+    assert!(client.get_schedule(&pid).is_none());
+}
+
+#[test]
+fn test_schedule_rebalance_steward_can_schedule() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    // Transfer stewardship to another address
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
+
+    // The new steward should be able to schedule
+    // (mock_all_auths() already mocks all signatures)
+    client.schedule_rebalance(&pid, &200);
+    assert!(client.has_schedule(&pid));
+}
+
+#[test]
+fn test_schedule_persisted_across_ledger_advances() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+
+    // Advance ledger but stay below target
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 75;
+    });
+
+    // Schedule must still exist
+    assert!(client.has_schedule(&pid));
+    let config = client.get_schedule(&pid).unwrap();
+    assert_eq!(config.target_sequence, 100);
+}
+
+#[test]
+fn test_reschedule_after_cancel() {
+    let env = Env::default();
+    let (client, _user, pid) = setup_scheduler_test(&env);
+
+    client.schedule_rebalance(&pid, &100);
+    client.cancel_scheduled_rebalance(&pid);
+
+    // After cancel, a new schedule should be allowed
+    client.schedule_rebalance(&pid, &200);
+    assert!(client.has_schedule(&pid));
+
+    let config = client.get_schedule(&pid).unwrap();
+    assert_eq!(config.target_sequence, 200);
+}

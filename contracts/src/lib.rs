@@ -9,6 +9,7 @@ use soroban_sdk::{
 mod nav;
 mod portfolio;
 mod reflector;
+mod scheduler;
 #[cfg(test)]
 mod test;
 mod types;
@@ -280,7 +281,7 @@ impl PortfolioRebalancer {
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None, false)
     }
 
     pub fn admin_force_rebalance(
@@ -290,7 +291,7 @@ impl PortfolioRebalancer {
     ) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(admin))
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(admin), false)
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {
@@ -312,6 +313,46 @@ impl PortfolioRebalancer {
 
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
         dca::execute_dca(&env, portfolio_id)
+    }
+
+    /// Schedule a rebalance at a future ledger sequence.
+    /// Only the portfolio owner (or steward) may call.
+    /// At most one pending schedule per portfolio.
+    pub fn schedule_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        target_sequence: u32,
+    ) -> Result<(), Error> {
+        scheduler::schedule_rebalance(&env, portfolio_id, target_sequence)
+    }
+
+    /// Execute a scheduled rebalance if the target sequence has been reached.
+    /// Callable by anyone — no authorization required.
+    pub fn execute_scheduled_rebalance(
+        env: Env,
+        portfolio_id: u64,
+        actual_balances: Map<Address, i128>,
+    ) -> Result<(), Error> {
+        scheduler::execute_scheduled_rebalance(&env, portfolio_id, actual_balances)
+    }
+
+    /// Cancel a pending scheduled rebalance.
+    /// Only the portfolio owner (or steward) may call.
+    pub fn cancel_scheduled_rebalance(
+        env: Env,
+        portfolio_id: u64,
+    ) -> Result<(), Error> {
+        scheduler::cancel_scheduled_rebalance(&env, portfolio_id)
+    }
+
+    /// Check if a schedule exists for a portfolio.
+    pub fn has_schedule(env: Env, portfolio_id: u64) -> bool {
+        scheduler::has_schedule(&env, portfolio_id)
+    }
+
+    /// Get the current schedule config for a portfolio.
+    pub fn get_schedule(env: Env, portfolio_id: u64) -> Option<ScheduleConfig> {
+        scheduler::get_schedule(&env, portfolio_id)
     }
 
     pub fn transfer_stewardship(
@@ -654,6 +695,7 @@ impl PortfolioRebalancer {
         actual_balances: Map<Address, i128>,
         bypass_cooldown: bool,
         override_admin: Option<Address>,
+        skip_owner_auth: bool,
     ) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             return Err(Error::EmergencyStop);
@@ -672,12 +714,14 @@ impl PortfolioRebalancer {
             return Err(Error::PortfolioPaused);
         }
 
-        let steward: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Steward(portfolio_id))
-            .unwrap_or(portfolio.user.clone());
-        steward.require_auth();
+        if !skip_owner_auth {
+            let steward: Address = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Steward(portfolio_id))
+                .unwrap_or(portfolio.user.clone());
+            steward.require_auth();
+        }
 
         let current_time = guard_ledger_timestamp(env);
         if !bypass_cooldown

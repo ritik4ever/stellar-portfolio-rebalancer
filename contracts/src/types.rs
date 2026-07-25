@@ -137,6 +137,7 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    ScheduleConfig(u64),
 }
 
 #[contracttype]
@@ -146,6 +147,17 @@ pub struct DCAConfig {
     pub amount: i128, // Fixed USDC amount per execution (in smallest units)
     pub interval: u64, // Execution interval in seconds
     pub next_execution: u64, // Timestamp of next scheduled execution
+}
+
+/// Configuration for a time-locked rebalance schedule.
+/// At most one pending schedule exists per portfolio.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleConfig {
+    /// Ledger sequence number after which execution is allowed.
+    pub target_sequence: u32,
+    /// Timestamp when the schedule was created.
+    pub created_at: u64,
 }
 
 
@@ -181,6 +193,9 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    ScheduleNotReady = 29,
+    NoScheduleFound = 30,
+    ScheduleAlreadyExists = 31,
 }
 
 #[contracttype]
