@@ -1,6 +1,6 @@
-use soroban_sdk::{Address, Env, Map};
+use soroban_sdk::{Address, Env, Map, Symbol};
 use crate::reflector::ReflectorClient;
-use crate::types::{CircuitBreakerConfig, Error};
+use crate::types::{CircuitBreakerConfig, DataKey, Error, PauseReason};
 
 pub fn check_volatility(
     env: &Env,
@@ -22,9 +22,13 @@ pub fn check_volatility(
                 let deviation_bps = (diff_abs * 10000) / historical_price;
                 
                 if deviation_bps > config.spike_threshold_bps as i128 {
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::ContractPauseReason, &PauseReason::VolatilityCircuitBreaker);
+                    
                     env.events().publish(
-                        ("CircuitBreakerTriggered", asset.clone()),
-                        (deviation_bps, env.ledger().timestamp() + config.window_seconds)
+                        (Symbol::new(env, "circuit_breaker_tripped"), asset.clone()),
+                        (deviation_bps, PauseReason::VolatilityCircuitBreaker, env.ledger().timestamp() + config.window_seconds)
                     );
                     return Err(Error::EmergencyStop);
                 }
