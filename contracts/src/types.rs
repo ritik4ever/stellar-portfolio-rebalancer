@@ -157,6 +157,7 @@ pub enum DataKey {
     LastTimestamp,
     RecurringDeposit(u64),
     DCAConfig(u64),
+    NavHistory(u64),
 }
 
 #[contracttype]
@@ -266,4 +267,12 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NavSnapshot {
+    pub usd_nav: i128,
+    pub sequence: u32,
+    pub timestamp: u64,
 }
