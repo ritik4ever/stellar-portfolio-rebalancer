@@ -67,6 +67,69 @@ impl PortfolioRebalancer {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
+    /// Propose a new admin for the contract (two-step admin transfer, step 1).
+    ///
+    /// Only the current admin may call this. The proposed address is stored as
+    /// `PendingAdmin` and an `admin_transfer_proposed` event is emitted.  A
+    /// subsequent call from the current admin simply overwrites any prior
+    /// proposal with the new address.
+    pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        // Only the current admin is authorised to initiate a transfer.
+        let current_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        current_admin.require_auth();
+
+        // Store (or overwrite) the pending admin.
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+
+        // Emit the proposal event so off-chain monitors can observe it.
+        env.events().publish(
+            (
+                symbol_short!("admin"),
+                Symbol::new(&env, "transfer_proposed"),
+            ),
+            (current_admin, new_admin),
+        );
+
+        Ok(())
+    }
+
+    /// Accept the pending admin transfer (two-step admin transfer, step 2).
+    ///
+    /// Only the address stored as `PendingAdmin` may call this.  On success
+    /// the stored `Admin` is replaced, `PendingAdmin` is cleared, and an
+    /// `admin_transferred` event is emitted.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        // There must be a pending proposal.
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoPendingAdminTransfer)?;
+
+        // Only the pending admin is authorised to accept.
+        pending_admin.require_auth();
+
+        let previous_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+
+        // Finalise the transfer.
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &pending_admin);
+
+        // Clear the pending slot so the value cannot be replayed.
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        // Emit confirmation event.
+        env.events().publish(
+            (symbol_short!("admin"), Symbol::new(&env, "transferred")),
+            (previous_admin, pending_admin),
+        );
+
+        Ok(())
+    }
+
     pub fn create_portfolio(
         env: Env,
         user: Address,

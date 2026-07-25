@@ -137,6 +137,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    /// Holds the address of the next proposed admin until they call accept_admin.
+    PendingAdmin,
 }
 
 #[contracttype]
@@ -181,6 +183,8 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    /// Returned by accept_admin when there is no pending admin transfer in progress.
+    NoPendingAdminTransfer = 29,
 }
 
 #[contracttype]
