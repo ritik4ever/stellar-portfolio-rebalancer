@@ -245,6 +245,15 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Preconditions:**
   - Does not require portfolio owner authorization and does not mutate persistent storage.
 
+### `estimate_rebalance_cost(env: Env, portfolio_id: u64) -> FeeEstimate`
+
+- **Purpose:** Estimates the computational resource limits (CPU instructions) and estimated network fees in stroops required to execute a rebalance for a given portfolio.
+- **Parameters:**
+  - `portfolio_id`: Target portfolio ID.
+- **Returns:** `FeeEstimate` struct detailing total instructions, total fee, and per-asset breakdowns.
+- **Preconditions:**
+  - Non-mutating read call; does not require authorization.
+
 ### `pause_portfolio(env: Env, portfolio_id: u64, reason: PauseReason) -> ()`
 
 - **Purpose:** Pauses a specific portfolio and records the pause reason.
@@ -318,6 +327,10 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `pause_reason: PauseReason`
 - `ContractCapabilitySummary` (`contracts/src/types.rs`)
   - Struct with `version: u32`, `schema_version: u32`, `capability_flags: u32`, `min_rebalance_threshold: u32`, `max_rebalance_threshold: u32`, `min_slippage_tolerance_bps: u32`, `max_slippage_tolerance_bps: u32`, `max_portfolio_assets: u32`.
+- `FeeEstimate` (`contracts/src/types.rs`)
+  - Struct with `total_instructions: u64`, `total_fee: i128`, `per_asset_breakdown: Map<Address, AssetFeeBreakdown>`.
+- `AssetFeeBreakdown` (`contracts/src/types.rs`)
+  - Struct with `instructions: u64`, `fee: i128`.
 - `Asset` (`contracts/src/reflector.rs`)
   - Enum: `Stellar(Address)` or `Other(Symbol)`.
 - `PriceData` (`contracts/src/reflector.rs`)

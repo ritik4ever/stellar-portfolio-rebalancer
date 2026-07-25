@@ -2422,3 +2422,46 @@ fn test_get_drift_preview_unknown_portfolio_returns_empty() {
     let drifts = client.get_drift_preview(&9999u64);
     assert_eq!(drifts.len(), 0, "unknown portfolio must return empty vec, not panic");
 }
+
+#[test]
+fn test_estimate_rebalance_cost() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // 1. Register contract and initialize
+    let contract_id = env.register_contract(None, crate::PortfolioRebalancer);
+    let client = crate::PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let reflector = Address::generate(&env);
+    client.initialize(&admin, &reflector);
+
+    // 2. Create a test portfolio
+    let user = Address::generate(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+
+    let mut target_allocations = Map::new(&env);
+    target_allocations.set(asset1.clone(), 5000);
+    target_allocations.set(asset2.clone(), 5000);
+
+    let mut asset_decimals = Map::new(&env);
+    asset_decimals.set(asset1, 7);
+    asset_decimals.set(asset2, 7);
+
+    let portfolio_id = client.create_portfolio(
+        &user,
+        &target_allocations,
+        &asset_decimals,
+        &5,
+        &100,
+        &1,
+    );
+
+    // 3. Test gas estimation query
+    let fee_estimate = client.estimate_rebalance_cost(&portfolio_id);
+
+    // 4. Assert estimations are populated
+    assert!(fee_estimate.total_instructions > 0);
+    assert!(fee_estimate.total_fee > 0);
+}

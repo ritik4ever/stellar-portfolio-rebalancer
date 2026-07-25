@@ -147,7 +147,6 @@ pub struct DCAConfig {
     pub next_execution: u64, // Timestamp of next scheduled execution
 }
 
-
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -242,4 +241,29 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetFeeBreakdown {
+    pub asset: Address,
+    pub estimated_instructions: u64,
+    pub estimated_fee: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeEstimate {
+    pub total_instructions: u64,
+    pub total_fee: u64,
+    pub per_asset_breakdown: Vec<AssetFeeBreakdown>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub enabled: bool,
+    pub max_drift_bps: u32,
+    pub window_seconds: u64,
+    pub spike_threshold_bps: u32,
 }

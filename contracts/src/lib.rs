@@ -6,13 +6,15 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
-
-
-mod strategies;
+mod circuit_breaker;
+mod events;
+mod portfolio;
 mod reflector;
+mod strategies;
 #[cfg(test)]
 mod test;
 mod types;
+mod upgrade;
 
 pub use reflector::*;
 pub use types::*;
@@ -23,7 +25,6 @@ pub struct PortfolioRebalancer;
 fn validate_slippage_policy_version(version: u32) -> bool {
     version == CURRENT_SLIPPAGE_POLICY_VERSION
 }
-
 
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
@@ -119,7 +120,6 @@ impl PortfolioRebalancer {
 
         let _estimated_footprint =
             portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
-
 
         env.storage()
             .persistent()
@@ -260,7 +260,6 @@ impl PortfolioRebalancer {
         } else {
             false
         }
-
     }
 
     pub fn execute_rebalance(
@@ -296,12 +295,12 @@ impl PortfolioRebalancer {
 
     // DCA configuration
     pub fn configure_dca(env: Env, portfolio_id: u64, enabled: bool, amount: i128, interval: u64) -> Result<(), Error> {
-        dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
+        strategies::dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
     }
 
     // DCA execution
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
-        dca::execute_dca(&env, portfolio_id)
+        strategies::dca::execute_dca(&env, portfolio_id)
     }
 
     pub fn transfer_stewardship(
@@ -332,7 +331,6 @@ impl PortfolioRebalancer {
             (portfolio_id, current_steward, new_steward),
         );
 
-
         Ok(())
     }
 
@@ -356,7 +354,6 @@ impl PortfolioRebalancer {
         CONTRACT_EVENT_SCHEMA_VERSION
     }
 
-
     pub fn capabilities(_env: Env) -> u32 {
         let mut flags: u32 = 0;
         flags |= CapabilityFlag::PerPortfolioSteward as u32;
@@ -377,7 +374,6 @@ impl PortfolioRebalancer {
             max_portfolio_assets: MAX_PORTFOLIO_ASSETS,
         }
     }
-
 
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -471,6 +467,40 @@ impl PortfolioRebalancer {
                 total_value: 0,
             },
         )
+    }
+
+    /// Estimates the worst-case CPU instruction count and transaction fee for rebalancing a portfolio.
+    pub fn estimate_rebalance_cost(env: Env, portfolio_id: u64) -> Result<FeeEstimate, Error> {
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+
+        // Base overhead for portfolio load, state checks, timestamp guard, and event publishing
+        let base_instructions: u64 = 150_000;
+        let base_fee: u64 = 10_000; // in stroops
+
+        // Per-asset estimate for price oracle lookup, drift check, and balance mutation
+        let per_asset_instructions: u64 = 80_000;
+        let per_asset_fee: u64 = 5_000; // in stroops
+
+        let mut total_instructions = base_instructions;
+        let mut total_fee = base_fee;
+        let mut per_asset_breakdown: Vec<AssetFeeBreakdown> = Vec::new(&env);
+
+        for (asset, _) in portfolio.target_allocations.iter() {
+            total_instructions = total_instructions.saturating_add(per_asset_instructions);
+            total_fee = total_fee.saturating_add(per_asset_fee);
+
+            per_asset_breakdown.push_back(AssetFeeBreakdown {
+                asset: asset.clone(),
+                estimated_instructions: per_asset_instructions,
+                estimated_fee: per_asset_fee,
+            });
+        }
+
+        Ok(FeeEstimate {
+            total_instructions,
+            total_fee,
+            per_asset_breakdown,
+        })
     }
 
     /// Returns per-asset allocation drift using live oracle prices.
@@ -685,7 +715,6 @@ impl PortfolioRebalancer {
         if !portfolio::validate_allocations(&portfolio.target_allocations) {
             return Err(Error::InvalidAllocationSum);
         }
-
 
         portfolio::check_portfolio_invariants(&portfolio)?;
 
