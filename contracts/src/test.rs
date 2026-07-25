@@ -2727,3 +2727,125 @@ fn test_benchmark_nav_operations() {
     std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
     std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
 }
+
+// ── Two-step admin transfer tests (propose_admin / accept_admin) ────────────
+
+/// Happy path: admin proposes a new admin, new admin accepts, admin slot updated.
+#[test]
+fn test_propose_then_accept_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    // Step 1 – current admin proposes a new admin.
+    client.propose_admin(&new_admin);
+
+    // Admin slot must still be the original admin at this point.
+    assert_eq!(client.get_admin(), admin);
+
+    // Step 2 – proposed admin accepts.
+    client.accept_admin();
+
+    // Admin slot must now be the new admin.
+    assert_eq!(client.get_admin(), new_admin);
+
+    // Verify both events were emitted in the correct order.
+    let events = env.events().all();
+
+    let proposed_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            // topic tuple is (symbol_short!("admin"), Symbol::new("transfer_proposed"))
+            e.topics.len() == 2
+                && e.topics.get(1).unwrap() == Symbol::new(&env, "transfer_proposed")
+        })
+        .collect();
+    assert_eq!(proposed_events.len(), 1, "admin_transfer_proposed event must be emitted once");
+
+    let transferred_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.len() == 2
+                && e.topics.get(1).unwrap() == Symbol::new(&env, "transferred")
+        })
+        .collect();
+    assert_eq!(transferred_events.len(), 1, "admin_transferred event must be emitted once");
+}
+
+/// Failure path: calling accept_admin without a prior propose must return
+/// NoPendingAdminTransfer (error code 29).
+#[test]
+fn test_accept_admin_without_propose_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // No propose_admin has been called — accept_admin must fail.
+    let result = client.try_accept_admin();
+    assert_eq!(
+        result,
+        Err(Ok(Error::NoPendingAdminTransfer)),
+        "accept_admin without a prior propose must return NoPendingAdminTransfer"
+    );
+
+    // Admin slot must remain unchanged.
+    assert_eq!(client.get_admin(), admin);
+}
+
+/// Overwrite path: admin proposes address A, then overwrites with address B;
+/// only address B can accept, and the final admin is B.
+#[test]
+fn test_propose_then_overwrite_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+
+    let admin = Address::generate(&env);
+    let candidate_a = Address::generate(&env);
+    let candidate_b = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    // First proposal – candidate A.
+    client.propose_admin(&candidate_a);
+
+    // Overwrite – candidate B replaces candidate A.
+    client.propose_admin(&candidate_b);
+
+    // Two `transfer_proposed` events must have been emitted (one per propose call).
+    let events = env.events().all();
+    let proposed_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.len() == 2
+                && e.topics.get(1).unwrap() == Symbol::new(&env, "transfer_proposed")
+        })
+        .collect();
+    assert_eq!(proposed_events.len(), 2, "two transfer_proposed events must be emitted");
+
+    // Accepting must finalise to candidate B (the latest proposal).
+    client.accept_admin();
+
+    assert_eq!(
+        client.get_admin(),
+        candidate_b,
+        "final admin must be the last proposed address"
+    );
+}
