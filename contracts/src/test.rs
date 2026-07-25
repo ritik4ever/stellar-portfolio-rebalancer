@@ -2590,3 +2590,120 @@ fn test_benchmark_nav_operations() {
     std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
     std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
 }
+
+mod circuit_breaker_test {
+    use super::*;
+    use crate::circuit_breaker::check_volatility;
+    use crate::reflector::{Asset, PriceData, ReflectorClient};
+    use soroban_sdk::{contract, contractimpl, Env, Map, Symbol, Vec};
+
+    #[contract]
+    pub struct MockReflectorForCircuitBreaker;
+
+    #[contractimpl]
+    impl MockReflectorForCircuitBreaker {
+        pub fn base(_env: Env) -> Asset {
+            Asset::Other(Symbol::new(&_env, "USD"))
+        }
+        pub fn assets(_env: Env) -> Vec<Asset> {
+            Vec::new(&_env)
+        }
+        pub fn decimals(_env: Env) -> u32 {
+            14
+        }
+        pub fn lastprice(_env: Env, _asset: Asset) -> Option<PriceData> {
+            None
+        }
+        pub fn twap(_env: Env, _asset: Asset, records: u32) -> Option<i128> {
+            if records == 0 {
+                None
+            } else {
+                Some(100_00000000000000i128)
+            }
+        }
+    }
+
+    #[test]
+    fn test_check_volatility_zero_records_returns_error() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let reflector_id = env.register_contract(None, MockReflectorForCircuitBreaker);
+        let client = ReflectorClient::new(&env, &reflector_id);
+
+        let mut current_prices = Map::new(&env);
+        let asset = Address::generate(&env);
+        current_prices.set(asset.clone(), 100_00000000000000i128);
+
+        let config = crate::types::CircuitBreakerConfig {
+            window_seconds: 30,
+            spike_threshold_bps: 100,
+        };
+
+        let result = check_volatility(&env, &config, &client, &current_prices);
+        assert_eq!(result, Err(Error::InvalidThreshold));
+    }
+
+    #[test]
+    fn test_check_volatility_valid_records_works() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let reflector_id = env.register_contract(None, MockReflectorForCircuitBreaker);
+        let client = ReflectorClient::new(&env, &reflector_id);
+
+        let mut current_prices = Map::new(&env);
+        let asset = Address::generate(&env);
+        current_prices.set(asset.clone(), 110_00000000000000i128);
+
+        let config = crate::types::CircuitBreakerConfig {
+            window_seconds: 300,
+            spike_threshold_bps: 100,
+        };
+
+        let result = check_volatility(&env, &config, &client, &current_prices);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_volatility_boundary_59_seconds_returns_error() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let reflector_id = env.register_contract(None, MockReflectorForCircuitBreaker);
+        let client = ReflectorClient::new(&env, &reflector_id);
+
+        let mut current_prices = Map::new(&env);
+        let asset = Address::generate(&env);
+        current_prices.set(asset.clone(), 100_00000000000000i128);
+
+        let config = crate::types::CircuitBreakerConfig {
+            window_seconds: 59,
+            spike_threshold_bps: 100,
+        };
+
+        let result = check_volatility(&env, &config, &client, &current_prices);
+        assert_eq!(result, Err(Error::InvalidThreshold));
+    }
+
+    #[test]
+    fn test_check_volatility_boundary_60_seconds_works() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let reflector_id = env.register_contract(None, MockReflectorForCircuitBreaker);
+        let client = ReflectorClient::new(&env, &reflector_id);
+
+        let mut current_prices = Map::new(&env);
+        let asset = Address::generate(&env);
+        current_prices.set(asset.clone(), 100_00000000000000i128);
+
+        let config = crate::types::CircuitBreakerConfig {
+            window_seconds: 60,
+            spike_threshold_bps: 100,
+        };
+
+        let result = check_volatility(&env, &config, &client, &current_prices);
+        assert!(result.is_ok());
+    }
+}

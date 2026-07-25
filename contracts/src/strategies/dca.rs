@@ -1,6 +1,6 @@
 // DCA (Dollar Cost Averaging) strategy implementation
-use soroban_sdk::{symbol_short, Address, Env, Map, Symbol};
-use crate::{types::*, portfolio, events};
+use soroban_sdk::{Address, Env, Map};
+use crate::{types::*, portfolio, emit_dca_executed};
 
 /// Configure DCA settings for a portfolio.
 /// Only the portfolio owner (or steward) may call.
@@ -12,7 +12,7 @@ pub fn configure_dca(
     interval: u64,
 ) -> Result<(), Error> {
     // Authorization: portfolio owner or steward must auth
-    let portfolio = super::PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
+    let portfolio = crate::PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
     // Determine who can authorize: steward if set, else user
     let steward = env
         .storage()
@@ -51,8 +51,8 @@ pub fn configure_dca(
 /// This adds capital according to target allocations without triggering rebalance.
 pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
     // Load portfolio and DCA config
-    let mut portfolio = super::PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
-    let mut config = match env
+    let mut portfolio = crate::PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
+    let mut config: DCAConfig = match env
         .storage()
         .persistent()
         .get(&DataKey::DCAConfig(portfolio_id))
@@ -76,13 +76,20 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         return Err(Error::PortfolioPaused);
     }
 
+    // Get the invoker (steward or user) for event emission
+    let invoker = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Steward(portfolio_id))
+        .unwrap_or(portfolio.user.clone());
+
     // Assume USDC is represented by an asset address that exists in target allocations.
     // The DCA amount is split according to target allocation percentages.
     // For each asset, increase balance by proportional amount.
     let mut purchased: Map<Address, i128> = Map::new(env);
     for (asset, target_pct) in portfolio.target_allocations.iter() {
         // amount proportional to target percentage
-        let to_invest = (config.amount * (*target_pct as i128)) / (ALLOCATION_DENOMINATOR as i128);
+        let to_invest = (config.amount * (target_pct as i128)) / (ALLOCATION_DENOMINATOR as i128);
         if to_invest > 0 {
             let current = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
             portfolio
@@ -123,6 +130,6 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         .set(&DataKey::DCAConfig(portfolio_id), &config);
 
     // Emit event
-    events::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_ts);
+    emit_dca_executed(env, &invoker, portfolio_id, config.amount, purchased, current_ts);
     Ok(())
 }

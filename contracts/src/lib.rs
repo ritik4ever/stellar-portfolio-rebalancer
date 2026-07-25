@@ -9,12 +9,18 @@ use soroban_sdk::{
 mod nav;
 mod portfolio;
 mod reflector;
+mod circuit_breaker;
+mod strategies;
+mod events;
 #[cfg(test)]
 mod test;
 mod types;
 
 pub use reflector::*;
 pub use types::*;
+pub use events::emit_dca_executed;
+pub use strategies::dca;
+pub use strategies::*;
 
 #[contract]
 pub struct PortfolioRebalancer;
