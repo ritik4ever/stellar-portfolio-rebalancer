@@ -1,5 +1,4 @@
-import { Server } from '@stellar/stellar-sdk'
-import { Contract } from '@stellar/stellar-sdk'
+import { Server as RpcServer } from '@stellar/stellar-sdk/rpc'
 import { validateStartupConfigOrThrow } from '../config/startupConfig.js'
 import { logger } from '../utils/logger.js'
 
@@ -92,7 +91,7 @@ async function runNetworkCheck(
     const checkStart = Date.now()
 
     try {
-        const server = new Server(horizonUrl)
+        const server = new RpcServer(horizonUrl)
         await withTimeout(
             server.getHealth(),
             5000,
@@ -127,24 +126,12 @@ async function runContractExistsCheck(
     const checkStart = Date.now()
 
     try {
-        const server = new Server(horizonUrl)
-        const networkConfig = network === 'mainnet'
-            ? { httpUrl: horizonUrl, networkPassphrase: Server.NETWORK_NAMES.MAINNET }
-            : { httpUrl: horizonUrl, networkPassphrase: Server.NETWORK_NAMES.TESTNET }
-
-        const contract = new Contract(contractAddress, networkConfig)
-
-        const dummyKey = Buffer.alloc(32)
-        const result = await withTimeout(
-            contract.call({ method: 'VERSION', args: [] }),
+        const server = new RpcServer(horizonUrl)
+        await withTimeout(
+            server.getContractWasmByContractId(contractAddress),
             5000,
-            'Contract call timed out'
-        ).catch(() => {
-            const tryKey = Buffer.alloc(32, 0)
-            return contract.call({ method: 'version', args: [] }).catch(() => {
-                return contract.call({ method: 'get_version', args: [] })
-            })
-        })
+            'Contract lookup timed out'
+        )
 
         return {
             name: 'contract-exists',

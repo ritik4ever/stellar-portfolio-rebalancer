@@ -27,8 +27,8 @@ export function getConnectionOptions() {
 export async function isRedisAvailable(): Promise<boolean> {
   try {
     // Dynamic import so the module loads even if ioredis isn't installed
-    const { default: IORedis } = await import("ioredis");
-    const probe = new IORedis(REDIS_URL, {
+    const { Redis } = await import("ioredis");
+    const probe = new Redis(REDIS_URL, {
       lazyConnect: true,
       connectTimeout: 3000,
       maxRetriesPerRequest: 1,

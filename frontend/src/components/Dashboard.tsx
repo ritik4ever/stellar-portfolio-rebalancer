@@ -131,18 +131,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         setResettingDemo(true)
         try {
             // Reset to default demo state
-            const defaultDemoData = {
-                id: 'demo',
-                totalValue: 10000,
-                dayChange: 0.85,
-                needsRebalance: false,
-                lastRebalance: '2 hours ago',
-                allocations: [
-                    { asset: 'XLM', target: 40, current: 40.2, amount: 4020 },
-                    { asset: 'USDC', target: 60, current: 59.8, amount: 5980 }
-                ]
-            }
-            
             // Clear any cached demo data and force refresh
             await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
             await queryClient.invalidateQueries({ queryKey: priceKeys.all })

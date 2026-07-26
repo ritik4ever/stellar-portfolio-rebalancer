@@ -1,0 +1,55 @@
+# Gitleaks configuration for stellar-portfolio-rebalancer.
+#
+# Used by:
+#   - scripts/hooks/pre-commit (via scripts/hooks/secrets-scan.mjs) — staged changes only
+#   - .github/workflows/secrets-scan.yml — full scan on every PR and push to main/develop
+#
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+#
+# When you hit a false positive, add a narrowly-scoped entry below with a
+# comment explaining *why* it's safe, instead of disabling the hook. See
+# docs/CONTRIBUTING.md "Secrets scanning" for the review expectations.
+
+title = "stellar-portfolio-rebalancer gitleaks config"
+
+[extend]
+# Start from gitleaks' maintained ruleset (AWS keys, generic API keys/tokens,
+# private key blocks, etc.) and layer project-specific rules on top.
+useDefault = true
+
+# Stellar secret seeds ("S..." ed25519 seeds) are the one credential type
+# that's meaningful to this project and not covered by the default ruleset.
+# Public keys (G...) and contract IDs (C...) are not secrets and are not
+# matched by this rule.
+[[rules]]
+id = "stellar-secret-seed"
+description = "Stellar secret seed (private key)"
+regex = '''\bS[A-Z2-7]{55}\b'''
+keywords = ["secret", "seed", "SECRET_KEY", "SOROBAN_SECRET", "STELLAR_SECRET"]
+
+[allowlist]
+description = "Known false positives: fixtures, examples, and generated docs"
+
+paths = [
+    # .env.example files intentionally document variable names, not real values.
+    '''(^|/)\.env\.example$''',
+    # Test fixtures and mocked API/contract responses use throwaway keys.
+    '''(^|/)(fixtures|__mocks__|__fixtures__|test-data|mock-data)/''',
+    '''\.test\.[jt]sx?$''',
+    '''\.spec\.[jt]sx?$''',
+    # Soroban contract test snapshots embed deterministic testnet keypairs
+    # generated per test run — never real funded accounts.
+    '''(^|/)contracts/test_snapshots/''',
+    # Rendered API/reference docs use illustrative (non-funded) addresses.
+    '''(^|/)docs/curl-recipes/''',
+]
+
+regexes = [
+    # Common documentation/placeholder conventions used throughout this repo's
+    # README, .env.example, and docs (e.g. "your-app-password", "YOUR_ADMIN_ADDRESS").
+    '''(?i)(your[-_][a-z-]+|changeme|placeholder|example[-_]?key|xxxx+)''',
+]
+
+# Stellar testnet friendbot/demo accounts used only in docs and demo-mode
+# seed data — funded with testnet (not real) XLM and safe to publish.
+stopwords = ["GABCDEF1234567890"]

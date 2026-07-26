@@ -10,7 +10,7 @@ vi.mock('../observability', () => ({
 import { AppErrorBoundary } from './AppErrorBoundary'
 import { Sentry } from '../observability'
 
-function Bomb() {
+function Bomb(): JSX.Element {
     throw new Error('Test error')
 }
 

@@ -17,13 +17,11 @@ import {
   ArrowLeft,
   AlertCircle,
   CheckCircle,
-  Search,
   Save,
   User,
   Zap,
   RefreshCw,
 } from "lucide-react";
-import { api, ENDPOINTS } from "../config/api";
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 
@@ -33,10 +31,6 @@ import { useAssets } from "../hooks/queries/useAssetsQuery"; // NEW: Use enhance
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface AssetOption {
-  value: string;
-  label: string;
-}
 
 interface PortfolioSetupProps {
   onNavigate: (view: string) => void;
@@ -48,12 +42,6 @@ interface Allocation {
   percentage: number;
 }
 
-const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
-  { value: "XLM", label: "XLM (Stellar Lumens)" },
-  { value: "USDC", label: "USDC (USD Coin)" },
-  { value: "BTC", label: "BTC (Bitcoin)" },
-  { value: "ETH", label: "ETH (Ethereum)" },
-];
 
 export type RiskLevel = "low" | "medium" | "high";
 
@@ -162,7 +150,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   );
 
   // NEW: Use enhanced assets query
-  const { data: assets = [], isLoading: assetsLoading } = useAssets()
+  const { data: assets = [] } = useAssets()
 
   useEffect(() => {
     setSavedTemplates(loadSavedTemplates(publicKey || ""));
@@ -1035,7 +1023,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
               {/* Create Portfolio Button */}
               <button
-                onClick={handleSubmit}
+                onClick={createPortfolio}
                 disabled={hasAnyFieldError || !isValidTotal || createPortfolioMutation.isPending}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >

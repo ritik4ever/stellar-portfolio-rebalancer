@@ -1,6 +1,6 @@
 import { rateLimit, type Options } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
-import IORedis from "ioredis";
+import { Redis as RedisClient } from "ioredis";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
@@ -18,7 +18,7 @@ const BURST_WINDOW_MS =
 const BURST_MAX = Number(process.env.RATE_LIMIT_BURST_MAX) || 20;
 const WRITE_BURST_MAX = Number(process.env.RATE_LIMIT_WRITE_BURST_MAX) || 3;
 
-let redisClient: IORedis | undefined;
+let redisClient: RedisClient | undefined;
 
 // express-rate-limit requires a *separate* RedisStore instance per limiter.
 // We share one ioredis client but wrap it in a fresh RedisStore with a unique
@@ -27,14 +27,14 @@ function makeStore(prefix: string): RedisStore | undefined {
   if (!redisClient) return undefined;
   return new RedisStore({
     prefix: `rl:${prefix}:`,
-    sendCommand: (...args: Parameters<IORedis["call"]>) =>
+    sendCommand: (...args: Parameters<RedisClient["call"]>) =>
       redisClient!.call(...args) as Promise<any>,
   });
 }
 
 if (process.env.NODE_ENV !== "test") {
   try {
-    redisClient = new IORedis(REDIS_URL, {
+    redisClient = new RedisClient(REDIS_URL, {
       lazyConnect: true,
       connectTimeout: 3000,
       maxRetriesPerRequest: null,

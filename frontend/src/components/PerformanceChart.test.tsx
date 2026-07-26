@@ -256,7 +256,7 @@ describe("PerformanceChart", () => {
     it("should update data slice when range changes", () => {
       // Mock different data for different ranges
       queryMocks.usePortfolioAnalytics.mockImplementation(
-        (portfolioId, days) => {
+        (_portfolioId, days) => {
           const dataByDays = {
             7: {
               data: [

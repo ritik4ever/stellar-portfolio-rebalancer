@@ -1,4 +1,4 @@
-import Redis from 'ioredis'
+import { Redis } from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 
@@ -40,7 +40,7 @@ export class RebalanceLockService {
                 maxRetriesPerRequest: 3,
             })
             
-            this.redis.on('error', (err) => {
+            this.redis.on('error', (err: Error) => {
                 logger.error('[LOCK_SERVICE] Redis connection error', { error: err.message })
             })
 
