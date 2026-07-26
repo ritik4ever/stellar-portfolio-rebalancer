@@ -1935,6 +1935,68 @@ fn test_admin_force_rebalance_bypasses_cooldown() {
 }
 
 #[test]
+#[should_panic]
+fn test_admin_force_rebalance_non_admin_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let unauthorized = Address::generate(&env);
+    let actual_balances = Map::new(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &unauthorized,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "admin_force_rebalance",
+                args: (pid, actual_balances.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .admin_force_rebalance(&pid, &actual_balances);
+}
+
+#[test]
+fn test_admin_force_rebalance_admin_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let actual_balances = Map::new(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "admin_force_rebalance",
+                args: (pid, actual_balances.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .admin_force_rebalance(&pid, &actual_balances);
+}
+
+#[test]
 fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
     let env = Env::default();
     let mut allocations = Map::new(&env);
