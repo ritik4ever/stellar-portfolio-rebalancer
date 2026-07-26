@@ -539,16 +539,57 @@ impl PortfolioRebalancer {
     }
 
     pub fn pause_portfolio(env: Env, portfolio_id: u64, reason: PauseReason) {
-        let mut portfolio: Portfolio = env
+        let portfolio: Portfolio = env
             .storage()
             .persistent()
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
+        
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
+        
+        let mut portfolio = portfolio;
         portfolio.is_active = false;
         portfolio.pause_reason = reason;
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            ("portfolio", "paused"),
+            (portfolio_id, steward, reason),
+        );
+    }
+
+    pub fn resume_portfolio(env: Env, portfolio_id: u64) {
+        let portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+            .unwrap();
+        
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
+        
+        let mut portfolio = portfolio;
+        portfolio.is_active = true;
+        portfolio.pause_reason = PauseReason::None;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            ("portfolio", "resumed"),
+            (portfolio_id, steward),
+        );
     }
 
     pub fn get_contract_pause_reason(env: Env) -> PauseReason {
