@@ -4,9 +4,10 @@
 //! These tests use the [`proptest`] crate to verify mathematical invariants of
 //! the contract's pure business logic across 10,000 randomly-generated inputs
 //! per property.  Because Soroban's `Env` is not available in integration test
-//! context, all invariants are expressed over the **pure helper functions**
-//! that are re-implemented inline here — mirroring the exact arithmetic in
-//! `contracts/src/portfolio.rs`.
+//! context, type-independent invariants are expressed over the **pure helper
+//! functions** that are re-implemented inline here (e.g. validation and drift),
+//! while balance/value arithmetic re-uses the shared `portfolio::value_to_balance`
+//! function from the production crate so that scaling regressions are caught.
 //!
 //! # Verified Properties
 //!
@@ -28,6 +29,8 @@
 //! ```
 
 use proptest::prelude::*;
+use portfolio_rebalancer::portfolio::value_to_balance;
+use portfolio_rebalancer::types::{ALLOCATION_DENOMINATOR, DEFAULT_ASSET_DECIMALS};
 
 // ---------------------------------------------------------------------------
 // Pure helper functions — mirrors of contracts/src/portfolio.rs logic
@@ -72,19 +75,16 @@ fn compute_drift(current_percent: u32, target_percent: u32) -> u32 {
 /// the `target_percent` allocation of `total_value` at the given `price`.
 ///
 /// Returns `target_balance − current_balance`.
-/// Mirrors the arithmetic inside `calculate_rebalance_trades` in the contract.
+/// Delegates to the production [`portfolio::value_to_balance`] so that the
+/// property test exercises the same arithmetic as `calculate_rebalance_trades`.
 fn compute_trade_amount(
     current_balance: i128,
     target_percent: u32,
     total_value: i128,
     price: i128,
 ) -> i128 {
-    if price == 0 {
-        return 0;
-    }
-    const REFLECTOR_PRICE_DECIMALS: u32 = 14;
-    let target_value = (total_value * target_percent as i128) / 10000;
-    let target_balance = (target_value * 10i128.pow(REFLECTOR_PRICE_DECIMALS)) / price;
+    let target_value = (total_value * target_percent as i128) / ALLOCATION_DENOMINATOR as i128;
+    let target_balance = value_to_balance(target_value, price, DEFAULT_ASSET_DECIMALS);
     target_balance - current_balance
 }
 
@@ -202,18 +202,17 @@ proptest! {
     /// **P3a** – Rebalancing an already-balanced portfolio produces zero trade.
     ///
     /// When `current_balance == target_balance`, `compute_trade_amount` must
-    /// return exactly 0 for any valid price and total_value.
+    /// return exactly 0 for any valid price and total_value.  Target balance
+    /// is derived via the production [`portfolio::value_to_balance`] so that
+    /// the full arithmetic path (including scaling) is exercised.
     #[test]
     fn property_rebalance_idempotent_at_zero_drift(
         target_percent in 1u32..=10000u32,
         total_value    in 1i128..=1_000_000_000_000i128,
         price          in 1i128..=1_000_000_000_000_000_000i128,
     ) {
-        const PRICE_DECIMALS: u32 = 14;
-
-        // Derive the exact target_balance using the same formula as the contract.
-        let target_value   = (total_value * target_percent as i128) / 10000;
-        let target_balance = (target_value * 10i128.pow(PRICE_DECIMALS)) / price;
+        let target_value = (total_value * target_percent as i128) / ALLOCATION_DENOMINATOR as i128;
+        let target_balance = value_to_balance(target_value, price, DEFAULT_ASSET_DECIMALS);
 
         // When current == target, trade must be 0 (idempotent).
         let trade = compute_trade_amount(target_balance, target_percent, total_value, price);
@@ -231,6 +230,8 @@ proptest! {
     ///
     /// • Over-weight (current > target) → trade ≤ 0 (sell)
     /// • Under-weight (current < target) → trade ≥ 0 (buy)
+    /// Target balance is derived via the production [`portfolio::value_to_balance`]
+    /// so that the full arithmetic path is exercised.
     #[test]
     fn property_trade_sign_matches_weight_direction(
         target_percent in 1u32..=10000u32,
@@ -238,10 +239,8 @@ proptest! {
         price          in 1i128..=1_000_000_000_000_000_000i128,
         surplus        in 1i128..=1_000_000_000i128,
     ) {
-        const PRICE_DECIMALS: u32 = 14;
-
-        let target_value   = (total_value * target_percent as i128) / 10000;
-        let target_balance = (target_value * 10i128.pow(PRICE_DECIMALS)) / price;
+        let target_value = (total_value * target_percent as i128) / ALLOCATION_DENOMINATOR as i128;
+        let target_balance = value_to_balance(target_value, price, DEFAULT_ASSET_DECIMALS);
 
         // Over-weight: current > target → should produce a sell (≤ 0).
         let over_balance = target_balance.saturating_add(surplus);

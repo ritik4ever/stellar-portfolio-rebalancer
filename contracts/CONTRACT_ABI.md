@@ -26,8 +26,8 @@ The contract's pure business logic is verified using property-based testing (via
   - Drift is zero when equal: `compute_drift(p, p) == 0`
 
 ### P3: Rebalance Idempotency
-- **Description:** Rebalancing a portfolio that is already at its target allocation produces no trades.
-- **Invariant Statement:** When `current_balance == target_balance`, the computed trade amount is exactly `0`. Furthermore, trade signs correctly reflect the weight direction (over-weight produces a sell/≤0; under-weight produces a buy/≥0).
+- **Description:** Rebalancing a portfolio that is already at its target allocation produces no trades. P3 exercises the production `portfolio::value_to_balance` function so that arithmetic scaling regressions in `calculate_rebalance_trades` are detected.
+- **Invariant Statement:** When `current_balance == target_balance`, the computed trade amount is exactly `0`. Furthermore, trade signs correctly reflect the weight direction (over-weight produces a sell/≤0; under-weight produces a buy/≥0). Both target balances and trade amounts are computed via the shared production arithmetic.
 
 ## Public Functions
 
