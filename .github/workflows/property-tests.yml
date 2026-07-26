@@ -38,9 +38,11 @@ jobs:
 
       - name: Run Property Tests
         working-directory: contracts
-        env:
-          PROPTEST_CASES: 10000
+        # Bash strict mode: -e aborts on any non-zero, -u on unset vars,
+        # -o pipefail propagates the cargo exit code through `tee` so that
+        # the `if: failure()` upload step below correctly triggers.
         run: |
+          set -euo pipefail
           cargo test --test property_tests -- --nocapture 2>&1 | tee property-test-results.txt
 
       - name: Upload Test Report
@@ -58,3 +60,4 @@ jobs:
           name: proptest-failure-corpus
           path: contracts/proptest-regressions/
           retention-days: 14
+          if-no-files-found: warn

@@ -30,10 +30,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Ensure testnet secret exists
+        # Fork PRs and PRs from contributors without `secrets.STELLAR_TESTNET_SECRET_KEY`
+        # cannot deploy to testnet (GitHub strips secrets for non-trusted contexts).
+        # The build, audit, and benchmark steps still run so the contract code is
+        # verified on every PR; the testnet deploy step below is gated on the secret.
         run: |
-          if [ -z "${STELLAR_SECRET_KEY}" ]; then
-            echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
-            exit 1
+          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
+            echo "::warning::STELLAR_TESTNET_SECRET_KEY not available in this run context (fork PR or maintenance run); skipping on-chain deploy step."
+            echo "HAS_TESTNET_SECRET=false" >> "$GITHUB_ENV"
+          else
+            echo "HAS_TESTNET_SECRET=true" >> "$GITHUB_ENV"
           fi
 
       - name: Setup Rust
@@ -110,6 +116,7 @@ jobs:
 
       - name: Deploy and initialize on testnet
         working-directory: ./contracts
+        if: env.HAS_TESTNET_SECRET == 'true'
         run: |
           soroban network add testnet --global \
             --rpc-url "${SOROBAN_RPC_URL}" \
