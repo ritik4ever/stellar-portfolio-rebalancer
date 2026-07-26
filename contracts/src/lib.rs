@@ -6,6 +6,7 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
+mod assets;
 mod nav;
 mod portfolio;
 mod reflector;
@@ -16,6 +17,7 @@ mod types;
 
 use strategies::dca;
 
+pub use assets::*;
 pub use reflector::*;
 pub use types::*;
 
@@ -315,6 +317,38 @@ impl PortfolioRebalancer {
 
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
         dca::execute_dca(&env, portfolio_id)
+    }
+
+    pub fn register_lp_token(
+        env: Env,
+        lp_token: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), Error> {
+        assets::register_lp_token(&env, lp_token, asset_a, asset_b)
+    }
+
+    pub fn get_lp_token_config(env: Env, lp_token: Address) -> Option<LpTokenConfig> {
+        assets::get_lp_token_config(&env, &lp_token)
+    }
+
+    pub fn get_sac_balance(env: Env, token: Address, owner: Address) -> i128 {
+        assets::get_sac_balance(&env, &token, &owner)
+    }
+
+    pub fn sync_portfolio_sac_balances(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+
+        for (asset, _) in portfolio.target_allocations.iter() {
+            let sac_bal = assets::get_sac_balance(&env, &asset, &portfolio.user);
+            portfolio.current_balances.set(asset, sac_bal);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        Ok(())
     }
 
     pub fn transfer_stewardship(

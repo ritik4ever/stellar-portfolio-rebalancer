@@ -2727,3 +2727,97 @@ fn test_benchmark_nav_operations() {
     std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
     std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
 }
+
+#[test]
+fn test_register_lp_token_and_config() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let lp_token = Address::generate(&env);
+    let asset_a = Address::generate(&env);
+    let asset_b = Address::generate(&env);
+
+    client.register_lp_token(&lp_token, &asset_a, &asset_b);
+
+    let config = client.get_lp_token_config(&lp_token).expect("Config should exist");
+    assert_eq!(config.lp_token, lp_token);
+    assert_eq!(config.asset_a, asset_a);
+    assert_eq!(config.asset_b, asset_b);
+}
+
+#[test]
+fn test_register_lp_token_invalid_config_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let lp_token = Address::generate(&env);
+    let asset_b = Address::generate(&env);
+
+    let res = client.try_register_lp_token(&lp_token, &lp_token, &asset_b);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_lp_token_price_and_50_percent_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // Register SAC tokens
+    let sac_admin = Address::generate(&env);
+    let asset_a_sac = env.register_stellar_asset_contract_v2(sac_admin.clone());
+    let asset_b_sac = env.register_stellar_asset_contract_v2(sac_admin.clone());
+    let lp_sac = env.register_stellar_asset_contract_v2(sac_admin.clone());
+
+    let asset_a = asset_a_sac.address();
+    let asset_b = asset_b_sac.address();
+    let lp_token = lp_sac.address();
+
+    // Register LP Token pair: asset_a + asset_b
+    client.register_lp_token(&lp_token, &asset_a, &asset_b);
+
+    // Setup pool reserves (held by lp_token address)
+    // 1000 units of asset_a and 1000 units of asset_b
+    let asset_a_client = soroban_sdk::token::StellarAssetClient::new(&env, &asset_a);
+    let asset_b_client = soroban_sdk::token::StellarAssetClient::new(&env, &asset_b);
+    let lp_token_client = soroban_sdk::token::StellarAssetClient::new(&env, &lp_token);
+
+    asset_a_client.mint(&lp_token, &1_000_0000000i128);
+    asset_b_client.mint(&lp_token, &1_000_0000000i128);
+
+    // Total supply of LP tokens = 2000 units
+    lp_token_client.mint(&user, &2_000_0000000i128);
+
+    // Read SAC balance
+    let user_lp_bal = client.get_sac_balance(&lp_token, &user);
+    assert_eq!(user_lp_bal, 2_000_0000000i128);
+
+    // Create portfolio: 50% LP token, 50% Asset A
+    let mut allocations = Map::new(&env);
+    allocations.set(lp_token.clone(), 5000);
+    allocations.set(asset_a.clone(), 5000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Deposit 500 LP tokens and 500 Asset A
+    client.deposit(&pid, &lp_token, &500_0000000i128, &String::from_str(&env, "dep_lp"));
+    client.deposit(&pid, &asset_a, &500_0000000i128, &String::from_str(&env, "dep_a"));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(lp_token.clone()).unwrap(), 500_0000000i128);
+
+    // Verify preview rebalance runs without error
+    let preview = client.preview_rebalance(&pid);
+    assert!(preview.total_value > 0);
+    assert_eq!(preview.rebalance_needed, false);
+}
+

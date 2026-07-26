@@ -137,6 +137,15 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    LpToken(Address),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LpTokenConfig {
+    pub lp_token: Address,
+    pub asset_a: Address,
+    pub asset_b: Address,
 }
 
 #[contracttype]
@@ -181,6 +190,8 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    LpTokenNotFound = 29,
+    InvalidLpTokenConfig = 30,
 }
 
 #[contracttype]
