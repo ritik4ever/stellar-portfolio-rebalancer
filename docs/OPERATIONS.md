@@ -10,6 +10,24 @@ For comprehensive queue monitoring, dashboard guidance, and operational workflow
 - **Health Check:** `node scripts/queue-health-check.mjs` — programmatic queue health validation for CI/CD pipelines and operational scripts
 - **Workflows & Runbooks:** See [QUEUE_OPERATIONS_WORKFLOW.md](QUEUE_OPERATIONS_WORKFLOW.md) for scenario-based troubleshooting, pre-deployment validation, and incident response procedures
 
+### Rebalance Queue Backlog Alert
+
+The `RebalanceQueueBacklog` alert fires when the rebalance queue accumulates more than 50 waiting jobs for 10+ minutes. This typically indicates:
+
+- Workers are stuck or have crashed
+- Worker processes are scaled down relative to job arrival rate
+- Redis connectivity issues preventing job processing
+
+**Resolution steps:**
+
+1. Check worker process status: `docker compose logs backend-worker` or equivalent
+2. Verify Redis connectivity: `redis-cli ping` should return `PONG`
+3. Check the queue-operations Grafana dashboard for worker lag metrics
+4. If workers are healthy but backlog persists, consider scaling worker processes
+5. Review recent deployments that may have introduced performance regressions
+
+The alert clears automatically once the backlog drains below the threshold.
+
 ## Redis and queues
 
 - **BullMQ** drives scheduled work: portfolio checks, rebalance jobs, analytics snapshots, and idempotency key cleanup.

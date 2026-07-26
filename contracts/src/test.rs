@@ -2423,6 +2423,311 @@ fn test_get_drift_preview_unknown_portfolio_returns_empty() {
     assert_eq!(drifts.len(), 0, "unknown portfolio must return empty vec, not panic");
 }
 
+// ── NAV snapshot and history tests ──────────────────────────────────────────
+
+#[test]
+fn test_manual_nav_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Deposit some balance so total value is non-zero
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, "initial"));
+
+    // Set sequence and timestamp
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 123;
+        li.timestamp = 456;
+    });
+
+    let snapshot = client.snapshot_nav(&pid);
+    assert_eq!(snapshot.usd_nav, 100_000000000); // 100 * 100 USD (which is 100_000000000 USD stroops)
+    assert_eq!(snapshot.sequence, 123);
+    assert_eq!(snapshot.timestamp, 456);
+
+    let history = client.get_nav_history(&pid, &10);
+    assert_eq!(history.len(), 1);
+    let snap_in_history = history.get(0).unwrap();
+    assert_eq!(snap_in_history.usd_nav, 100_000000000);
+    assert_eq!(snap_in_history.sequence, 123);
+    assert_eq!(snap_in_history.timestamp, 456);
+}
+
+#[test]
+fn test_nav_history_limit_and_eviction() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Call snapshot_nav 105 times, updating timestamp/sequence
+    for i in 0..105 {
+        env.ledger().with_mut(|li| {
+            li.sequence_number = i as u32 + 1;
+            li.timestamp = i as u64 + 10;
+        });
+        let _ = client.snapshot_nav(&pid);
+    }
+
+    // Limit is 100. So history length should be exactly 100.
+    let history = client.get_nav_history(&pid, &200);
+    assert_eq!(history.len(), 100);
+
+    // The oldest stored snapshot should be sequence 6 (since 105 total snapshots, first 5 were evicted)
+    assert_eq!(history.get(0).unwrap().sequence, 6);
+    assert_eq!(history.get(99).unwrap().sequence, 105);
+
+    // Test limit argument of get_nav_history
+    let partial_history = client.get_nav_history(&pid, &10);
+    assert_eq!(partial_history.len(), 10);
+    assert_eq!(partial_history.get(0).unwrap().sequence, 96);
+    assert_eq!(partial_history.get(9).unwrap().sequence, 105);
+}
+
+#[test]
+fn test_auto_nav_snapshot_on_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, "init"));
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 10;
+        li.timestamp = 1000;
+    });
+
+    // Execute rebalance
+    let mut actual_balances = Map::new(&env);
+    actual_balances.set(asset.clone(), 100_0000000);
+    client.execute_rebalance(&pid, &actual_balances);
+
+    // Check that a snapshot was created automatically
+    let history = client.get_nav_history(&pid, &10);
+    assert_eq!(history.len(), 1);
+    let snapshot = history.get(0).unwrap();
+    assert_eq!(snapshot.sequence, 10);
+    assert_eq!(snapshot.timestamp, 1000);
+    assert_eq!(snapshot.usd_nav, 100_000000000);
+}
+
+#[test]
+fn test_fee_transfer_to_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Configure fee: 50 bps (0.5%)
+    let fee_config = FeeConfig {
+        platform_name: String::from_str(&env, "Test Platform"),
+        fee_bps: 50,
+        fee_recipient: fee_recipient.clone(),
+        enabled: true,
+    };
+    client.set_fee_config(&fee_config);
+    
+    // Create portfolio with 2 assets
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 5000); // 50%
+    allocations.set(asset2.clone(), 5000); // 50%
+    
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let pid = client.create_portfolio(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    
+    // Deposit initial balances
+    client.deposit(&pid, &asset1, &100_0000000, &String::from_str(&env, "init"));
+    client.deposit(&pid, &asset2, &100_0000000, &String::from_str(&env, "init"));
+    
+    // Advance time past cooldown
+    env.ledger().with_mut(|li| {
+        li.timestamp += REBALANCE_COOLDOWN_SECONDS + 1;
+    });
+    
+    // Execute rebalance with new allocations that trigger trades
+    let mut actual_balances = Map::new(&env);
+    actual_balances.set(asset1.clone(), 120_0000000); // Drifted to 60%
+    actual_balances.set(asset2.clone(), 80_0000000);  // Drifted to 40%
+    
+    client.execute_rebalance(&pid, &actual_balances);
+    
+    // Verify fee_collected event was emitted
+    let events = env.events().all();
+    let fee_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            if let Some(topics) = e.topics.first() {
+                topics == Symbol::new(&env, "fee_collected")
+            } else {
+                false
+            }
+        })
+        .collect();
+    
+    assert!(!fee_events.is_empty(), "fee_collected event should be emitted");
+    
+    // Verify the event contains the correct recipient
+    if let Some(event) = fee_events.first() {
+        let data: (i128, Address, u64) = event.data.clone().unwrap();
+        assert_eq!(data.1, fee_recipient, "fee should be sent to configured recipient");
+        assert!(data.0 > 0, "fee amount should be positive");
+    }
+}
+
+#[test]
+fn test_circuit_breaker_persists_pause_reason() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Create a portfolio
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Verify initial pause reason is None
+    let initial_reason = client.get_contract_pause_reason();
+    assert_eq!(initial_reason, PauseReason::None);
+    
+    // Simulate circuit breaker trip by calling check_volatility with extreme price deviation
+    // This would normally be called internally, but we're testing the persistence logic
+    let config = CircuitBreakerConfig {
+        spike_threshold_bps: 100, // 1% threshold
+        window_seconds: 3600,
+    };
+    
+    let mut current_prices = Map::new(&env);
+    // Price has spiked 10% (1000 bps) which exceeds the 1% threshold
+    current_prices.set(asset.clone(), 110_00000000000000i128);
+    
+    let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    let result = crate::circuit_breaker::check_volatility(&env, &config, &reflector_client, &current_prices);
+    
+    // Should return EmergencyStop error
+    assert_eq!(result, Err(Error::EmergencyStop));
+    
+    // Verify pause reason was persisted as VolatilityCircuitBreaker
+    let pause_reason = client.get_contract_pause_reason();
+    assert_eq!(pause_reason, PauseReason::VolatilityCircuitBreaker);
+    
+    // Verify circuit_breaker_tripped event was emitted
+    let events = env.events().all();
+    let cb_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            if let Some(topics) = e.topics.first() {
+                topics == Symbol::new(&env, "circuit_breaker_tripped")
+            } else {
+                false
+            }
+        })
+        .collect();
+    
+    assert!(!cb_events.is_empty(), "circuit_breaker_tripped event should be emitted");
+}
+
+#[test]
+fn test_benchmark_nav_operations() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, "init"));
+
+    // Measure snapshot_nav with empty history
+    env.budget().reset_unlimited();
+    env.budget().reset_tracker();
+    let _ = client.snapshot_nav(&pid);
+    let cpu_empty = env.budget().cpu_instruction_cost();
+    let mem_empty = env.budget().memory_bytes_cost();
+
+    std::println!("BENCHMARK_NAV_EMPTY_HISTORY_CPU: {}", cpu_empty);
+    std::println!("BENCHMARK_NAV_EMPTY_HISTORY_MEM: {}", mem_empty);
+
+    // Fill history to 99 elements
+    for i in 0..98 {
+        env.ledger().with_mut(|li| {
+            li.sequence_number = i + 10;
+            li.timestamp = i as u64 + 10000;
+        });
+        let _ = client.snapshot_nav(&pid);
+    }
+
+    // Measure snapshot_nav with full history (where eviction / slice happens)
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 500;
+        li.timestamp = 50000;
+    });
+    env.budget().reset_unlimited();
+    env.budget().reset_tracker();
+    let _ = client.snapshot_nav(&pid);
+    let cpu_full = env.budget().cpu_instruction_cost();
+    let mem_full = env.budget().memory_bytes_cost();
+
+    std::println!("BENCHMARK_NAV_FULL_HISTORY_CPU: {}", cpu_full);
+    std::println!("BENCHMARK_NAV_FULL_HISTORY_MEM: {}", mem_full);
+}
+
 // ── Issue #967: on-chain portfolio templates ────────────────────────────
 
 #[test]
