@@ -44,6 +44,8 @@ const BASELINE_CREATE_PORTFOLIO_CPU: u64 = 2_500_000;
 const BASELINE_CREATE_PORTFOLIO_MEM: u64 = 300_000;
 const BASELINE_EXECUTE_REBALANCE_CPU: u64 = 5_000_000;
 const BASELINE_EXECUTE_REBALANCE_MEM: u64 = 500_000;
+const BASELINE_EXECUTE_REBALANCE_MAX_ASSETS_CPU: u64 = 10_000_000; // Will adjust later
+const BASELINE_EXECUTE_REBALANCE_MAX_ASSETS_MEM: u64 = 1_000_000; // Will adjust later
 const BASELINE_DEPOSIT_CPU: u64 = 2_000_000;
 const BASELINE_DEPOSIT_MEM: u64 = 250_000;
 
@@ -2096,6 +2098,74 @@ fn benchmark_deposit_gas() {
         BASELINE_DEPOSIT_CPU,
         BASELINE_DEPOSIT_MEM,
     );
+}
+
+#[test]
+fn benchmark_execute_rebalance_max_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let _ = client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    for _ in 0..MAX_PORTFOLIO_ASSETS {
+        allocations.set(Address::generate(&env), ALLOCATION_DENOMINATOR / MAX_PORTFOLIO_ASSETS);
+    }
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15_000;
+    });
+
+    env.budget().reset_tracker();
+    let _ = client.execute_rebalance(&pid, &Map::new(&env));
+    
+    std::println!("CPU used for max assets: {}", env.budget().cpu_instruction_cost());
+    std::println!("MEM used for max assets: {}", env.budget().memory_bytes_cost());
+    
+    assert_cost_within_tolerance(
+        "execute_rebalance_max_assets",
+        env.budget().cpu_instruction_cost(),
+        env.budget().memory_bytes_cost(),
+        BASELINE_EXECUTE_REBALANCE_MAX_ASSETS_CPU,
+        BASELINE_EXECUTE_REBALANCE_MAX_ASSETS_MEM,
+    );
+}
+
+#[test]
+fn test_execute_rebalance_max_assets_plus_one_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let _ = client.initialize(&admin, &reflector_id);
+
+    let mut too_many_allocations = Map::new(&env);
+    for _ in 0..(MAX_PORTFOLIO_ASSETS + 1) {
+        too_many_allocations.set(Address::generate(&env), ALLOCATION_DENOMINATOR / (MAX_PORTFOLIO_ASSETS + 1));
+    }
+    
+    let too_many_decimals = allocation_decimals(&env, &too_many_allocations, DEFAULT_ASSET_DECIMALS);
+    
+    let result = client.try_create_portfolio(
+        &user,
+        &too_many_allocations,
+        &too_many_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    assert_eq!(result, Err(Ok(Error::TooManyAssets)));
 }
 
 // ── Issue #861: rebalance validates allocation sum ──────────────────────
