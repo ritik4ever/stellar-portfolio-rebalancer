@@ -350,6 +350,16 @@ export class RiskManagementService {
         return status
     }
 
+    resetCircuitBreaker(asset: string): void {
+        const existing = this.circuitBreakers.get(asset)
+        if (existing) {
+            existing.isTriggered = false
+            existing.triggerReason = undefined
+            existing.cooldownUntil = undefined
+            existing.triggeredAssets = []
+        }
+    }
+
     getRecommendations(riskMetrics: RiskMetrics, allocationsInput: Record<string, number>): string[] {
         const allocations = this.normalizeAllocations(allocationsInput)
         const recommendations: string[] = []
