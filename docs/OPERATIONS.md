@@ -349,6 +349,129 @@ Add backup verification to your CI pipeline:
 
 For detailed, step-by-step procedures to handle incident response, outages, containment, rollbacks, database restoration, and validation across the smart contract, backend, and frontend stacks, refer to the [Disaster Recovery Runbook](DISASTER_RECOVERY.md).
 
+## Circuit-breaker manual-reset runbook
+
+The `RiskManagementService` maintains an in-memory circuit breaker for every tracked asset (`XLM`, `BTC`, `ETH`, `USDC`, and any assets added via the admin API). A breaker **trips** when an asset's tick-over-tick price change exceeds **20 %** (the `CIRCUIT_BREAKER_THRESHOLD`). While tripped, `shouldAllowRebalance()` returns `allowed: false` with reason code `CIRCUIT_BREAKER_ACTIVE`, blocking all automatic and manual rebalance operations for any portfolio that holds the affected asset.
+
+Tripped breakers auto-recover after **5 minutes** (`CIRCUIT_BREAKER_COOLDOWN`). The steps below are for situations where you need to reset before that window expires, or where you need to confirm the system is healthy after an incident.
+
+### 1. Diagnose – confirm the breaker is tripped
+
+**Public status endpoint (no auth):**
+
+```bash
+curl -s https://<API_HOST>/api/system/status | jq '.data.riskManagement'
+```
+
+A tripped breaker looks like:
+
+```json
+{
+  "circuitBreakers": {
+    "BTC": {
+      "isTriggered": true,
+      "triggerReason": "22.3% price movement",
+      "cooldownUntil": 1722080760000,
+      "triggeredAssets": ["BTC"]
+    }
+  },
+  "enabled": true,
+  "alertsActive": true
+}
+```
+
+`isTriggered: true` with a `cooldownUntil` value in the future confirms the breaker is active. Convert the Unix millisecond timestamp to determine how much cooldown remains:
+
+```bash
+node -e "console.log(new Date(1722080760000).toISOString())"
+```
+
+**Per-portfolio risk check:**
+
+```bash
+curl -s https://<API_HOST>/api/risk/check/<PORTFOLIO_ID> | jq '{allowed, reason, reasonCode}'
+```
+
+If the response is `"reasonCode": "CIRCUIT_BREAKER_ACTIVE"`, rebalancing is blocked for that portfolio.
+
+**Per-portfolio detailed circuit-breaker status:**
+
+```bash
+curl -s https://<API_HOST>/api/risk/metrics/<PORTFOLIO_ID> | jq '.data.circuitBreakers'
+```
+
+This returns the per-asset breaker map, including `triggerReason` and the precise `cooldownUntil` timestamp.
+
+---
+
+### 2. Decide – reset manually or wait?
+
+| Situation | Recommended action |
+|-----------|-------------------|
+| Cooldown expires in < 3 minutes | **Wait.** Auto-recovery will fire; no operator action needed. |
+| Flash-crash or data anomaly confirmed as false alarm | **Reset manually.** Prices have stabilised and the trigger was a bad tick or feed glitch. |
+| Market still highly volatile (> 15 % EWMA vol) | **Wait or investigate further.** Resetting into continued volatility will likely re-trip the breaker immediately. |
+| Cooldown has expired but `isTriggered` is still `true` in status | Call `GET /api/system/status` again — `getCircuitBreakerStatus()` performs the expiry check lazily on each read. If the flag does not clear, restart the API process (see Safe shutdown and restart below). |
+| Incident requires immediate production rebalancing | Follow the manual-reset steps below, then monitor `/api/risk/check/:portfolioId` continuously after the reset. |
+
+---
+
+### 3. Perform the manual reset
+
+The admin endpoint accepts an `X-Admin-Key` header (value of the `ADMIN_API_KEY` environment variable) and optionally a specific asset to reset. Omitting `asset` resets **all** tripped breakers.
+
+**Reset a single asset (e.g. BTC):**
+
+```bash
+curl -X POST https://<API_HOST>/api/admin/circuit-breaker/reset \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: <ADMIN_API_KEY>" \
+  -d '{"asset": "BTC"}'
+```
+
+**Reset all assets at once:**
+
+```bash
+curl -X POST https://<API_HOST>/api/admin/circuit-breaker/reset \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: <ADMIN_API_KEY>" \
+  -d '{}'
+```
+
+Expected success response (`200 OK`):
+
+```json
+{
+  "success": true,
+  "data": {
+    "reset": ["BTC"],
+    "message": "Circuit breaker(s) reset successfully"
+  }
+}
+```
+
+> **Note:** The `RiskManagementService` instance is in-process and in-memory. If the API runs as multiple instances behind a load balancer, send the reset request to **every instance** (or use a sticky session / internal broadcast mechanism). After any process restart the breaker state is cleared automatically.
+
+---
+
+### 4. Post-reset confirmation checklist
+
+Run through the following checks after performing a reset to confirm the system has returned to normal operation:
+
+- [ ] **Breaker cleared** – `GET /api/system/status` returns `alertsActive: false` and `isTriggered: false` for the affected asset(s).
+- [ ] **Risk check passes** – `GET /api/risk/check/<PORTFOLIO_ID>` returns `"reasonCode": "CIRCUIT_BREAKER_ACTIVE"` no longer; `allowed: true` (assuming no other blocks are active).
+- [ ] **Price feed is live** – `GET /api/system/status` shows `"priceFeeds": true` under `services`. Stale or absent prices will re-trip the breaker on the next price tick if volatility is still high.
+- [ ] **Auto-rebalancer running** – `GET /api/system/status` → `autoRebalancer.status.isRunning: true`. If the auto-rebalancer paused due to the circuit-breaker event, restart it:
+  ```bash
+  curl -X POST https://<API_HOST>/api/auto-rebalancer/start \
+    -H "X-Admin-Key: <ADMIN_API_KEY>"
+  ```
+- [ ] **No repeat trips** – Monitor `GET /api/system/status` for 5–10 minutes after the reset. If the breaker re-trips immediately, the underlying market condition has not stabilised; **do not keep resetting manually** — investigate the price feed or wait for conditions to calm.
+- [ ] **Notification delivered** – If circuit-breaker notifications are enabled (`event_circuit_breaker` preference), confirm users received the event-cleared or rebalancing-resumed notification (check `GET /api/notifications` for recent entries).
+- [ ] **Audit log entry** – Confirm the admin action is reflected in application logs (search for `circuit-breaker reset` at `INFO` level).
+
+---
+
 ## Related docs
 
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
