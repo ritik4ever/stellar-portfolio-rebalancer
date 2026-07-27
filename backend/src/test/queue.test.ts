@@ -15,20 +15,18 @@ import type { Job } from 'bullmq'
 // functions, for classes that get called with `new`.
 
 vi.mock('../services/stellar.js', () => {
-    // eslint-disable-next-line @typescript-eslint/no-shadow
-    function StellarService(this: any) {
-        this.getPortfolio = vi.fn().mockResolvedValue({
-            id: 'test-portfolio-1',
-            userAddress: 'GTEST123456789',
-            allocations: { XLM: 60, USDC: 40 },
-            balances: { XLM: 1000, USDC: 400 },
-            totalValue: 1000,
-            threshold: 5,
-            lastRebalance: new Date(Date.now() - 25 * 3600000).toISOString(),
-        })
-        this.checkRebalanceNeeded = vi.fn().mockResolvedValue(true)
-        this.executeRebalance = vi.fn().mockResolvedValue({ trades: 2, gasUsed: '0.01 XLM' })
-    }
+    function StellarService(this: any) {}
+    StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
+        id: 'test-portfolio-1',
+        userAddress: 'GTEST123456789',
+        allocations: { XLM: 60, USDC: 40 },
+        balances: { XLM: 1000, USDC: 400 },
+        totalValue: 1000,
+        threshold: 5,
+        lastRebalance: new Date(Date.now() - 25 * 3600000).toISOString(),
+    })
+    StellarService.prototype.checkRebalanceNeeded = vi.fn().mockResolvedValue(true)
+    StellarService.prototype.executeRebalance = vi.fn().mockResolvedValue({ trades: 2, gasUsed: '0.01 XLM' })
     return { StellarService }
 })
 
@@ -105,13 +103,11 @@ vi.mock('../services/analyticsService.js', () => ({
     },
 }))
 
-vi.mock('../services/rebalanceLock.js', () => ({
-    rebalanceLockService: {
-        acquireLock: vi.fn().mockResolvedValue(true),
-        releaseLock: vi.fn().mockResolvedValue(true),
-        isLocked: vi.fn().mockResolvedValue(false),
-    },
-}))
+vi.mock('../queue/workers/workerRuntime.js', () => ({
+  acquireWorkerLock: vi.fn().mockResolvedValue(true),
+  releaseWorkerLock: vi.fn().mockResolvedValue(true),
+  createWorkerRuntimeStatus: vi.fn().mockReturnValue({}),
+}));
 
 vi.mock('../queue/queues.js', () => ({
     getRebalanceQueue: vi.fn().mockReturnValue({
@@ -139,8 +135,9 @@ import { processAnalyticsSnapshotJob } from '../queue/workers/analyticsSnapshotW
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { CircuitBreakers } from '../services/circuitBreakers.js'
 import { analyticsService } from '../services/analyticsService.js'
-import { rebalanceLockService } from '../services/rebalanceLock.js'
+import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
 import { getRebalanceQueue } from '../queue/queues.js'
+import { StellarService } from '../services/stellar.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -254,8 +251,8 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         // Reset lock service for each test
-        ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
-        ;(rebalanceLockService.releaseLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+        ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+        ;(releaseWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
     })
 
     describe('Retryable failure paths', () => {
@@ -263,7 +260,6 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             // Simulate a transient network error that should trigger a retry
             const stellarError = new Error('STELLAR_SERVICE_TEMPORARILY_UNAVAILABLE')
             
-            const StellarService = (global as any).StellarService
             StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(stellarError)
 
             const job = mockJob(
@@ -284,7 +280,6 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             const recordSpy = vi.spyOn(rebalanceHistoryService, 'recordRebalanceEvent')
 
             const stellarError = new Error('StellarService error')
-            const StellarService = (global as any).StellarService
             StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(stellarError)
 
             const job = mockJob(
@@ -315,7 +310,6 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             )
 
             const stellarError = new Error('Persistent error')
-            const StellarService = (global as any).StellarService
             StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(stellarError)
 
             await expect(processRebalanceJob(job)).rejects.toThrow()
@@ -327,7 +321,6 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
 
     describe('Terminal failures', () => {
         it('fails terminal failure (invalid portfolio) without retry', async () => {
-            const StellarService = (global as any).StellarService
             StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(
                 new Error('Portfolio not found')
             )
@@ -345,7 +338,6 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
             const recordSpy = vi.spyOn(rebalanceHistoryService, 'recordRebalanceEvent')
 
-            const StellarService = (global as any).StellarService
             StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
                 id: portfolioId,
                 userAddress: 'GTEST123456789',
@@ -374,14 +366,13 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
     describe('Duplicate protection & lock interactions', () => {
         it('prevents duplicate rebalances via lock acquisition', async () => {
             // First rebalance acquires lock
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
 
             const job1 = mockJob(
                 { portfolioId, triggeredBy: 'auto' as const },
                 'lock-test-1'
             )
 
-            const StellarService = (global as any).StellarService
             StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
                 id: portfolioId,
                 userAddress: 'GTEST123456789',
@@ -395,12 +386,12 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await processRebalanceJob(job1)
 
             // Lock was acquired
-            expect(rebalanceLockService.acquireLock).toHaveBeenCalledWith(portfolioId)
+            expect(acquireWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
 
         it('aborts rebalance when lock cannot be acquired (in-progress rebalance)', async () => {
             // Simulate another rebalance already in progress
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
 
             const job = mockJob({ portfolioId, triggeredBy: 'auto' as const })
 
@@ -408,7 +399,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await processRebalanceJob(job)
 
             // Lock release should NOT be called since it was never acquired
-            expect(rebalanceLockService.releaseLock).not.toHaveBeenCalled()
+            expect(releaseWorkerLock).not.toHaveBeenCalled()
 
             // History should NOT be recorded for skipped rebalances
             const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
@@ -417,10 +408,8 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
         })
 
         it('releases lock on both success and failure paths', async () => {
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
-            ;(rebalanceLockService.releaseLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
-
-            const StellarService = (global as any).StellarService
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+            ;(releaseWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(true)
 
             // Test failure path
             StellarService.prototype.getPortfolio = vi.fn().mockRejectedValue(
@@ -431,7 +420,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await expect(processRebalanceJob(failureJob)).rejects.toThrow()
 
             // Lock must be released on failure
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith('portfolio-fail')
+            expect(releaseWorkerLock).toHaveBeenCalledWith('portfolio-fail')
 
             vi.clearAllMocks()
 
@@ -450,18 +439,18 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await processRebalanceJob(successJob)
 
             // Lock must also be released on success
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+            expect(releaseWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
 
         it('ensures finally block executes to release lock during early returns', async () => {
             // Test scenario: lock not acquired, early return
-            ;(rebalanceLockService.acquireLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+            ;(acquireWorkerLock as ReturnType<typeof vi.fn>).mockResolvedValue(false)
 
             const job = mockJob({ portfolioId: 'skip-test', triggeredBy: 'auto' as const })
             await processRebalanceJob(job)
 
             // Should not call releaseLock since lock was never acquired
-            expect(rebalanceLockService.releaseLock).not.toHaveBeenCalled()
+            expect(releaseWorkerLock).not.toHaveBeenCalled()
         })
     })
 
@@ -485,7 +474,6 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
         })
 
         it('executes job processor deterministically given same inputs', async () => {
-            const StellarService = (global as any).StellarService
             const getPortfolioMock = vi.fn().mockResolvedValue({
                 id: portfolioId,
                 userAddress: 'GTEST123456789',

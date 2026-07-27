@@ -50,7 +50,7 @@ describe('usePortfolio', () => {
     })
 
     it('exposes loading state during fetch', async () => {
-        let resolveGet: ((value: any) => void) | null = null
+        let resolveGet!: (value: any) => void
         vi.spyOn(api, 'get').mockImplementation(
             () =>
                 new Promise(res => {
@@ -61,7 +61,7 @@ describe('usePortfolio', () => {
         render(<TestComponent portfolioId="p1" />)
         expect(screen.getByTestId('loading').textContent).toBe('true')
 
-        resolveGet?.({
+        resolveGet({
             portfolio: { id: 'p1', totalValue: 100, allocations: [], needsRebalance: false, lastRebalance: '' },
         })
         await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
@@ -77,7 +77,7 @@ describe('usePortfolio', () => {
                 portfolio: { id: 'p1', totalValue: 120, allocations: [], needsRebalance: false, lastRebalance: 'new' },
             } as any)
 
-        let resolvePost: ((value: any) => void) | null = null
+        let resolvePost!: (value: any) => void
         vi.spyOn(api, 'post').mockImplementation(
             () =>
                 new Promise(res => {
@@ -91,7 +91,7 @@ describe('usePortfolio', () => {
         fireEvent.click(screen.getByRole('button', { name: 'rebalance' }))
         await waitFor(() => expect(screen.getByTestId('needs-rebalance').textContent).toBe('false'))
 
-        resolvePost?.({ ok: true })
+        resolvePost({ ok: true })
         await waitFor(() => expect(getSpy).toHaveBeenCalledTimes(2))
     })
 

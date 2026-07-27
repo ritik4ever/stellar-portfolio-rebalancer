@@ -3,13 +3,29 @@ import { databaseService } from '../services/databaseService.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
-import { consentStatusQuerySchema, recordConsentSchema } from './validation.js'
+import {
+    consentAuditQuerySchema,
+    consentGrantSchema,
+    consentStatusQuerySchema,
+    consentRevokeSchema,
+    recordConsentSchema
+} from './validation.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { protectedWriteLimiter, protectedCriticalLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 
 export const consentRouter = Router()
+
+function consentRequestMeta(req: Request): { ipAddress?: string; userAgent?: string } {
+    return {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.get('user-agent')
+    }
+}
+
+function resolveConsentUserId(req: Request, candidate?: string): string | undefined {
+    return req.user?.address ?? candidate
+}
 
 /** Get consent status for a user. Required before using the app. */
 consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (req: Request, res: Response) => {
@@ -21,7 +37,10 @@ consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (r
             accepted,
             termsAcceptedAt: consent?.termsAcceptedAt ?? null,
             privacyAcceptedAt: consent?.privacyAcceptedAt ?? null,
-            cookieAcceptedAt: consent?.cookieAcceptedAt ?? null
+            cookieAcceptedAt: consent?.cookieAcceptedAt ?? null,
+            revokedAt: consent?.revokedAt ?? null,
+            active: consent?.active ?? false,
+            documentVersion: consent?.documentVersion ?? null
         })
     } catch (error) {
         logger.error('[ERROR] Consent status failed', { error: getErrorObject(error) })
@@ -29,22 +48,141 @@ consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (r
     }
 })
 
-/** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-consentRouter.post('/consent', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
+/** GDPR: Grant active consent and append an immutable audit event. */
+consentRouter.post('/consent/grant', requireJwtWhenEnabled, idempotencyMiddleware, validateRequest(consentGrantSchema), (req: Request, res: Response) => {
     try {
-        const { userId, terms, privacy, cookies } = req.body
-        const ipAddress = req.ip ?? req.socket?.remoteAddress
-        const userAgent = req.get('user-agent')
-        databaseService.recordConsent(userId, { terms, privacy, cookies, ipAddress, userAgent })
-        return ok(res, { message: 'Consent recorded', accepted: true })
+        const userId = resolveConsentUserId(req, req.body.userId)
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        const meta = consentRequestMeta(req)
+        databaseService.recordConsent(userId, {
+            terms: req.body.terms,
+            privacy: req.body.privacy,
+            cookies: req.body.cookies,
+            documentText: req.body.documentText,
+            ...meta
+        })
+        const consent = databaseService.getConsent(userId)
+        return ok(res, {
+            message: 'Consent granted',
+            accepted: databaseService.hasFullConsent(userId),
+            userId,
+            termsAcceptedAt: consent?.termsAcceptedAt ?? null,
+            privacyAcceptedAt: consent?.privacyAcceptedAt ?? null,
+            cookieAcceptedAt: consent?.cookieAcceptedAt ?? null,
+            revokedAt: consent?.revokedAt ?? null,
+            active: consent?.active ?? false,
+            documentVersion: consent?.documentVersion ?? null,
+            ipAddress: meta.ipAddress ?? null
+        })
+    } catch (error) {
+        logger.error('[ERROR] Grant consent failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** GDPR: Revoke active consent and append an immutable audit event. */
+consentRouter.post('/consent/revoke', requireJwtWhenEnabled, idempotencyMiddleware, validateRequest(consentRevokeSchema), (req: Request, res: Response) => {
+    try {
+        const userId = resolveConsentUserId(req, req.body.userId)
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        const meta = consentRequestMeta(req)
+        databaseService.revokeConsent(userId, { ...meta, documentText: req.body.documentText })
+        const consent = databaseService.getConsent(userId)
+        return ok(res, {
+            message: 'Consent revoked',
+            accepted: false,
+            userId,
+            revokedAt: consent?.revokedAt ?? null,
+            active: consent?.active ?? false,
+            documentVersion: consent?.documentVersion ?? null
+        })
+    } catch (error) {
+        logger.error('[ERROR] Revoke consent failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** GDPR: Return append-only grant/revoke audit events for a user. */
+consentRouter.get('/consent/audit', requireJwtWhenEnabled, validateQuery(consentAuditQuerySchema), (req: Request, res: Response) => {
+    try {
+        const userId = resolveConsentUserId(req, (req.query.userId ?? req.query.user_id) as string | undefined)
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        return ok(res, {
+            userId,
+            events: databaseService.getConsentAudit(userId)
+        })
+    } catch (error) {
+        logger.error('[ERROR] Consent audit failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
+consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
+    try {
+        const { userId, terms, privacy, cookies, documentText } = req.body
+        databaseService.recordConsent(userId, { terms, privacy, cookies, documentText, ...consentRequestMeta(req) })
+        const consent = databaseService.getConsent(userId)
+        return ok(res, { message: 'Consent recorded', accepted: true, documentVersion: consent?.documentVersion ?? null })
     } catch (error) {
         logger.error('[ERROR] Record consent failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
+/** GDPR: Return full consent history export for the current user (consent records + audit events). */
+consentRouter.get('/consent/history', requireJwtWhenEnabled, (req: Request, res: Response) => {
+    try {
+        const userId = resolveConsentUserId(req)
+        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        const consent = databaseService.getConsent(userId)
+        const auditEvents = databaseService.getConsentAudit(userId)
+        return ok(res, {
+            userId,
+            consent: consent ? {
+                termsAcceptedAt: consent.termsAcceptedAt,
+                privacyAcceptedAt: consent.privacyAcceptedAt,
+                cookieAcceptedAt: consent.cookieAcceptedAt,
+                revokedAt: consent.revokedAt,
+                active: consent.active,
+                documentVersion: consent.documentVersion,
+            } : null,
+            history: auditEvents.map(e => ({
+                id: e.id,
+                action: e.action,
+                timestamp: e.timestamp,
+                ipAddress: e.ipAddress,
+                userAgent: e.userAgent,
+                documentVersion: e.documentVersion,
+            })),
+        })
+    } catch (error) {
+        logger.error('[ERROR] Consent history failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** GDPR: Purge consent audit events older than the configured retention period. */
+consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, (req: Request, res: Response) => {
+    try {
+        const retentionDays = req.body.retentionDays !== undefined ? parseInt(req.body.retentionDays as string) : parseInt(process.env.CONSENT_AUDIT_RETENTION_DAYS || '365')
+        if (!Number.isInteger(retentionDays) || retentionDays < 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'retentionDays must be a non-negative integer')
+        }
+        const deletedCount = databaseService.purgeOldConsentAuditEvents(retentionDays)
+        return ok(res, {
+            message: `Consent audit events purged`,
+            retentionDays,
+            deletedCount
+        })
+    } catch (error) {
+        logger.error('[ERROR] Purge consent audit failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 /** GDPR: Delete all data for a user (portfolios, history, consent). Requires JWT when enabled. */
-consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, ...protectedCriticalLimiter, async (req: Request, res: Response) => {
+consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
         const address = req.params.address
         const userId = req.user?.address ?? address
@@ -63,4 +201,3 @@ consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, ...protectedC
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
-

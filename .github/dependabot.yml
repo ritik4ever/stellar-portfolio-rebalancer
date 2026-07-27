@@ -1,0 +1,163 @@
+version: 2
+updates:
+  # Root npm dependencies
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    allow-auto-merge: true
+    allow-auto-delete: true
+    assignees:
+      - nonso7
+    reviewers:
+      - nonso7
+    versioning-strategy: increase
+    groups:
+      # Patch updates: auto-approve and auto-merge if CI passes
+      patch-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "patch"
+        update-types:
+          - "patch"
+      # Minor updates: separate PRs, require review
+      minor-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "minor"
+        update-types:
+          - "minor"
+      # Major updates: separate PRs, assign to maintainers
+      major-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "major"
+        update-types:
+          - "major"
+    ignore-conditions:
+      - dependency-type: "direct:peer"
+
+  # Backend npm dependencies
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    allow-auto-merge: true
+    allow-auto-delete: true
+    assignees:
+      - nonso7
+    reviewers:
+      - nonso7
+    versioning-strategy: increase
+    groups:
+      # Patch updates: auto-approve and auto-merge if CI passes
+      patch-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "patch"
+        update-types:
+          - "patch"
+      # Minor updates: separate PRs, require review
+      minor-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "minor"
+        update-types:
+          - "minor"
+      # Major updates: separate PRs, assign to maintainers
+      major-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "major"
+        update-types:
+          - "major"
+    ignore-conditions:
+      - dependency-type: "direct:peer"
+
+  # Frontend npm dependencies
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    allow-auto-merge: true
+    allow-auto-delete: true
+    assignees:
+      - nonso7
+    reviewers:
+      - nonso7
+    versioning-strategy: increase
+    groups:
+      # Patch updates: auto-approve and auto-merge if CI passes
+      patch-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "patch"
+        update-types:
+          - "patch"
+      # Minor updates: separate PRs, require review
+      minor-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "minor"
+        update-types:
+          - "minor"
+      # Major updates: separate PRs, assign to maintainers
+      major-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "major"
+        update-types:
+          - "major"
+    ignore-conditions:
+      - dependency-type: "direct:peer"
+
+  # Contracts Cargo dependencies
+  - package-ecosystem: cargo
+    directory: /contracts
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 4
+    allow-auto-merge: true
+    allow-auto-delete: true
+    assignees:
+      - nonso7
+    reviewers:
+      - nonso7
+    versioning-strategy: increase
+    groups:
+      # Patch updates: auto-approve and auto-merge if CI passes
+      patch-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "patch"
+        update-types:
+          - "patch"
+      # Minor updates: separate PRs, require review
+      minor-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "minor"
+        update-types:
+          - "minor"
+      # Major updates: separate PRs, assign to maintainers
+      major-dependencies:
+        patterns:
+          - "*"
+        dependency-types:
+          - "major"
+        update-types:
+          - "major"

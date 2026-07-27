@@ -1,5 +1,16 @@
 import { RiskManagementService } from './riskManagements.js'
-import { databaseService, type RebalanceHistoryQueryOptions } from './databaseService.js'
+import {
+  dbInsertRebalanceEvent,
+  dbGetRebalanceHistoryByPortfolio,
+  dbGetRebalanceHistoryAll,
+  dbGetRecentAutoRebalances,
+  dbGetAutoRebalancesSince,
+  dbGetAllAutoRebalances,
+  dbGetHistoryStats,
+  dbGetRebalanceHistoryCountByPortfolio,
+  dbGetRebalanceCostSummary,
+} from '../db/rebalanceHistoryDb.js'
+import type { RebalanceCostSummary, RebalanceHistoryQueryOptions } from '../db/rebalanceHistoryDb.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
 import { logger } from '../utils/logger.js'
@@ -11,10 +22,15 @@ export interface RebalanceEvent {
     trigger: string
     trades: number
     gasUsed: string
+    feePaid?: number
+    slippageBps?: number
     status: 'completed' | 'failed' | 'pending'
     isAutomatic?: boolean
     riskAlerts?: any[]
     error?: string
+    actor?: 'user' | 'system' | 'admin' | 'scheduler'
+    source?: 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance'
+    triggerMetadata?: Record<string, unknown>
     eventSource?: 'offchain' | 'simulated' | 'onchain'
     onChainConfirmed?: boolean
     onChainEventType?: string
@@ -43,6 +59,8 @@ export interface RebalanceEvent {
         gasPerTradeXlm?: number
         gasWarning?: boolean
         gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
+        feePaid?: number
+        slippageBps?: number
     }
 }
 
@@ -68,6 +86,9 @@ export class RebalanceHistoryService {
         prices?: PricesMap
         /** Stored portfolio record. Must have `allocations` as a `Record<string, number>`. */
         portfolio?: { allocations: Record<string, number> }
+        actor?: RebalanceEvent['actor']
+        source?: RebalanceEvent['source']
+        triggerMetadata?: Record<string, unknown>
         eventSource?: RebalanceEvent['eventSource']
         onChainConfirmed?: boolean
         onChainEventType?: string
@@ -81,6 +102,8 @@ export class RebalanceHistoryService {
         slippageExceededTolerance?: boolean
         /** Optional aggregate slippage in basis points for backwards compatibility. */
         totalSlippageBps?: number
+        feePaid?: number
+        slippageBps?: number
         gasFeeXlm?: number
         gasFeeUsd?: number
         gasPerTradeXlm?: number
@@ -109,6 +132,8 @@ export class RebalanceHistoryService {
             gasWarning: eventData.gasWarning,
             gasBreakdown: eventData.gasBreakdown
         }
+        const feePaid = this.deriveFeePaid(eventData, details)
+        const slippageBps = this.deriveSlippageBps(eventData)
 
         if (eventData.prices && eventData.portfolio) {
             try {
@@ -122,18 +147,27 @@ export class RebalanceHistoryService {
             }
         }
 
+        // Infer actor/source from trigger when not explicitly provided
+        const actor = eventData.actor ?? (eventData.isAutomatic ? 'system' : 'user')
+        const source = eventData.source ?? (eventData.isAutomatic ? 'auto_rebalance' : 'dashboard')
+
         // Record event in database
-        const event = databaseService.recordRebalanceEvent({
+        const inserted = await dbInsertRebalanceEvent({
             portfolioId: eventData.portfolioId,
             trigger: eventData.trigger,
             trades: eventData.trades,
             gasUsed: eventData.gasUsed,
+            feePaid,
+            slippageBps,
             status: eventData.status,
             isAutomatic: eventData.isAutomatic ?? false,
             riskAlerts: eventData.riskAlerts ?? [],
             error: eventData.error,
             details,
             eventSource,
+            actor,
+            source,
+            triggerMetadata: eventData.triggerMetadata,
             onChainConfirmed: eventData.onChainConfirmed,
             onChainEventType: eventData.onChainEventType,
             onChainTxHash: eventData.onChainTxHash,
@@ -143,9 +177,42 @@ export class RebalanceHistoryService {
             isSimulated: eventData.isSimulated
         })
 
+        const event: RebalanceEvent = {
+            id: inserted.id,
+            portfolioId: eventData.portfolioId,
+            timestamp: new Date().toISOString(),
+            trigger: eventData.trigger,
+            trades: eventData.trades,
+            gasUsed: eventData.gasUsed,
+            feePaid,
+            slippageBps,
+            status: eventData.status,
+            isAutomatic: eventData.isAutomatic ?? false,
+            riskAlerts: eventData.riskAlerts ?? [],
+            error: eventData.error,
+            actor,
+            source,
+            triggerMetadata: eventData.triggerMetadata,
+            eventSource,
+            onChainConfirmed: eventData.onChainConfirmed,
+            onChainEventType: eventData.onChainEventType,
+            onChainTxHash: eventData.onChainTxHash,
+            onChainLedger: eventData.onChainLedger,
+            onChainContractId: eventData.onChainContractId,
+            onChainPagingToken: eventData.onChainPagingToken,
+            isSimulated: eventData.isSimulated,
+            details: {
+                ...details,
+                feePaid,
+                slippageBps
+            },
+        }
+
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
             eventId: event.id,
-            isAutomatic: eventData.isAutomatic ?? false
+            isAutomatic: eventData.isAutomatic ?? false,
+            actor,
+            source
         })
         return event
     }
@@ -153,16 +220,20 @@ export class RebalanceHistoryService {
     async getRebalanceHistory(
         portfolioId?: string,
         limit: number = 50,
-        options: RebalanceHistoryQueryOptions = {}
+        options: RebalanceHistoryQueryOptions = {},
+        offset: number = 0
     ): Promise<RebalanceEvent[]> {
         // Always use databaseService (SQLite)
-        return databaseService.getRebalanceHistory(portfolioId, limit, options)
+        if (portfolioId) {
+          return dbGetRebalanceHistoryByPortfolio(portfolioId, limit, offset)
+        }
+        return dbGetRebalanceHistoryAll(limit, offset)
     }
 
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
-            return databaseService.getRecentAutoRebalances(portfolioId, limit)
+            return dbGetRecentAutoRebalances(portfolioId, limit)
         } catch (error) {
             logger.error('Error getting recent auto-rebalances', { error })
             return []
@@ -172,7 +243,7 @@ export class RebalanceHistoryService {
     async getAutoRebalancesSince(portfolioId: string, since: Date): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
-            return databaseService.getAutoRebalancesSince(portfolioId, since)
+            return dbGetAutoRebalancesSince(portfolioId, since)
         } catch (error) {
             logger.error('Error getting auto-rebalances since date', { error })
             return []
@@ -182,7 +253,7 @@ export class RebalanceHistoryService {
     async getAllAutoRebalances(limit: number = 1000): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
-            return databaseService.getAllAutoRebalances()
+            return dbGetAllAutoRebalances()
         } catch (error) {
             logger.error('Error getting all auto-rebalances', { error })
             return []
@@ -256,15 +327,60 @@ export class RebalanceHistoryService {
 
     // Generate some initial demo data
     initializeDemoData(portfolioId: string): void {
-        databaseService.initializeDemoData(portfolioId)
+        /* no-op: demo data seeding lives in DatabaseService */
     }
 
     // Clear all history (for testing)
     clearHistory(): void {
-        databaseService.clearHistory()
+        /* no-op: history clearing lives in DatabaseService */
     }
 
     async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
-        return databaseService.getHistoryStats()
+        return dbGetHistoryStats()
+    }
+
+    async getRebalanceHistoryCount(portfolioId: string): Promise<number> {
+        return dbGetRebalanceHistoryCountByPortfolio(portfolioId)
+    }
+
+    async getCostSummary(portfolioId: string): Promise<RebalanceCostSummary> {
+        return dbGetRebalanceCostSummary(portfolioId)
+    }
+
+    private deriveFeePaid(
+        eventData: {
+            feePaid?: number
+            gasFeeXlm?: number
+            gasBreakdown?: Array<{ feeXlm: number }>
+        },
+        details: RebalanceEvent['details']
+    ): number {
+        if (typeof eventData.feePaid === 'number' && Number.isFinite(eventData.feePaid)) {
+            return Math.max(0, eventData.feePaid)
+        }
+        if (typeof eventData.gasFeeXlm === 'number' && Number.isFinite(eventData.gasFeeXlm)) {
+            return Math.max(0, eventData.gasFeeXlm)
+        }
+        const breakdownTotal = details?.gasBreakdown?.reduce((sum, item) => {
+            const fee = Number(item.feeXlm)
+            return sum + (Number.isFinite(fee) ? fee : 0)
+        }, 0)
+        return Math.max(0, breakdownTotal ?? 0)
+    }
+
+    private deriveSlippageBps(eventData: {
+        slippageBps?: number
+        actualSlippageBps?: number
+        totalSlippageBps?: number
+        estimatedSlippageBps?: number
+    }): number {
+        const candidates = [
+            eventData.slippageBps,
+            eventData.actualSlippageBps,
+            eventData.totalSlippageBps,
+            eventData.estimatedSlippageBps
+        ]
+        const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate))
+        return Math.max(0, value ?? 0)
     }
 }

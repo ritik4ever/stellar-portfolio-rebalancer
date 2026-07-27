@@ -1,0 +1,459 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RebalanceHistory > snapshots > matches snapshot in empty state 1`] = `
+<div>
+  <section
+    aria-labelledby="rebalance-history-heading"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm"
+  >
+    <header
+      class="p-6 border-b border-gray-200 dark:border-gray-700"
+    >
+      <div
+        class="flex items-center justify-between"
+      >
+        <div>
+          <h2
+            class="text-lg font-semibold text-gray-900 dark:text-white"
+            id="rebalance-history-heading"
+          >
+            Rebalance history
+          </h2>
+          <p
+            class="text-sm text-gray-500 dark:text-gray-400 mt-1"
+          >
+            Recent portfolio rebalancing activities with risk management
+          </p>
+        </div>
+        <div
+          class="flex items-center space-x-3"
+        >
+          <button
+            class="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+            disabled=""
+            type="button"
+          >
+            Export CSV
+          </button>
+        </div>
+      </div>
+      <div
+        class="p-6 text-center text-gray-500 dark:text-gray-400"
+        role="status"
+      >
+        <svg
+          aria-hidden="true"
+          class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+          />
+          <polyline
+            points="12 6 12 12 16 14"
+          />
+        </svg>
+        <p>
+          No rebalancing history yet
+        </p>
+        <p
+          class="text-sm mt-1"
+        >
+          Portfolio rebalances will appear here when they occur
+        </p>
+      </div>
+    </header>
+  </section>
+</div>
+`;
+
+exports[`RebalanceHistory > snapshots > matches snapshot in error state 1`] = `
+<div>
+  <section
+    aria-labelledby="rebalance-history-heading"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm"
+  >
+    <header
+      class="p-6 border-b border-gray-200 dark:border-gray-700"
+    >
+      <div
+        class="flex items-center justify-between"
+      >
+        <div>
+          <h2
+            class="text-lg font-semibold text-gray-900 dark:text-white"
+            id="rebalance-history-heading"
+          >
+            Rebalance history
+          </h2>
+          <p
+            class="text-sm text-gray-500 dark:text-gray-400 mt-1"
+          >
+            Recent portfolio rebalancing activities with risk management
+          </p>
+        </div>
+        <div
+          class="flex items-center space-x-3"
+        >
+          <button
+            class="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+            disabled=""
+            type="button"
+          >
+            Export CSV
+          </button>
+          <div
+            class="text-sm text-red-600 bg-red-50 dark:bg-red-900/30 px-3 py-1 rounded"
+          >
+            Failed to load rebalance history
+          </div>
+        </div>
+      </div>
+      <div
+        class="p-6 text-center text-gray-500 dark:text-gray-400"
+        role="status"
+      >
+        <svg
+          aria-hidden="true"
+          class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+          />
+          <polyline
+            points="12 6 12 12 16 14"
+          />
+        </svg>
+        <p>
+          No rebalancing history yet
+        </p>
+        <p
+          class="text-sm mt-1"
+        >
+          Portfolio rebalances will appear here when they occur
+        </p>
+      </div>
+    </header>
+  </section>
+</div>
+`;
+
+exports[`RebalanceHistory > snapshots > matches snapshot in loading state 1`] = `
+<div>
+  <div
+    aria-busy="true"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6"
+    data-testid="rebalance-history-skeleton"
+  >
+    <div
+      class="animate-pulse"
+    >
+      <div
+        class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"
+      />
+      <div
+        class="space-y-3"
+      >
+        <div
+          class="h-16 bg-gray-100 dark:bg-gray-700 rounded"
+        />
+        <div
+          class="h-16 bg-gray-100 dark:bg-gray-700 rounded"
+        />
+        <div
+          class="h-16 bg-gray-100 dark:bg-gray-700 rounded"
+        />
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`RebalanceHistory > snapshots > matches snapshot with fetched history data 1`] = `
+<div>
+  <section
+    aria-labelledby="rebalance-history-heading"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm"
+  >
+    <header
+      class="p-6 border-b border-gray-200 dark:border-gray-700"
+    >
+      <div
+        class="flex items-center justify-between"
+      >
+        <div>
+          <h2
+            class="text-lg font-semibold text-gray-900 dark:text-white"
+            id="rebalance-history-heading"
+          >
+            Rebalance history
+          </h2>
+          <p
+            class="text-sm text-gray-500 dark:text-gray-400 mt-1"
+          >
+            Recent portfolio rebalancing activities with risk management
+          </p>
+        </div>
+        <div
+          class="flex items-center space-x-3"
+        >
+          <button
+            class="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+            type="button"
+          >
+            Export CSV
+          </button>
+        </div>
+      </div>
+      <div
+        class="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        role="listitem"
+      >
+        <div
+          class="flex items-start justify-between"
+        >
+          <div
+            class="flex items-start space-x-4"
+          >
+            <div
+              class="flex-shrink-0"
+            >
+              <div
+                class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"
+              >
+                <svg
+                  class="w-5 h-5 text-green-600"
+                  fill="none"
+                  height="24"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                  width="24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M22 11.08V12a10 10 0 1 1-5.93-9.14"
+                  />
+                  <polyline
+                    points="22 4 12 14.01 9 11.01"
+                  />
+                </svg>
+              </div>
+            </div>
+            <div
+              class="flex-1 min-w-0"
+            >
+              <div
+                class="flex items-center space-x-2 mb-2"
+              >
+                <span
+                  class="font-medium text-gray-900 dark:text-white"
+                >
+                  Automatic Rebalancing
+                </span>
+                <span
+                  class="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded"
+                >
+                  2
+                   trade
+                  s
+                </span>
+                <span
+                  class="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded"
+                >
+                  Off-chain
+                </span>
+              </div>
+              <div
+                class="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400 mb-2"
+              >
+                <div
+                  class="flex items-center"
+                >
+                  <svg
+                    class="w-4 h-4 mr-1"
+                    fill="none"
+                    height="24"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <rect
+                      height="18"
+                      rx="2"
+                      ry="2"
+                      width="18"
+                      x="3"
+                      y="4"
+                    />
+                    <line
+                      x1="16"
+                      x2="16"
+                      y1="2"
+                      y2="6"
+                    />
+                    <line
+                      x1="8"
+                      x2="8"
+                      y1="2"
+                      y2="6"
+                    />
+                    <line
+                      x1="3"
+                      x2="21"
+                      y1="10"
+                      y2="10"
+                    />
+                  </svg>
+                  <span
+                    class="font-medium"
+                  >
+                    Jan 15, 2025
+                  </span>
+                  <span
+                    class="mx-1"
+                  >
+                    at
+                  </span>
+                  <span>
+                    11:30:00 AM
+                  </span>
+                </div>
+                <span
+                  class="text-gray-300 dark:text-gray-600"
+                >
+                  •
+                </span>
+                <div
+                  class="flex items-center"
+                >
+                  <svg
+                    class="w-4 h-4 mr-1"
+                    fill="none"
+                    height="24"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                    />
+                    <polyline
+                      points="12 6 12 12 16 14"
+                    />
+                  </svg>
+                  529 days ago
+                </div>
+              </div>
+              <div
+                class="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400 mb-2"
+              >
+                <span>
+                  Gas: 
+                  0.02 XLM
+                </span>
+              </div>
+              <div
+                class="flex items-center space-x-2 mb-2"
+              />
+            </div>
+          </div>
+          <svg
+            class="w-4 h-4 text-gray-400 mt-2"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M5 12h14"
+            />
+            <path
+              d="m12 5 7 7-7 7"
+            />
+          </svg>
+        </div>
+      </div>
+    </header>
+    <div
+      class="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50"
+    >
+      <div
+        class="flex flex-col sm:flex-row items-center justify-between gap-4"
+      >
+        <div
+          class="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400"
+        >
+          <span>
+            Showing 1 of 0 rebalances
+          </span>
+          <div
+            class="hidden md:flex items-center space-x-4"
+          >
+            <div
+              class="flex items-center"
+            >
+              <div
+                aria-hidden="true"
+                class="w-2 h-2 bg-green-500 rounded-full mr-1"
+              />
+              <span>
+                Automated
+              </span>
+            </div>
+            <div
+              class="flex items-center"
+            >
+              <div
+                aria-hidden="true"
+                class="w-2 h-2 bg-orange-500 rounded-full mr-1"
+              />
+              <span>
+                Risk
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+`;

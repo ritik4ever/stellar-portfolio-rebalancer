@@ -1,5 +1,5 @@
-import { Server } from '@stellar/stellar-sdk'
-import { Contract } from '@stellar/stellar-sdk'
+import { Horizon, Contract } from '@stellar/stellar-sdk'
+const { Server } = Horizon
 import { validateStartupConfigOrThrow } from '../config/startupConfig.js'
 import { logger } from '../utils/logger.js'
 

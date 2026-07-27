@@ -3,12 +3,18 @@ import { WalletAdapter, WalletType, getAdapter, getAvailableAdapters, WalletErro
 const STORAGE_KEY_WALLET_TYPE = 'wallet_type'
 const STORAGE_KEY_PUBLIC_KEY = 'stellar_public_key'
 const STORAGE_KEY_WALLET_CONNECTED = 'wallet_connected'
+const STORAGE_KEY_AUTO_RECONNECT = 'wallet_auto_reconnect'
 
 export class WalletManager {
     private currentAdapter: WalletAdapter | null = null
     private currentPublicKey: string | null = null
 
     async connect(walletType: WalletType): Promise<string> {
+        // Clear any stale state before attempting connection
+        this.clearStorage()
+        this.currentAdapter = null
+        this.currentPublicKey = null
+
         const adapter = getAdapter(walletType)
         if (!adapter) {
             throw new WalletError(`Wallet adapter not found: ${walletType}`, 'ADAPTER_NOT_FOUND', walletType)
@@ -30,6 +36,8 @@ export class WalletManager {
             return publicKey
         } catch (error) {
             this.clearStorage()
+            this.currentAdapter = null
+            this.currentPublicKey = null
             throw error
         }
     }
@@ -100,6 +108,15 @@ export class WalletManager {
 
     getAvailableWallets() {
         return getAvailableAdapters()
+    }
+
+    setAutoReconnect(enabled: boolean): void {
+        localStorage.setItem(STORAGE_KEY_AUTO_RECONNECT, enabled ? 'true' : 'false')
+    }
+
+    getAutoReconnect(): boolean {
+        const val = localStorage.getItem(STORAGE_KEY_AUTO_RECONNECT)
+        return val !== 'false'
     }
 
     private clearStorage(): void {

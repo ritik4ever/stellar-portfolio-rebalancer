@@ -26,7 +26,25 @@ scrape_configs:
       - targets:
           - http://backend:3001/readiness
           - http://backend:3001/health
+          - http://backend:3001/
+          - http://backend:3001/api-docs
+          - http://backend:3001/api-docs.json
           - http://frontend:80/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: portfolio-websocket
+    metrics_path: /probe
+    params:
+      module: [websocket]
+    static_configs:
+      - targets:
+          - http://backend:3001/
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
