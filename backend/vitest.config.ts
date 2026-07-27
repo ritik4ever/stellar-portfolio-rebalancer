@@ -37,6 +37,7 @@ export default defineConfig({
             'src/test/reflector.service.test.ts',
             'src/test/requireJwt.test.ts',
             'src/test/revokeDeviceSession.test.ts',
+            'src/test/notificationDelivery.test.ts',
         ],
         /** SQLite temp files + singleton DB modules: sequential files avoid EBUSY flakes on Windows/CI. */
         fileParallelism: false,
