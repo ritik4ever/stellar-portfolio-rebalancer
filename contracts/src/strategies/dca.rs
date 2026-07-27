@@ -1,6 +1,6 @@
 // DCA (Dollar Cost Averaging) strategy implementation
+use crate::{portfolio, types::*, PortfolioRebalancer};
 use soroban_sdk::{Address, Env, Map};
-use crate::{types::*, portfolio, PortfolioRebalancer};
 
 /// Configure DCA settings for a portfolio.
 /// Only the portfolio owner (or steward) may call.

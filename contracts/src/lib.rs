@@ -26,7 +26,6 @@ fn validate_slippage_policy_version(version: u32) -> bool {
     version == CURRENT_SLIPPAGE_POLICY_VERSION
 }
 
-
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
     let last: Option<u64> = env.storage().instance().get(&DataKey::LastTimestamp);
@@ -91,7 +90,8 @@ impl PortfolioRebalancer {
             return Err(Error::InvalidThreshold);
         }
 
-        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance) {
+        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance)
+        {
             return Err(Error::InvalidSlippageTolerance);
         }
 
@@ -120,7 +120,6 @@ impl PortfolioRebalancer {
 
         let _estimated_footprint =
             portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
-
 
         env.storage()
             .persistent()
@@ -275,7 +274,6 @@ impl PortfolioRebalancer {
         } else {
             false
         }
-
     }
 
     pub fn execute_rebalance(
@@ -309,7 +307,13 @@ impl PortfolioRebalancer {
             .set(&DataKey::ContractPauseReason, &reason);
     }
 
-    pub fn configure_dca(env: Env, portfolio_id: u64, enabled: bool, amount: i128, interval: u64) -> Result<(), Error> {
+    pub fn configure_dca(
+        env: Env,
+        portfolio_id: u64,
+        enabled: bool,
+        amount: i128,
+        interval: u64,
+    ) -> Result<(), Error> {
         dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
     }
 
@@ -367,7 +371,6 @@ impl PortfolioRebalancer {
         CONTRACT_EVENT_SCHEMA_VERSION
     }
 
-
     pub fn capabilities(_env: Env) -> u32 {
         let mut flags: u32 = 0;
         flags |= CapabilityFlag::PerPortfolioSteward as u32;
@@ -388,7 +391,6 @@ impl PortfolioRebalancer {
             max_portfolio_assets: MAX_PORTFOLIO_ASSETS,
         }
     }
-
 
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -413,6 +415,7 @@ impl PortfolioRebalancer {
             })
     }
 
+    // Upgrade logic is intentionally kept in lib.rs; duplicate module removed.
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
@@ -668,7 +671,6 @@ impl PortfolioRebalancer {
             return Err(Error::InvalidAllocationSum);
         }
 
-
         portfolio::check_portfolio_invariants(&portfolio)?;
 
         if !portfolio.is_active {
@@ -738,7 +740,6 @@ impl PortfolioRebalancer {
             ) {
                 Ok(v) => v,
                 Err(_) => return Err(Error::StaleData),
-
             };
 
             if total_value > 0 {
@@ -823,7 +824,11 @@ impl PortfolioRebalancer {
         nav::snapshot_nav(&env, portfolio_id)
     }
 
-    pub fn get_nav_history(env: Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
+    pub fn get_nav_history(
+        env: Env,
+        portfolio_id: u64,
+        limit: u32,
+    ) -> Result<Vec<NavSnapshot>, Error> {
         nav::get_nav_history(&env, portfolio_id, limit)
     }
 }

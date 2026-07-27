@@ -303,12 +303,15 @@ pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, time
     );
 }
 
-pub fn emit_dca_executed(env: &Env, portfolio_id: u64, amount: i128, purchases: Map<Address, i128>, timestamp: u64) {
+pub fn emit_dca_executed(
+    env: &Env,
+    portfolio_id: u64,
+    amount: i128,
+    purchases: Map<Address, i128>,
+    timestamp: u64,
+) {
     env.events().publish(
-        (
-            symbol_short!("portfolio"),
-            Symbol::new(env, "dca_executed"),
-        ),
+        (symbol_short!("portfolio"), Symbol::new(env, "dca_executed")),
         (portfolio_id, amount, purchases, timestamp),
     );
 }
