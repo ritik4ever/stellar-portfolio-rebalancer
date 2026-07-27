@@ -109,8 +109,27 @@ To prevent users from interacting with a degraded platform, serve a maintenance 
 ## 4. Rollback Procedures
 
 ### 4.1 Smart Contract Rollback
-Soroban smart contracts are immutable. There is no built-in on-chain upgrade method. 
-If a critical contract bug requires a rollback:
+The contract exposes an `upgrade()` entrypoint that calls
+`update_current_contract_wasm` to swap the on-chain WASM blob. This allows
+reverting to a previous code version without deploying a new contract ID.
+
+**When rollback is safe:** if the upgrade was a plain WASM swap and no
+storage-migration hook mutated persistent entries, you can point the contract
+back to the previous WASM hash:
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source <STELLAR_SECRET_KEY> \
+  --network <STELLAR_NETWORK> \
+  -- upgrade \
+  --new_wasm_hash $PREVIOUS_WASM_HASH
+```
+
+**When rollback requires a new contract:** if `migrate_storage` transformed
+storage entries during the upgrade, the old WASM cannot deserialize the
+migrated data. In that case:
+
 1.  **Deploy Corrected Contract**: Build and deploy a corrected version of the contract to obtain a new Contract ID:
     ```bash
     cd contracts
