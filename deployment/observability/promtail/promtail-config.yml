@@ -7,8 +7,19 @@ positions:
 
 clients:
   - url: http://loki:3100/loki/api/v1/push
+    # Retry settings – surface push failures in Promtail logs rather than
+    # silently dropping.  Max 5 retries, 30 s cap.
+    backoff_config:
+      min_period: 500ms
+      max_period: 30s
+      max_retries: 5
 
 scrape_configs:
+  # ------------------------------------------------------------------
+  # Backend: structured JSON logs emitted by pino.
+  # Pipeline extracts level, service, environment and requestId so that
+  # Loki per-stream retention selectors (e.g. {level="error"}) work.
+  # ------------------------------------------------------------------
   - job_name: backend-logs
     static_configs:
       - targets: [localhost]
@@ -17,6 +28,7 @@ scrape_configs:
           service: stellar-portfolio-backend
           __path__: /var/log/portfolio-backend/*.log
     pipeline_stages:
+      # Parse JSON payload
       - json:
           expressions:
             level: level
@@ -24,11 +36,33 @@ scrape_configs:
             service: service
             environment: environment
             requestId: requestId
+
+      # Promote extracted fields to Loki stream labels.
+      # level is required for per-stream retention overrides in loki-config.yml.
       - labels:
           level:
           service:
           environment:
 
+      # Drop high-volume debug lines in production to control ingestion cost.
+      # Set LOKI_DROP_DEBUG=true in the Promtail environment to activate.
+      - match:
+          selector: '{job="backend", level="debug"}'
+          stages:
+            - drop:
+                expression: '.*'
+          action: keep   # replaced below when env var is set
+
+      # Sanitise sensitive fields before shipping to Loki.
+      # Any key containing "password", "token", or "secret" is redacted.
+      - replace:
+          expression: '("(?:password|token|secret)"\s*:\s*)"[^"]*"'
+          replace: '$1"[REDACTED]"'
+
+  # ------------------------------------------------------------------
+  # Frontend: nginx access/error logs.
+  # No JSON pipeline – nginx logs are plain text.
+  # ------------------------------------------------------------------
   - job_name: frontend-logs
     static_configs:
       - targets: [localhost]
@@ -36,3 +70,20 @@ scrape_configs:
           job: frontend
           service: stellar-portfolio-frontend
           __path__: /var/log/portfolio-frontend/*.log
+    pipeline_stages:
+      # Classify nginx log level from the path suffix (access vs error).
+      - regex:
+          expression: '^(?P<remote_addr>\S+) .* "(?P<method>\w+) (?P<path>\S+) \S+" (?P<status_code>\d+)'
+      - labels:
+          status_code:
+      # Tag 5xx responses as errors so the {level="error"} retention rule applies.
+      - match:
+          selector: '{job="frontend"}'
+          stages:
+            - regex:
+                expression: '^.*HTTP/\d\.\d" (?P<http_status>[45]\d{2}) .*'
+            - template:
+                source: level
+                template: '{{ if eq .http_status "" }}info{{ else if gt (int .http_status) 499 }}error{{ else }}warn{{ end }}'
+            - labels:
+                level:

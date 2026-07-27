@@ -32,7 +32,7 @@ describe('validateRequest middleware', () => {
         middleware(req, {} as any, vi.fn())
 
         expect(failMock).toHaveBeenCalled()
-        expect(failMock.mock.calls[0][1]).toBe(400)
+        expect(failMock.mock.calls[0][1]).toBe(422)
         expect(failMock.mock.calls[0][2]).toBe('VALIDATION_ERROR')
     })
 })

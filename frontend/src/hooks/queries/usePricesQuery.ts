@@ -68,5 +68,7 @@ export const usePrices = () => {
         },
         refetchInterval: 60000,
         staleTime: 55000,
+        refetchOnReconnect: false,
+        placeholderData: (previous) => previous,
     })
 }

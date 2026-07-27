@@ -1,5 +1,6 @@
-import type { PricesMap } from '../types/index.js'
+import type { PricesMap, RiskHeatmap } from '../types/index.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { logger } from '../utils/logger.js'
 
 export interface StatisticalRiskMetrics {
     ewmaVolatility: number
@@ -178,6 +179,12 @@ export class RiskManagementService {
             .some(cb => cb.isTriggered && (cb.cooldownUntil || 0) > Date.now())
 
         if (hasActiveCircuitBreaker) {
+            logger.warn('[RISK] Rebalance blocked by circuit breaker', {
+                reasonCode: 'CIRCUIT_BREAKER_ACTIVE',
+                activeBreakers: Array.from(this.circuitBreakers.entries())
+                    .filter(([, cb]) => cb.isTriggered)
+                    .map(([asset]) => asset)
+            })
             return {
                 allowed: false,
                 reason: 'Circuit breaker active due to high market volatility',
@@ -196,6 +203,10 @@ export class RiskManagementService {
         const riskMetrics = fallbackMetrics
 
         if (riskMetrics.concentrationRisk > 0.9) {
+            logger.warn('[RISK] Rebalance blocked by concentration', {
+                reasonCode: 'CONCENTRATION_BREACH',
+                concentrationRisk: riskMetrics.concentrationRisk
+            })
             return {
                 allowed: false,
                 reason: 'Portfolio concentration risk exceeds policy limit',
@@ -219,6 +230,11 @@ export class RiskManagementService {
                 recommendedAction: 'Pause rebalance until realized volatility declines',
                 timestamp: Date.now()
             })
+            logger.warn('[RISK] Rebalance blocked by EWMA volatility', {
+                reasonCode: 'STAT_MODEL_EWMA_VOL_BREACH',
+                ewmaVolatility: riskMetrics.ewmaVolatility,
+                threshold: this.EWMA_VOL_BLOCK_THRESHOLD
+            })
             return {
                 allowed: false,
                 reason: 'Rebalance blocked by statistical volatility model',
@@ -235,6 +251,11 @@ export class RiskManagementService {
                 message: `VaR(95) breach: ${(riskMetrics.var95 * 100).toFixed(2)}%`,
                 recommendedAction: 'Reduce risk assets or wait for calmer market regime',
                 timestamp: Date.now()
+            })
+            logger.warn('[RISK] Rebalance blocked by VaR', {
+                reasonCode: 'STAT_MODEL_VAR_BREACH',
+                var95: riskMetrics.var95,
+                threshold: this.VAR95_BLOCK_THRESHOLD
             })
             return {
                 allowed: false,
@@ -253,6 +274,11 @@ export class RiskManagementService {
                 recommendedAction: 'Reduce downside tail-risk before rebalancing',
                 timestamp: Date.now()
             })
+            logger.warn('[RISK] Rebalance blocked by CVaR', {
+                reasonCode: 'STAT_MODEL_CVAR_BREACH',
+                cvar95: riskMetrics.cvar95,
+                threshold: this.CVAR95_BLOCK_THRESHOLD
+            })
             return {
                 allowed: false,
                 reason: 'Rebalance blocked by CVaR limit',
@@ -269,6 +295,11 @@ export class RiskManagementService {
                 message: `Max drawdown breach: ${(riskMetrics.maxDrawdown * 100).toFixed(2)}%`,
                 recommendedAction: 'Avoid additional turnover while drawdown band is critical',
                 timestamp: Date.now()
+            })
+            logger.warn('[RISK] Rebalance blocked by drawdown', {
+                reasonCode: 'STAT_MODEL_DRAWDOWN_BREACH',
+                maxDrawdown: riskMetrics.maxDrawdown,
+                threshold: this.DRAWDOWN_BLOCK_THRESHOLD
             })
             return {
                 allowed: false,
@@ -288,6 +319,12 @@ export class RiskManagementService {
                 timestamp: Date.now()
             })
         }
+
+        logger.info('[RISK] Rebalance allowed', {
+            reasonCode: 'OK',
+            overallRiskLevel: riskMetrics.overallRiskLevel,
+            alertsCount: alerts.length
+        })
 
         return {
             allowed: true,
@@ -344,6 +381,43 @@ export class RiskManagementService {
         }
 
         return recommendations
+    }
+
+    calculateRiskHeatmap(
+        allocationsInput: Record<string, number>,
+        _prices: PricesMap
+    ): RiskHeatmap {
+        const weights = this.normalizeAllocations(allocationsInput || {})
+        const stats = this.computeStatisticalRiskMetrics(weights)
+        
+        const concentrationRisk = this.calculateConcentrationRisk(weights)
+        const volatilityScore = this.calculateVolatilityScore(stats.ewmaVolatility)
+        const drawdownScore = this.safeRatio(stats.maxDrawdown, this.DRAWDOWN_BLOCK_THRESHOLD)
+
+        const normConcentration = Math.min(1, Math.max(0, concentrationRisk))
+        const normVolatility = Math.min(1, Math.max(0, volatilityScore))
+        const normDrawdown = Math.min(1, Math.max(0, drawdownScore))
+
+        const getLevel = (score: number): 'low' | 'medium' | 'high' => {
+            if (score > 0.8) return 'high'
+            if (score > 0.4) return 'medium'
+            return 'low'
+        }
+
+        return {
+            concentration: {
+                score: Number(normConcentration.toFixed(4)),
+                level: getLevel(normConcentration)
+            },
+            volatility: {
+                score: Number(normVolatility.toFixed(4)),
+                level: getLevel(normVolatility)
+            },
+            drawdown: {
+                score: Number(normDrawdown.toFixed(4)),
+                level: getLevel(normDrawdown)
+            }
+        }
     }
 
     private checkVolatility(asset: string): RiskAlert | null {

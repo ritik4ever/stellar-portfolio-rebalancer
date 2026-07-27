@@ -1,4 +1,4 @@
-import { Info, AlertTriangle } from 'lucide-react'
+import { Info, AlertTriangle, ExternalLink } from 'lucide-react'
 import type { CapabilityNotice } from '../hooks/useReadinessReport'
 
 type Props = {
@@ -6,6 +6,38 @@ type Props = {
     loadError: boolean
     loading: boolean
     belowRealtimeBar: boolean
+}
+
+interface NoticeHint {
+    label: string
+    href: string
+}
+
+const NOTICE_HINTS: Record<string, NoticeHint> = {
+    database: {
+        label: 'Database setup',
+        href: 'https://github.com/ritik4ever/stellar-portfolio-rebalancer#database-setup',
+    },
+    'queue-workers': {
+        label: 'Redis / worker setup',
+        href: 'https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/CONTRIBUTING.md',
+    },
+    queue: {
+        label: 'Redis / worker setup',
+        href: 'https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/CONTRIBUTING.md',
+    },
+    workers: {
+        label: 'Redis / worker setup',
+        href: 'https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/CONTRIBUTING.md',
+    },
+    indexer: {
+        label: 'Environment setup',
+        href: 'https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/ENVIRONMENT.md',
+    },
+    'auto-rebalancer': {
+        label: 'Environment setup',
+        href: 'https://github.com/ritik4ever/stellar-portfolio-rebalancer/blob/main/docs/ENVIRONMENT.md',
+    },
 }
 
 export default function BackendCapabilitiesBanner({ notices, loadError, loading, belowRealtimeBar }: Props) {
@@ -57,16 +89,35 @@ export default function BackendCapabilitiesBanner({ notices, loadError, loading,
                         : 'A few optional backend features are turned off for this environment. Nothing is wrong with your wallet — this is expected when Redis, workers, or certain flags are not enabled.'}
                 </p>
                 <ul className="space-y-1.5 leading-snug">
-                    {notices.map((n) => (
-                        <li key={n.id} className="flex gap-2">
-                            {n.kind === 'limited' ? (
-                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" aria-hidden />
-                            ) : (
-                                <Info className="mt-0.5 h-4 w-4 shrink-0 opacity-80" aria-hidden />
-                            )}
-                            <span>{n.text}</span>
-                        </li>
-                    ))}
+                    {notices.map((n) => {
+                        const hint = NOTICE_HINTS[n.id]
+                        return (
+                            <li key={n.id} className="flex gap-2">
+                                {n.kind === 'limited' ? (
+                                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" aria-hidden />
+                                ) : (
+                                    <Info className="mt-0.5 h-4 w-4 shrink-0 opacity-80" aria-hidden />
+                                )}
+                                <span>
+                                    {n.text}
+                                    {hint && (
+                                        <>
+                                            {' '}
+                                            <a
+                                                href={hint.href}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                                            >
+                                                {hint.label}
+                                                <ExternalLink className="h-3 w-3" aria-hidden />
+                                            </a>
+                                        </>
+                                    )}
+                                </span>
+                            </li>
+                        )
+                    })}
                 </ul>
             </div>
         </div>

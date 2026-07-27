@@ -1,31 +1,43 @@
-# Root Terraform Configuration - Multi-Region Active/DR Deployment
-
-module "dr_secondary_region" {
-  source = "./modules/dr_secondary_region"
-
-  providers = {
-    aws = aws.secondary
-  }
-
-  secondary_region        = var.secondary_region
-  app_name                = var.app_name
-  environment             = var.environment
-  primary_db_instance_arn = module.primary_region.db_instance_arn
+locals {
+  name_prefix = "${var.project_name}-${terraform.workspace}"
 }
 
-module "primary_region" {
-  source = "./modules/primary_region"
+module "vpc" {
+  source      = "./modules/vpc"
+  name_prefix = local.name_prefix
+  vpc_cidr    = var.vpc_cidr
+}
 
-  providers = {
-    aws = aws.primary
-  }
+module "rds" {
+  source         = "./modules/rds"
+  name_prefix    = local.name_prefix
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_subnet_ids
+  instance_class = lookup(var.db_instance_class, terraform.workspace, "db.t4g.micro")
+}
 
-  primary_region   = var.primary_region
-  secondary_region = var.secondary_region
-  app_name         = var.app_name
-  environment      = var.environment
-  db_name          = var.db_name
-  db_user          = var.db_user
-  db_password      = var.db_password
-  dr_s3_bucket_arn = module.dr_secondary_region.s3_bucket_arn
+module "elasticache" {
+  source      = "./modules/elasticache"
+  name_prefix = local.name_prefix
+  vpc_id      = module.vpc.vpc_id
+  subnet_ids  = module.vpc.private_subnet_ids
+  node_type   = lookup(var.redis_node_type, terraform.workspace, "cache.t4g.micro")
+}
+
+module "ecs" {
+  source             = "./modules/ecs"
+  name_prefix        = local.name_prefix
+  vpc_id             = module.vpc.vpc_id
+  public_subnet_ids  = module.vpc.public_subnet_ids
+  private_subnet_ids = module.vpc.private_subnet_ids
+  task_cpu           = lookup(var.ecs_task_cpu, terraform.workspace, 256)
+  task_memory        = lookup(var.ecs_task_memory, terraform.workspace, 512)
+  db_secret_arn      = module.rds.db_secret_arn
+  db_host            = module.rds.db_endpoint
+  redis_host         = module.elasticache.redis_endpoint
+}
+
+module "s3_cloudfront" {
+  source      = "./modules/s3_cloudfront"
+  name_prefix = local.name_prefix
 }

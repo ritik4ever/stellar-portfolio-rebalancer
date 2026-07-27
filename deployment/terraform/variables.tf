@@ -1,42 +1,53 @@
-variable "primary_region" {
+variable "aws_region" {
+  description = "AWS region to deploy resources"
   type        = string
-  description = "AWS Primary Region for Active Infrastructure"
   default     = "us-east-1"
 }
 
-variable "secondary_region" {
+variable "project_name" {
+  description = "Name of the project"
   type        = string
-  description = "AWS Secondary DR Region for Failover Infrastructure"
-  default     = "us-west-2"
-}
-
-variable "app_name" {
-  type        = string
-  description = "Application Name identifier"
   default     = "stellar-portfolio"
 }
 
-variable "environment" {
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
   type        = string
-  description = "Deployment Environment (e.g. production, staging)"
-  default     = "production"
+  default     = "10.0.0.0/16"
 }
 
-variable "db_name" {
-  type        = string
-  description = "PostgreSQL Database Name"
-  default     = "portfolio"
+variable "db_instance_class" {
+  description = "RDS instance class"
+  type        = map(string)
+  default = {
+    staging    = "db.t4g.micro"
+    production = "db.t4g.small"
+  }
 }
 
-variable "db_user" {
-  type        = string
-  description = "PostgreSQL Master Username"
-  default     = "portfolio_admin"
+variable "redis_node_type" {
+  description = "ElastiCache node type"
+  type        = map(string)
+  default = {
+    staging    = "cache.t4g.micro"
+    production = "cache.t4g.small"
+  }
 }
 
-variable "db_password" {
-  type        = string
-  description = "PostgreSQL Master Password"
-  sensitive   = true
-  default     = "ChangeMeInProduction123!"
+variable "ecs_task_cpu" {
+  description = "ECS Task CPU"
+  type        = map(number)
+  default = {
+    staging    = 256
+    production = 512
+  }
+}
+
+variable "ecs_task_memory" {
+  description = "ECS Task Memory"
+  type        = map(number)
+  default = {
+    staging    = 512
+    production = 1024
+  }
 }

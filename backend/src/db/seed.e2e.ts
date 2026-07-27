@@ -34,4 +34,29 @@ async function seedE2E() {
     }
 }
 
+// NEW: Demo reset function for local testing
+export async function resetDemoData() {
+    console.log('Resetting Demo Data...');
+    const pool = getPool()
+
+    try {
+        // Reset to clean state - same as initial seed
+        await pool.query('DELETE FROM portfolios');
+        await pool.query('DELETE FROM users');
+
+        // Recreate mock user
+        const mockAddress = 'GA2C5RFPE6GCKIG3EQRUUYYTQ27WXYVHTP73HZY4MDF4M7Q2W4M2OWH7';
+        await pool.query(
+            'INSERT INTO users (address, created_at, updated_at) VALUES ($1, NOW(), NOW())',
+            [mockAddress]
+        );
+
+        console.log('Demo Data Reset Successfully!');
+        return { success: true, message: 'Demo data reset to default state' };
+    } catch (err) {
+        console.error('Failed to reset demo data:', err);
+        return { success: false, message: 'Failed to reset demo data' };
+    }
+}
+
 seedE2E();

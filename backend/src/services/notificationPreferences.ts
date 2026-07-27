@@ -28,6 +28,7 @@ export const notificationPreferencesSchema = z
     userId: z.string().min(1, "userId is required").optional(),
     emailEnabled: z.boolean(),
     webhookEnabled: z.boolean(),
+    digestMode: z.enum(['immediate','daily','weekly']).optional(),
     emailAddress: z.preprocess(
       (v) => (v === "" ? undefined : v),
       z.string().email("emailAddress must be a valid email").optional(),
@@ -72,6 +73,7 @@ export function normalizeNotificationPreferences(
     webhookUrl: input.webhookEnabled
       ? input.webhookUrl?.trim() || undefined
       : undefined,
+    digestMode: input.digestMode || 'immediate',
     events: {
       rebalance: input.events.rebalance,
       circuitBreaker: input.events.circuitBreaker,

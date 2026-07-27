@@ -25,6 +25,7 @@ const SENSITIVE_KEY_TOKENS = [
     'password',
     'x-cg-pro-api-key',
     'x-cg-demo-api-key',
+    'smtp_pass',
 ];
 
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, '');

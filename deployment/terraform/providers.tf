@@ -6,31 +6,23 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # NOTE: To use an S3 backend for remote state, uncomment and configure below.
+  # backend "s3" {
+  #   bucket         = "stellar-portfolio-tf-state"
+  #   key            = "state/terraform.tfstate"
+  #   region         = "us-east-1"
+  #   dynamodb_table = "stellar-portfolio-tf-locks"
+  # }
 }
 
 provider "aws" {
-  alias  = "primary"
-  region = var.primary_region
+  region = var.aws_region
 
   default_tags {
     tags = {
-      Environment = var.environment
-      Project     = var.app_name
-      Role        = "Primary"
-      ManagedBy   = "Terraform"
-    }
-  }
-}
-
-provider "aws" {
-  alias  = "secondary"
-  region = var.secondary_region
-
-  default_tags {
-    tags = {
-      Environment = var.environment
-      Project     = var.app_name
-      Role        = "DisasterRecovery"
+      Project     = "StellarPortfolioRebalancer"
+      Environment = terraform.workspace
       ManagedBy   = "Terraform"
     }
   }
