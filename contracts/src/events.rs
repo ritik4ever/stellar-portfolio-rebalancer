@@ -44,7 +44,7 @@ pub fn emit_paused(env: &Env, invoker: &Address, paused: bool, correlation_id: u
 
 pub fn emit_dca_executed(env: &Env, invoker: &Address, portfolio_id: u64, amount: i128, purchases: Map<Address, i128>, timestamp: u64) {
     env.events().publish(
-        (symbol_short!("dca_executed"), invoker.clone(), timestamp),
+        (symbol_short!("dca_exec"), invoker.clone(), timestamp),
         (portfolio_id, amount, purchases),
     );
 }

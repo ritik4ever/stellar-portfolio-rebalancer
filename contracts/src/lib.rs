@@ -15,12 +15,15 @@ mod strategies;
 mod nav;
 mod portfolio;
 mod reflector;
+mod events;
 #[cfg(test)]
 mod test;
 mod types;
 
 pub use reflector::*;
 pub use types::*;
+pub use portfolio::*;
+pub use strategies::dca;
 
 #[contract]
 pub struct PortfolioRebalancer;
@@ -98,12 +101,6 @@ impl PortfolioRebalancer {
         }
 
         if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance) {
-            return Err(Error::InvalidSlippageTolerance);
-        }
-
-        if !validate_slippage_policy_version(slippage_policy_version) {
-        if !(MIN_SLIPPAGE_TOLERANCE_BPS..=MAX_SLIPPAGE_TOLERANCE_BPS).contains(&slippage_tolerance)
-        {
             return Err(Error::InvalidSlippageTolerance);
         }
 
@@ -552,10 +549,8 @@ impl PortfolioRebalancer {
         env.storage().instance().set(&DataKey::FeeConfig, &config);
         env.events().publish(
             (Symbol::new(&env, "FeeConfigUpdated"),),
-            config,
+            config.clone(),
         );
-        env.events()
-            .publish((Symbol::new(&env, "FeeConfigUpdated"),), config);
     }
 
     pub fn get_fee_config(env: Env) -> FeeConfig {
@@ -908,7 +903,7 @@ impl PortfolioRebalancer {
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
 
-        let mut current_prices = Map::new(env);
+        let mut current_prices = Map::<Address, i128>::new(env);
         let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
 
         for (asset, _) in portfolio.target_allocations.iter() {
