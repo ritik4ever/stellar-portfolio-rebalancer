@@ -139,10 +139,21 @@ migrated data. In that case:
       --source <STELLAR_SECRET_KEY> \
       --network <STELLAR_NETWORK>
     ```
-2.  **Update Environment Configurations**: Update the new contract ID in the backend and frontend `.env` configurations:
+2.  **Assess state loss**: Deploying a fresh contract starts with empty
+    persistent storage. All on-chain state — portfolio records, balances,
+    fee configuration, DCA configurations, and NAV history — is **not**
+    transferred. Before proceeding:
+    - Export portfolio records and target allocations from the old contract
+      via event replay or indexer data so users can re-create them.
+    - Inform users they must re-deposit funds into the new contract, since
+      asset balances held by the old contract are not migrated.
+    - Activate the emergency stop on the old contract to prevent further
+      deposits into the abandoned instance.
+3.  **Update Environment Configurations**: Update the new contract ID in the backend and frontend `.env` configurations:
     *   Backend env: `STELLAR_CONTRACT_ADDRESS` (or alias `CONTRACT_ADDRESS`)
     *   Frontend env: `VITE_CONTRACT_ADDRESS`
-3.  **Redeploy Services**: Redeploy backend and frontend services using the updated configurations.
+4.  **Redeploy Services**: Redeploy backend and frontend services using the updated configurations.
+5.  **Validate**: Create a test portfolio, execute a full deposit/withdraw/rebalance cycle, and confirm the indexer is syncing events from the new contract.
 
 ### 4.2 Backend Rollback
 If a buggy backend release was deployed:

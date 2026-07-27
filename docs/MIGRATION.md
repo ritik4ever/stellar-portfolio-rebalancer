@@ -153,12 +153,24 @@ Run these checks against the live contract **before** triggering `upgrade()`:
    for post-migration comparison.
 
 3. **Record current WASM hash**:
+
+   Obtain the deployed WASM from the on-chain contract instance rather than
+   hashing a local build artifact — the local binary may not match what is
+   actually deployed.
+
+   Retrieve the WASM from the contract instance and compute its hash:
    ```bash
-   soroban contract wasm hash \
-     --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+   soroban contract wasm fetch --id $CONTRACT_ID --network $STELLAR_NETWORK \
+     --out current_deployed.wasm
+   CURRENT_HASH=$(soroban contract wasm hash --wasm current_deployed.wasm)
+   echo "Current on-chain WASM hash: $CURRENT_HASH"
    ```
-   If you do not have the current on-chain WASM artifact, retrieve it from
-   the contract instance via the RPC endpoint and hash it locally.
+
+   Compare this hash against your deployment records (CI build logs,
+   deployment manifests, or the `("portfolio", "upgraded")` event's
+   `from_hash` field from the last upgrade). If the hashes do not match,
+   investigate the discrepancy before proceeding — the deployed code may
+   differ from what you expect.
 
 4. **Snapshot contract state** (optional but recommended):
    - Record the total number of portfolios via event replay or indexer
@@ -308,7 +320,21 @@ In this scenario, recovery options are:
 1. **Deploy a corrective contract** with a reverse migration hook that
    restores the original storage shape, then activate the old logic.
 2. **Deploy a fresh contract** and re-point the backend and frontend to the
-   new contract ID. Users would need to re-create portfolios.
+   new contract ID. This is a **data-losing** recovery: the new contract
+   starts with empty persistent storage. All on-chain state — portfolio
+   records, balances, fee configuration, DCA configurations, and NAV
+   history — is left behind in the old contract's storage entries and is
+   **not** automatically transferred. Before re-pointing services:
+   - Export portfolio records and target allocations from the old contract
+     (via event replay or indexer data) so users can re-create them.
+   - Communicate to users that they must re-deposit funds into the new
+     contract, since asset balances held by the old contract are not
+     migrated.
+   - The old contract's admin key should be rotated or the emergency stop
+     activated to prevent further deposits into the abandoned contract.
+   - After re-pointing, verify the new contract is functional by creating
+     a test portfolio and executing a full deposit/withdraw/rebalance
+     cycle.
 3. **Restore from a ledger snapshot** if one was captured before the migration
    (not generally available on public networks).
 
@@ -336,6 +362,7 @@ inconsistent state because `migrate_storage` failed partway through:
 | [`CONTRACT_CAPABILITY_MATRIX.md`](CONTRACT_CAPABILITY_MATRIX.md) | Frontend capability detection and schema version alignment. |
 | [`CONTRACT_DEPLOYMENT_CHECKLIST.md`](CONTRACT_DEPLOYMENT_CHECKLIST.md) | Full deployment and upgrade checklist for each environment. |
 | [`DISASTER_RECOVERY.md`](DISASTER_RECOVERY.md) | Incident rollback and recovery procedures. |
+| [`docs/adr/0002-reflector-oracle-selection.md`](adr/0002-reflector-oracle-selection.md) | Oracle selection decision governing strategy rebalance behaviour, price-feed dependencies, and fallback tiers. A schema migration that changes how the contract queries or caches oracle data must be evaluated against this ADR's fallback strategy. |
 | `contracts/src/types.rs` | `DataKey` enum, `Portfolio` struct, `CONTRACT_VERSION`, `CONTRACT_EVENT_SCHEMA_VERSION`. |
 | `contracts/src/lib.rs` | `upgrade()` entrypoint, `schema_version()` query. |
 
