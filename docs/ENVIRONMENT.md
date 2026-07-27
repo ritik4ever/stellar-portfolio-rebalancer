@@ -30,6 +30,8 @@ This document is the canonical reference for `backend/.env.example`.
 | `PGDATABASE` | string | No | empty | PostgreSQL database name. |
 | `CI` | string | No | empty | CI marker used by scripts/runtime checks. |
 | `DB_PATH` | path | No | `./data/portfolio.db` | SQLite database path for local/test fallback. |
+| `REFLECTOR_SERVICE_URL` | URL | No | empty | Base URL for mock Reflector oracle server or CoinGecko API override. |
+| `REFLECTOR_ADDRESS` | string | No | `CDSW...` | Soroban contract address for Reflector oracle. |
 | `COINGECKO_API_KEY` | string | No | empty | CoinGecko API key for higher rate limits. |
 | `PRICE_CACHE_DURATION` | integer (ms) | No | `300000` | Price-cache TTL. |
 | `MIN_REQUEST_INTERVAL` | integer (ms) | No | `90000` | Minimum delay between upstream market-data requests. |

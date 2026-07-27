@@ -76,17 +76,18 @@ init-contract:
 		echo "Error: CONTRACT_ID environment variable is required"; \
 		exit 1; \
 	fi
-	@if [ -z "$(REFLECTOR_ADDRESS)" ]; then \
-		echo "Error: REFLECTOR_ADDRESS environment variable is required"; \
-		exit 1; \
-	fi
+	@REFLECTOR_ADDR="$(REFLECTOR_ADDRESS)"; \
+	if [ -z "$$REFLECTOR_ADDR" ]; then \
+		REFLECTOR_ADDR="CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO"; \
+		echo "REFLECTOR_ADDRESS not set, using default mock/testnet address $$REFLECTOR_ADDR"; \
+	fi; \
 	soroban contract invoke \
 		--id $(CONTRACT_ID) \
 		--source $(STELLAR_SECRET_KEY) \
 		--network $(STELLAR_NETWORK) \
 		-- initialize \
-		--admin $(shell soroban keys address deployer) \
-		--reflector_address $(REFLECTOR_ADDRESS)
+		--admin $$(soroban keys address deployer) \
+		--reflector_address $$REFLECTOR_ADDR
 
 # Install required tools
 install-tools:

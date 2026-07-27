@@ -40,6 +40,18 @@ export class ReflectorService {
         return Object.keys(map).length > 0 ? map : { ...DEFAULT_COIN_IDS }
     }
 
+    /** CoinGecko / Reflector API base URL (supports REFLECTOR_SERVICE_URL for offline dev) */
+    private getBaseUrl(): string {
+        const customUrl = process.env.REFLECTOR_SERVICE_URL || process.env.COINGECKO_BASE_URL
+        if (customUrl && customUrl.trim()) {
+            return customUrl.trim().replace(/\/$/, '')
+        }
+        const apiKey = this.coinGeckoApiKey
+        return apiKey && apiKey.trim()
+            ? 'https://pro-api.coingecko.com/api/v3'
+            : 'https://api.coingecko.com/api/v3'
+    }
+
     async getCurrentPrices(): Promise<PricesMap> {
         const { map } = await this.resolvePricesInternal()
         return this.applyQuoteAges(map)
@@ -181,9 +193,7 @@ export class ReflectorService {
 
         try {
             const apiKey = this.coinGeckoApiKey
-
-            // FIXED: Use correct API endpoints
-            const baseUrl = 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
             logger.info('[DEBUG] Using API', { api: apiKey ? 'CoinGecko Pro' : 'CoinGecko Free' })
             logger.info('[DEBUG] Base URL', { baseUrl })
 
@@ -312,9 +322,7 @@ export class ReflectorService {
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -373,9 +381,7 @@ export class ReflectorService {
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -490,9 +496,7 @@ export class ReflectorService {
     async testApiConnectivity(): Promise<{ success: boolean, error?: string, data?: any }> {
         try {
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',

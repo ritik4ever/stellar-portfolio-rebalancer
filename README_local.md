@@ -66,10 +66,42 @@ cd frontend && npm run dev
 - **Monitor**: View real-time portfolio status and drift
 - **Rebalance**: Manual or automatic rebalancing based on your settings
 
+## Local Reflector Oracle Mock (Offline Dev)
+
+When developing locally or offline without access to live market feeds, `docker-compose up` runs a lightweight local **Reflector Oracle Mock** container alongside backend services.
+
+### Running with Docker Compose
+```bash
+docker compose -f deployment/docker-compose.yml up -d
+```
+
+### Overriding Mock Prices for Testing Scenarios
+You can configure or dynamically push custom asset prices to simulate market conditions like volatility spikes:
+
+#### Initial Configuration via Env
+Set initial prices in environment variables before launching:
+```bash
+MOCK_PRICE_XLM=0.50 MOCK_PRICE_BTC=150000 ENABLE_RANDOMIZATION=true docker compose -f deployment/docker-compose.yml up -d
+```
+
+#### Dynamic Price Override (HTTP POST)
+To simulate a volatility spike or test specific rebalance drift thresholds while services are running:
+```bash
+# Override specific asset prices
+curl -X POST http://localhost:8080/prices \
+  -H "Content-Type: application/json" \
+  -d '{"prices": {"XLM": 0.85, "BTC": 150000, "ETH": 2500}}'
+
+# Toggle price randomization
+curl -X POST http://localhost:8080/config \
+  -H "Content-Type: application/json" \
+  -d '{"enableRandomization": true}'
+```
+
 ## Architecture
 
 - **Smart Contracts**: Soroban contracts for portfolio management
 - **Backend**: Node.js API with real-time monitoring
 - **Frontend**: React with TypeScript and Tailwind CSS
-- **Oracle**: Reflector price feeds for accurate pricing
+- **Oracle**: Reflector price feeds with local mock service for offline dev
  
