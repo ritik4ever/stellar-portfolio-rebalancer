@@ -1,0 +1,120 @@
+name: Observability Config Lint
+
+on:
+  pull_request:
+    paths:
+      - 'deployment/observability/**'
+      - 'scripts/loki-retention-check.sh'
+      - 'docs/OBSERVABILITY.md'
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/observability/**'
+      - 'scripts/loki-retention-check.sh'
+      - 'docs/OBSERVABILITY.md'
+
+jobs:
+  # ── Job 1: Validate YAML structure of Loki & Promtail configs ─────────────
+  validate-configs:
+    name: Validate Loki / Promtail YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Check loki-config.yml is valid YAML
+        run: yq e '.' deployment/observability/loki/loki-config.yml > /dev/null
+
+      - name: Check promtail-config.yml is valid YAML
+        run: yq e '.' deployment/observability/promtail/promtail-config.yml > /dev/null
+
+      - name: Verify retention_enabled is true in loki-config
+        run: |
+          ENABLED=$(yq e '.compactor.retention_enabled' deployment/observability/loki/loki-config.yml)
+          if [[ "${ENABLED}" != "true" ]]; then
+            echo "❌  compactor.retention_enabled must be 'true' in loki-config.yml" >&2
+            exit 1
+          fi
+          echo "✅  compactor.retention_enabled = true"
+
+      - name: Verify retention_period is set in limits_config
+        run: |
+          PERIOD=$(yq e '.limits_config.retention_period' deployment/observability/loki/loki-config.yml)
+          if [[ -z "${PERIOD}" || "${PERIOD}" == "null" ]]; then
+            echo "❌  limits_config.retention_period must be set in loki-config.yml" >&2
+            exit 1
+          fi
+          echo "✅  limits_config.retention_period = ${PERIOD}"
+
+      - name: Verify per_stream_retention rules exist
+        run: |
+          COUNT=$(yq e '.per_stream_retention | length' deployment/observability/loki/loki-config.yml)
+          if [[ "${COUNT}" -lt 1 ]]; then
+            echo "❌  At least one per_stream_retention rule is required in loki-config.yml" >&2
+            exit 1
+          fi
+          echo "✅  ${COUNT} per_stream_retention rule(s) present"
+
+      - name: Check Promtail level label is extracted
+        run: |
+          # The 'level' label must be present in the backend pipeline labels section
+          # so that per-stream retention selectors in Loki work correctly.
+          LEVEL_LABEL=$(yq e '.scrape_configs[] | select(.job_name == "backend-logs") | .pipeline_stages[] | .labels.level' deployment/observability/promtail/promtail-config.yml | grep -v 'null' | head -1)
+          if [[ -z "${LEVEL_LABEL}" ]]; then
+            echo "❌  Promtail backend-logs pipeline must promote 'level' as a label" >&2
+            exit 1
+          fi
+          echo "✅  Promtail promotes 'level' label for backend-logs"
+
+  # ── Job 2: Validate Prometheus alert rules YAML ────────────────────────────
+  validate-alerts:
+    name: Validate Prometheus alert rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Check alerts.yml is valid YAML
+        run: yq e '.' deployment/observability/prometheus/alerts.yml > /dev/null
+
+      - name: Verify Loki compactor alert is present
+        run: |
+          ALERT=$(yq e '.groups[] | select(.name == "loki-retention") | .rules[] | select(.alert == "LokiCompactorNotRunning") | .alert' deployment/observability/prometheus/alerts.yml)
+          if [[ -z "${ALERT}" ]]; then
+            echo "❌  LokiCompactorNotRunning alert rule is missing from alerts.yml" >&2
+            exit 1
+          fi
+          echo "✅  LokiCompactorNotRunning alert rule present"
+
+  # ── Job 3: Dry-run the retention-check script (offline mode) ───────────────
+  lint-retention-script:
+    name: Lint loki-retention-check.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Shellcheck retention script
+        run: shellcheck scripts/loki-retention-check.sh
+
+      - name: Ensure script is executable (chmod check)
+        run: |
+          if [[ ! -x scripts/loki-retention-check.sh ]]; then
+            echo "⚠️  scripts/loki-retention-check.sh is not executable – fixing..."
+            chmod +x scripts/loki-retention-check.sh
+            echo "Set executable bit.  Please commit: git add scripts/loki-retention-check.sh"
+            exit 1
+          fi
+          echo "✅  Script is executable"

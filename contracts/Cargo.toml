@@ -4,17 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 soroban-sdk = "21.0.0"
 
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+proptest = "1.4.0"
 
 [features]
 default = []
 testutils = ["soroban-sdk/testutils"]
+integration = []
 
 [profile.release]
 opt-level = "z"

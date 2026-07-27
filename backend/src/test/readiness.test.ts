@@ -73,10 +73,11 @@ function readyWorker(name: string) {
 }
 
 describe('buildReadinessReport', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         vi.clearAllMocks()
         process.env.NODE_ENV = 'test'
         delete process.env.ENABLE_AUTO_REBALANCER
+        delete process.env.READINESS_CACHE_TTL_MS
 
         mockGetReadiness.mockReturnValue({
             ready: true,
@@ -102,6 +103,9 @@ describe('buildReadinessReport', () => {
             initialized: false,
             backend: 'bullmq'
         })
+
+        const { clearReadinessCache } = await import('../monitoring/readiness.js')
+        clearReadinessCache()
     })
 
     it('returns ready when all required subsystems are ready', async () => {
@@ -111,7 +115,11 @@ describe('buildReadinessReport', () => {
 
         expect(report.status).toBe('ready')
         expect(report.checks.database.status).toBe('ready')
+        expect(report.checks.database.details).toBeDefined()
+        expect(typeof (report.checks.database.details as any).latencyMs).toBe('number')
         expect(report.checks.queue.status).toBe('ready')
+        // queue check should include per-queue details
+        expect((report.checks.queue.details as any).queues).toBeDefined()
         expect(report.checks.workers.status).toBe('ready')
         expect(report.checks.contractEventIndexer.status).toBe('disabled')
         expect(report.checks.autoRebalancer.status).toBe('disabled')
@@ -131,6 +139,7 @@ describe('buildReadinessReport', () => {
 
         expect(report.status).toBe('not_ready')
         expect(report.checks.autoRebalancer.status).toBe('not_ready')
+        expect((report.checks.autoRebalancer.details as any).degradedReason).toBeDefined()
     })
 
     it('returns not_ready when indexer is enabled and contract event schema check failed', async () => {
@@ -150,5 +159,79 @@ describe('buildReadinessReport', () => {
         expect(report.status).toBe('not_ready')
         expect(report.checks.contractEventIndexer.status).toBe('not_ready')
         expect(report.checks.contractEventIndexer.message).toContain('mismatch')
+        expect((report.checks.contractEventIndexer.details as any).degradedReason).toBeDefined()
+    })
+
+    it('caches readiness report within TTL and serves from cache', async () => {
+        const { buildReadinessReport, setReadinessCacheTtl, clearReadinessCache } = await import('../monitoring/readiness.js')
+        clearReadinessCache()
+        setReadinessCacheTtl(5000)
+
+        mockGetReadiness.mockClear()
+        mockIsRedisAvailable.mockClear()
+
+        const report1 = await buildReadinessReport()
+        expect(report1.status).toBe('ready')
+        expect(mockGetReadiness).toHaveBeenCalledTimes(1)
+
+        mockGetReadiness.mockReturnValue({
+            ready: false,
+            databasePath: '/tmp/test.db',
+            error: 'simulated failure'
+        })
+
+        const report2 = await buildReadinessReport()
+        expect(report2.status).toBe('ready')
+        expect(report2.timestamp).toBe(report1.timestamp)
+        expect(mockGetReadiness).toHaveBeenCalledTimes(1)
+    })
+
+    it('skips cache when TTL is set to 0', async () => {
+        const { buildReadinessReport, setReadinessCacheTtl, clearReadinessCache } = await import('../monitoring/readiness.js')
+        clearReadinessCache()
+        setReadinessCacheTtl(0)
+
+        mockGetReadiness.mockClear()
+        mockIsRedisAvailable.mockClear()
+
+        await buildReadinessReport()
+        expect(mockGetReadiness).toHaveBeenCalledTimes(1)
+
+        mockGetReadiness.mockReturnValue({
+            ready: false,
+            databasePath: '/tmp/test.db',
+            error: 'simulated failure'
+        })
+
+        const report = await buildReadinessReport()
+        expect(report.status).toBe('not_ready')
+        expect(mockGetReadiness).toHaveBeenCalledTimes(2)
+    })
+
+    it('expires cache after TTL elapses', async () => {
+        vi.useFakeTimers()
+        const { buildReadinessReport, setReadinessCacheTtl, clearReadinessCache } = await import('../monitoring/readiness.js')
+        clearReadinessCache()
+        setReadinessCacheTtl(100)
+
+        mockGetReadiness.mockClear()
+        mockIsRedisAvailable.mockClear()
+
+        await buildReadinessReport()
+        expect(mockGetReadiness).toHaveBeenCalledTimes(1)
+
+        vi.advanceTimersByTime(150)
+
+        mockGetReadiness.mockReturnValue({
+            ready: false,
+            databasePath: '/tmp/test.db',
+            error: 'timed out'
+        })
+
+        const report = await buildReadinessReport()
+        expect(report.status).toBe('not_ready')
+        expect(mockGetReadiness).toHaveBeenCalledTimes(2)
+
+        vi.useRealTimers()
     })
 })

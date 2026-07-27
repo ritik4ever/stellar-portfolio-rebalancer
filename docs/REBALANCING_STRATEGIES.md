@@ -2,6 +2,8 @@
 
 Portfolios can use different strategies to decide when to rebalance. You choose a strategy when creating a portfolio and can pass optional configuration per strategy.
 
+**💡 Have an idea for a new strategy?** Use our [Rebalancing Strategy Feature Request Template](../.github/ISSUE_TEMPLATE/feature-request-rebalancing-strategy.md) to propose it with all the context maintainers need.
+
 ## Available strategies
 
 ### 1. Threshold-based (`threshold`)

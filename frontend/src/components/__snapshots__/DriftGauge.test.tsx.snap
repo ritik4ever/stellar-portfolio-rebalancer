@@ -1,0 +1,305 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DriftGauge snapshot > renders drift approaching threshold 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="drift-gauge"
+  >
+    <div
+      class="flex items-center justify-between mb-3"
+    >
+      <span
+        class="text-sm text-gray-500 dark:text-gray-400"
+      >
+        Portfolio Drift
+      </span>
+      <span
+        class="text-lg font-bold text-yellow-600 dark:text-yellow-400"
+      >
+        +
+        4.2
+        %
+      </span>
+    </div>
+    <div
+      class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3"
+    >
+      <div
+        class="h-3 rounded-full transition-all duration-500 bg-yellow-500"
+        style="width: 84.00000000000001%;"
+      />
+    </div>
+    <div
+      class="flex justify-between mt-1"
+    >
+      <span
+        class="text-xs text-gray-400"
+      >
+        0%
+      </span>
+      <span
+        class="text-xs text-gray-400"
+      >
+        Threshold: 
+        5
+        %
+      </span>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge snapshot > renders drift exceeding threshold 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="drift-gauge"
+  >
+    <div
+      class="flex items-center justify-between mb-3"
+    >
+      <span
+        class="text-sm text-gray-500 dark:text-gray-400"
+      >
+        Portfolio Drift
+      </span>
+      <span
+        class="text-lg font-bold text-red-600 dark:text-red-400"
+      >
+        +
+        6.8
+        %
+      </span>
+    </div>
+    <div
+      class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3"
+    >
+      <div
+        class="h-3 rounded-full transition-all duration-500 bg-red-500"
+        style="width: 100%;"
+      />
+    </div>
+    <div
+      class="flex justify-between mt-1"
+    >
+      <span
+        class="text-xs text-gray-400"
+      >
+        0%
+      </span>
+      <span
+        class="text-xs text-gray-400"
+      >
+        Threshold: 
+        5
+        %
+      </span>
+    </div>
+    <p
+      class="mt-2 text-xs text-red-600 dark:text-red-400 font-medium"
+    >
+      Drift exceeds threshold — rebalancing recommended
+    </p>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge snapshot > renders drift within threshold 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="drift-gauge"
+  >
+    <div
+      class="flex items-center justify-between mb-3"
+    >
+      <span
+        class="text-sm text-gray-500 dark:text-gray-400"
+      >
+        Portfolio Drift
+      </span>
+      <span
+        class="text-lg font-bold text-green-600 dark:text-green-400"
+      >
+        +
+        2.5
+        %
+      </span>
+    </div>
+    <div
+      class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3"
+    >
+      <div
+        class="h-3 rounded-full transition-all duration-500 bg-green-500"
+        style="width: 50%;"
+      />
+    </div>
+    <div
+      class="flex justify-between mt-1"
+    >
+      <span
+        class="text-xs text-gray-400"
+      >
+        0%
+      </span>
+      <span
+        class="text-xs text-gray-400"
+      >
+        Threshold: 
+        5
+        %
+      </span>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge snapshot > renders negative drift 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="drift-gauge"
+  >
+    <div
+      class="flex items-center justify-between mb-3"
+    >
+      <span
+        class="text-sm text-gray-500 dark:text-gray-400"
+      >
+        Portfolio Drift
+      </span>
+      <span
+        class="text-lg font-bold text-green-600 dark:text-green-400"
+      >
+        -3.5
+        %
+      </span>
+    </div>
+    <div
+      class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3"
+    >
+      <div
+        class="h-3 rounded-full transition-all duration-500 bg-green-500"
+        style="width: 70%;"
+      />
+    </div>
+    <div
+      class="flex justify-between mt-1"
+    >
+      <span
+        class="text-xs text-gray-400"
+      >
+        0%
+      </span>
+      <span
+        class="text-xs text-gray-400"
+      >
+        Threshold: 
+        5
+        %
+      </span>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge snapshot > renders with custom label 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="drift-gauge"
+  >
+    <div
+      class="flex items-center justify-between mb-3"
+    >
+      <span
+        class="text-sm text-gray-500 dark:text-gray-400"
+      >
+        Max Drift
+      </span>
+      <span
+        class="text-lg font-bold text-green-600 dark:text-green-400"
+      >
+        +
+        1.2
+        %
+      </span>
+    </div>
+    <div
+      class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3"
+    >
+      <div
+        class="h-3 rounded-full transition-all duration-500 bg-green-500"
+        style="width: 24%;"
+      />
+    </div>
+    <div
+      class="flex justify-between mt-1"
+    >
+      <span
+        class="text-xs text-gray-400"
+      >
+        0%
+      </span>
+      <span
+        class="text-xs text-gray-400"
+      >
+        Threshold: 
+        5
+        %
+      </span>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge snapshot > renders zero drift 1`] = `
+<div>
+  <div
+    class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
+    data-testid="drift-gauge"
+  >
+    <div
+      class="flex items-center justify-between mb-3"
+    >
+      <span
+        class="text-sm text-gray-500 dark:text-gray-400"
+      >
+        Portfolio Drift
+      </span>
+      <span
+        class="text-lg font-bold text-green-600 dark:text-green-400"
+      >
+        +
+        0.0
+        %
+      </span>
+    </div>
+    <div
+      class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3"
+    >
+      <div
+        class="h-3 rounded-full transition-all duration-500 bg-green-500"
+        style="width: 0%;"
+      />
+    </div>
+    <div
+      class="flex justify-between mt-1"
+    >
+      <span
+        class="text-xs text-gray-400"
+      >
+        0%
+      </span>
+      <span
+        class="text-xs text-gray-400"
+      >
+        Threshold: 
+        5
+        %
+      </span>
+    </div>
+  </div>
+</div>
+`;

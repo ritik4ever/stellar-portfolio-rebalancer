@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Community Discussion
+    url: https://github.com/ritik4ever/stellar-portfolio-rebalancer/discussions
+    about: Ask questions, share ideas, or discuss the project with the community
+  - name: 📚 Documentation
+    url: https://github.com/ritik4ever/stellar-portfolio-rebalancer/tree/main/docs
+    about: Browse the full documentation including setup guides and API reference
+  - name: 🔒 Private Security Report
+    url: https://github.com/ritik4ever/stellar-portfolio-rebalancer/security/advisories/new
+    about: Report critical security vulnerabilities privately

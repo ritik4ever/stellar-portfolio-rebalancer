@@ -1,0 +1,98 @@
+name: Accessibility Audit
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/a11y.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/a11y.yml'
+
+jobs:
+  a11y-scan:
+    name: Axe-core accessibility scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_CONTRACT_ADDRESS: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      DEMO_MODE: 'true'
+      ALLOW_DEMO_BALANCE_FALLBACK: 'true'
+      JWT_SECRET: a11y-ci-jwt-secret-at-least-32-characters-long
+      DB_PATH: /tmp/a11y-test.db
+      VITE_API_URL: http://localhost:3001
+      VITE_E2E_MOCK_WALLET: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: ./frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Build backend
+        working-directory: ./backend
+        env:
+          PORT: 3001
+        run: npm run build
+
+      - name: Start backend
+        working-directory: ./backend
+        env:
+          PORT: 3001
+        run: |
+          npm start &
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::Backend did not become healthy on http://localhost:3001/health"
+            exit 1
+          fi
+
+      - name: Run axe-core accessibility scan
+        working-directory: ./frontend
+        run: npx playwright test --config=playwright.a11y.config.ts
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-report
+          path: |
+            frontend/a11y-reports/
+            frontend/playwright-report/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop backend
+        if: always()
+        run: kill $(lsof -t -i:3001) 2>/dev/null || true
