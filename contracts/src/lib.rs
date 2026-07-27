@@ -36,6 +36,17 @@ impl PortfolioRebalancer {
     ) -> Result<u64, Error> {
         user.require_auth();
 
+        let max_portfolios = Self::get_max_portfolios_per_user(env.clone());
+        let user_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(user.clone()))
+            .unwrap_or(0);
+
+        if user_count >= max_portfolios {
+            return Err(Error::TooManyPortfolios);
+        }
+
         if !portfolio::validate_allocations(&target_allocations) {
             return Err(Error::InvalidAllocation);
         }
@@ -74,6 +85,9 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserPortfolioCount(user.clone()), &(user_count + 1));
         env.events()
             .publish(("portfolio", "created"), (portfolio_id, user));
         Ok(portfolio_id)
@@ -260,5 +274,20 @@ impl PortfolioRebalancer {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().set(&DataKey::EmergencyStop, &stop);
+    }
+
+    pub fn set_max_portfolios_per_user(env: Env, max_portfolios: u32) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPortfoliosPerUser, &max_portfolios);
+    }
+
+    pub fn get_max_portfolios_per_user(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxPortfoliosPerUser)
+            .unwrap_or(MAX_PORTFOLIOS_PER_USER)
     }
 }

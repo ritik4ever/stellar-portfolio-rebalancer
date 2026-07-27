@@ -4,6 +4,7 @@ use soroban_sdk::{contracterror, contracttype, Address, Map};
 // 1_000_000 stroops equals 0.1 XLM, which acts as the minimum executable trade size.
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
+pub const MAX_PORTFOLIOS_PER_USER: u32 = 10;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +28,8 @@ pub enum DataKey {
     Initialized,
     Portfolio(u64),
     NextPortfolioId,
+    MaxPortfoliosPerUser,
+    UserPortfolioCount(Address),
 }
 
 #[contracterror]
@@ -44,4 +47,5 @@ pub enum Error {
     InvalidSlippageTolerance = 9,
     SlippageExceeded = 10,
     TooManyAssets = 11,
+    TooManyPortfolios = 12,
 }
