@@ -5,6 +5,18 @@ import { Keypair } from '@stellar/stellar-sdk'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+const mockMetadata = vi.hoisted(() => ({
+    org_name: 'Stellar Foundation',
+    org_description: 'Stellar test network asset',
+    org_url: 'https://stellar.org'
+}))
+
+vi.mock('../services/issuerMetadataService.js', () => ({
+    issuerMetadataService: {
+        getMetadata: vi.fn().mockResolvedValue(mockMetadata)
+    }
+}))
+
 import { issuerMetadataService } from '../services/issuerMetadataService.js'
 
 function makeAdminHeaders(kp: Keypair) {
@@ -141,15 +153,6 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
         })
 
         it('creates an asset with issuer metadata if issuerAccount is provided', async () => {
-            const mockMetadata = {
-                org_name: 'Stellar Foundation',
-                org_description: 'Stellar test network asset',
-                org_url: 'https://stellar.org'
-            }
-            const getMetadataSpy = vi
-                .spyOn(issuerMetadataService, 'getMetadata')
-                .mockResolvedValue(mockMetadata)
-
             const symbol = 'META'
             const res = await request(app)
                 .post('/api/admin/assets')
@@ -161,9 +164,9 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 })
 
             expect(res.status).toBe(201)
-            expect(getMetadataSpy).toHaveBeenCalledWith('GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5')
             expect(res.body.success).toBe(true)
             expect(res.body.data.asset.issuerMetadata).toEqual(mockMetadata)
+            expect(issuerMetadataService.getMetadata).toHaveBeenCalledWith('GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5')
         })
     })
 
@@ -241,7 +244,7 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 .set(makeAdminHeaders(adminKp))
                 .send({})
             expect(res.status).toBe(400)
-            expect(res.body.error).toBe('VALIDATION_ERROR')
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
         })
 
         it('returns 400 for invalid queryId', async () => {
@@ -250,7 +253,7 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 .set(makeAdminHeaders(adminKp))
                 .send({ queryId: 'invalid_query' })
             expect(res.status).toBe(400)
-            expect(res.body.error).toBe('VALIDATION_ERROR')
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
         })
 
         it('returns 200 with explain plan for valid admin and queryId', async () => {

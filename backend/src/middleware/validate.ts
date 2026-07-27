@@ -20,7 +20,7 @@ export const validateRequest = (schema: ZodSchema) => {
                     errors: formattedErrors
                 });
 
-                return fail(res, 422, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
+                return fail(res, 400, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
             }
 
             req.body = result.data;
@@ -49,7 +49,7 @@ export const validateQuery = (schema: ZodSchema) => {
                     errors: formattedErrors
                 });
 
-                return fail(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
+                return fail(res, 400, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
             }
 
             req.query = result.data as typeof req.query;

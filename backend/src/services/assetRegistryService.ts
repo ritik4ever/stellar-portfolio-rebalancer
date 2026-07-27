@@ -35,6 +35,7 @@ export interface AssetRecord {
     contractAddress?: string
     issuerAccount?: string
     coingeckoId?: string
+    issuerMetadata?: Record<string, unknown>
     enabled: boolean
     lastRefreshedAt?: string
     isQuarantined: boolean
@@ -72,6 +73,7 @@ export const assetRegistryService = {
             contractAddress: asset.contractAddress,
             issuerAccount: asset.issuerAccount,
             coingeckoId: asset.coingeckoId,
+            issuerMetadata: asset.issuerMetadata,
             enabled: asset.enabled,
             lastRefreshedAt: asset.lastRefreshedAt,
             isQuarantined,

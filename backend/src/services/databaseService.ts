@@ -1138,6 +1138,7 @@ export class DatabaseService {
         contractAddress?: string;
         issuerAccount?: string;
         coingeckoId?: string;
+        issuerMetadata?: Record<string, unknown>;
         enabled: boolean;
         lastRefreshedAt?: string;
         isQuarantined: boolean;
@@ -1158,7 +1159,7 @@ export class DatabaseService {
             last_refreshed_at: string | null;
             is_quarantined: number;
           }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
+        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
         .get(symbol.toUpperCase());
       if (!row) return undefined;
       return {
@@ -1167,6 +1168,7 @@ export class DatabaseService {
         contractAddress: row.contract_address ?? undefined,
         issuerAccount: row.issuer_account ?? undefined,
         coingeckoId: row.coingecko_id ?? undefined,
+        issuerMetadata: row.issuer_metadata ? JSON.parse(row.issuer_metadata) : undefined,
         enabled: row.enabled === 1,
         lastRefreshedAt: row.last_refreshed_at ?? undefined,
         isQuarantined: row.is_quarantined === 1,
@@ -1191,7 +1193,7 @@ export class DatabaseService {
       const now = new Date().toISOString();
       this.db
         .prepare(
-          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
+          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
         )
         .run(
           sym,

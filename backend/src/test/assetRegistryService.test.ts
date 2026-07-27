@@ -50,13 +50,13 @@ describe('assetRegistryService Unit Tests', () => {
         })
 
         it('identifies stale and quarantine-expired timestamps correctly based on elapsed time', () => {
-            // 25 hours ago is stale (policy 24h)
-            const staleTime = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString()
+            // 10 minutes ago is stale (policy 5min) but NOT quarantine expired (policy 30min)
+            const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString()
             expect(assetRegistryService.isAssetStale(staleTime)).toBe(true)
             expect(assetRegistryService.isAssetQuarantineExpired(staleTime)).toBe(false)
 
-            // 8 days ago is quarantined (policy 7d)
-            const quarantineTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+            // 1 hour ago is both stale and quarantine expired
+            const quarantineTime = new Date(Date.now() - 60 * 60 * 1000).toISOString()
             expect(assetRegistryService.isAssetStale(quarantineTime)).toBe(true)
             expect(assetRegistryService.isAssetQuarantineExpired(quarantineTime)).toBe(true)
         })

@@ -56,7 +56,7 @@ vi.mock('../db/client.js', () => {
                 return { rowCount: initialLen - pgState.length }
             }
             if (text.includes('INSERT INTO rebalance_events')) {
-                const [id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp] = params!
+                const [id, portfolio_id, trigger, trades, gas_used, fee_paid, slippage_bps, status, is_automatic, risk_alerts, error, details, timestamp] = params!
                 historyState.push({
                     id,
                     portfolio_id,

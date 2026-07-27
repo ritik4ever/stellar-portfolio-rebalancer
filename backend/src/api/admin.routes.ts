@@ -68,23 +68,16 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
       return fail(res, 500, 'INTERNAL_ERROR', 'Database connection not available')
     }
 
-    // First, run EXPLAIN ANALYZE on the query
-    const explainQuery = `EXPLAIN ANALYZE ${query}`
+    // First, run EXPLAIN QUERY PLAN on the query (SQLite-compatible)
+    const explainQuery = `EXPLAIN QUERY PLAN ${query}`
     const explainStart = Date.now()
     
     try {
       const explainResult = db.prepare(explainQuery).all(...params)
       const explainTimeMs = Date.now() - explainStart
 
-      // Parse the EXPLAIN ANALYZE output to extract estimated vs actual row counts
+      // Parse the EXPLAIN QUERY PLAN output
       const explainPlan = explainResult.map((row: any) => row.detail || JSON.stringify(row)).join('\n')
-      
-      // Extract estimated and actual rows from the plan
-      const estimatedRowsMatch = explainPlan.match(/rows=(\d+)/)
-      const actualRowsMatch = explainPlan.match(/actual rows=(\d+)/)
-      
-      const estimatedRows = estimatedRowsMatch ? parseInt(estimatedRowsMatch[1], 10) : null
-      const actualRows = actualRowsMatch ? parseInt(actualRowsMatch[1], 10) : null
 
       // Also run the actual query to get the real row count
       const queryStart = Date.now()
@@ -97,7 +90,7 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
         explainPlan,
         explainExecutionTimeMs: explainTimeMs,
         queryExecutionTimeMs: queryTimeMs,
-        estimatedRows,
+        estimatedRows: null,
         actualRows: actualResult.length,
         rowCount: actualResult.length
       })
