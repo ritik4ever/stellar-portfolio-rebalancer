@@ -32,6 +32,11 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+/// Default maximum number of portfolios a single user address may create.
+/// Prevents storage-spam DoS by bounding per-account persistent entry growth.
+pub const MAX_PORTFOLIOS_PER_USER: u32 = 10;
+/// Default global cap on total portfolios across all users (admin-configurable).
+pub const DEFAULT_GLOBAL_PORTFOLIO_CAP: u32 = 10_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -137,6 +142,10 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    /// Tracks how many portfolios a given user has created.
+    UserPortfolioCount(Address),
+    /// Admin-configurable global cap on total portfolios (instance storage).
+    GlobalPortfolioCap,
 }
 
 #[contracttype]
@@ -181,6 +190,10 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    /// Caller has reached the per-user portfolio creation limit.
+    PortfolioLimitExceeded = 29,
+    /// The contract-wide global portfolio cap has been reached.
+    GlobalPortfolioCapExceeded = 30,
 }
 
 #[contracttype]

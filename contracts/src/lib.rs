@@ -99,11 +99,31 @@ impl PortfolioRebalancer {
             return Err(Error::UnsupportedSlippagePolicyVersion);
         }
 
+        // Rate-limit: per-user cap
+        let user_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(user.clone()))
+            .unwrap_or(0);
+        if user_count >= MAX_PORTFOLIOS_PER_USER {
+            return Err(Error::PortfolioLimitExceeded);
+        }
+
+        // Rate-limit: global cap
+        let global_cap: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::GlobalPortfolioCap)
+            .unwrap_or(DEFAULT_GLOBAL_PORTFOLIO_CAP);
         let portfolio_id: u64 = env
             .storage()
             .persistent()
             .get(&DataKey::NextPortfolioId)
             .unwrap_or(1);
+        if portfolio_id > global_cap as u64 {
+            return Err(Error::GlobalPortfolioCapExceeded);
+        }
+
         let portfolio = Portfolio {
             user: user.clone(),
             target_allocations,
@@ -125,6 +145,9 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::NextPortfolioId, &(portfolio_id + 1));
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserPortfolioCount(user.clone()), &(user_count + 1));
         portfolio::check_portfolio_invariants(&portfolio)?;
 
         env.storage()
@@ -642,6 +665,27 @@ impl PortfolioRebalancer {
             total_usd_value: total_value,
             assets,
         })
+    }
+
+    pub fn set_global_portfolio_cap(env: Env, cap: u32) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalPortfolioCap, &cap);
+    }
+
+    pub fn get_global_portfolio_cap(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::GlobalPortfolioCap)
+            .unwrap_or(DEFAULT_GLOBAL_PORTFOLIO_CAP)
+    }
+
+    pub fn get_user_portfolio_count(env: Env, user: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(user))
+            .unwrap_or(0)
     }
 
     fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
