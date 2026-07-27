@@ -82,8 +82,12 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `allocations`: Target allocations per asset (`Address -> percentage`), same shape and validation as `create_portfolio`'s `target_allocations`.
 - **Returns:** `Ok(())` or one of:
   - `Err(Error::InvalidAllocation)` — allocations do not sum to 100% or contain a zero percentage.
+  - `Err(Error::TooManyAssets)` — the allocation map has more than `MAX_PORTFOLIO_ASSETS` (10) entries, same limit `create_portfolio` enforces.
+  - `Err(Error::PortfolioStorageFootprintTooLarge)` — a portfolio instantiated from this template would exceed `MAX_PORTFOLIO_STORAGE_BYTES`, estimated using default asset decimals and no balances yet (a lower bound on the real footprint).
   - `Err(Error::TemplateAlreadyExists)` — a template with this name already exists; use `update_template` instead.
+  - `Err(Error::TooManyTemplates)` — the template registry already holds `MAX_TEMPLATES` (50) entries.
 - **Preconditions:** `admin.require_auth()` succeeds.
+- **Notes:** These limits exist so a template accepted here can always be turned into a portfolio later via `create_portfolio_from_template` — `create_portfolio`'s own asset-count and storage-footprint checks would otherwise be able to reject a template that `create_template` had accepted.
 
 ### `update_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
 
@@ -91,6 +95,8 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Parameters:** Same as `create_template`.
 - **Returns:** `Ok(())` or one of:
   - `Err(Error::InvalidAllocation)`
+  - `Err(Error::TooManyAssets)`
+  - `Err(Error::PortfolioStorageFootprintTooLarge)`
   - `Err(Error::TemplateNotFound)` — no template with this name exists; use `create_template` instead.
 - **Preconditions:** `admin.require_auth()` succeeds.
 
@@ -341,6 +347,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `28` | `InvalidAllocationSum` | A portfolio's target allocations no longer sum to exactly 100% at rebalance time. | Update the portfolio's target allocations so they sum to exactly 100% before retrying. |
 | `29` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
 | `30` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
+| `31` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | Remove or repurpose an existing template (via `update_template`) before creating a new one. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 

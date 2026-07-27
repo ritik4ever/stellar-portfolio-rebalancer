@@ -32,6 +32,10 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+/// Maximum number of named templates the registry (`DataKey::TemplateNames`)
+/// may hold. Bounds `list_templates`'s result size and the per-write cost of
+/// rewriting the registry on every `create_template` call.
+pub const MAX_TEMPLATES: u32 = 50;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -185,6 +189,7 @@ pub enum Error {
     InvalidAllocationSum = 28,
     TemplateNotFound = 29,
     TemplateAlreadyExists = 30,
+    TooManyTemplates = 31,
 }
 
 #[contracttype]

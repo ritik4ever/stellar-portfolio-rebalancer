@@ -2852,6 +2852,85 @@ fn test_create_template_duplicate_name_rejected() {
 }
 
 #[test]
+fn test_create_template_too_many_assets_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // MAX_PORTFOLIO_ASSETS is 10; use 11 assets so the template could never
+    // be turned into a portfolio via create_portfolio_from_template.
+    let mut allocations = Map::new(&env);
+    for i in 0..11u32 {
+        let asset = Address::generate(&env);
+        let pct = if i == 10 { 910 } else { 909 };
+        allocations.set(asset, pct);
+    }
+    let name = String::from_str(&env, "TooBig");
+
+    let result = client.try_create_template(&name, &allocations);
+    assert_eq!(result, Err(Ok(Error::TooManyAssets)));
+}
+
+#[test]
+fn test_update_template_too_many_assets_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset, 10000);
+    let name = String::from_str(&env, "Balanced");
+    client.create_template(&name, &allocations);
+
+    let mut oversized = Map::new(&env);
+    for i in 0..11u32 {
+        let a = Address::generate(&env);
+        let pct = if i == 10 { 910 } else { 909 };
+        oversized.set(a, pct);
+    }
+
+    let result = client.try_update_template(&name, &oversized);
+    assert_eq!(result, Err(Ok(Error::TooManyAssets)));
+}
+
+#[test]
+fn test_create_template_registry_limit_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    for i in 0..MAX_TEMPLATES {
+        let asset = Address::generate(&env);
+        let mut allocations = Map::new(&env);
+        allocations.set(asset, 10000);
+        let name = String::from_str(&env, &std::format!("Template{}", i));
+        client.create_template(&name, &allocations);
+    }
+    assert_eq!(client.list_templates().len(), MAX_TEMPLATES);
+
+    let asset = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset, 10000);
+    let one_too_many = String::from_str(&env, "OneTooMany");
+
+    let result = client.try_create_template(&one_too_many, &allocations);
+    assert_eq!(result, Err(Ok(Error::TooManyTemplates)));
+}
+
+#[test]
 fn test_update_template_success() {
     let env = Env::default();
     env.mock_all_auths();
