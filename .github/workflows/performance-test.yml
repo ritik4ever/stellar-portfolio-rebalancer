@@ -7,6 +7,7 @@ on:
       - develop
     paths:
       - 'backend/**'
+      - 'scripts/chaos/**'
       - '.github/workflows/performance-test.yml'
   pull_request:
     branches:
@@ -14,8 +15,12 @@ on:
       - develop
     paths:
       - 'backend/**'
+      - 'scripts/chaos/**'
       - '.github/workflows/performance-test.yml'
   workflow_dispatch:
+  schedule:
+    # Weekly capacity verification: every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
 
 permissions:
   contents: read
@@ -23,6 +28,103 @@ permissions:
   actions: write
 
 jobs:
+  ws-portfolio-feed-load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Run WS portfolio feed load test
+        timeout-minutes: 8
+        run: |
+          # Set minimal environment for backend startup
+          export NODE_ENV=test
+          export PORT=3001
+          export DATABASE_URL="sqlite::memory:"
+          export JWT_SECRET="test-secret-key-for-ws-load-testing"
+          export STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+          export CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
+          export LOG_LEVEL="warn"
+          export AUTH_ENABLED="false"
+          export ENABLE_STARTUP_SELF_TEST="false"
+          # Resolve ws package from backend's node_modules
+          export NODE_PATH="backend/node_modules"
+
+          # Start backend in background (use working-directory approach for reliable PID capture)
+          node backend/dist/index.js &
+          BACKEND_PID=$!
+
+          # Wait for backend to become ready
+          echo "Waiting for backend to become ready..."
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:3001/health > /dev/null 2>&1; then
+              echo "Backend is ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+          # Create results directory
+          mkdir -p ws-load-test-results
+
+          # Run the WS portfolio feed load test
+          echo "Starting WS portfolio feed load test..."
+          CHAOS_WS_BACKEND_URL="http://localhost:3001" \
+          CHAOS_WS_CONCURRENT_CONNECTIONS="50" \
+          CHAOS_WS_BATCH_SIZE="10" \
+          CHAOS_WS_BATCH_DELAY_MS="200" \
+          CHAOS_WS_DURATION_MS="30000" \
+          CHAOS_WS_AUTH_ENABLED="false" \
+          CHAOS_WS_RESULTS_DIR="ws-load-test-results" \
+          node scripts/chaos/ws-portfolio-feed-load-test.mjs
+          LOAD_TEST_EXIT=$?
+
+          # Cleanup
+          kill $BACKEND_PID 2>/dev/null || true
+          wait $BACKEND_PID 2>/dev/null || true
+
+          exit $LOAD_TEST_EXIT
+        env:
+          NODE_OPTIONS: '--max-old-space-size=2048'
+
+      - name: Upload load test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-load-test-report
+          path: |
+            ws-load-test-results/
+          retention-days: 14
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## WS Portfolio Feed Load Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Concurrent Connections: 50" >> $GITHUB_STEP_SUMMARY
+          echo "- Sustain Duration: 30s" >> $GITHUB_STEP_SUMMARY
+          echo "- Auth Enabled: false" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Purpose:** Periodically verifies WebSocket portfolio feed capacity and documents connection ceiling for planning." >> $GITHUB_STEP_SUMMARY
+
   performance-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
