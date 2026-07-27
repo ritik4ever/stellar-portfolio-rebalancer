@@ -1,5 +1,5 @@
 export class CircuitBreakers {
-    static async checkMarketConditions(prices: Record<string, any>): Promise<{ safe: boolean, reason?: string }> {
+    static checkMarketConditions(prices: Record<string, any>): { safe: boolean, reason?: string } {
         // Check for extreme volatility
         const volatilityCheck = this.checkVolatility(prices)
         if (!volatilityCheck.safe) return volatilityCheck

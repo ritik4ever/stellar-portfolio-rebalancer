@@ -1,0 +1,111 @@
+name: Dependabot Auto-Merge
+
+on:
+  pull_request
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  auto-merge-patch-updates:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            console.log(`PR Title: ${pr.title}`);
+            console.log(`PR Body: ${pr.body}`);
+            return pr;
+
+      - name: Check if patch update
+        id: check-patch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title || '';
+            const body = pr.body || '';
+
+            // Check if it's a patch update (patch version bump)
+            const isPatch = /patch/i.test(title) || /bump.*from.*\d+\.\d+\.\d+ to \d+\.\d+\.\d+/i.test(title);
+            // Also check for version patterns like "from 1.2.3 to 1.2.4"
+            const versionRegex = /from (\d+)\.(\d+)\.(\d+) to (\d+)\.(\d+)\.(\d+)/;
+            const match = title.match(versionRegex);
+
+            let isPatchVersion = false;
+            if (match) {
+              const [, majorFrom, minorFrom, patchFrom, majorTo, minorTo, patchTo] = match.map(Number);
+              // Patch update: major and minor same, patch different
+              isPatchVersion = majorFrom === majorTo && minorFrom === minorTo && patchFrom !== patchTo;
+            }
+
+            // Check it's not a security update (those should never auto-merge)
+            const isSecurityUpdate = /security|vulnerability|CVE/i.test(body) || /security/i.test(title);
+
+            const shouldAutoMerge = isPatch || isPatchVersion;
+            const canAutoMerge = shouldAutoMerge && !isSecurityUpdate;
+
+            console.log(`Is patch: ${isPatch}`);
+            console.log(`Is patch version: ${isPatchVersion}`);
+            console.log(`Is security update: ${isSecurityUpdate}`);
+            console.log(`Can auto-merge: ${canAutoMerge}`);
+
+            core.setOutput('can-auto-merge', canAutoMerge);
+
+      - name: Approve PR
+        if: steps.check-patch.outputs.can-auto-merge == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              event: 'APPROVE',
+              body: 'Auto-approved: patch version update with CI checks passing'
+            });
+
+      - name: Enable auto-merge
+        if: steps.check-patch.outputs.can-auto-merge == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.pulls.enableAutoMerge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                merge_method: 'squash'
+              });
+              console.log('Auto-merge enabled for patch update PR');
+            } catch (error) {
+              console.log(`Auto-merge may already be enabled or not available: ${error.message}`);
+            }
+
+      - name: Comment on major/minor updates
+        if: steps.check-patch.outputs.can-auto-merge == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            const isSecurityUpdate = /security|vulnerability|CVE/i.test(body) || /security/i.test(pr.title);
+
+            let message;
+            if (isSecurityUpdate) {
+              message = '🔒 **Security Update**: This PR will NOT be auto-merged. Security advisories require manual review and approval.';
+            } else {
+              message = '📋 **Manual Review Required**: This is a major or minor version update and requires explicit approval before merging.';
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });

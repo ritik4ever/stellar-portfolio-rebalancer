@@ -3,8 +3,10 @@ import { portfolioRouter } from '../api/routes.js'
 import { authRouter } from '../api/authRoutes.js'
 import { v1Router } from '../api/v1Router.js'
 import { legacyApiDeprecation } from '../middleware/legacyApiDeprecation.js'
+import { dynamicRateLimiter } from '../middleware/rateLimit.js'
 
 export function mountApiRoutes(app: Express): void {
+    app.use(dynamicRateLimiter)
     app.use('/api/v1', v1Router)
     app.use('/api/auth', authRouter)
     app.use('/api', legacyApiDeprecation, portfolioRouter)

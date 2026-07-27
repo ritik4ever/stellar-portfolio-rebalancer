@@ -6,6 +6,8 @@
 const STORAGE_KEY_ACCESS = 'auth_access_token'
 const STORAGE_KEY_REFRESH = 'auth_refresh_token'
 const STORAGE_KEY_EXPIRES = 'auth_expires_at'
+const AUTH_SESSION_EXPIRED_EVENT = 'stellar-auth-session-expired'
+const AUTH_SESSION_RESTORED_EVENT = 'stellar-auth-session-restored'
 
 const getBaseUrl = (): string => {
     const viteEnv = (import.meta as any).env
@@ -25,6 +27,67 @@ export interface AuthTokens {
     refreshToken: string
     expiresIn: number
     refreshExpiresIn: number
+}
+
+export interface AuthSessionEventDetail {
+    message: string
+    source?: string
+    status?: number
+    code?: string
+}
+
+function emitAuthSessionEvent(
+    eventName: string,
+    detail: AuthSessionEventDetail,
+): void {
+    if (typeof window === 'undefined') {
+        return
+    }
+
+    window.dispatchEvent(new CustomEvent<AuthSessionEventDetail>(eventName, { detail }))
+}
+
+export function announceAuthSessionExpired(detail: AuthSessionEventDetail): void {
+    emitAuthSessionEvent(AUTH_SESSION_EXPIRED_EVENT, detail)
+}
+
+export function announceAuthSessionRestored(detail: Partial<AuthSessionEventDetail> = {}): void {
+    emitAuthSessionEvent(AUTH_SESSION_RESTORED_EVENT, {
+        message: detail.message || 'Session restored.',
+        source: detail.source,
+        status: detail.status,
+        code: detail.code,
+    })
+}
+
+export function onAuthSessionExpired(
+    handler: (detail: AuthSessionEventDetail) => void,
+): () => void {
+    if (typeof window === 'undefined') {
+        return () => undefined
+    }
+
+    const listener = (event: Event) => {
+        handler((event as CustomEvent<AuthSessionEventDetail>).detail)
+    }
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener)
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener)
+}
+
+export function onAuthSessionRestored(
+    handler: (detail: AuthSessionEventDetail) => void,
+): () => void {
+    if (typeof window === 'undefined') {
+        return () => undefined
+    }
+
+    const listener = (event: Event) => {
+        handler((event as CustomEvent<AuthSessionEventDetail>).detail)
+    }
+
+    window.addEventListener(AUTH_SESSION_RESTORED_EVENT, listener)
+    return () => window.removeEventListener(AUTH_SESSION_RESTORED_EVENT, listener)
 }
 
 let inMemoryAccessToken: string | null = null
@@ -88,6 +151,10 @@ export async function login(address: string): Promise<AuthTokens | null> {
         refreshExpiresIn: data.refreshExpiresIn ?? 604800
     }
     setTokens(tokens)
+    announceAuthSessionRestored({
+        message: 'Signed in successfully.',
+        source: 'login',
+    })
     return tokens
 }
 
@@ -115,6 +182,10 @@ export async function refresh(): Promise<boolean> {
         refreshToken: data.refreshToken,
         expiresIn: data.expiresIn ?? 900,
         refreshExpiresIn: data.refreshExpiresIn ?? 604800
+    })
+    announceAuthSessionRestored({
+        message: 'Session refreshed successfully.',
+        source: 'refresh',
     })
     return true
 }

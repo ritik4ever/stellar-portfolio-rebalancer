@@ -1,0 +1,48 @@
+name: Npm Audit Policy
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'scripts/check-npm-audit-baseline.mjs'
+      - 'security/npm-audit-baseline.json'
+      - 'docs/CONTRIBUTING.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'scripts/check-npm-audit-baseline.mjs'
+      - 'security/npm-audit-baseline.json'
+      - 'docs/CONTRIBUTING.md'
+
+jobs:
+  audit-policy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check dependency audit baseline
+        run: npm run audit:policy
+
+      - name: Notify Slack on Failure
+        if: failure() && github.ref == 'refs/heads/main'
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"🚨 Security Scan / Dependency Vulnerability Failure on main!\n*Repo*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Failing Step*: ${{ github.job }}\n*Link*: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}

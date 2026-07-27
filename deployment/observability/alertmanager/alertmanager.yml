@@ -3,13 +3,84 @@ global:
 
 route:
   receiver: default
-  group_by: ['alertname', 'service']
+  group_by: ['alertname', 'subsystem', 'severity']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
+  routes:
+    # ----------------------------------------------------
+    # CRITICAL ALERTS: High-priority, aggressive paging
+    # ----------------------------------------------------
+    - match:
+        severity: critical
+      receiver: pagerduty-critical
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      routes:
+        - match:
+            subsystem: portfolio-engine
+          receiver: pagerduty-critical
+        - match:
+            subsystem: api-gateway
+          receiver: pagerduty-critical
+        - match:
+            subsystem: database
+          receiver: pagerduty-critical
+        - match:
+            subsystem: system
+          receiver: pagerduty-critical
+
+    # ----------------------------------------------------
+    # WARNING ALERTS: Asynchronous logging / Slack warning
+    # ----------------------------------------------------
+    - match:
+        severity: warning
+      receiver: slack-warnings
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        - match:
+            subsystem: portfolio-engine
+          receiver: slack-warnings
+        - match:
+            subsystem: api-gateway
+          receiver: slack-warnings
+        - match:
+            subsystem: database
+          receiver: slack-warnings
+        - match:
+            subsystem: system
+          receiver: slack-warnings
+
+    # ----------------------------------------------------
+    # INFO ALERTS: Diagnostic logging records / Low priority
+    # ----------------------------------------------------
+    - match:
+        severity: info
+      receiver: diagnostic-logs
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 24h
 
 receivers:
   - name: default
     webhook_configs:
       - url: http://host.docker.internal:5001/alerts
+        send_resolved: true
+
+  - name: pagerduty-critical
+    webhook_configs:
+      - url: http://host.docker.internal:5001/alerts/critical
+        send_resolved: true
+
+  - name: slack-warnings
+    webhook_configs:
+      - url: http://host.docker.internal:5001/alerts/warning
+        send_resolved: true
+
+  - name: diagnostic-logs
+    webhook_configs:
+      - url: http://host.docker.internal:5001/alerts/info
         send_resolved: true
