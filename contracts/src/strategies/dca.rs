@@ -1,7 +1,6 @@
 // DCA (Dollar Cost Averaging) strategy implementation
 use soroban_sdk::{Address, Env, Map};
 use crate::{types::*, portfolio, events, PortfolioRebalancer};
-use crate::{types::*, portfolio, PortfolioRebalancer};
 
 /// Configure DCA settings for a portfolio.
 /// Only the portfolio owner (or steward) may call.
@@ -124,7 +123,6 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         .set(&DataKey::DCAConfig(portfolio_id), &config);
 
     // Emit event
-    events::emit_dca_executed(env, &portfolio.user, portfolio_id, config.amount, purchased, current_ts);
-    portfolio::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_ts);
+    events::emit_dca_executed(env, &portfolio.user, portfolio_id, config.amount, purchased.clone(), current_ts);
     Ok(())
 }

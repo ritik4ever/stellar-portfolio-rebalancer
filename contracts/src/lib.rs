@@ -11,17 +11,15 @@ mod portfolio;
 
 
 
-mod strategies;
-mod nav;
-mod portfolio;
 mod reflector;
+mod circuit_breaker;
 mod events;
+mod nav;
 mod strategies;
 #[cfg(test)]
 mod test;
 mod types;
 
-use strategies::dca;
 
 pub use reflector::*;
 pub use types::*;

@@ -276,3 +276,10 @@ pub struct NavSnapshot {
     pub sequence: u32,
     pub timestamp: u64,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
+}
