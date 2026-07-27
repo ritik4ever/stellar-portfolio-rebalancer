@@ -3,18 +3,20 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
+    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
 mod nav;
 mod oracle;
 mod portfolio;
 mod reflector;
+mod strategies;
 #[cfg(test)]
 mod test;
 mod types;
 
 pub use oracle::*;
+use strategies::dca;
 pub use reflector::*;
 pub use types::*;
 
@@ -804,6 +806,19 @@ impl PortfolioRebalancer {
             portfolio
                 .current_balances
                 .set(asset.clone(), current + effective_amount);
+
+            if fee_amount > 0 {
+                let token_client = token::Client::new(env, &asset);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &fee_config.fee_recipient,
+                    &fee_amount,
+                );
+                env.events().publish(
+                    (Symbol::new(env, "fee_collected"), asset.clone()),
+                    (fee_amount, fee_config.fee_recipient.clone(), current_time),
+                );
+            }
         }
         portfolio.total_value = total_value;
         portfolio.last_rebalance = current_time;
