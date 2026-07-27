@@ -1,0 +1,38 @@
+name: Terraform CI & Plan Validation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployment/terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    paths:
+      - 'deployment/terraform/**'
+      - '.github/workflows/terraform.yml'
+
+jobs:
+  terraform-validation:
+    name: Terraform Format, Validate & Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Check Terraform formatting
+        working-directory: deployment/terraform
+        run: terraform fmt -check -recursive
+
+      - name: Initialize Terraform modules
+        working-directory: deployment/terraform
+        run: terraform init -backend=false
+
+      - name: Validate Terraform syntax
+        working-directory: deployment/terraform
+        run: terraform validate
