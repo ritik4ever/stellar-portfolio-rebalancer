@@ -137,6 +137,7 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    StopLoss(u64, Address),
 }
 
 #[contracttype]

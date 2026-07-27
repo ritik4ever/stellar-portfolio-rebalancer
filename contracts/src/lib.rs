@@ -9,6 +9,7 @@ use soroban_sdk::{
 mod nav;
 mod portfolio;
 mod reflector;
+mod stop_loss;
 mod strategies;
 #[cfg(test)]
 mod test;
@@ -315,6 +316,31 @@ impl PortfolioRebalancer {
 
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
         dca::execute_dca(&env, portfolio_id)
+    }
+
+    pub fn set_stop_loss(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+        price: i128,
+    ) -> Result<(), Error> {
+        stop_loss::set_stop_loss(&env, portfolio_id, asset, price)
+    }
+
+    pub fn remove_stop_loss(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+    ) -> Result<(), Error> {
+        stop_loss::remove_stop_loss(&env, portfolio_id, asset)
+    }
+
+    pub fn get_stop_loss(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+    ) -> Option<i128> {
+        stop_loss::get_stop_loss(&env, portfolio_id, asset)
     }
 
     pub fn transfer_stewardship(
@@ -699,7 +725,21 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
-        let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
+        let triggered = stop_loss::check_stop_losses(env, portfolio_id, &portfolio, &reflector_client);
+        let has_triggered = triggered.len() > 0;
+        let portfolio_for_preview = if has_triggered {
+            let adjusted = stop_loss::apply_stop_loss_adjustments(env, &triggered, &portfolio.target_allocations);
+            for (asset, price) in triggered.iter() {
+                stop_loss::emit_stop_loss_triggered(env, portfolio_id, asset.clone(), price);
+            }
+            let mut p = portfolio.clone();
+            p.target_allocations = adjusted;
+            p
+        } else {
+            portfolio.clone()
+        };
+
+        let preview = portfolio::build_rebalance_preview(env, &portfolio_for_preview, &reflector_client)?;
 
         for (asset, _) in portfolio.target_allocations.iter() {
             if let Some(reason) = preview.skip_reasons.get(asset) {
