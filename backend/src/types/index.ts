@@ -66,6 +66,8 @@ export interface Portfolio {
     createdAt: string
     lastRebalance: string
     version: number
+    /** ISO timestamp until which scheduled rebalancing is paused due to a CVaR/VaR breach. */
+    riskPausedUntil?: string
 }
 
 export type RebalanceTrigger = 'auto' | 'manual' | 'system'
