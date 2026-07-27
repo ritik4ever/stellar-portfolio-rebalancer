@@ -97,7 +97,7 @@ export function startAnalyticsSnapshotWorker(): Worker | null {
       error: err.message,
       attemptsMade: job?.attemptsMade,
     });
-    void handleFinalFailure(job, err);
+    void handleFinalFailure(job!, err);
   });
 
   logger.info("[WORKER:analytics-snapshot] Worker started");

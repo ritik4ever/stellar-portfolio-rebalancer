@@ -48,7 +48,10 @@ pricesRouter.get('/prices/ohlcv', async (req: Request, res: Response) => {
             return fail(res, 400, 'VALIDATION_ERROR', message)
         }
 
-        const { asset, interval, from, to } = parsed.data
+        const { symbol: asset, interval, startTime: from, endTime: to } = parsed.data
+        if (!asset || !interval || !from || !to) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'asset, interval, startTime, and endTime are required')
+        }
         const key = cacheKey(asset, interval, from, to)
         const now = Date.now()
 

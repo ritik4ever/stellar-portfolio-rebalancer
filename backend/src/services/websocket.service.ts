@@ -2,11 +2,20 @@ import { WebSocketServer, WebSocket } from 'ws';
 import {
   WSMessageSchema,
   PROTOCOL_VERSION,
-  type WSSessionMetadata,
   HEARTBEAT_INTERVAL_MS,
   RECONNECT_MAX_ATTEMPTS,
   RECONNECT_SUGGESTED_BACKOFF_MS
 } from '../types/websocket.js';
+
+interface WSSessionMetadata {
+  userId: string
+  sessionId?: string
+  connectedAt?: number
+  userAgent?: string
+  authenticatedAt?: string
+  tokenExpiresAt?: string
+  tokenExpiryTimestamp?: number
+}
 import { verifyAccessTokenForWebSocket } from '../middleware/requireJwt.js';
 import { getAuthConfig } from './authService.js';
 import { logger } from '../utils/logger.js';
@@ -86,7 +95,7 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
       const client = ws as ExtWebSocket;
       
       // Check token expiry
-      if (client.sessionMetadata) {
+      if (client.sessionMetadata?.tokenExpiryTimestamp) {
         const now = Date.now();
         if (now >= client.sessionMetadata.tokenExpiryTimestamp * 1000) {
           logger.info('[WS] Terminating connection — token expired', {
@@ -222,7 +231,7 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
       extWs.isAlive = true;
 
       // Re-validate token on each message if auth is enabled
-      if (authConfig.enabled && extWs.sessionMetadata) {
+      if (authConfig.enabled && extWs.sessionMetadata?.tokenExpiryTimestamp) {
         const now = Date.now();
         if (now >= extWs.sessionMetadata.tokenExpiryTimestamp * 1000) {
           logger.warn('[WS] Message rejected — token expired', {

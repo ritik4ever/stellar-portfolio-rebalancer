@@ -337,7 +337,7 @@ export async function buildReadinessReport() {
     secretConfigured: Boolean(process.env.HEALTH_PROBE_SECRET),
   };
 
-  const report = {
+  const report: ReadinessReport = {
     status: ready ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),

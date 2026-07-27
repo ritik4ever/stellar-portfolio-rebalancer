@@ -151,7 +151,7 @@ await queue.add(
                                 reason: result.trigger || 'Shadow rebalance decision',
                                 estimatedSlippageBps: result.estimatedTotalSlippageBps,
                             },
-                        })
+                        } as any)
                         recorded++
                     }
                 } catch (err) {

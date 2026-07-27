@@ -10,7 +10,12 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { getPool, isDbConfigured } from './client.js'
 
-const scryptAsync = promisify(scrypt)
+const scryptAsync = promisify(scrypt) as (
+    password: string,
+    salt: Buffer,
+    keylen: number,
+    options: { N: number; r: number; p: number },
+) => Promise<Buffer>
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const SCRYPT_N = 16384   // CPU/memory cost factor

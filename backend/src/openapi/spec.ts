@@ -3,7 +3,7 @@
  * Served at /api-docs via Swagger UI.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const spec: Record<string, any> = {
+const spec: any = {
     openapi: '3.1.0',
     info: {
         title: 'Stellar Portfolio Rebalancer API',
@@ -569,38 +569,6 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
-                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                },
-            },
-        },
-        '/api/portfolio/{id}/rebalance/dry-run': {
-            post: {
-                tags: ['Portfolio'],
-                summary: 'Dry-run rebalance',
-                description: 'Preview likely rebalance outcome (estimated trades, skipped assets, guardrails) without executing trades or writing rebalance history.',
-                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-                requestBody: {
-                    content: {
-                        'application/json': {
-                            schema: {
-                                type: 'object',
-                                properties: {
-                                    options: {
-                                        type: 'object',
-                                        properties: {
-                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                responses: {
-                    '200': { description: 'Dry-run preview', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
@@ -1299,7 +1267,7 @@ const spec: Record<string, any> = {
                 },
             },
         },
-    },
-};
+    }
+}
 
 export default spec;

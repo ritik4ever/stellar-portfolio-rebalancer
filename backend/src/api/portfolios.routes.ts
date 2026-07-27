@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import { buildRebalancePlan } from '../services/rebalancePlan.js'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
@@ -20,7 +21,7 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, rebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
 import type { Portfolio } from '../types/index.js'
 import { portfolioImportRouter } from './portfolioImportRoutes.js'
 
@@ -621,7 +622,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
 });
 
-portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolioRebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
+portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(rebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
         if (!portfolioId) {

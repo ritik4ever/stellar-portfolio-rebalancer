@@ -137,7 +137,7 @@ export function startPortfolioCheckWorker(): Worker | null {
       error: err.message,
       attemptsMade: j?.attemptsMade,
     });
-    void handleFinalFailure(j, err);
+    void handleFinalFailure(j!, err);
   });
 
   logger.info("[WORKER:portfolio-check] Worker started");

@@ -13,7 +13,7 @@
  */
 import { REDIS_URL } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
-import type { Redis } from 'ioredis'
+import { Redis } from 'ioredis'
 
 const SESSION_TTL_SECONDS = 60 * 60   // 1 hour
 const KEY_PREFIX = 'demo:session:'
@@ -29,8 +29,7 @@ let redis: Redis | null = null
 async function getRedis(): Promise<Redis | null> {
     if (redis) return redis
     try {
-        const { default: IORedis } = await import('ioredis')
-        const client = new IORedis(REDIS_URL, {
+        const client = new Redis(REDIS_URL, {
             maxRetriesPerRequest: 1,
             enableReadyCheck: false,
             lazyConnect: true,

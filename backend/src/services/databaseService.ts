@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "fs";
+import { mkdirSync, existsSync, copyFileSync } from "fs";
 import { dirname, join } from "path";
 import { randomUUID, createHash } from "node:crypto";
 
@@ -531,7 +531,7 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
         ? undefined
         : row.is_simulated === 1,
     details,
-  };
+  } as unknown as RebalanceEvent;
 }
 
 function generateId(): string {
@@ -1072,13 +1072,6 @@ export class DatabaseService {
     });
   }
 
-  private verifyBackupExists(): void {
-      // In production, this would check for a recent .db backup.
-      // For this implementation, we'll assume it passes or skip in test.
-      if (process.env.NODE_ENV === 'test') return;
-      // dummy implementation
-  }
-
   deletePortfolio(id: string): boolean {
     // Verify a recent backup before destructive delete
     this.verifyBackupExists();
@@ -1190,7 +1183,7 @@ export class DatabaseService {
       contractAddress?: string;
       issuerAccount?: string;
       coingeckoId?: string;
-      issuerMetadata?: IssuerMetadata;
+      issuerMetadata?: any;
     } = {},
   ): void {
     try {
@@ -1540,7 +1533,7 @@ export class DatabaseService {
         }),
       };
 
-      const event: RebalanceEvent = {
+      const event = {
         id: generateId(),
         portfolioId: eventData.portfolioId,
         timestamp: eventData.timestamp ?? new Date().toISOString(),
@@ -1564,7 +1557,7 @@ export class DatabaseService {
         onChainContractId: eventData.onChainContractId,
         onChainPagingToken: eventData.onChainPagingToken,
         isSimulated: eventData.isSimulated,
-      };
+      } as RebalanceEvent;
 
         this.db
           .prepare(
@@ -1579,7 +1572,7 @@ export class DatabaseService {
             eventData.portfolioId,
             event.timestamp,
             event.trigger,
-            event.reasonCode ?? null,
+            (event as any).reasonCode ?? null,
             event.trades,
             event.gasUsed,
             event.status,

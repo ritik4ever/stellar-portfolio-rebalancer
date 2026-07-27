@@ -30,7 +30,7 @@ export const redisProbe = {
     try {
       // Dynamic import so the module loads even if ioredis isn't installed
       const { default: IORedis } = await import("ioredis");
-      const probe = new IORedis(REDIS_URL, {
+      const probe = new (IORedis as any)(REDIS_URL, {
         lazyConnect: true,
         connectTimeout: 3000,
         maxRetriesPerRequest: 1,

@@ -31,7 +31,7 @@ export class ReflectorService {
     // Cache metrics tracking
     private cacheStats: Map<string, { hits: number; misses: number; lastAgeMs: number }> = new Map()
     private cacheMetricsReportInterval: NodeJS.Timer | null = null
-    private redisCache: Awaited<ReturnType<typeof import('ioredis').default>> | null = null
+    private redisCache: import('ioredis').Redis | null = null
     private redisAvailable: boolean = false
     private readonly ORACLE_CACHE_KEY = 'oracle:prices'
 
@@ -99,16 +99,16 @@ export class ReflectorService {
         if (this.redisCache) return this.redisCache
         try {
             const { default: IORedis } = await import('ioredis')
-            this.redisCache = new IORedis(REDIS_URL, {
+            this.redisCache = new (IORedis as any)(REDIS_URL, {
                 lazyConnect: true,
                 connectTimeout: 2000,
                 maxRetriesPerRequest: 1,
                 enableReadyCheck: false,
                 retryStrategy: () => null
             })
-            this.redisCache.on('error', () => {})
-            await this.redisCache.connect()
-            await this.redisCache.ping()
+            this.redisCache!.on('error', () => {})
+            await this.redisCache!.connect()
+            await this.redisCache!.ping()
             this.redisAvailable = true
         } catch {
             this.redisAvailable = false
@@ -346,8 +346,8 @@ export class ReflectorService {
         } | Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
 
         const rows: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }> = ('prices' in payload && payload.prices)
-            ? payload.prices
-            : payload
+            ? payload.prices as Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
+            : payload as Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
 
         const out: PricesMap = {}
         let staleCount = 0
@@ -866,7 +866,7 @@ export class ReflectorService {
      */
     stopCacheMetricsReporting(): void {
         if (this.cacheMetricsReportInterval) {
-            clearInterval(this.cacheMetricsReportInterval)
+            clearInterval(this.cacheMetricsReportInterval as NodeJS.Timeout)
             this.cacheMetricsReportInterval = null
         }
     }

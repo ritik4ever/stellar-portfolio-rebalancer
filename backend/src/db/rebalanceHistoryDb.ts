@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { query } from './client.js'
 
 export interface RebalanceEventRow {
@@ -39,7 +40,7 @@ function rowToEvent(r: RebalanceEventRow) {
 }
 
 export async function dbInsertRebalanceEvent(event: {
-    id: string
+    id?: string
     portfolioId: string
     trigger: string
     trades: number
@@ -51,13 +52,24 @@ export async function dbInsertRebalanceEvent(event: {
     riskAlerts?: unknown[]
     error?: string
     details?: unknown
+    eventSource?: string
+    actor?: string
+    source?: string
+    triggerMetadata?: unknown
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
     timestamp?: Date
 }): Promise<{ id: string }> {
     await query(
         `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, fee_paid, slippage_bps, status, is_automatic, risk_alerts, error, details, timestamp)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()))`,
         [
-            event.id,
+            event.id ?? randomUUID(),
             event.portfolioId,
             event.trigger,
             event.trades,
@@ -72,7 +84,7 @@ export async function dbInsertRebalanceEvent(event: {
             event.timestamp ?? null
         ]
     )
-    return { id: event.id }
+    return { id: event.id ?? randomUUID() }
 }
 
 export async function dbGetRebalanceHistoryByPortfolio(portfolioId: string, limit: number, offset = 0) {

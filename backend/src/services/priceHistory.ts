@@ -13,7 +13,10 @@ const reflector = new ReflectorService()
 export async function snapshotPrices(): Promise<void> {
     let prices: Record<string, number>
     try {
-        prices = await reflector.getCurrentPrices()
+        const rawPrices = await reflector.getCurrentPrices()
+        prices = Object.fromEntries(
+            Object.entries(rawPrices).map(([asset, data]) => [asset, data.price])
+        )
     } catch (err) {
         logger.warn('[priceHistory] Failed to fetch prices — snapshot skipped', {
             error: err instanceof Error ? err.message : String(err),
