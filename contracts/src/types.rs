@@ -32,6 +32,10 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+pub const PERIODIC_MIN_INTERVAL_LEDGERS: u64 = 10;
+pub const PERIODIC_MAX_INTERVAL_LEDGERS: u64 = 100_000;
+pub const CUSTOM_MIN_DAYS_BETWEEN_REBALANCE: u64 = 1;
+pub const CUSTOM_MAX_DAYS_BETWEEN_REBALANCE: u64 = 365;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,7 +64,25 @@ pub struct Portfolio {
     pub total_value: i128,
     pub is_active: bool,
     pub pause_reason: PauseReason,
+    pub strategy: StrategyType,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebalanceRecord {
+    pub timestamp: u64,
+    pub trades_executed: u64,
+    pub fee_paid: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebalanceHistory {
+    pub records: Vec<RebalanceRecord>,
+    pub capacity: u32,
+}
+
+pub const DEFAULT_REBALANCE_HISTORY_CAPACITY: u32 = 50;
 
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,6 +143,29 @@ pub struct UpgradeEvent {
 }
 
 #[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum StrategyType {
+    None = 0,
+    Threshold = 1,
+    Periodic = 2,
+    Custom = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PeriodicConfig {
+    pub interval_ledgers: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CustomStrategyConfig {
+    pub min_days_between_rebalance: u64,
+    pub threshold_bps: u32,
+}
+
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
@@ -137,6 +182,10 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    RebalanceHistory(u64),
+    PortfolioByUser(Address),
+    PeriodicConfig(u64),
+    CustomStrategyConfig(u64),
 }
 
 #[contracttype]

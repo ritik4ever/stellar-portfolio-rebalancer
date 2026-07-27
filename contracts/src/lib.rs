@@ -15,6 +15,8 @@ mod test;
 mod types;
 
 use strategies::dca;
+use strategies::periodic;
+use strategies::custom;
 
 pub use reflector::*;
 pub use types::*;
@@ -116,6 +118,7 @@ impl PortfolioRebalancer {
             total_value: 0,
             is_active: true,
             pause_reason: PauseReason::None,
+            strategy: StrategyType::Threshold,
         };
 
         let _estimated_footprint =
@@ -130,6 +133,7 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        portfolio::register_portfolio_for_user(&env, &user, portfolio_id);
         portfolio::emit_portfolio_created(&env, portfolio_id, user);
         Ok(portfolio_id)
     }
@@ -235,47 +239,70 @@ impl PortfolioRebalancer {
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
 
-        let reflector_address: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::ReflectorAddress)
-            .unwrap();
-        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+        match portfolio.strategy {
+            StrategyType::None => false,
+            StrategyType::Threshold => {
+                let reflector_address: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::ReflectorAddress)
+                    .unwrap();
+                let reflector_client = ReflectorClient::new(&env, &reflector_address);
 
-        let total_value = match portfolio::calculate_portfolio_value(
-            &env,
-            &portfolio.current_balances,
-            &portfolio.asset_decimals,
-            &reflector_client,
-        ) {
-            Ok(val) => val,
-            Err(_) => return false,
-        };
+                let total_value = match portfolio::calculate_portfolio_value(
+                    &env,
+                    &portfolio.current_balances,
+                    &portfolio.asset_decimals,
+                    &reflector_client,
+                ) {
+                    Ok(val) => val,
+                    Err(_) => return false,
+                };
 
-        if total_value == 0 {
-            return false;
-        }
+                if total_value == 0 {
+                    return false;
+                }
 
-        let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
-        if let Ok(p) = preview {
-            if p.total_value == 0 {
-                return false;
-            }
-            for (asset, _) in portfolio.target_allocations.iter() {
-                if let Some(reason) = p.skip_reasons.get(asset) {
-                    match reason {
-                        AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
-                            return false;
-                        }
-                        _ => {}
+                let preview = portfolio::build_rebalance_preview(&env, &portfolio, &reflector_client);
+                if let Ok(p) = preview {
+                    if p.total_value == 0 {
+                        return false;
                     }
+                    for (asset, _) in portfolio.target_allocations.iter() {
+                        if let Some(reason) = p.skip_reasons.get(asset) {
+                            match reason {
+                                AssetSkipReason::MissingPrice | AssetSkipReason::StalePrice => {
+                                    return false;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    p.rebalance_needed
+                } else {
+                    false
                 }
             }
-            p.rebalance_needed
-        } else {
-            false
+            StrategyType::Periodic => {
+                let config: PeriodicConfig = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::PeriodicConfig(portfolio_id))
+                    .unwrap_or(PeriodicConfig { interval_ledgers: 1000 });
+                periodic::check_periodic_rebalance(&env, &portfolio, &config)
+            }
+            StrategyType::Custom => {
+                let config: CustomStrategyConfig = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::CustomStrategyConfig(portfolio_id))
+                    .unwrap_or(CustomStrategyConfig {
+                        min_days_between_rebalance: 7,
+                        threshold_bps: portfolio.rebalance_threshold,
+                    });
+                custom::check_custom_rebalance(&env, &portfolio, &config)
+            }
         }
-
     }
 
     pub fn execute_rebalance(
@@ -315,6 +342,14 @@ impl PortfolioRebalancer {
 
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
         dca::execute_dca(&env, portfolio_id)
+    }
+
+    pub fn configure_periodic(env: Env, portfolio_id: u64, interval_ledgers: u64) -> Result<(), Error> {
+        periodic::configure_periodic(&env, portfolio_id, interval_ledgers)
+    }
+
+    pub fn configure_custom(env: Env, portfolio_id: u64, min_days: u64, threshold_bps: u32) -> Result<(), Error> {
+        custom::configure_custom(&env, portfolio_id, min_days, threshold_bps)
     }
 
     pub fn transfer_stewardship(
@@ -816,6 +851,17 @@ impl PortfolioRebalancer {
         };
         nav::save_nav_snapshot(env, portfolio_id, &snapshot)?;
 
+        let trades_executed = trades.len() as u64;
+        let mut fee_paid = 0i128;
+        for (_, amount) in trades.iter() {
+            fee_paid += if effective_fee_bps > 0 {
+                (amount.abs() * effective_fee_bps as i128) / 10000
+            } else {
+                0
+            };
+        }
+        portfolio::push_rebalance_history(env, portfolio_id, current_time, trades_executed, fee_paid);
+
         Ok(())
     }
 
@@ -825,6 +871,14 @@ impl PortfolioRebalancer {
 
     pub fn get_nav_history(env: Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
         nav::get_nav_history(&env, portfolio_id, limit)
+    }
+
+    pub fn get_rebalance_history(env: Env, portfolio_id: u64) -> Vec<RebalanceRecord> {
+        portfolio::get_rebalance_history(&env, portfolio_id)
+    }
+
+    pub fn list_portfolios_by_user(env: Env, user: Address) -> Vec<u64> {
+        portfolio::list_portfolios_by_user(&env, user)
     }
 }
 
