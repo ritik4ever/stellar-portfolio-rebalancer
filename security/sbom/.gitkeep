@@ -1,0 +1,8 @@
+# This file keeps the security/sbom/ directory present in the repository so the
+# scripts can write to it reproducibly. The actual SBOM JSON files emitted by
+# scripts/sbom and the .github/workflows/sbom.yml job are gitignored via the
+# standard re-include pattern in .gitignore (/security/sbom/* + !.gitkeep)
+# because they change every build and are emitted as GitHub workflow artifacts
+# named sbom-{ecosystem} instead.
+#
+# For the SBOM consumer guide, see security/SBOM.md at the repo root.

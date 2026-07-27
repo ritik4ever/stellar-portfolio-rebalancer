@@ -1,0 +1,116 @@
+name: SBOM Generation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  # Re-run SBOM generation when a new release tag is cut by release-please.
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: Generate CycloneDX SBOMs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CARGO_TERM_COLOR: never
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----- Backend + frontend prerequisites ------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install backend dependencies (for lockfile-based SBOM)
+        working-directory: backend
+        run: npm ci --ignore-scripts
+
+      - name: Install frontend dependencies (for lockfile-based SBOM)
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      # ----- Contracts prerequisites ----------------------------------------
+      # `cargo cyclonedx` needs Rust + cargo-cyclonedx. Cache cargo like the
+      # `contract-smoke` workflow to keep cold installs short.
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: sbom-cargo-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            sbom-cargo-${{ runner.os }}-
+
+      # ----- Install SBOM tools (cargo-cyclonedx; node tool is npx per-run) -
+      - name: Install SBOM generation tools
+        run: bash scripts/sbom/install-tools.sh
+
+      # ----- Prepare output directory --------------------------------------
+      - name: Prepare SBOM artifact directory
+        run: mkdir -p security/sbom
+
+      # ----- Generate the three SBOMs --------------------------------------
+      - name: Generate contracts SBOM (CycloneDX 1.5 JSON)
+        run: bash scripts/sbom/generate-contracts-sbom.sh
+
+      - name: Generate backend SBOM (CycloneDX 1.5 JSON)
+        run: bash scripts/sbom/generate-backend-sbom.sh
+
+      - name: Generate frontend SBOM (CycloneDX 1.5 JSON)
+        run: bash scripts/sbom/generate-frontend-sbom.sh
+
+      # ----- Surface the artifacts ------------------------------------------
+      - name: List SBOM files
+        run: ls -la security/sbom
+
+      - name: Upload contracts SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-contracts
+          path: security/sbom/contracts.cdx.json
+          if-no-files-found: error
+
+      - name: Upload backend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-backend
+          path: security/sbom/backend.cdx.json
+          if-no-files-found: error
+
+      - name: Upload frontend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-frontend
+          path: security/sbom/frontend.cdx.json
+          if-no-files-found: error
+
+      # ----- PR-only comment so reviewers can audit the dependency graph ----
+      - name: Summarize SBOM component counts (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          for f in contracts.cdx.json backend.cdx.json frontend.cdx.json; do
+            count=$(node -e "const b=require('./security/sbom/${f}'); console.log(b.components ? b.components.length : 0);")
+            echo "::group::${f}: ${count} components"
+            head -c 600 "security/sbom/${f}" || true
+            echo
+            echo "::endgroup::"
+          done

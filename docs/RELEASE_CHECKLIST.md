@@ -14,15 +14,16 @@ Use this template for contract, backend, and frontend releases. Fill in the rele
 ## Supply chain
 
 - [ ] Confirm the build workflow produced the latest frontend and backend bundles.
-- [ ] Confirm SBOM artifacts were generated for frontend, backend, and contracts.
+- [ ] Confirm SBOM artifacts were generated for frontend, backend, and contracts (download `sbom-{ecosystem}` artifacts from `.github/workflows/sbom.yml` on the matching SHA).
 - [ ] Confirm artifact attestations were created for the release bundles.
-- [ ] Review `npm run audit:policy` output and record any accepted exceptions.
+- [ ] Confirm `npm run audit:policy` ran cleanly and review its output for accepted exceptions.
+- [ ] Confirm `npm run sbom` runs cleanly on a fresh checkout (Smoke test the generator).
 
 ## Contract artifacts
 
 - [ ] Build the contract with `cd contracts && make build`.
 - [ ] Verify the generated WASM artifact matches the intended release commit.
-- [ ] Confirm the contract SBOM is attached to the CI run or release artifacts.
+- [ ] Confirm the contract SBOM is attached to the CI run by downloading the `sbom-contracts` artifact from the latest `.github/workflows/sbom.yml` run that matches the contract SHA.
 - [ ] Record the deployed contract address and network.
 
 ## Backend deploy

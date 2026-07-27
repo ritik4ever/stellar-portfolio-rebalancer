@@ -43,3 +43,15 @@ jobs:
           npm ci
           npm run build
 
+      # SBOM generation is owned by .github/workflows/sbom.yml which uploads
+      # `sbom-{frontend,backend,contracts}` as workflow artifacts and runs on
+      # every PR + push to main + release. We still emit lightweight copies
+      # into the build bundle so a single workflow run carries everything.
+      - name: Generate frontend SBOM into build bundle
+        working-directory: frontend
+        run: bash ../scripts/sbom/generate-frontend-sbom.sh && cp ../security/sbom/frontend.cdx.json ../artifacts/sbom/frontend.cdx.json
+
+      - name: Generate backend SBOM into build bundle
+        working-directory: backend
+        run: bash ../scripts/sbom/generate-backend-sbom.sh && cp ../security/sbom/backend.cdx.json ../artifacts/sbom/backend.cdx.json
+

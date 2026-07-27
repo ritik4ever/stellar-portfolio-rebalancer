@@ -31,7 +31,8 @@
         "replay:run": "tsx scripts/verify-replay.ts replay",
         "sdk:generate": "tsx scripts/generate-sdk.ts",
         "api:validate": "tsx scripts/validate-api-docs.ts",
-        "indexer:reindex": "tsx scripts/reindex-events.ts"
+        "indexer:reindex": "tsx scripts/reindex-events.ts",
+        "sbom": "bash ../scripts/sbom/generate-backend-sbom.sh"
     },
     "dependencies": {
         "@aws-sdk/client-secrets-manager": "^3.1098.0",

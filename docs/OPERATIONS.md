@@ -147,13 +147,14 @@ The script exits `0` when all required checks pass and `1` otherwise, so it can 
 
 ## Supply chain artifacts
 
-- The PR build workflow now emits three SBOM files: one each for `frontend`, `backend`, and `contracts`.
-- The same workflow packages the frontend and backend bundles as tarballs and creates GitHub artifact attestations for those release outputs.
-- Download the `build-and-supply-chain-artifacts` artifact from the workflow run when you need to inspect the exact files that were built.
+- The dedicated [`.github/workflows/sbom.yml`](../.github/workflows/sbom.yml) workflow generates CycloneDX 1.5 SBOM JSON for every tracked package — `frontend`, `backend`, and `contracts` — and uploads them as GitHub workflow artifacts named `sbom-{frontend,backend,contracts}` on every PR, push to `main`, and GitHub release (via `release: published`).
+- The build workflow also embeds the frontend + backend SBOMs in the `build-and-supply-chain-artifacts` bundle, alongside the bundle tarballs and attestations.
+- Generate the same artifacts locally with `npm run sbom` (or the per-ecosystem helpers `sbom:contracts`, `sbom:backend`, `sbom:frontend`); output path is `security/sbom/{ecosystem}.cdx.json`.
+- The raw SBOMs follow the CycloneDX 1.5 JSON schema (NTIA minimum fields). See [`security/SBOM.md`](../security/SBOM.md) for consumer recipes (Dependency-Track, Grype, Snyk, `bom-cli`).
 
 ### Verification
 
-Use GitHub's attestation tooling to verify a downloaded artifact against the repository's published attestations. The workflow stores the attestation on the run; verification is a maintainer task, not a manual build step.
+Use GitHub's attestation tooling to verify a downloaded artifact against the repository's published attestations; the SBOM artifacts are workflow-only (no attestation needed). Both flows ship on the same set of workflow files so a security investigator can correlate contract hash → contract SBOM → contract attestations using the run's git SHA.
 
 ### Practical limits
 

@@ -113,7 +113,7 @@ Release changelog entries are generated into these sections:
   - Created `docs/ROADMAP.md` with detailed project roadmap
   - Added roadmap summary table to `README.md` for quick reference
 
-- GitHub Actions build attestations for frontend and backend release bundles, plus CycloneDX SBOM artifacts for frontend, backend, and contracts.
+- GitHub Actions build attestations for frontend and backend release bundles, plus a dedicated SBOM Generation workflow (`.github/workflows/sbom.yml`) that publishes CycloneDX 1.6 JSON SBOMs for `frontend`, `backend`, and `contracts` as GitHub workflow artifacts on every PR, push to `main`, and `release: published`. Local equivalents are wired behind `npm run sbom`, `sbom:contracts`, `sbom:backend`, `sbom:frontend` plus a `make sbom` target in `contracts/`, with the full consumer guide under [`security/SBOM.md`](security/SBOM.md).
 - A repository-level npm audit baseline and CI policy gate, with a backend-local wrapper command for maintainers.
 - A reusable release checklist template for contract, backend, and frontend releases, together with a contract Makefile helper that points to it.
 - Replay-focused idempotency tests for cached success/error responses, cross-user key rejection, and expiry cleanup paths.
