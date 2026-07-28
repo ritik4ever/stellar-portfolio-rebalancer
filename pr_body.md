@@ -1,6 +1,6 @@
 ## Description
 
-This PR adds a **complete testnet integration testing infrastructure** for the Stellar Portfolio Rebalancer smart contract, including a **mock reflector oracle contract**, a **real on-chain test suite**, and a **nightly CI workflow**. It fixes #964.
+This PR adds a **complete testnet integration testing infrastructure** for the Stellar Portfolio Rebalancer smart contract, including a **mock reflector oracle contract**, a **real on-chain test suite**, and a **nightly CI workflow**. Fixes #964.
 
 ### Motivation
 
