@@ -60,13 +60,12 @@ jobs:
         working-directory: ./backend
         run: npm run openapi:export
 
-      - name: Build and start backend
+      - name: Start backend (tsx)
         working-directory: ./backend
         env:
           PORT: 3001
         run: |
-          npm run build
-          npm start &
+          npx tsx src/index.ts &
           ok=0
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3001/health > /dev/null; then
