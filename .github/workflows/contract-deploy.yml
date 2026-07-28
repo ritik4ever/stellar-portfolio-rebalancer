@@ -50,9 +50,11 @@ jobs:
       STELLAR_NETWORK: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'mainnet' || 'testnet' }}
       SOROBAN_RPC_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'https://soroban-mainnet.stellar.org' || 'https://soroban-testnet.stellar.org' }}
       SOROBAN_NETWORK_PASSPHRASE: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'Public Global Stellar Network ; September 2015' || 'Test SDF Network ; September 2015' }}
-      CONTRACT_ENV_FILE: ${{ runner.temp }}/contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}.env
 
     steps:
+      - name: Set env file path
+        run: echo "CONTRACT_ENV_FILE=/tmp/contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}.env" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: Setup Rust
