@@ -32,6 +32,10 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+pub const DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS: u32 = 100; // 1%
+pub const DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 3600; // 1 hour
+pub const DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 300; // 3%
+pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,6 +64,8 @@ pub struct Portfolio {
     pub total_value: i128,
     pub is_active: bool,
     pub pause_reason: PauseReason,
+    pub circuit_breaker_config: CircuitBreakerConfig,
+    pub global_max_slippage_bps: u32,
 }
 
 #[contracttype]
@@ -114,6 +120,27 @@ pub struct FeeConfig {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub execute_after: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedFeeConfig {
+    pub config: FeeConfig,
+    pub execute_after: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpgradeEvent {
     pub from_hash: BytesN<32>,
     pub to_hash: BytesN<32>,
@@ -137,6 +164,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    QueuedUpgrade,
+    QueuedFeeConfig,
 }
 
 #[contracttype]
@@ -181,6 +210,7 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    TimelockNotElapsed = 29,
 }
 
 #[contracttype]
