@@ -113,7 +113,7 @@ soroban contract invoke \
 
 **Proposed signature** (from `frontend/src/lib/contractCapabilities.ts`):
 
-```
+```text
 update_allocations(portfolio_id: u64, target_allocations: Map<Address, u32>) -> Result<(), Error>
 ```
 
@@ -132,13 +132,21 @@ soroban contract invoke \
 #### SDK (anticipated, TypeScript)
 
 ```typescript
-import { Contract, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Contract, nativeToScVal } from "@stellar/stellar-sdk";
+
+// Replace with your deployed contract ID and desired values.
+const CONTRACT_ID = "C...";           // deployed portfolio_rebalancer contract ID
+const portfolioId = 1;                // u64 portfolio ID
+const targetAllocations: Record<string, number> = {
+  "CDML...": 60,
+  "CDEF...": 40,
+}; // Map<Address, u32>, values must sum to 100
 
 const contract = new Contract(CONTRACT_ID);
 const op = contract.call(
   "update_allocations",
   nativeToScVal(portfolioId, { type: "u64" }),
-  nativeToScVal(targetAllocations, { type: "map" }) // Map<Address, u32>
+  nativeToScVal(targetAllocations, { type: "map" })
 );
 // Build, sign with the portfolio owner or steward key, and submit as usual.
 ```
