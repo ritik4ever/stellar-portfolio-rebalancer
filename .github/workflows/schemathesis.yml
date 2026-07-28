@@ -82,7 +82,7 @@ jobs:
       - name: Run Schemathesis against OpenAPI spec
         run: |
           schemathesis run \
-            --base-url http://localhost:3001 \
+            --url http://localhost:3001 \
             --checks all \
             --max-response-time 5000 \
             --max-examples 30 \
