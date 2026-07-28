@@ -1,0 +1,93 @@
+name: Frontend Deploy
+
+# Uploads the built frontend to S3 and automatically invalidates the CloudFront
+# distribution so users see updated content immediately after every deploy (#1486).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      invalidation_paths:
+        description: "CloudFront paths to invalidate (space-separated, default: /*)"
+        required: false
+        default: "/*"
+
+concurrency:
+  group: frontend-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write  # required for OIDC-based AWS credential exchange
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+      S3_BUCKET: ${{ secrets.FRONTEND_S3_BUCKET }}
+      SMOKE_CHECK_URL: ${{ secrets.FRONTEND_CDN_URL }}
+      INVALIDATION_PATHS: ${{ github.event.inputs.invalidation_paths || '/*' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build --workspace=frontend
+        env:
+          VITE_CONTRACT_ADDRESS: ${{ secrets.VITE_CONTRACT_ADDRESS }}
+          VITE_NETWORK: ${{ secrets.VITE_NETWORK }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload frontend assets to S3
+        run: |
+          aws s3 sync frontend/dist/ "s3://${S3_BUCKET}/" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html"
+
+          # index.html must never be cached so browsers always fetch the latest entry point.
+          aws s3 cp frontend/dist/index.html "s3://${S3_BUCKET}/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        # Fails loudly if invalidation fails — stale content is never silently served (#1486).
+        run: bash deployment/scripts/cloudfront-invalidate.sh
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ env.CLOUDFRONT_DISTRIBUTION_ID }}
+          INVALIDATION_PATHS: ${{ env.INVALIDATION_PATHS }}
+          SMOKE_CHECK_URL: ${{ env.SMOKE_CHECK_URL }}
+          INVALIDATION_TIMEOUT: "300"
+
+      - name: Summarize deployment
+        if: always()
+        run: |
+          {
+            echo "## Frontend deployment"
+            echo ""
+            echo "- S3 bucket: \`$S3_BUCKET\`"
+            echo "- CloudFront distribution: \`$CLOUDFRONT_DISTRIBUTION_ID\`"
+            echo "- Invalidation paths: \`$INVALIDATION_PATHS\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
