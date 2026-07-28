@@ -32,6 +32,8 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+/// Maximum number of portfolios accepted by `batch_rebalance` in one call.
+pub const MAX_BATCH_REBALANCE_PORTFOLIOS: u32 = 10;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -181,6 +183,21 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    BatchTooLarge = 29,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchRebalanceResult {
+    pub portfolio_id: u64,
+    pub result: BatchRebalanceResultStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BatchRebalanceResultStatus {
+    Success,
+    Failed(Error),
 }
 
 #[contracttype]
