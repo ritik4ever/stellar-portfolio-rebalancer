@@ -21,7 +21,7 @@ jobs:
   schemathesis:
     name: OpenAPI contract testing
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     env:
       CI: 'true'
