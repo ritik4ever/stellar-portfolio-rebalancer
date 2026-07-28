@@ -40,6 +40,8 @@ export interface RebalanceHistoryQueryOptions {
 interface PortfolioRow {
   id: string;
   user_address: string;
+  name?: string | null;
+  description?: string | null;
   allocations: string;
   threshold: number;
   slippage_tolerance_percent?: number;
@@ -467,6 +469,12 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
   return {
     id: row.id,
     userAddress: row.user_address,
+    // `name` and `description` are persisted on create and on versioned
+    // update, so they have to be read back here. Dropping them made every
+    // versioned update rewrite the stored name as NULL, because the merge
+    // that feeds the UPDATE started from a row that had already lost it.
+    ...(row.name == null ? {} : { name: row.name }),
+    ...(row.description == null ? {} : { description: row.description }),
     allocations: safeJsonParse(
       row.allocations,
       {},
