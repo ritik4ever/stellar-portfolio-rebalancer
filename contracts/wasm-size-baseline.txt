@@ -1,0 +1,28 @@
+# Contract WASM size baseline (bytes)
+#
+# This file is the single source of truth for the WASM size regression check.
+# The CI workflow (.github/workflows/contract-wasm-size.yml) builds the
+# contract, measures the release WASM in bytes, and fails the build if the
+# new size exceeds this baseline by more than WASM_SIZE_THRESHOLD_PCT (default 10%).
+#
+# How to update this baseline
+# ──────────────────────────
+# When a legitimate feature warrants a larger WASM binary:
+#
+#   1. Build locally:
+#        cd contracts
+#        cargo build --target wasm32-unknown-unknown --release
+#
+#   2. Measure the new size:
+#        wc -c < target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+#
+#   3. Replace the number on the BASELINE= line below with the new byte count.
+#
+#   4. Commit the updated baseline alongside the feature change so reviewers
+#      can see the explicit size delta in the PR diff.
+#
+# The baseline below was recorded from the release build at the time this
+# check was introduced. If CI reports that the baseline is wrong on the first
+# run, update it with the value from step 2 above.
+#
+BASELINE=57344
