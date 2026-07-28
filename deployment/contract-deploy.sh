@@ -19,6 +19,9 @@ SOROBAN_NETWORK_PASSPHRASE="${SOROBAN_NETWORK_PASSPHRASE:-}"
 CONTRACT_ENV_FILE="${CONTRACT_ENV_FILE:-}"
 DEPLOYMENT_SHA="${GITHUB_SHA:-${DEPLOYMENT_SHA:-}}"
 GITHUB_REF_NAME="${GITHUB_REF_NAME:-}"
+# Bitmask of capability flags the deployed contract must expose (#1490).
+# PerPortfolioSteward=1, DifferentiatedPricing=2, EmergencyStop=4 → 7.
+EXPECTED_CAPABILITY_FLAGS="${EXPECTED_CAPABILITY_FLAGS:-7}"
 
 if [ -z "$DEPLOYMENT_ENVIRONMENT" ]; then
   fail "DEPLOYMENT_ENVIRONMENT is required"
@@ -99,5 +102,38 @@ REFLECTOR_ADDRESS=$REFLECTOR_ADDRESS
 DEPLOYMENT_SHA=$DEPLOYMENT_SHA
 EOF
 fi
+
+print_step "Verifying deployed contract capabilities"
+ACTUAL_CAPABILITY_FLAGS="$(soroban contract invoke \
+  --id "$CONTRACT_ID" \
+  --source ci-deployer \
+  --network "$STELLAR_NETWORK" \
+  -- capabilities 2>/dev/null | tr -d '[:space:]')"
+
+if [ -z "$ACTUAL_CAPABILITY_FLAGS" ]; then
+  fail "capabilities() returned an empty response — contract may not have deployed correctly"
+fi
+
+# Decode flags into human-readable names for the audit log.
+decode_capability_flags() {
+  local flags="$1"
+  local names=""
+  (( flags & 1 )) && names="${names:+$names, }PerPortfolioSteward"
+  (( flags & 2 )) && names="${names:+$names, }DifferentiatedPricing"
+  (( flags & 4 )) && names="${names:+$names, }EmergencyStop"
+  printf '%s' "${names:-<none>}"
+}
+
+printf '[%s] Verified capability flags : %s (%s)\n' \
+  "contract-deploy" "$ACTUAL_CAPABILITY_FLAGS" "$(decode_capability_flags "$ACTUAL_CAPABILITY_FLAGS")"
+printf '[%s] Expected capability flags  : %s (%s)\n' \
+  "contract-deploy" "$EXPECTED_CAPABILITY_FLAGS" "$(decode_capability_flags "$EXPECTED_CAPABILITY_FLAGS")"
+
+if [ "$ACTUAL_CAPABILITY_FLAGS" != "$EXPECTED_CAPABILITY_FLAGS" ]; then
+  fail "Capability mismatch: expected flags=$EXPECTED_CAPABILITY_FLAGS but got flags=$ACTUAL_CAPABILITY_FLAGS. \
+Aborting — the deployed contract does not match the expected capability manifest."
+fi
+
+print_step "Capability verification passed"
 
 printf '\n[%s] Contract deployed: %s\n' "contract-deploy" "$CONTRACT_ID"
