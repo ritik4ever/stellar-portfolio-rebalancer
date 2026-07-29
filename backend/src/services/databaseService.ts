@@ -1311,6 +1311,8 @@ export class DatabaseService {
   ): void {
     const now = new Date().toISOString();
     const docVersion = computeDocumentVersionHash(opts.documentText);
+    const analyticsFlag = opts.analytics === undefined ? null : (opts.analytics ? 1 : 0);
+    const marketingFlag = opts.marketing === undefined ? null : (opts.marketing ? 1 : 0);
     const grant = this.db.transaction(() => {
       this.db
         .prepare(
@@ -1320,8 +1322,16 @@ export class DatabaseService {
                  terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
                  privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
                  cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
-                 analytics_accepted_at = CASE WHEN ? THEN excluded.analytics_accepted_at ELSE NULL END,
-                 marketing_accepted_at = CASE WHEN ? THEN excluded.marketing_accepted_at ELSE NULL END,
+                 analytics_accepted_at = CASE
+                   WHEN ? IS NULL THEN analytics_accepted_at
+                   WHEN ? = 1 THEN excluded.analytics_accepted_at
+                   ELSE NULL
+                 END,
+                 marketing_accepted_at = CASE
+                   WHEN ? IS NULL THEN marketing_accepted_at
+                   WHEN ? = 1 THEN excluded.marketing_accepted_at
+                   ELSE NULL
+                 END,
                  revoked_at = NULL,
                  is_active = 1,
                  ip_address = excluded.ip_address,
@@ -1334,19 +1344,21 @@ export class DatabaseService {
           opts.terms ? now : null,
           opts.privacy ? now : null,
           opts.cookies ? now : null,
-          opts.analytics ? now : null,
-          opts.marketing ? now : null,
+          analyticsFlag === 1 ? now : null,
+          marketingFlag === 1 ? now : null,
           opts.ipAddress ?? null,
           opts.userAgent ?? null,
           docVersion,
           now,
-          opts.analytics ? 1 : 0,
-          opts.marketing ? 1 : 0,
+          analyticsFlag,
+          analyticsFlag,
+          marketingFlag,
+          marketingFlag,
         );
       this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion);
     });
     grant();
-    logger.info("[DB] Consent recorded", { userId, documentVersion: docVersion, analytics: !!opts.analytics, marketing: !!opts.marketing });
+    logger.info("[DB] Consent recorded", { userId, documentVersion: docVersion });
   }
 
   revokeConsent(
