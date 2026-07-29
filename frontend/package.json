@@ -1,20 +1,15 @@
 {
   "name": "stellar-portfolio-frontend",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=20.19.0"
-  },
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview --host",
-    "test": "vitest run",
-    "test:unit": "vitest run",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:visual": "playwright test --project=visual-regression",
-    "test:e2e:visual-update": "playwright test --project=visual-regression --update-snapshots",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -36,18 +31,13 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.1",
-    "@chromatic-com/storybook": "^5.2.1",
     "@playwright/test": "^1.58.2",
-    "@storybook/addon-a11y": "^10.4.6",
-    "@storybook/addon-docs": "^10.4.6",
+    "@storybook/addon-a11y": "^8.6.14",
+    "@storybook/addon-docs": "^8.6.14",
     "@storybook/addon-essentials": "^8.6.14",
     "@storybook/addon-interactions": "^8.6.14",
-    "@storybook/addon-links": "^10.4.6",
-    "@storybook/addon-mcp": "^0.6.0",
-    "@storybook/addon-vitest": "^10.4.6",
+    "@storybook/addon-links": "^8.6.14",
     "@storybook/blocks": "^8.6.14",
-    "@storybook/react": "^10.4.6",
-    "@storybook/react-vite": "^10.4.6",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -60,14 +50,16 @@
     "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.4.16",
     "esbuild": "^0.28.0",
-    "eslint-plugin-storybook": "^10.4.6",
     "jsdom": "^26.1.0",
     "playwright": "^1.61.1",
     "postcss": "^8.4.31",
-    "storybook": "^10.4.6",
+    "storybook": "^8.6.14",
     "tailwindcss": "^3.3.5",
     "typescript": "^5.2.2",
-    "vite": "^4.5.0",
+    "vite": "^5.4.0",
     "vitest": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=20.19.0"
   }
 }

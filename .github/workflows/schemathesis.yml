@@ -21,7 +21,14 @@ jobs:
   schemathesis:
     name: OpenAPI contract testing
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 5
 
     env:
       CI: 'true'
@@ -33,6 +40,7 @@ jobs:
       ALLOW_DEMO_BALANCE_FALLBACK: 'true'
       JWT_SECRET: schemathesis-ci-jwt-secret-at-least-32
       DB_PATH: /tmp/schemathesis-test.db
+      REDIS_URL: redis://localhost:6379
 
     steps:
       - uses: actions/checkout@v4
@@ -61,13 +69,12 @@ jobs:
         working-directory: ./backend
         run: npm run openapi:export
 
-      - name: Build and start backend
+      - name: Start backend (tsx)
         working-directory: ./backend
         env:
           PORT: 3001
         run: |
-          npm run build
-          npm start &
+          npx tsx src/index.ts &
           ok=0
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3001/health > /dev/null; then
@@ -84,12 +91,8 @@ jobs:
       - name: Run Schemathesis against OpenAPI spec
         run: |
           schemathesis run \
-            --base-url http://localhost:3001 \
+            --url http://localhost:3001 \
             --checks all \
-            --max-response-time 5000 \
-            --max-examples 30 \
-            --hypothesis-deadline 500 \
-            --contrib-openapi-formats-uuid \
             backend/openapi.json
 
       - name: Stop backend

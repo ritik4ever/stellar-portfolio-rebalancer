@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Run frontend unit tests with coverage
         working-directory: ./frontend
@@ -70,7 +70,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Install backend dependencies
         working-directory: ./backend
