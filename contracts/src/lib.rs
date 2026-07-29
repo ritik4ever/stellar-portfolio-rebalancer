@@ -6,10 +6,12 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
+mod circuit_breaker;
 mod nav;
 mod portfolio;
 mod reflector;
 mod strategies;
+mod circuit_breaker;
 #[cfg(test)]
 mod test;
 mod types;
@@ -396,6 +398,61 @@ impl PortfolioRebalancer {
     }
 
 
+    pub fn set_circuit_breaker_config(env: Env, config: CircuitBreakerConfig) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CircuitBreakerConfig, &config);
+    }
+
+    pub fn get_circuit_breaker_config(env: Env) -> CircuitBreakerConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::CircuitBreakerConfig)
+            .unwrap_or(CircuitBreakerConfig {
+                spike_threshold_bps: 500,
+                window_seconds: 3600,
+            })
+    }
+
+    pub fn update_allocations(
+        env: Env,
+        portfolio_id: u64,
+        new_allocations: Map<Address, u32>,
+    ) -> Result<(), Error> {
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+
+        if !portfolio::validate_allocations(&new_allocations) {
+            return Err(Error::InvalidAllocation);
+        }
+
+        for (asset, _) in new_allocations.iter() {
+            if !portfolio.asset_decimals.contains_key(asset.clone()) {
+                return Err(Error::AssetNotSupported);
+            }
+        }
+
+        let old_allocations = portfolio.target_allocations.clone();
+        portfolio.target_allocations = new_allocations.clone();
+
+        portfolio::check_portfolio_invariants(&portfolio)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+
+        env.events().publish(
+            (
+                symbol_short!("portfolio"),
+                Symbol::new(&env, "alloc_upd"),
+            ),
+            (portfolio_id, old_allocations, new_allocations),
+        );
+
+        Ok(())
+    }
+
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
@@ -545,16 +602,57 @@ impl PortfolioRebalancer {
     }
 
     pub fn pause_portfolio(env: Env, portfolio_id: u64, reason: PauseReason) {
-        let mut portfolio: Portfolio = env
+        let portfolio: Portfolio = env
             .storage()
             .persistent()
             .get(&DataKey::Portfolio(portfolio_id))
             .unwrap();
+        
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
+        
+        let mut portfolio = portfolio;
         portfolio.is_active = false;
         portfolio.pause_reason = reason;
         env.storage()
             .persistent()
             .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            ("portfolio", "paused"),
+            (portfolio_id, steward, reason),
+        );
+    }
+
+    pub fn resume_portfolio(env: Env, portfolio_id: u64) {
+        let portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+            .unwrap();
+        
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
+        
+        let mut portfolio = portfolio;
+        portfolio.is_active = true;
+        portfolio.pause_reason = PauseReason::None;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            ("portfolio", "resumed"),
+            (portfolio_id, steward),
+        );
     }
 
     pub fn get_contract_pause_reason(env: Env) -> PauseReason {
@@ -704,6 +802,25 @@ impl PortfolioRebalancer {
             .get(&DataKey::ReflectorAddress)
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
+
+        let cb_config: CircuitBreakerConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::CircuitBreakerConfig)
+            .unwrap_or(CircuitBreakerConfig {
+                spike_threshold_bps: 500,
+                window_seconds: 3600,
+            });
+
+        let mut current_prices = Map::new(env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(price_data) =
+                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            {
+                current_prices.set(asset.clone(), price_data.price);
+            }
+        }
+        circuit_breaker::check_volatility(env, &cb_config, &reflector_client, &current_prices)?;
 
         let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
 
