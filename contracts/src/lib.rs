@@ -6,6 +6,7 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
+mod circuit_breaker;
 mod nav;
 mod portfolio;
 mod reflector;
