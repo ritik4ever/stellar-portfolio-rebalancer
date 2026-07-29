@@ -12,7 +12,6 @@ mod portfolio;
 mod reflector;
 mod stop_loss;
 mod strategies;
-mod circuit_breaker;
 #[cfg(test)]
 mod test;
 mod types;
