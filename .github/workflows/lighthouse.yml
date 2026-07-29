@@ -6,6 +6,7 @@ on:
       - 'frontend/**'
       - '.github/workflows/lighthouse.yml'
       - '.lighthouserc.json'
+      - 'docs/FRONTEND_PERFORMANCE_BUDGET.md'
 
 permissions:
   contents: read
@@ -39,5 +40,12 @@ jobs:
         with:
           configPath: ./.lighthouserc.json
           uploadArtifacts: true
-          temporaryPublicStorage: true
           githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: lighthouse-results/
+          retention-days: 14
