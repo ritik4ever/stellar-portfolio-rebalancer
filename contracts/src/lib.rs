@@ -312,6 +312,36 @@ impl PortfolioRebalancer {
         Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
     }
 
+    pub fn batch_rebalance(
+        env: Env,
+        portfolio_ids: Vec<u64>,
+    ) -> Result<Vec<BatchRebalanceResult>, Error> {
+        if portfolio_ids.len() > MAX_BATCH_REBALANCE_PORTFOLIOS {
+            return Err(Error::BatchTooLarge);
+        }
+
+        let mut results = Vec::new(&env);
+        for portfolio_id in portfolio_ids.iter() {
+            let result = match Self::execute_rebalance_internal(
+                &env,
+                portfolio_id,
+                Map::new(&env),
+                false,
+                None,
+            ) {
+                Ok(()) => BatchRebalanceResultStatus::Success,
+                Err(error) => BatchRebalanceResultStatus::Failed(error),
+            };
+
+            results.push_back(BatchRebalanceResult {
+                portfolio_id,
+                result,
+            });
+        }
+
+        Ok(results)
+    }
+
     pub fn admin_force_rebalance(
         env: Env,
         portfolio_id: u64,

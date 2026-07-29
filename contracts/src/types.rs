@@ -32,10 +32,15 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+
+/// Maximum number of portfolios accepted by `batch_rebalance` in one call.
+pub const MAX_BATCH_REBALANCE_PORTFOLIOS: u32 = 10;
+
 pub const DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS: u32 = 100; // 1%
 pub const DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 3600; // 1 hour
 pub const DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 300; // 3%
 pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -195,7 +200,25 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+
+    BatchTooLarge = 29,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchRebalanceResult {
+    pub portfolio_id: u64,
+    pub result: BatchRebalanceResultStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BatchRebalanceResultStatus {
+    Success,
+    Failed(Error),
+
     InvalidOracleAddress = 29,
+
 }
 
 #[contracttype]
