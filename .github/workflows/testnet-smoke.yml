@@ -1,0 +1,165 @@
+name: Testnet Smoke Test
+
+on:
+  schedule:
+    # Runs daily at 6:00 UTC to catch testnet-breaking regressions early
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      testnet_rpc_url:
+        description: 'Soroban testnet RPC URL override'
+        required: false
+        type: string
+        default: 'https://soroban-testnet.stellar.org'
+  # Also run when core contract files change on main/develop
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/testnet-smoke.yml'
+      - 'scripts/testnet-smoke.sh'
+
+concurrency:
+  group: testnet-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Deploy & Smoke Test (Testnet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_SECRET_KEY }}
+      SOROBAN_RPC_URL: ${{ inputs.testnet_rpc_url || 'https://soroban-testnet.stellar.org' }}
+      SOROBAN_NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015'
+      SOROBAN_NETWORK: testnet
+      SOROBAN_IDENTITY: ci-deployer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Pre-flight: validate secrets ────────────────────────────────────
+      - name: Ensure testnet secret is available
+        run: |
+          if [ -z "${STELLAR_SECRET_KEY}" ]; then
+            echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
+            echo "::notice::Add STELLAR_TESTNET_SECRET_KEY to repository secrets (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+
+      # ── Toolchain ───────────────────────────────────────────────────────
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo and Soroban
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.soroban
+            contracts/target
+          key: testnet-smoke-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            testnet-smoke-${{ runner.os }}-
+
+      - name: Install Soroban CLI
+        run: cargo install --locked soroban-cli
+
+      # ── Build ───────────────────────────────────────────────────────────
+      - name: Build contract WASM
+        working-directory: ./contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      # ── Configure Soroban network and identity ──────────────────────────
+      - name: Configure Soroban testnet profile
+        run: |
+          soroban network add testnet --global \
+            --rpc-url "${SOROBAN_RPC_URL}" \
+            --network-passphrase "${SOROBAN_NETWORK_PASSPHRASE}" || true
+
+          soroban keys add "${SOROBAN_IDENTITY}" --global --secret-key "${STELLAR_SECRET_KEY}" || true
+
+          echo "ADMIN_ADDRESS=$(soroban keys address ${SOROBAN_IDENTITY} --global)" >> "${GITHUB_ENV}"
+
+      # ── Deploy ──────────────────────────────────────────────────────────
+      - name: Deploy contract to Soroban testnet
+        id: deploy
+        working-directory: ./contracts
+        run: |
+          CONTRACT_ID="$(soroban contract deploy \
+            --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \
+            --source "${SOROBAN_IDENTITY}" \
+            --network testnet)"
+
+          if [ -z "${CONTRACT_ID}" ]; then
+            echo "::error::Contract deployment did not return a contract ID"
+            exit 1
+          fi
+
+          echo "CONTRACT_ID=${CONTRACT_ID}" >> "${GITHUB_ENV}"
+          echo "contract_id=${CONTRACT_ID}" >> "${GITHUB_OUTPUT}"
+          echo "Deployed contract: ${CONTRACT_ID}"
+
+      # ── Initialize ──────────────────────────────────────────────────────
+      - name: Initialize contract on testnet
+        run: |
+          soroban contract invoke \
+            --id "${CONTRACT_ID}" \
+            --source "${SOROBAN_IDENTITY}" \
+            --network testnet \
+            -- initialize \
+            --admin "${ADMIN_ADDRESS}" \
+            --reflector_address "${ADMIN_ADDRESS}"
+
+          echo "Contract initialized with admin: ${ADMIN_ADDRESS}"
+
+      # ── Smoke tests ─────────────────────────────────────────────────────
+      - name: Run smoke test suite
+        id: smoke
+        run: bash scripts/testnet-smoke.sh
+
+      # ── Cleanup Soroban identity from runner ────────────────────────────
+      - name: Cleanup Soroban identity
+        if: always()
+        run: |
+          soroban keys rm "${SOROBAN_IDENTITY}" --global 2>/dev/null || true
+          echo "Cleaned up CI deployer identity from runner"
+
+      # ── Deployment summary ──────────────────────────────────────────────
+      - name: Post deployment summary
+        if: always()
+        run: |
+          {
+            echo "## Testnet Smoke Test Results"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| **Contract ID** | \`${{ env.CONTRACT_ID }}\` |"
+            echo "| **Network** | Soroban Testnet |"
+            echo "| **RPC URL** | \`${{ env.SOROBAN_RPC_URL }}\` |"
+            echo "| **Deployer** | \`${{ env.ADMIN_ADDRESS }}\` |"
+            echo "| **Smoke Suite** | ${{ job.status == 'success' && '✅ Passed' || '❌ Failed' }} |"
+            echo "| **Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "> Triggered by: ${{ github.event_name }}"
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "> ⏰ Scheduled run — check for testnet-breaking regressions"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # ── Failure notification ────────────────────────────────────────────
+      - name: Notify on smoke-test failure
+        if: failure()
+        run: |
+          echo "::error::Testnet smoke test FAILED — testnet-breaking regression detected!"
+          echo "::error::Contract ID: ${CONTRACT_ID}"
+          echo "::error::Review the smoke-test logs above for the failing step."
