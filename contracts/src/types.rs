@@ -118,6 +118,13 @@ pub struct FeeConfig {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpgradeEvent {
     pub from_hash: BytesN<32>,
     pub to_hash: BytesN<32>,
@@ -141,6 +148,7 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    CircuitBreakerConfig,
     Template(String),
     TemplateNames,
 }
@@ -187,9 +195,10 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
-    TemplateNotFound = 29,
-    TemplateAlreadyExists = 30,
-    TooManyTemplates = 31,
+    InvalidOracleAddress = 29,
+    TemplateNotFound = 30,
+    TemplateAlreadyExists = 31,
+    TooManyTemplates = 32,
 }
 
 #[contracttype]

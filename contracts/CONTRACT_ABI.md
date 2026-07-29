@@ -345,9 +345,10 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `26` | `InvalidAmount` | A deposit or trade amount is zero, negative, or below the minimum trade size. | Provide a positive amount greater than the minimum trade size. |
 | `27` | `WithdrawFailed` | A withdrawal operation could not be completed. | Check that the portfolio has sufficient balance and is not paused. Verify the withdrawal amount does not exceed available balances. |
 | `28` | `InvalidAllocationSum` | A portfolio's target allocations no longer sum to exactly 100% at rebalance time. | Update the portfolio's target allocations so they sum to exactly 100% before retrying. |
-| `29` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
-| `30` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
-| `31` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | Remove or repurpose an existing template (via `update_template`) before creating a new one. |
+| `29` | `InvalidOracleAddress` | The address passed to `initialize` as `reflector_address` does not behave like a Reflector oracle (its `base()` call failed or returned unexpectedly). | Verify the Reflector contract address is correct and deployed on the target network before calling `initialize`. |
+| `30` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
+| `31` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
+| `32` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | Remove or repurpose an existing template (via `update_template`) before creating a new one. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 
