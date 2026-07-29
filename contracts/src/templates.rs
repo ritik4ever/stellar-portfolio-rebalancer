@@ -19,17 +19,18 @@ fn validate_template_allocations(allocations: &Map<Address, u32>) -> bool {
     crate::portfolio::validate_allocations(allocations)
 }
 
-/// Ensures a template's allocations can actually be turned into a portfolio
-/// later: same asset-count ceiling as `create_portfolio`, and a storage
-/// footprint estimate under the same limit `create_portfolio` enforces.
+/// Checks a template's allocations against the same asset-count ceiling and
+/// storage-footprint limit `create_portfolio` enforces, so that under normal
+/// use a template accepted here can be turned into a portfolio later via
+/// `create_portfolio_from_template`.
 ///
-/// The footprint is estimated using a synthetic `Portfolio` value (default
-/// decimals per asset, no balances yet) since templates don't carry
-/// `asset_decimals` or `current_balances` themselves; this is a lower bound
-/// on the real footprint at portfolio-creation time; instantiating from this
-/// template can only add resource usage as balances accrue, so it is
-/// conservative in the right direction against a template that is *not*
-/// already unusable.
+/// The footprint is estimated using a synthetic `Portfolio` value (one
+/// `asset_decimals` entry per allocated asset, no balances yet) since
+/// templates don't carry `asset_decimals` or `current_balances` themselves.
+/// This is not an absolute guarantee: decimal *values* are fixed-width and
+/// don't affect the serialized size, but a caller who supplies extra,
+/// unrelated entries in `asset_decimals` at `create_portfolio_from_template`
+/// time can still exceed the limit despite the template being accepted here.
 fn validate_template_size(env: &Env, allocations: &Map<Address, u32>) -> Result<(), Error> {
     if allocations.len() > MAX_PORTFOLIO_ASSETS {
         return Err(Error::TooManyAssets);

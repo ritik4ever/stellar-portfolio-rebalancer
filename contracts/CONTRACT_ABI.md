@@ -87,7 +87,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `Err(Error::TemplateAlreadyExists)` — a template with this name already exists; use `update_template` instead.
   - `Err(Error::TooManyTemplates)` — the template registry already holds `MAX_TEMPLATES` (50) entries.
 - **Preconditions:** `admin.require_auth()` succeeds.
-- **Notes:** These limits exist so a template accepted here can always be turned into a portfolio later via `create_portfolio_from_template` — `create_portfolio`'s own asset-count and storage-footprint checks would otherwise be able to reject a template that `create_template` had accepted.
+- **Notes:** These limits exist so a template accepted here can, under normal use, be turned into a portfolio later via `create_portfolio_from_template` without hitting `create_portfolio`'s own asset-count and storage-footprint checks. This is not an absolute guarantee: the footprint estimate here assumes `asset_decimals` at portfolio-creation time has exactly one entry per allocated asset (as `create_portfolio_from_template`'s own `asset_decimals` parameter normally would). Since decimal *values* are fixed-width and don't affect the serialized size, only the number of `asset_decimals` entries matters — a caller who supplies extra, unrelated entries in `asset_decimals` at `create_portfolio_from_template` time can still exceed `MAX_PORTFOLIO_STORAGE_BYTES` despite the template having been accepted here.
 
 ### `update_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
 
@@ -348,7 +348,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `29` | `InvalidOracleAddress` | The address passed to `initialize` as `reflector_address` does not behave like a Reflector oracle (its `base()` call failed or returned unexpectedly). | Verify the Reflector contract address is correct and deployed on the target network before calling `initialize`. |
 | `30` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
 | `31` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
-| `32` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | Remove or repurpose an existing template (via `update_template`) before creating a new one. |
+| `32` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | There is no delete entrypoint. Repurpose an existing template's allocations via `update_template` instead of creating a new one. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 
