@@ -156,6 +156,7 @@ pub enum DataKey {
     DCAConfig(u64),
     NavHistory(u64),
     CircuitBreakerConfig,
+    StopLoss(u64, Address),
 }
 
 #[contracttype]
@@ -281,13 +282,6 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CircuitBreakerConfig {
-    pub spike_threshold_bps: u32,
-    pub window_seconds: u64,
 }
 
 #[contracttype]
