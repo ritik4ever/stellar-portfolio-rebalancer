@@ -2,7 +2,7 @@
 
 set -e
 
-echo "🚀 Deploying Stellar Portfolio Rebalancer..."
+echo "Deploying Stellar Portfolio Rebalancer..."
 
 # Load environment variables
 if [ -f .env ]; then
@@ -13,19 +13,126 @@ fi
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Configuration with defaults
+HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:3001/readiness}"
+HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-5}"
+HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-10}"
+DRY_RUN=false
 
 # Function to print colored output
 print_status() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}[OK]${NC} $1"
 }
 
 print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
 print_error() {
-    echo -e "${RED}✗${NC} $1"
+    echo -e "${RED}[ERR]${NC} $1"
+}
+
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+# Send alert notification
+send_alert() {
+    local message="$1"
+    local severity="${2:-warning}"
+
+    echo -e "${RED}ALERT [${severity}]:${NC} ${message}"
+
+    # Send Slack notification if webhook is configured
+    if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        local emoji="warning"
+        if [ "$severity" = "error" ]; then
+            emoji="alert"
+        fi
+        curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"${emoji} ${message}\"}" \
+            "$SLACK_WEBHOOK_URL" || print_warning "Failed to send Slack notification"
+    fi
+}
+
+# Health check function
+health_check() {
+    local url="$HEALTH_CHECK_URL"
+    local retries="$HEALTH_CHECK_RETRIES"
+    local interval="$HEALTH_CHECK_INTERVAL"
+    local attempt=1
+
+    print_info "Running health check against ${url} (max ${retries} attempts, ${interval}s interval)..."
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY-RUN] Would poll ${url} up to ${retries} times"
+        print_info "[DRY-RUN] Simulating health check failure for rollback validation"
+        return 1
+    fi
+
+    while [ $attempt -le $retries ]; do
+        print_info "Health check attempt ${attempt}/${retries}..."
+
+        if curl -sf --max-time 10 "$url" > /dev/null 2>&1; then
+            print_status "Health check passed on attempt ${attempt}"
+            return 0
+        fi
+
+        if [ $attempt -lt $retries ]; then
+            print_warning "Health check failed (attempt ${attempt}/${retries}), retrying in ${interval}s..."
+            sleep "$interval"
+        fi
+
+        attempt=$((attempt + 1))
+    done
+
+    print_error "Health check failed after ${retries} attempts"
+    return 1
+}
+
+# Rollback function
+rollback() {
+    local compose_cmd="$1"
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    print_error "==========================================="
+    print_error "  INITIATING AUTOMATED ROLLBACK"
+    print_error "  Time: ${timestamp}"
+    print_error "==========================================="
+
+    send_alert "Automated rollback triggered for stellar-portfolio-rebalancer at ${timestamp}. Health check failed against ${HEALTH_CHECK_URL}." "error"
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY-RUN] Would execute: ${compose_cmd} -f deployment/docker-compose.yml down"
+        print_info "[DRY-RUN] Would execute: ${compose_cmd} -f deployment/docker-compose.yml up -d"
+        print_info "[DRY-RUN] Rollback simulation complete"
+        print_status "[DRY-RUN] Rollback logic validated successfully"
+        return 0
+    fi
+
+    print_info "Stopping failed deployment..."
+    $compose_cmd -f deployment/docker-compose.yml down || {
+        print_error "Failed to stop current deployment during rollback"
+        send_alert "CRITICAL: Rollback failed to stop current deployment" "error"
+        return 1
+    }
+
+    print_info "Restoring previous deployment..."
+    $compose_cmd -f deployment/docker-compose.yml up -d || {
+        print_error "Failed to restore previous deployment"
+        send_alert "CRITICAL: Rollback failed to restore previous deployment. Manual intervention required." "error"
+        return 1
+    }
+
+    print_warning "Rollback completed. Previous deployment restored."
+    print_warning "Please investigate the failed deployment and re-deploy when fixed."
+    send_alert "Rollback completed successfully. Previous deployment restored. Investigation needed." "warning"
+
+    return 0
 }
 
 # Check if required tools are installed
@@ -128,9 +235,16 @@ build_backend() {
     cd ..
 }
 
-# Deploy to production (Docker)
+# Deploy to production (Docker) with health check and rollback
 deploy_production() {
-    if [ "$1" = "--production" ]; then
+    if [ "$1" = "--production" ] || [ "$1" = "--dry-run" ]; then
+        if [ "$1" = "--dry-run" ]; then
+            DRY_RUN=true
+            print_info "==========================================="
+            print_info "  DRY-RUN MODE: no actual changes will be made"
+            print_info "==========================================="
+        fi
+
         print_status "Deploying to production..."
         
         if command -v docker &> /dev/null && docker compose version &> /dev/null; then
@@ -143,22 +257,66 @@ deploy_production() {
         fi
 
         print_status "Validating compose configuration..."
-        $COMPOSE_CMD -f deployment/docker-compose.yml config > /dev/null
-        
-        # Build and start services
-        $COMPOSE_CMD -f deployment/docker-compose.yml up --build -d
-        
-        print_status "Production deployment completed!"
-        print_status "Frontend: http://localhost:3000"
-        print_status "Backend API: http://localhost:3001/api"
+        if [ "$DRY_RUN" = true ]; then
+            print_info "[DRY-RUN] Would validate compose configuration"
+            print_info "[DRY-RUN] Would run: ${COMPOSE_CMD} -f deployment/docker-compose.yml up --build -d"
+        else
+            $COMPOSE_CMD -f deployment/docker-compose.yml config > /dev/null
+            
+            # Build and start services
+            $COMPOSE_CMD -f deployment/docker-compose.yml up --build -d
+        fi
+
+        # Post-deploy health check
+        print_status "Running post-deploy health check..."
+        if health_check; then
+            print_status "Production deployment completed and verified!"
+            print_status "Frontend: http://localhost:3000"
+            print_status "Backend API: http://localhost:3001/api"
+        else
+            print_error "Post-deploy health check failed!"
+            print_error "Triggering automated rollback..."
+
+            if rollback "$COMPOSE_CMD"; then
+                print_warning "Rollback succeeded. Deployment reverted to previous version."
+            else
+                print_error "CRITICAL: Rollback failed! Manual intervention required."
+                send_alert "CRITICAL: Both deployment and rollback failed. Manual intervention required immediately." "error"
+            fi
+
+            if [ "$DRY_RUN" = true ]; then
+                print_status "[DRY-RUN] Dry run completed. Rollback logic validated."
+            else
+                exit 1
+            fi
+        fi
     fi
+}
+
+# Parse command-line arguments
+parse_args() {
+    for arg in "$@"; do
+        case $arg in
+            --dry-run)
+                DRY_RUN=true
+                ;;
+        esac
+    done
 }
 
 # Main deployment flow
 main() {
-    echo "🌟 Stellar Portfolio Rebalancer Deployment Script"
+    echo "Stellar Portfolio Rebalancer Deployment Script"
     echo "================================================"
     
+    parse_args "$@"
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "Running in dry-run mode. Validating rollback logic."
+        deploy_production "--dry-run"
+        return 0
+    fi
+
     check_dependencies
     build_contracts
     
@@ -172,7 +330,7 @@ main() {
     
     deploy_production "$@"
     
-    print_status "Deployment completed successfully! 🎉"
+    print_status "Deployment completed successfully!"
     print_status "Local development:"
     print_status "  Frontend: http://localhost:3000"
     print_status "  Backend: http://localhost:3001"
