@@ -127,20 +127,6 @@ pub struct CircuitBreakerConfig {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuedUpgrade {
-    pub new_wasm_hash: BytesN<32>,
-    pub execute_after: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuedFeeConfig {
-    pub config: FeeConfig,
-    pub execute_after: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpgradeEvent {
     pub from_hash: BytesN<32>,
     pub to_hash: BytesN<32>,
@@ -164,8 +150,7 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
-    QueuedUpgrade,
-    QueuedFeeConfig,
+    CircuitBreakerConfig,
 }
 
 #[contracttype]
@@ -273,6 +258,13 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
 }
 
 #[contracttype]

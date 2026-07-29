@@ -59,11 +59,6 @@ export const analyticsRouter = Router()
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 
-
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
 analyticsRouter.get('/portfolio/:id/analytics', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
