@@ -35,6 +35,8 @@ module "ecs" {
   db_secret_arn      = module.rds.db_secret_arn
   db_host            = module.rds.db_endpoint
   redis_host         = module.elasticache.redis_endpoint
+  ecs_min_capacity   = lookup(var.ecs_min_capacity, terraform.workspace, 1)
+  ecs_max_capacity   = lookup(var.ecs_max_capacity, terraform.workspace, 5)
 }
 
 module "s3_cloudfront" {
