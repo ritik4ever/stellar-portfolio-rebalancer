@@ -39,7 +39,7 @@ export const ACTION_ORDER: ShortcutAction[] = [
   'prevPortfolio',
 ]
 
-const STORAGE_KEY = 'custom-keybindings'
+export const STORAGE_KEY = 'custom-keybindings'
 
 // ---------------------------------------------------------------------------
 // Persistence helpers

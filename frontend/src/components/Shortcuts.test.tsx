@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import Shortcuts from './Shortcuts'
-import { DEFAULT_KEYBINDINGS } from '../hooks/useKeybindings'
-
-const STORAGE_KEY = 'custom-keybindings'
+import { DEFAULT_KEYBINDINGS, STORAGE_KEY } from '../hooks/useKeybindings'
 
 describe('Shortcuts – customizable keybindings', () => {
   beforeEach(() => {
@@ -124,6 +122,44 @@ describe('Shortcuts – customizable keybindings', () => {
     fireEvent.click(customizeButton)
 
     // Now press 'n' — should NOT fire because settings is open
+    fireEvent.keyDown(window, { key: 'n' })
+    expect(onNewPortfolio).not.toHaveBeenCalled()
+  })
+
+  // -----------------------------------------------------------------------
+  // 7. End-to-end: remap via UI on a live instance, then use new key
+  // -----------------------------------------------------------------------
+  it('remaps a shortcut through the Customize UI and fires it on the same mounted instance', () => {
+    const onNewPortfolio = vi.fn()
+    render(<Shortcuts onNewPortfolio={onNewPortfolio} />)
+
+    // Verify default 'n' works before remapping
+    fireEvent.keyDown(window, { key: 'n' })
+    expect(onNewPortfolio).toHaveBeenCalledTimes(1)
+    onNewPortfolio.mockClear()
+
+    // Open shortcuts panel → open Customize modal
+    fireEvent.keyDown(window, { key: '?' })
+    fireEvent.click(screen.getByText('Customize'))
+
+    // Click the key button for "Create new portfolio" to start listening
+    fireEvent.click(screen.getByLabelText('Change key for Create new portfolio'))
+
+    // Press 'x' to remap
+    fireEvent.keyDown(window, { key: 'x' })
+
+    // Close the settings modal
+    fireEvent.click(screen.getByText('Done'))
+
+    // Close the shortcuts panel by pressing the (unchanged) '?' key
+    fireEvent.keyDown(window, { key: '?' })
+
+    // Now press the NEW key 'x' — should fire
+    fireEvent.keyDown(window, { key: 'x' })
+    expect(onNewPortfolio).toHaveBeenCalledTimes(1)
+
+    // And the OLD key 'n' should no longer fire
+    onNewPortfolio.mockClear()
     fireEvent.keyDown(window, { key: 'n' })
     expect(onNewPortfolio).not.toHaveBeenCalled()
   })

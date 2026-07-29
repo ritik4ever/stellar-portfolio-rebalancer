@@ -4,20 +4,22 @@ import { Modal } from './ui/Modal'
 import {
   ACTION_ORDER,
   SHORTCUT_LABELS,
-  useKeybindings,
   type ShortcutAction,
+  type UpdateResult,
 } from '../hooks/useKeybindings'
 
 interface KeybindingSettingsProps {
   open: boolean
   onClose: () => void
-  /** Notify parent that bindings changed so the shortcut list can re-render. */
-  onBindingsChanged?: () => void
+  /** Current binding map — owned by the parent. */
+  bindings: Record<ShortcutAction, string>
+  /** Attempt to update a single binding. Returns conflict info on failure. */
+  updateBinding: (action: ShortcutAction, newKey: string) => UpdateResult
+  /** Reset all bindings to defaults. */
+  resetBindings: () => void
 }
 
-export default function KeybindingSettings({ open, onClose, onBindingsChanged }: KeybindingSettingsProps) {
-  const { bindings, updateBinding, resetBindings } = useKeybindings()
-
+export default function KeybindingSettings({ open, onClose, bindings, updateBinding, resetBindings }: KeybindingSettingsProps) {
   /** Which action (if any) is currently listening for a new keypress. */
   const [listeningAction, setListeningAction] = useState<ShortcutAction | null>(null)
 
@@ -46,22 +48,19 @@ export default function KeybindingSettings({ open, onClose, onBindingsChanged }:
           action: listeningAction,
           message: `Already assigned to "${SHORTCUT_LABELS[result.conflict]}"`,
         })
-      } else {
-        onBindingsChanged?.()
       }
       setListeningAction(null)
     }
 
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [listeningAction, updateBinding, onBindingsChanged])
+  }, [listeningAction, updateBinding])
 
   const handleReset = useCallback(() => {
     resetBindings()
     setConflict(null)
     setListeningAction(null)
-    onBindingsChanged?.()
-  }, [resetBindings, onBindingsChanged])
+  }, [resetBindings])
 
   // Cancel listening when modal closes
   useEffect(() => {

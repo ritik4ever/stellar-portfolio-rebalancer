@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Keyboard, X, Settings } from 'lucide-react'
 import KeybindingSettings from './KeybindingSettings'
 import {
@@ -30,13 +30,12 @@ function Shortcuts({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavig
   const [open, setOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const { bindings } = useKeybindings()
+  const { bindings, updateBinding, resetBindings } = useKeybindings()
 
-  // Force a re-render when bindings change in the settings modal
-  const [, forceUpdate] = useState(0)
-  const handleBindingsChanged = useCallback(() => forceUpdate((c) => c + 1), [])
-
-  const actionMap = buildActionMap({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios })
+  const actionMap = useMemo(
+    () => buildActionMap({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios }),
+    [onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios],
+  )
 
   const isInputFocused = useCallback(() => {
     const tag = document.activeElement?.tagName
@@ -170,7 +169,9 @@ function Shortcuts({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavig
       <KeybindingSettings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onBindingsChanged={handleBindingsChanged}
+        bindings={bindings}
+        updateBinding={updateBinding}
+        resetBindings={resetBindings}
       />
     </>
   )
