@@ -12,6 +12,12 @@ export interface ModalProps {
 export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose, children, footer }) => {
   const modalRef = useRef<HTMLDivElement>(null)
   const previousActiveElementRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+
+  // Keep the onClose ref up to date
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return
@@ -62,7 +68,7 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
     }
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
       handleTabKey(e)
     }
 
@@ -75,7 +81,7 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
         previousActiveElementRef.current.focus()
       }
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 
