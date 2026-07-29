@@ -1,44 +1,58 @@
 import { useTranslation } from 'react-i18next'
 import { Globe } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 const LanguageSelector = () => {
   const { i18n } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  const closeMenu = () => {
+    setIsOpen(false)
+    triggerRef.current?.focus()
+  }
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng)
-    setIsOpen(false)
+    closeMenu()
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleTriggerKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       setIsOpen(!isOpen)
     }
     if (e.key === 'Escape') {
-      setIsOpen(false)
+      closeMenu()
+    }
+  }
+
+  const handleMenuKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      closeMenu()
     }
   }
 
   return (
-    <div className="relative group focus-within:group-hover">
+    <div className="relative">
       <button
+        ref={triggerRef}
         className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         aria-label="Change language"
         aria-expanded={isOpen}
         aria-haspopup="true"
         onClick={() => setIsOpen(!isOpen)}
-        onKeyDown={handleKeyDown}
+        onKeyDown={handleTriggerKeyDown}
       >
         <Globe className="w-4 h-4" />
         <span className="text-sm font-medium">{i18n.language.toUpperCase()}</span>
       </button>
       <div
         className={`absolute right-0 mt-2 w-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 transition-all z-50 ${
-          isOpen || isOpen === undefined ? 'opacity-100 visible' : 'opacity-0 invisible'
-        } group-hover:opacity-100 group-hover:visible`}
+          isOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
+        }`}
         role="menu"
+        onKeyDown={handleMenuKeyDown}
       >
         <div className="py-1">
           <button
