@@ -355,6 +355,72 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
+fn test_batch_rebalance_mixed_success_and_failure() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+
+    let success_pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    let cooldown_pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    let results = client
+        .batch_rebalance(&vec![&env, success_pid, 999, cooldown_pid])
+        .unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results.get(0).unwrap().portfolio_id, success_pid);
+    assert_eq!(
+        results.get(0).unwrap().result,
+        BatchRebalanceResultStatus::Success
+    );
+    assert_eq!(results.get(1).unwrap().portfolio_id, 999);
+    assert_eq!(
+        results.get(1).unwrap().result,
+        BatchRebalanceResultStatus::Failed(Error::PortfolioNotFound)
+    );
+    assert_eq!(results.get(2).unwrap().portfolio_id, cooldown_pid);
+    assert_eq!(
+        results.get(2).unwrap().result,
+        BatchRebalanceResultStatus::Failed(Error::CooldownActive)
+    );
+
+    assert_eq!(client.get_portfolio(&success_pid).last_rebalance, 15000);
+}
+
+#[test]
+fn test_batch_rebalance_size_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let result = client.try_batch_rebalance(&vec![&env, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert_eq!(result, Err(Ok(Error::BatchTooLarge)));
+}
+
+#[test]
 fn test_fee_config_supports_platform_name_and_zero_fee() {
     let env = Env::default();
     env.mock_all_auths();
