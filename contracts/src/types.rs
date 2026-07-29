@@ -189,6 +189,7 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    InvalidOracleAddress = 29,
 }
 
 #[contracttype]

@@ -170,6 +170,22 @@ mod reflector_without_prices {
     }
 }
 
+// A contract that does NOT implement the Reflector interface.
+// Used to verify that initialize() rejects non-conforming addresses.
+mod non_reflector_contract {
+    use soroban_sdk::{contract, contractimpl, Env};
+
+    #[contract]
+    pub struct NonReflector;
+
+    #[contractimpl]
+    impl NonReflector {
+        pub fn hello(_env: Env) -> bool {
+            true
+        }
+    }
+}
+
 #[test]
 fn test_create_portfolio() {
     let env = Env::default();
@@ -1143,6 +1159,32 @@ fn test_initialize_guard() {
 
     client.initialize(&admin, &reflector_id);
     client.initialize(&admin, &reflector_id);
+}
+
+#[test]
+fn test_initialize_rejects_invalid_reflector_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let non_reflector_id = env.register_contract(None, non_reflector_contract::NonReflector);
+    let admin = Address::generate(&env);
+
+    let result = client.try_initialize(&admin, &non_reflector_id);
+    assert_eq!(result, Err(Ok(Error::InvalidOracleAddress)));
+}
+
+#[test]
+fn test_initialize_accepts_valid_reflector_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+
+    let result = client.try_initialize(&admin, &reflector_id);
+    assert_eq!(result, Ok(Ok(())));
 }
 
 #[test]

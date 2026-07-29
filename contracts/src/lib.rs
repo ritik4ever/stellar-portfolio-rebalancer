@@ -50,10 +50,29 @@ fn guard_ledger_timestamp(env: &Env) -> u64 {
 
 #[contractimpl]
 impl PortfolioRebalancer {
+    /// Validate that `reflector_address` behaves like a Reflector oracle by
+    /// making a lightweight read-only call (`base()`) and checking the result.
+    ///
+    /// This is a best-effort guard, not a full interface conformance check:
+    /// - A malicious contract could implement `base()` but return wrong data in
+    ///   `lastprice()`. Further operations (rebalance, preview) will detect
+    ///   missing or invalid price data at the point of use.
+    /// - The goal is to fail early when the address is clearly not a Reflector
+    ///   contract (e.g. a typo, an EOA, or a random contract).
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
         }
+
+        // Lightweight validation: call base() on the provided address.
+        // If the call fails (host error) or returns an unexpected type, the
+        // address is not a valid Reflector oracle.
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+        match reflector_client.try_base() {
+            Ok(Ok(_asset)) => {}
+            _ => return Err(Error::InvalidOracleAddress),
+        }
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
