@@ -7,7 +7,7 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
 
 - [Quick Start](#quick-start)
 - [Secret Rotation Guide](#secret-rotation-guide)
-- [Backend Variables](#backend-variables)
+- [Backend Variable Reference](#backend-variable-reference)
   - [Core](#core)
   - [Database](#database)
   - [Stellar & Soroban](#stellar--soroban)
@@ -22,7 +22,7 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
   - [Analytics & Snapshots](#analytics--snapshots)
   - [Demo Mode](#demo-mode)
   - [Feature Flags](#feature-flags)
-- [Frontend Variables](#frontend-variables)
+- [Frontend Variable Reference](#frontend-variable-reference)
   - [Frontend Core](#frontend-core)
   - [Frontend Observability](#frontend-observability)
   - [Frontend Analytics](#frontend-analytics)
@@ -65,12 +65,20 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
 2. Generate a new app-specific password (Gmail: **Account → Security → App Passwords**).
 3. Update `SMTP_PASS` in your secrets manager and redeploy.
 
-### `PGPASSWORD` / `DATABASE_URL`
+### `PGPASSWORD` / `DATABASE_URL` / `DB_SECRET_ARN`
 
-1. Rotate the password via your Postgres provider (RDS, Neon, Supabase, etc.) or with `ALTER USER`.
-2. Update `PGPASSWORD` (or the password segment of `DATABASE_URL`) in your secrets manager.
-3. Restart the backend — the connection pool re-establishes with the new credential.
-4. Drop or disable the old credential.
+1. Prefer `DB_SECRET_ARN` in AWS deployments. Terraform configures RDS managed-password rotation and the backend refreshes the Secrets Manager value at runtime.
+2. For non-AWS deployments, rotate the password via your Postgres provider (RDS, Neon, Supabase, etc.) or with `ALTER USER`.
+3. Update `PGPASSWORD` (or the password segment of `DATABASE_URL`) in your secrets manager if you are not using `DB_SECRET_ARN`.
+4. With `DB_SECRET_ARN`, wait up to `DB_SECRET_CACHE_TTL_MS` for the backend to refresh and rebuild its pool. Without `DB_SECRET_ARN`, restart the backend.
+5. Drop or disable the old credential after all instances have moved to the new value.
+
+### `REDIS_URL` / `REDIS_SECRET_ARN`
+
+1. Prefer `REDIS_SECRET_ARN` in AWS deployments. Terraform provisions an ElastiCache replication group with AUTH enabled, stores the token in Secrets Manager, and attaches an automatic rotation Lambda where token rotation is supported.
+2. The backend builds `REDIS_URL` dynamically from the secret (`rediss://:token@host:port`) and refreshes it at `REDIS_SECRET_CACHE_TTL_MS` intervals.
+3. For non-AWS Redis deployments, rotate the AUTH token according to your provider's process, update `REDIS_URL`, and restart processes that cannot read from Secrets Manager.
+4. Verify `/ready` and queue metrics after rotation. See [Operations: AWS database and Redis credential rotation](OPERATIONS.md#aws-database-and-redis-credential-rotation) for verification and rollback.
 
 ### `WEBHOOK_SIGNING_SECRET`
 
@@ -102,7 +110,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 ---
 
-## Backend Variables
+## Backend Variable Reference
 
 ### Core
 
@@ -120,16 +128,25 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `WS_PORT` | No | `3001` | WebSocket listen port (typically shares the HTTP port). | `3001` | |
 | `WS_HEARTBEAT_INTERVAL` | No | `30000` | WebSocket ping/pong heartbeat interval (ms). | `30000` | |
 | `CI` | No | _(empty)_ | CI environment marker used by scripts and validation checks. | `true` | |
+| `VITEST` | No | _(empty)_ | Vitest runtime marker used by test-only Redis mocks. | `true` | Test/CI only. |
+| `APP_URL` | No | _(empty)_ | Public application URL used in notification links. | `https://app.example.com` | |
+| `API_URL` | No | _(empty)_ | Public API URL used in notification links. | `https://api.example.com` | |
+| `AWS_REGION` | No | SDK default chain | AWS region used by the Secrets Manager client when runtime secrets are configured. | `us-east-1` | Required in non-ECS AWS runtimes unless your SDK environment already supplies a region. |
+| `AWS_DEFAULT_REGION` | No | SDK default chain | Alias AWS region variable recognized by the AWS SDK. | `us-east-1` | |
 
 ### Database
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
-| `DATABASE_URL` | No | _(empty)_ | PostgreSQL connection URI. When set, takes priority over discrete `PG*` vars. Falls back to SQLite when unset. | `postgresql://user:pass@localhost:5432/stellar_portfolio` | ⚠️ SECRET — contains credentials. Use a secrets manager; never commit. See [rotation guide](#pgpassword--database_url). |
-| `PGHOST` | No | _(empty)_ | PostgreSQL host for discrete connection mode. | `db.example.com` | |
+| `DATABASE_URL` | No | _(empty)_ | PostgreSQL connection URI. Discrete `PG*` vars populated from `DB_SECRET_ARN` take precedence when present. Falls back to SQLite when unset. | `postgresql://user:pass@localhost:5432/stellar_portfolio` | ⚠️ SECRET — contains credentials. Use a secrets manager; never commit. See [rotation guide](#pgpassword--database_url--db_secret_arn). |
+| `DB_SECRET_ARN` | No | _(empty)_ | AWS Secrets Manager secret ARN containing RDS JSON credentials. When set, the backend refreshes `PGUSER`, `PGPASSWORD`, `PGHOST`, `PGPORT`, and `PGDATABASE` dynamically. | `arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/rds` | Preferred for AWS. Requires IAM `secretsmanager:GetSecretValue`. |
+| `DATABASE_SECRET_ARN` | No | _(empty)_ | Alias for `DB_SECRET_ARN`. | `arn:aws:secretsmanager:...` | |
+| `PG_SECRET_ARN` | No | _(empty)_ | Alias for `DB_SECRET_ARN`. | `arn:aws:secretsmanager:...` | |
+| `DB_SECRET_CACHE_TTL_MS` | No | `300000` | Maximum age for cached database credentials before the backend refreshes Secrets Manager. Minimum accepted value is 30000. | `300000` | Lower during rotation tests if you need faster verification. |
+| `PGHOST` | No | _(empty)_ | PostgreSQL host for discrete connection mode. | `db.example.com` | Populated automatically when `DB_SECRET_ARN` is configured. |
 | `PGPORT` | No | `5432` | PostgreSQL port. | `5432` | |
-| `PGUSER` | No | _(empty)_ | PostgreSQL username. | `stellar_app` | |
-| `PGPASSWORD` | No | _(empty)_ | PostgreSQL password. | _(use secrets manager)_ | ⚠️ SECRET — rotate via your Postgres provider. See [rotation guide](#pgpassword--database_url). |
+| `PGUSER` | No | _(empty)_ | PostgreSQL username. | `stellar_app` | Populated automatically when `DB_SECRET_ARN` is configured. |
+| `PGPASSWORD` | No | _(empty)_ | PostgreSQL password. | _(use secrets manager)_ | ⚠️ SECRET — rotate via your Postgres provider. See [rotation guide](#pgpassword--database_url--db_secret_arn). |
 | `PGDATABASE` | No | _(empty)_ | PostgreSQL database name. | `stellar_portfolio` | |
 | `DB_POOL_SIZE` | No | `10` | Maximum number of connections in the PostgreSQL pool. | `20` | |
 | `DB_PATH` | No | `./data/portfolio.db` | SQLite database file path used when no PostgreSQL connection is configured. | `./data/portfolio.db` | |
@@ -161,6 +178,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
 | `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
 | `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
+| `ORACLE_CACHE_TTL_SECONDS` | No | `30` | Redis-backed oracle cache TTL in seconds. | `30` | |
+| `ISSUER_METADATA_TTL_MS` | No | `21600000` | Issuer metadata cache TTL in milliseconds. | `21600000` | |
 
 ### Auto-Rebalancer
 
@@ -176,7 +195,9 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `RATE_LIMIT_WINDOW_MS` | No | `60000` | Global sliding window for request rate limits (ms). | `60000` | |
+| `RATE_LIMIT_GLOBAL_WINDOW_MS` | No | `900000` | Backward-compatible alias for global rate-limit window. | `900000` | |
 | `RATE_LIMIT_MAX` | No | `100` | Maximum requests allowed per global window. | `100` | |
+| `RATE_LIMIT_GLOBAL_MAX` | No | `100` | Backward-compatible alias for global max requests. | `100` | |
 | `RATE_LIMIT_WRITE_MAX` | No | `10` | Maximum write requests (POST/PUT/DELETE) per window. | `10` | |
 | `RATE_LIMIT_AUTH_MAX` | No | `5` | Maximum auth requests per window. | `5` | |
 | `RATE_LIMIT_CRITICAL_MAX` | No | `3` | Maximum critical-operation requests per window. | `3` | |
@@ -185,12 +206,17 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `RATE_LIMIT_WRITE_BURST_MAX` | No | `3` | Maximum write requests in the burst window. | `3` | |
 | `API_RATE_LIMIT_WINDOW` | No | `900000` | Security-middleware rate-limit window (ms). | `900000` | |
 | `API_RATE_LIMIT_MAX_REQUESTS` | No | `100` | Security-middleware max requests per window. | `100` | |
+| `HEALTH_PROBE_SECRET` | No | _(empty)_ | Shared secret for trusted health/readiness probes. | _(use secrets manager)_ | ⚠️ SECRET — never expose in clients. |
 
 ### Redis
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
-| `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for BullMQ queues and workers. | `redis://localhost:6379` | ⚠️ SECRET if your Redis instance requires a password (`redis://:password@host:port`). |
+| `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for BullMQ queues and workers. In AWS, omit static credentials and use `REDIS_SECRET_ARN` so the backend builds this dynamically. | `redis://localhost:6379` | ⚠️ SECRET if your Redis instance requires a password (`redis://:password@host:port`). |
+| `REDIS_SECRET_ARN` | No | _(empty)_ | AWS Secrets Manager secret ARN containing Redis endpoint and AUTH token JSON. | `arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/redis/auth-token` | Preferred for AWS rotation. Requires IAM `secretsmanager:GetSecretValue`. |
+| `REDIS_AUTH_SECRET_ARN` | No | _(empty)_ | Alias for `REDIS_SECRET_ARN`. | `arn:aws:secretsmanager:...` | |
+| `REDIS_SECRET_CACHE_TTL_MS` | No | `300000` | Maximum age for cached Redis credentials before the backend refreshes Secrets Manager. Minimum accepted value is 30000. | `300000` | Lower during non-production rotation tests if needed. |
+| `REDIS_AVAILABILITY_CACHE_TTL_MS` | No | `30000` | Short TTL for cached Redis availability probes; prevents indefinite caching after Redis credential changes. | `30000` | |
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
 
 ### Risk Controls
@@ -215,6 +241,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `RISK_CONCENTRATION_CRITICAL` | No | `80` | Concentration percentage threshold for critical-risk classification. | `80` | |
 | `RISK_LIQUIDITY_LOW` | No | `1000` | USD liquidity level below which a low-liquidity warning is issued. | `1000` | |
 | `RISK_LIQUIDITY_CRITICAL` | No | `500` | USD liquidity level below which a critical alert is issued. | `500` | |
+| `REBALANCE_DRY_RUN_BASE_FEE_STROOPS` | No | `100` | Base-fee assumption for rebalance dry-run estimates. | `100` | |
 
 ### Security & Auth
 
@@ -224,6 +251,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `JWT_PREVIOUS_SECRET` | No | _(empty)_ | Previous JWT secret accepted during key rotation grace period. | _(use secrets manager)_ | ⚠️ SECRET — clear after grace period expires. |
 | `JWT_PREVIOUS_SECRET_GRACE_UNTIL` | No | _(empty)_ | ISO 8601 timestamp until which `JWT_PREVIOUS_SECRET` remains valid. | `2026-07-01T12:00:00Z` | |
 | `JWT_ACCESS_EXPIRY_SEC` | No | `900` | Access token TTL (seconds). | `900` | |
+| `JWT_CLOCK_SKEW_SEC` | No | `0` | Allowed JWT validation clock skew in seconds. | `5` | Keep low in production. |
 | `JWT_REFRESH_EXPIRY_SEC` | No | `604800` | Refresh token TTL (seconds). | `604800` | |
 | `WEBHOOK_SIGNING_SECRET` | No | _(empty)_ | Secret used to sign outbound webhook payloads and verify inbound callbacks. | _(use secrets manager)_ | ⚠️ SECRET — notify webhook consumers before rotating. See [rotation guide](#webhook_signing_secret). |
 | `REQUEST_TIMEOUT` | No | `30000` | Timeout for outbound and internal requests (ms). | `30000` | |
@@ -241,6 +269,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `SMTP_USER` | No | `your-email@gmail.com` | SMTP login username. | `alerts@example.com` | |
 | `SMTP_PASS` | No | _(empty)_ | SMTP password or Gmail App Password. | _(use secrets manager)_ | ⚠️ SECRET — use an app-specific password, never your account password. See [rotation guide](#smtp_pass). |
 | `SMTP_FROM` | No | `noreply@stellarportfolio.com` | Default sender address for outbound notification email. | `noreply@example.com` | |
+| `UNSUBSCRIBE_SECRET` | No | `SMTP_PASS` fallback | Secret used to sign unsubscribe tokens. | _(use secrets manager)_ | ⚠️ SECRET. |
+| `TELEGRAM_BOT_TOKEN` | No | _(empty)_ | Telegram bot token for notification delivery. | _(use secrets manager)_ | ⚠️ SECRET. |
 | `WEBHOOK_TIMEOUT` | No | `5000` | Outbound webhook request timeout (ms). | `5000` | |
 | `WEBHOOK_RETRY_COUNT` | No | `1` | Webhook retries after the first failure. Total attempts = `1 + this value`. | `1` | |
 | `WEBHOOK_RETRY_DELAY` | No | `1000` | Initial backoff before the first webhook retry (ms). | `1000` | |
@@ -271,6 +301,10 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `METRICS_PREFIX` | No | `stellar_portfolio_` | Prefix applied to all emitted metric names. | `stellar_portfolio_` | |
 | `METRICS_DEFAULT_LABELS_SERVICE` | No | `stellar-portfolio-backend` | Default service label attached to all emitted metrics. | `stellar-portfolio-backend` | |
 | `ALERT_CONTACT` | No | `platform-oncall` | Alert-routing metadata label for operations tooling. | `platform-oncall` | |
+| `OTEL_ENABLED` | No | `false` | Enables OpenTelemetry tracing. | `true` | |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318/v1/traces` | OTLP collector endpoint for traces. | `https://otel.example.com/v1/traces` | |
+| `OTEL_SERVICE_NAME` | No | `stellar-portfolio-backend` | OpenTelemetry service name. | `stellar-portfolio-backend` | |
+| `ENABLE_API_DOCS` | No | `true` outside production | Enables Swagger UI/API docs routes. | `false` | Disable in production if docs should not be public. |
 | `READINESS_CACHE_TTL_MS` | No | `2000` | Cache TTL for the `/readiness` health endpoint (ms). | `2000` | |
 
 ### Analytics & Snapshots
@@ -303,7 +337,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 ---
 
-## Frontend Variables
+## Frontend Variable Reference
 
 > All `VITE_*` variables are embedded in the browser bundle at build time and are publicly readable.
 > Never put private credentials in `VITE_*` variables.

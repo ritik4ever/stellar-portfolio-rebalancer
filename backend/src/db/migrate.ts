@@ -13,6 +13,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { getPool, closePool, isDbConfigured } from './client.js'
+import { refreshDatabaseSecret } from '../config/runtimeSecrets.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const MIGRATIONS_DIR = join(__dirname, 'migrations')
@@ -133,6 +134,7 @@ async function run() {
     const { dryRun, rollback, status } = parseArgs()
     const migrations = discoverMigrations()
     validateMigrationManifest(migrations)
+    await refreshDatabaseSecret({ force: true })
 
     if (migrations.length === 0) {
         console.log('No migration files found in', MIGRATIONS_DIR)

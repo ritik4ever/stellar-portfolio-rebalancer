@@ -125,6 +125,7 @@ vi.mock('../queue/connection.js', () => ({
     isRedisAvailable: vi.fn().mockResolvedValue(false),
     logQueueStartup: vi.fn(),
     REDIS_URL: 'redis://localhost:6379',
+    getRedisUrl: vi.fn(() => 'redis://localhost:6379'),
 }))
 
 // ─── Static imports (after mocks) ────────────────────────────────────────────

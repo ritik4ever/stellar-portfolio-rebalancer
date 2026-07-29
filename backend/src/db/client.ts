@@ -1,5 +1,6 @@
 import pg from 'pg'
 import { logger } from '../utils/logger.js'
+import { hasDatabaseSecretConfigured, refreshDatabaseSecret } from '../config/runtimeSecrets.js'
 
 let pool: pg.Pool | null = null
 
@@ -44,6 +45,10 @@ function poolConfigFromEnv(): pg.PoolConfig {
         }
     }
 
+    if (hasDatabaseSecretConfigured()) {
+        throw new Error('Database secret configured but not loaded yet: call refreshDatabaseSecret() before getPool()')
+    }
+
     throw new Error('Database not configured: set DATABASE_URL or PGHOST, PGDATABASE, and PGUSER')
 }
 
@@ -61,19 +66,55 @@ export function getPool(): pg.Pool {
     return pool
 }
 
+function isPoolTimeout(err: unknown): boolean {
+    return err instanceof Error && err.message.includes('timeout')
+}
+
+function isCredentialError(err: unknown): boolean {
+    const candidate = err as { code?: unknown; message?: unknown }
+    const code = typeof candidate.code === 'string' ? candidate.code : ''
+    const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : ''
+
+    return code === '28P01' ||
+        code === '28000' ||
+        message.includes('password authentication failed') ||
+        message.includes('authentication failed') ||
+        message.includes('scram') ||
+        message.includes('sasl')
+}
+
+function handlePoolTimeout(err: unknown): never {
+    logger.error('[DB-POOL] Connection pool exhausted — all connections busy', {
+        error: String(err),
+        poolSize: getPoolSize(),
+    })
+    const poolError = new PoolExhaustedError('Database connection pool exhausted — try again later')
+    poolError.cause = err
+    throw poolError
+}
+
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params?: unknown[]): Promise<pg.QueryResult<T>> {
+    await refreshDatabaseSecret()
+
     try {
         return await (getPool().query(text, params) as Promise<pg.QueryResult<T>>)
     } catch (err: unknown) {
-        if (err instanceof Error && err.message.includes('timeout')) {
-            logger.error('[DB-POOL] Connection pool exhausted — all connections busy', {
-                error: String(err),
-                poolSize: getPoolSize(),
+        if (isPoolTimeout(err)) handlePoolTimeout(err)
+
+        if (hasDatabaseSecretConfigured() && isCredentialError(err)) {
+            logger.warn('[DB-POOL] Database credential error detected; refreshing Secrets Manager credential and retrying once', {
+                error: err instanceof Error ? err.message : String(err),
             })
-            const poolError = new PoolExhaustedError('Database connection pool exhausted — try again later')
-            poolError.cause = err
-            throw poolError
+            await closePool()
+            await refreshDatabaseSecret({ force: true })
+            try {
+                return await (getPool().query(text, params) as Promise<pg.QueryResult<T>>)
+            } catch (retryErr: unknown) {
+                if (isPoolTimeout(retryErr)) handlePoolTimeout(retryErr)
+                throw retryErr
+            }
         }
+
         throw err
     }
 }
@@ -94,6 +135,7 @@ export async function closePool(): Promise<void> {
 }
 
 export function isDbConfigured(): boolean {
+    if (hasDatabaseSecretConfigured()) return true
     const host = process.env.PGHOST?.trim()
     const database = process.env.PGDATABASE?.trim()
     const user = process.env.PGUSER?.trim()

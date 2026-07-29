@@ -1,5 +1,5 @@
-import Redis from 'ioredis'
-import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
+import { Redis, type Redis as RedisClient } from 'ioredis'
+import { getRedisUrl, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -8,7 +8,7 @@ import { logger } from '../utils/logger.js'
  * simultaneously for the same portfolio.
  */
 export class RebalanceLockService {
-    private redis: Redis | null = null
+    private redis: RedisClient | null = null
     private fallbackLocks: Map<string, number> = new Map()
     private isInitialized: boolean = false
     private useRedis: boolean = false
@@ -35,7 +35,7 @@ export class RebalanceLockService {
         this.useRedis = await isRedisAvailable()
         
         if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, {
+            this.redis = new Redis(getRedisUrl(), {
                 lazyConnect: false,
                 maxRetriesPerRequest: 3,
             })

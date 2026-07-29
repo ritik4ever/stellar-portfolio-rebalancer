@@ -1,11 +1,11 @@
-import Redis from 'ioredis'
-import { REDIS_URL, redisProbe } from '../queue/connection.js'
+import { Redis, type Redis as RedisClient } from 'ioredis'
+import { getRedisUrl, redisProbe } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 
-let redis: Redis | null = null
+let redis: RedisClient | null = null
 let redisAvailable: boolean | null = null
 
-async function getRedis(): Promise<Redis | null> {
+async function getRedis(): Promise<RedisClient | null> {
     if (redisAvailable === null) {
         try {
             redisAvailable = await redisProbe.isAvailable()
@@ -15,7 +15,7 @@ async function getRedis(): Promise<Redis | null> {
     }
     if (!redisAvailable) return null
     if (!redis) {
-        redis = new Redis(REDIS_URL, {
+        redis = new Redis(getRedisUrl(), {
             lazyConnect: false,
             maxRetriesPerRequest: 2,
             enableReadyCheck: false

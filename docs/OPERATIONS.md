@@ -199,6 +199,81 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
+## AWS database and Redis credential rotation
+
+Terraform now enables Secrets Manager rotation for the RDS managed master/user credential and for the ElastiCache Redis AUTH token secret when the AWS deployment modules are used.
+
+### Runtime behavior
+
+- ECS passes `DB_SECRET_ARN` and `REDIS_SECRET_ARN` to the backend instead of injecting static passwords once at task start.
+- The backend fetches both secrets from Secrets Manager during startup, refreshes them every `*_SECRET_CACHE_TTL_MS` (default: 5 minutes), and recreates the PostgreSQL pool / queue connections after a changed secret is detected.
+- PostgreSQL queries retry once after an authentication failure by forcing a Secrets Manager refresh. Redis uses ElastiCache token `ROTATE`, so the previous token remains accepted while application processes refresh to the new `AWSCURRENT` token.
+
+### Verification runbook
+
+1. Confirm Terraform has rotation enabled:
+   ```bash
+   terraform -chdir=deployment/terraform output db_secret_rotation_enabled
+   terraform -chdir=deployment/terraform output redis_auth_rotation_enabled
+   terraform -chdir=deployment/terraform output db_secret_arn
+   terraform -chdir=deployment/terraform output redis_auth_secret_arn
+   ```
+2. Trigger a controlled non-production rotation:
+   ```bash
+   aws secretsmanager rotate-secret --secret-id "$(terraform -chdir=deployment/terraform output -raw db_secret_arn)"
+   aws secretsmanager rotate-secret --secret-id "$(terraform -chdir=deployment/terraform output -raw redis_auth_secret_arn)"
+   ```
+3. Watch rotation state until `AWSCURRENT` changes and `LastRotatedDate` updates:
+   ```bash
+   aws secretsmanager describe-secret --secret-id "<db-secret-arn>" \
+     --query '{RotationEnabled:RotationEnabled,LastRotatedDate:LastRotatedDate,Versions:VersionIdsToStages}'
+   aws secretsmanager describe-secret --secret-id "<redis-secret-arn>" \
+     --query '{RotationEnabled:RotationEnabled,LastRotatedDate:LastRotatedDate,Versions:VersionIdsToStages}'
+   ```
+4. Verify the backend continued serving traffic without manual restarts:
+   ```bash
+   curl -fsS "http://<backend-alb-dns>/api/v1/health"
+   curl -fsS "http://<backend-alb-dns>/ready" | jq '.checks.database, .checks.queue'
+   ```
+5. Verify logs contain refresh/reconnect messages and no sustained authentication failures:
+   ```bash
+   aws logs filter-log-events \
+     --log-group-name "/ecs/<name-prefix>-backend" \
+     --filter-pattern '"[SECRETS]" "credential rotation detected"'
+   ```
+6. For Redis, confirm queue metrics still update and workers continue draining jobs:
+   ```bash
+   curl -fsS "http://<backend-alb-dns>/api/v1/ops/queues/metrics" | jq .
+   ```
+
+### Rollback runbook
+
+1. Identify the previous secret version:
+   ```bash
+   aws secretsmanager describe-secret --secret-id "<secret-arn>" --query 'VersionIdsToStages'
+   ```
+2. Move `AWSCURRENT` back to the previous known-good version:
+   ```bash
+   aws secretsmanager update-secret-version-stage \
+     --secret-id "<secret-arn>" \
+     --version-stage AWSCURRENT \
+     --move-to-version-id "<previous-version-id>" \
+     --remove-from-version-id "<failed-current-version-id>"
+   ```
+3. If the failed secret was the RDS credential, force an immediate ECS deployment only if the backend does not recover after the 5-minute refresh window:
+   ```bash
+   aws ecs update-service --cluster "<cluster>" --service "<service>" --force-new-deployment
+   ```
+4. If the failed secret was the Redis token, re-apply the previous token to the replication group using the safe two-token strategy, then allow backends to refresh:
+   ```bash
+   aws elasticache modify-replication-group \
+     --replication-group-id "<redis-replication-group-id>" \
+     --auth-token "<previous-token>" \
+     --auth-token-update-strategy ROTATE \
+     --apply-immediately
+   ```
+5. Re-run the verification steps above and open an incident follow-up before re-enabling immediate rotation in production.
+
 ## Database Backups and Restores
 
 The application supports two database backends: SQLite (for development) and PostgreSQL (for production). Both have automated backup and restore capabilities.

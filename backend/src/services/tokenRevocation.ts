@@ -1,5 +1,5 @@
-import Redis from 'ioredis'
-import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
+import { Redis, type Redis as RedisClient } from 'ioredis'
+import { getRedisUrl, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 
 const REVOKED_PREFIX = 'revoked_token:'
@@ -7,7 +7,7 @@ const REVOKED_USER_PREFIX = 'revoked_user:'
 const REVOKED_USER_TTL_SEC = 7 * 24 * 60 * 60
 
 class TokenRevocationService {
-    private redis: Redis | null = null
+    private redis: RedisClient | null = null
     private fallbackSet: Set<string> = new Set()
     private fallbackUserSet: Set<string> = new Set()
     private useRedis = false
@@ -20,7 +20,7 @@ class TokenRevocationService {
         this.useRedis = await isRedisAvailable()
 
         if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, {
+            this.redis = new Redis(getRedisUrl(), {
                 lazyConnect: false,
                 maxRetriesPerRequest: 3,
             })

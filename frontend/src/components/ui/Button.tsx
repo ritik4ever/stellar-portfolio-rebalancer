@@ -42,5 +42,3 @@ export const Button: React.FC<ButtonProps> = ({
   )
 }
 
-</parameter>
-</write_to_file>

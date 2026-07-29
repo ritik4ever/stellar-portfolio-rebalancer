@@ -1,12 +1,22 @@
 import { logger } from "../utils/logger.js";
 import type { StartupConfig } from "../config/startupConfig.js";
+import { refreshRedisSecret } from "../config/runtimeSecrets.js";
 
 // BullMQ bundles its own ioredis internally.
-// We pass the REDIS_URL string to BullMQ connection options directly.
-// This avoids the type conflict between the standalone ioredis package
-// and BullMQ's bundled ioredis.
+// We pass the current REDIS_URL string to BullMQ connection options directly.
+// The URL is resolved lazily so credentials refreshed from Secrets Manager are
+// used by newly created queues/workers instead of being cached for the process lifetime.
 
-export const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+export function getRedisUrl(): string {
+  return process.env.REDIS_URL || "redis://localhost:6379";
+}
+
+// Backward-compatible constant for older tests/imports. New code should call getRedisUrl().
+export const REDIS_URL = getRedisUrl();
+
+function redactRedisUrl(redisUrl: string): string {
+  return redisUrl.replace(/:\/\/[^@]*@/, "://***@");
+}
 
 /**
  * Returns the shared BullMQ-compatible connection options.
@@ -14,7 +24,7 @@ export const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
  */
 export function getConnectionOptions() {
   return {
-    url: REDIS_URL,
+    url: getRedisUrl(),
     maxRetriesPerRequest: null, // required by BullMQ
     enableReadyCheck: false,
     lazyConnect: false,
@@ -27,10 +37,12 @@ export const redisProbe = {
    * Uses the standalone ioredis only for this probe (not passed into BullMQ).
    */
   async isAvailable(): Promise<boolean> {
+    await refreshRedisSecret();
     try {
       // Dynamic import so the module loads even if ioredis isn't installed
-      const { default: IORedis } = await import("ioredis");
-      const probe = new IORedis(REDIS_URL, {
+      const redisModule = await import("ioredis");
+      const IORedis = (redisModule.Redis ?? redisModule.default) as any;
+      const probe = new IORedis(getRedisUrl(), {
         lazyConnect: true,
         connectTimeout: 3000,
         maxRetriesPerRequest: 1,
@@ -57,10 +69,18 @@ async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function defaultStartupConfig(): Pick<StartupConfig, "queueStartupInitialDelayMs" | "queueStartupRetries" | "queueStartupMaxDelayMs"> {
+  return {
+    queueStartupRetries: 5,
+    queueStartupInitialDelayMs: 1000,
+    queueStartupMaxDelayMs: 10000,
+  };
+}
+
 /**
  * Attempts to probe Redis with a bounded exponential backoff.
  */
-async function probeRedisWithRetry(config: StartupConfig): Promise<boolean> {
+async function probeRedisWithRetry(config: Pick<StartupConfig, "queueStartupInitialDelayMs" | "queueStartupRetries" | "queueStartupMaxDelayMs">): Promise<boolean> {
   let delay = config.queueStartupInitialDelayMs;
 
   for (let attempt = 1; attempt <= config.queueStartupRetries; attempt++) {
@@ -85,22 +105,39 @@ async function probeRedisWithRetry(config: StartupConfig): Promise<boolean> {
 }
 
 let _cachedRedisAvailable: boolean | null = null;
+let _cachedRedisAvailableAt = 0;
+
+function redisAvailabilityCacheTtlMs(): number {
+  const raw = process.env.REDIS_AVAILABILITY_CACHE_TTL_MS?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 1000 ? parsed : 30000;
+}
 
 /**
- * Probes Redis with retries and caches the result for the lifetime of the process.
- * Safe to call multiple times — subsequent calls return the cached value.
+ * Probes Redis with retries and caches the result for a short bounded TTL.
+ * This avoids indefinite Redis credential/configuration caching and lets the
+ * process recover after Secrets Manager AUTH-token rotation without a restart.
  */
-export async function probeRedis(config: StartupConfig): Promise<boolean> {
-  if (_cachedRedisAvailable !== null) {
+export async function probeRedis(config?: StartupConfig): Promise<boolean> {
+  const now = Date.now();
+  if (_cachedRedisAvailable !== null && now - _cachedRedisAvailableAt < redisAvailabilityCacheTtlMs()) {
     return _cachedRedisAvailable;
   }
-  const available = await probeRedisWithRetry(config);
+  const available = await probeRedisWithRetry(config ?? defaultStartupConfig());
   _cachedRedisAvailable = available;
+  _cachedRedisAvailableAt = Date.now();
   return available;
 }
 
 export function getCachedRedisAvailability(): boolean | null {
+  if (_cachedRedisAvailable === null) return null;
+  if (Date.now() - _cachedRedisAvailableAt >= redisAvailabilityCacheTtlMs()) return null;
   return _cachedRedisAvailable;
+}
+
+export function resetRedisAvailabilityCache(): void {
+  _cachedRedisAvailable = null;
+  _cachedRedisAvailableAt = 0;
 }
 
 /**
@@ -111,7 +148,7 @@ export function logQueueStartup(redisAvailable: boolean) {
     logger.info(
       "[QUEUE] Redis available – BullMQ workers and scheduler enabled",
       {
-        redisUrl: REDIS_URL.replace(/:\/\/[^@]*@/, "://***@"),
+        redisUrl: redactRedisUrl(getRedisUrl()),
       },
     );
   } else {

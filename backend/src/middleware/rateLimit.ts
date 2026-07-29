@@ -1,11 +1,11 @@
 import { rateLimit } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
-import IORedis from "ioredis";
+import { Redis, type Redis as RedisClient } from "ioredis";
 import type { Request, Response, NextFunction } from "express";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
-import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
+import { getRedisUrl, getCachedRedisAvailability } from "../queue/connection.js";
 
 const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
 const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
@@ -17,7 +17,7 @@ const BURST_WINDOW_MS = parseInt(process.env.RATE_LIMIT_BURST_WINDOW_MS || "", 1
 const BURST_MAX = parseInt(process.env.RATE_LIMIT_BURST_MAX || "", 10) || 5;
 const WRITE_BURST_MAX = parseInt(process.env.RATE_LIMIT_WRITE_BURST_MAX || "", 10) || 3;
 
-let redisClient: IORedis | undefined;
+let redisClient: RedisClient | undefined;
 
 // express-rate-limit requires a *separate* RedisStore instance per limiter.
 // We share one ioredis client but wrap it in a fresh RedisStore with a unique
@@ -26,14 +26,14 @@ function makeStore(prefix: string): RedisStore | undefined {
   if (!redisClient) return undefined;
   return new RedisStore({
     prefix: `rl:${prefix}:`,
-    sendCommand: (...args: Parameters<IORedis["call"]>) =>
+    sendCommand: (...args: Parameters<RedisClient["call"]>) =>
       redisClient!.call(...args) as Promise<any>,
   });
 }
 
 if (process.env.NODE_ENV !== "test") {
   try {
-    redisClient = new IORedis(REDIS_URL, {
+    redisClient = new Redis(getRedisUrl(), {
       lazyConnect: true,
       connectTimeout: 3000,
       maxRetriesPerRequest: 0,
@@ -44,7 +44,7 @@ if (process.env.NODE_ENV !== "test") {
     // Redis command fails.
     redisClient.on("error", () => {});
     logger.info("[RATE-LIMIT] Redis store configured (lazy connect)", {
-      redisUrl: REDIS_URL.replace(/:\/\/[^@]*@/, "://***@"),
+      redisUrl: getRedisUrl().replace(/:\/\/[^@]*@/, "://***@"),
     });
   } catch (error) {
     logger.warn("[RATE-LIMIT] Redis store init failed — using memory store", {

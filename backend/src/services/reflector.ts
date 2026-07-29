@@ -3,8 +3,9 @@ import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
 import { recordCacheTtl, recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice, recordCacheOperation, recordCacheExpiration, recordCacheAge, recordCacheHitRatio, recordCacheSize, recordCacheEntries } from '../observability/metrics.js'
 import { assetRegistryService } from './assetRegistryService.js'
-import { REDIS_URL } from '../queue/connection.js'
+import { getRedisUrl } from '../queue/connection.js'
 import { databaseService } from './databaseService.js'
+import type { Redis as RedisClient } from 'ioredis'
 
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
@@ -31,7 +32,7 @@ export class ReflectorService {
     // Cache metrics tracking
     private cacheStats: Map<string, { hits: number; misses: number; lastAgeMs: number }> = new Map()
     private cacheMetricsReportInterval: NodeJS.Timer | null = null
-    private redisCache: Awaited<ReturnType<typeof import('ioredis').default>> | null = null
+    private redisCache: RedisClient | null = null
     private redisAvailable: boolean = false
     private readonly ORACLE_CACHE_KEY = 'oracle:prices'
 
@@ -98,17 +99,19 @@ export class ReflectorService {
     private async getRedisCache() {
         if (this.redisCache) return this.redisCache
         try {
-            const { default: IORedis } = await import('ioredis')
-            this.redisCache = new IORedis(REDIS_URL, {
+            const redisModule = await import('ioredis')
+            const IORedis = (redisModule.Redis ?? redisModule.default) as any
+            const client = new IORedis(getRedisUrl(), {
                 lazyConnect: true,
                 connectTimeout: 2000,
                 maxRetriesPerRequest: 1,
                 enableReadyCheck: false,
                 retryStrategy: () => null
-            })
-            this.redisCache.on('error', () => {})
-            await this.redisCache.connect()
-            await this.redisCache.ping()
+            }) as RedisClient
+            client.on('error', () => {})
+            await client.connect()
+            await client.ping()
+            this.redisCache = client
             this.redisAvailable = true
         } catch {
             this.redisAvailable = false

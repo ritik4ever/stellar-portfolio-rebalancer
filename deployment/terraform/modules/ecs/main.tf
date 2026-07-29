@@ -1,3 +1,7 @@
+locals {
+  runtime_secret_arns = compact([var.db_secret_arn, var.redis_secret_arn])
+}
+
 resource "aws_ecs_cluster" "main" {
   name = "${var.name_prefix}-ecs-cluster"
 
@@ -106,30 +110,56 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-resource "aws_iam_policy" "ecs_secrets_policy" {
-  name        = "${var.name_prefix}-ecsSecretsPolicy"
-  description = "Allows ECS tasks to read secrets from AWS Secrets Manager"
+resource "aws_iam_role" "ecs_task_role" {
+  name = "${var.name_prefix}-ecsTaskRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy" "ecs_runtime_secrets_policy" {
+  name        = "${var.name_prefix}-ecsRuntimeSecretsPolicy"
+  description = "Allows application containers to refresh database and Redis credentials from AWS Secrets Manager at runtime"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect = "Allow"
         Action = [
-          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = local.runtime_secret_arns
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "kms:Decrypt"
         ]
-        Resource = [
-          var.db_secret_arn,
-          # Optionally add external API keys ARNs here
-        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+          }
+        }
       }
     ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "ecs_secrets_policy_attach" {
-  role       = aws_iam_role.ecs_task_execution_role.name
-  policy_arn = aws_iam_policy.ecs_secrets_policy.arn
+resource "aws_iam_role_policy_attachment" "ecs_runtime_secrets_policy_attach" {
+  role       = aws_iam_role.ecs_task_role.name
+  policy_arn = aws_iam_policy.ecs_runtime_secrets_policy.arn
 }
 
 resource "aws_ecs_task_definition" "main" {
@@ -139,6 +169,7 @@ resource "aws_ecs_task_definition" "main" {
   cpu                      = var.task_cpu
   memory                   = var.task_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
 
   container_definitions = jsonencode([
     {
@@ -157,29 +188,59 @@ resource "aws_ecs_task_definition" "main" {
           value = "3000"
         },
         {
+          name  = "AWS_REGION"
+          value = var.aws_region
+        },
+        {
+          name  = "AWS_DEFAULT_REGION"
+          value = var.aws_region
+        },
+        {
+          name  = "DB_SECRET_ARN"
+          value = var.db_secret_arn
+        },
+        {
+          name  = "DB_SECRET_CACHE_TTL_MS"
+          value = "300000"
+        },
+        {
+          name  = "PGHOST"
+          value = var.db_host
+        },
+        {
+          name  = "PGPORT"
+          value = tostring(var.db_port)
+        },
+        {
+          name  = "PGDATABASE"
+          value = var.db_name
+        },
+        {
           name  = "DB_HOST"
           value = var.db_host
         },
         {
-          name  = "REDIS_HOST"
-          value = var.redis_host
-        }
-      ]
-      secrets = [
-        {
-          name      = "DB_PASSWORD"
-          valueFrom = "${var.db_secret_arn}:password::"
+          name  = "REDIS_SECRET_ARN"
+          value = var.redis_secret_arn
         },
         {
-          name      = "DB_USER"
-          valueFrom = "${var.db_secret_arn}:username::"
+          name  = "REDIS_SECRET_CACHE_TTL_MS"
+          value = "300000"
+        },
+        {
+          name  = "REDIS_HOST"
+          value = var.redis_host
+        },
+        {
+          name  = "REDIS_PORT"
+          value = tostring(var.redis_port)
         }
       ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = "/ecs/${var.name_prefix}-backend"
-          "awslogs-region"        = "us-east-1"
+          "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "ecs"
           "awslogs-create-group"  = "true"
         }

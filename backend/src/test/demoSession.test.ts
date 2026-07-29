@@ -9,18 +9,22 @@ const { mockGet, mockSetex, mockDel, mockExpire, mockConnect } = vi.hoisted(() =
     mockConnect: vi.fn(),
 }))
 
-vi.mock('ioredis', () => ({
-    default: vi.fn().mockImplementation(function(this: any) {
+vi.mock('ioredis', () => {
+    const RedisMock = vi.fn().mockImplementation(function(this: any) {
         this.get = mockGet
         this.setex = mockSetex
         this.del = mockDel
         this.expire = mockExpire
         this.connect = mockConnect
         return this
-    }),
-}))
+    })
+    return { default: RedisMock, Redis: RedisMock }
+})
 
-vi.mock('../queue/connection.js', () => ({ REDIS_URL: 'redis://localhost:6379' }))
+vi.mock('../queue/connection.js', () => ({
+    REDIS_URL: 'redis://localhost:6379',
+    getRedisUrl: vi.fn(() => 'redis://localhost:6379'),
+}))
 
 // Re-import after mocks
 const { getDemoSession, saveDemoSession, deleteDemoSession, touchDemoSession } = await import('../demo/demoSessionStore.js')

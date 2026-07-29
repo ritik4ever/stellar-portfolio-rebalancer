@@ -11,7 +11,7 @@
  *   session.portfolio = { ... }
  *   await saveDemoSession(sessionKey, session)
  */
-import { REDIS_URL } from '../queue/connection.js'
+import { getRedisUrl } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 import type { Redis } from 'ioredis'
 
@@ -29,8 +29,9 @@ let redis: Redis | null = null
 async function getRedis(): Promise<Redis | null> {
     if (redis) return redis
     try {
-        const { default: IORedis } = await import('ioredis')
-        const client = new IORedis(REDIS_URL, {
+        const redisModule = await import('ioredis')
+        const IORedis = (redisModule.Redis ?? redisModule.default) as any
+        const client = new IORedis(getRedisUrl(), {
             maxRetriesPerRequest: 1,
             enableReadyCheck: false,
             lazyConnect: true,

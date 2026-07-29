@@ -15,6 +15,7 @@ import { getRateLimitStoreType } from './middleware/rateLimit.js'
 import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
 import { formatStartupSelfTestReport, runStartupSelfTest } from './monitoring/startupSelfTest.js'
 import { buildCorsOptions, enforceCorsOriginAllowlist } from './http/corsSecurity.js'
+import { initializeRuntimeSecrets, startRuntimeSecretRefresh } from './config/runtimeSecrets.js'
 import spec from './openapi/spec.js'
 
 const isStartupSelfTestRequested = (argv: string[] = process.argv): boolean => argv.includes('--startup-self-test')
@@ -33,7 +34,23 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         return
     }
 
+    await initializeRuntimeSecrets()
     const config = validateStartupConfigOrThrow()
+
+    startRuntimeSecretRefresh({
+        onDatabaseCredentialsChanged: async () => {
+            const { closePool } = await import('./db/client.js')
+            await closePool()
+            logger.info('[SECRETS] Database credential rotation detected; PostgreSQL pool will be recreated on next use')
+        },
+        onRedisCredentialsChanged: async () => {
+            const { resetRedisAvailabilityCache } = await import('./queue/connection.js')
+            const { closeAllQueues } = await import('./queue/queues.js')
+            resetRedisAvailabilityCache()
+            await closeAllQueues()
+            logger.info('[SECRETS] Redis credential rotation detected; queue connections will be recreated on next use')
+        },
+    })
 
     initializeSentry()
     setupProcessErrorHandlers()

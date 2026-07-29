@@ -14,3 +14,18 @@ output "db_secret_arn" {
   value       = module.rds.db_secret_arn
   description = "ARN of the Secrets Manager secret containing RDS credentials"
 }
+
+output "db_secret_rotation_enabled" {
+  value       = module.rds.db_secret_rotation_enabled
+  description = "Whether automatic RDS master credential rotation is enabled"
+}
+
+output "redis_auth_secret_arn" {
+  value       = module.elasticache.redis_auth_secret_arn
+  description = "ARN of the Secrets Manager secret containing the Redis AUTH token"
+}
+
+output "redis_auth_rotation_enabled" {
+  value       = module.elasticache.redis_auth_rotation_enabled
+  description = "Whether automatic Redis AUTH token rotation is enabled"
+}

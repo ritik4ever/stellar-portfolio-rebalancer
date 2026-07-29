@@ -2,6 +2,7 @@ import { buildStartupSummary, validateStartupConfigOrThrow } from '../config/sta
 import { logger } from '../utils/logger.js'
 import { probeRedis } from '../queue/connection.js'
 import { QUEUE_NAMES } from '../queue/queues.js'
+import { initializeRuntimeSecrets } from '../config/runtimeSecrets.js'
 
 type SelfTestStatus = 'passed' | 'failed'
 
@@ -37,6 +38,7 @@ export async function runStartupSelfTest(
 
     let config: ReturnType<typeof validateStartupConfigOrThrow>
     try {
+        await initializeRuntimeSecrets()
         config = validateStartupConfigOrThrow(env)
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

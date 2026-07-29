@@ -4,10 +4,10 @@ resource "aws_security_group" "rds" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    cidr_blocks     = ["10.0.0.0/16"] # Allow access from VPC
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"] # Allow access from VPC
   }
 
   egress {
@@ -44,5 +44,16 @@ resource "aws_db_instance" "main" {
 
   tags = {
     Name = "${var.name_prefix}-db"
+  }
+}
+
+resource "aws_secretsmanager_secret_rotation" "master_user" {
+  count = var.master_user_secret_rotation_days > 0 ? 1 : 0
+
+  secret_id          = aws_db_instance.main.master_user_secret[0].secret_arn
+  rotate_immediately = var.rotate_master_user_secret_immediately
+
+  rotation_rules {
+    automatically_after_days = var.master_user_secret_rotation_days
   }
 }

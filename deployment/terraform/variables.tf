@@ -51,3 +51,21 @@ variable "ecs_task_memory" {
     production = 1024
   }
 }
+
+variable "db_secret_rotation_days" {
+  description = "Number of days between automatic rotations for the RDS managed master user secret. Set to 0 to disable."
+  type        = number
+  default     = 30
+}
+
+variable "redis_auth_token_rotation_days" {
+  description = "Number of days between automatic rotations for the Redis AUTH token secret. Set to 0 to disable."
+  type        = number
+  default     = 30
+}
+
+variable "rotate_secrets_immediately" {
+  description = "Whether to rotate database and Redis secrets immediately on first enabling rotation. Defaults to false for safer rollout."
+  type        = bool
+  default     = false
+}
