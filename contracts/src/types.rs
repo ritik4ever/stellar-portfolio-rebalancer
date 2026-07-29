@@ -38,6 +38,15 @@ pub const MAX_PORTFOLIOS_PER_USER: u32 = 10;
 /// Default global cap on total portfolios across all users (admin-configurable).
 pub const DEFAULT_GLOBAL_PORTFOLIO_CAP: u32 = 10_000;
 
+/// Maximum number of portfolios accepted by `batch_rebalance` in one call.
+pub const MAX_BATCH_REBALANCE_PORTFOLIOS: u32 = 10;
+
+pub const DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS: u32 = 100; // 1%
+pub const DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 3600; // 1 hour
+pub const DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 300; // 3%
+pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
+
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractCapabilitySummary {
@@ -65,6 +74,8 @@ pub struct Portfolio {
     pub total_value: i128,
     pub is_active: bool,
     pub pause_reason: PauseReason,
+    pub circuit_breaker_config: CircuitBreakerConfig,
+    pub global_max_slippage_bps: u32,
 }
 
 #[contracttype]
@@ -115,6 +126,13 @@ pub struct FeeConfig {
     pub fee_bps: u32,
     pub fee_recipient: Address,
     pub enabled: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
 }
 
 #[contracttype]
@@ -256,6 +274,13 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
 }
 
 #[contracttype]
