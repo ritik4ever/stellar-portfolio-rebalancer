@@ -30,7 +30,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm run build
 
       - name: Package frontend bundle
@@ -40,6 +40,6 @@ jobs:
       - name: Build backend
         working-directory: backend
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm run build
 
