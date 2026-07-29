@@ -165,6 +165,7 @@ pub enum DataKey {
     RecurringDeposit(u64),
     DCAConfig(u64),
     NavHistory(u64),
+    CircuitBreakerConfig,
 }
 
 #[contracttype]
@@ -212,6 +213,7 @@ pub enum Error {
     RecurringDepositNotConfigured = 29,
     RecurringDepositTooSoon = 30,
     InvalidInterval = 31,
+    InvalidOracleAddress = 29,
 }
 
 #[contracttype]
@@ -274,6 +276,13 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
 }
 
 #[contracttype]
