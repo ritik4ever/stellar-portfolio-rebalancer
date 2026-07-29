@@ -30,6 +30,7 @@ import {
     onAuthSessionRestored,
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
+import { ToastContainer } from './components/ui/ToastContainer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
 import {
     detectContractCapabilities,
@@ -417,6 +418,7 @@ function App() {
                 </div>
             )}
 
+            <ToastContainer />
             {pendingConsentPublicKey ? (
                 legalDoc ? (
                     <Legal doc={legalDoc} onBack={() => setLegalDoc(null)} />
