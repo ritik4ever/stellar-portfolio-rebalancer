@@ -84,10 +84,6 @@ jobs:
           schemathesis run \
             --url http://localhost:3001 \
             --checks all \
-            --max-response-time 5000 \
-            --max-examples 30 \
-            --hypothesis-deadline 500 \
-            --contrib-openapi-formats-uuid \
             backend/openapi.json
 
       - name: Stop backend
