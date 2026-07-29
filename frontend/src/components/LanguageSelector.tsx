@@ -27,6 +27,22 @@ const LanguageSelector = () => {
           >
             English
           </button>
+          <button
+            onClick={() => changeLanguage('es')}
+            className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+              i18n.language === 'es' ? 'font-semibold bg-gray-50 dark:bg-gray-700' : ''
+            }`}
+          >
+            Español
+          </button>
+          <button
+            onClick={() => changeLanguage('pt')}
+            className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+              i18n.language === 'pt' ? 'font-semibold bg-gray-50 dark:bg-gray-700' : ''
+            }`}
+          >
+            Português
+          </button>
         </div>
       </div>
     </div>
