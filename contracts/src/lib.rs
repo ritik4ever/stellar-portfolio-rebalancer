@@ -7,6 +7,8 @@ use soroban_sdk::{
 };
 
 mod deposits;
+mod circuit_breaker;
+mod nav;
 mod portfolio;
 
 
