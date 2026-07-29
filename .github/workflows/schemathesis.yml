@@ -23,6 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 5
+
     env:
       CI: 'true'
       NODE_ENV: test
@@ -33,6 +40,7 @@ jobs:
       ALLOW_DEMO_BALANCE_FALLBACK: 'true'
       JWT_SECRET: schemathesis-ci-jwt-secret-at-least-32
       DB_PATH: /tmp/schemathesis-test.db
+      REDIS_URL: redis://localhost:6379
 
     steps:
       - uses: actions/checkout@v4
