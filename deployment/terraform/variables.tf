@@ -51,3 +51,15 @@ variable "ecs_task_memory" {
     production = 1024
   }
 }
+
+variable "secret_rotation_days" {
+  description = "Number of days between automatic scheduled rotations of database and redis credentials"
+  type        = number
+  default     = 30
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = "ARN of the Lambda function that rotates secrets (optional when using AWS managed rotation)"
+  type        = string
+  default     = null
+}
