@@ -18,6 +18,13 @@ fn allocation_decimals(
     asset_decimals
 }
 
+fn create_token_and_mint(env: &Env, admin: &Address, to: &Address, amount: i128) -> Address {
+    let token_id = env.register_stellar_asset_contract(admin.clone());
+    let token = TokenClient::new(env, &token_id);
+    token.mint(to, &amount);
+    token_id
+}
+
 fn create_portfolio_with_defaults(
     env: &Env,
     client: &PortfolioRebalancerClient,
@@ -228,15 +235,20 @@ fn test_deposit_valid() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let asset = create_token_and_mint(&env, &admin, &user, 2000);
+
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
     client.deposit(&pid, &asset, &1000, &String::from_str(&env, ""));
 
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 1000);
+    assert_eq!(portfolio.current_balances.get(asset.clone()).unwrap(), 1000);
+
+    let token = TokenClient::new(&env, &asset);
+    assert_eq!(token.balance(&contract_id), 1000);
+    assert_eq!(token.balance(&user), 1000);
 }
 
 #[test]
@@ -279,9 +291,10 @@ fn test_check_rebalance_needed_no_drift() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200);
+
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
     allocations.set(asset1.clone(), 5000);
     allocations.set(asset2.clone(), 5000);
 
@@ -309,9 +322,10 @@ fn test_check_rebalance_needed_with_drift() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let asset1 = create_token_and_mint(&env, &admin, &user, 300);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200);
+
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
     allocations.set(asset1.clone(), 5000);
     allocations.set(asset2.clone(), 5000);
 
@@ -469,9 +483,10 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let asset1 = create_token_and_mint(&env, &admin, &user, 10_000_000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 5_000_000);
+
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
     allocations.set(asset1.clone(), 5000);
     allocations.set(asset2.clone(), 5000);
 
@@ -482,7 +497,7 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     let config = FeeConfig {
         platform_name: String::from_str(&env, "Acme Vault"),
         fee_bps: 50,
-        fee_recipient: recipient,
+        fee_recipient: recipient.clone(),
         enabled: true,
     };
     client.set_fee_config(&config);
@@ -494,8 +509,15 @@ fn test_rebalance_applies_non_zero_fee_to_trade_amount() {
     client.execute_rebalance(&pid, &Map::new(&env));
 
     let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 4_975_000);
-    assert_eq!(portfolio.current_balances.get(asset2).unwrap(), 4_975_000);
+    assert_eq!(portfolio.current_balances.get(asset1.clone()).unwrap(), 4_975_000);
+    assert_eq!(portfolio.current_balances.get(asset2.clone()).unwrap(), 4_975_000);
+
+    let token1 = TokenClient::new(&env, &asset1);
+    let token2 = TokenClient::new(&env, &asset2);
+    assert_eq!(token1.balance(&contract_id), 4_975_000);
+    assert_eq!(token2.balance(&contract_id), 4_975_000);
+    assert_eq!(token1.balance(&recipient), 25_000);
+    assert_eq!(token2.balance(&recipient), 25_000);
 }
 
 #[test]
@@ -540,8 +562,9 @@ fn test_emergency_stop() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let asset = create_token_and_mint(&env, &admin, &user, 200);
+
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
@@ -1453,7 +1476,7 @@ fn test_emergency_stop_admin_pause_and_reactivate() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
@@ -1618,12 +1641,12 @@ fn test_transfer_stewardship_steward_can_deposit() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let new_steward = Address::generate(&env);
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &new_steward, 500);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    let new_steward = Address::generate(&env);
     client.transfer_stewardship(&pid, &new_steward);
 
     client
@@ -1655,8 +1678,8 @@ fn test_preview_rebalance_reports_trades_and_thresholds() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 20_000_000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 10_000_000);
     allocations.set(asset1.clone(), 5000);
     allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
@@ -1685,7 +1708,7 @@ fn test_preview_rebalance_does_not_mutate_portfolio() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 1000);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
@@ -1917,7 +1940,7 @@ fn test_deposit_rejects_paused_portfolio() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.pause_portfolio(&pid, &PauseReason::VolatilityCircuitBreaker);
@@ -1981,7 +2004,7 @@ fn test_check_invariants_inactive_portfolio() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
@@ -2003,7 +2026,7 @@ fn test_withdraw_success() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 1000);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.deposit(&pid, &asset, &1000, &String::from_str(&env, ""));
@@ -2026,7 +2049,7 @@ fn test_withdraw_insufficient_balance() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
@@ -2047,7 +2070,7 @@ fn test_withdraw_full_exit_deactivates_portfolio() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
@@ -2075,7 +2098,7 @@ fn test_admin_force_rebalance_bypasses_cooldown() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
@@ -2311,7 +2334,7 @@ fn benchmark_deposit_gas() {
     let _ = client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
@@ -2453,8 +2476,8 @@ fn test_get_portfolio_value_usd_basic() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 100);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset1.clone(), 5000);
     allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
@@ -2480,8 +2503,8 @@ fn test_get_portfolio_value_usd_drift() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset1.clone(), 5000);
     allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
@@ -2634,8 +2657,8 @@ fn test_get_drift_preview_balanced_no_needs_rebalance() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 100);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset1.clone(), 5000u32);
     allocations.set(asset2.clone(), 5000u32);
 
@@ -2672,8 +2695,8 @@ fn test_get_drift_preview_imbalanced_needs_rebalance() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 900);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 100);
     allocations.set(asset1.clone(), 5000u32);
     allocations.set(asset2.clone(), 5000u32);
 
@@ -2733,7 +2756,7 @@ fn test_manual_nav_snapshot() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
@@ -2811,7 +2834,7 @@ fn test_auto_nav_snapshot_on_rebalance() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
@@ -3497,7 +3520,7 @@ fn test_benchmark_nav_operations() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
     allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
     client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, "init"));
