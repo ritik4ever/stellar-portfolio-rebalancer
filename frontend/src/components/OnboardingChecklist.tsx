@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { X, CheckCircle2, Circle, ArrowRight, HelpCircle, ChevronDown } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { X, CheckCircle2, Circle, ArrowRight, HelpCircle, RotateCcw } from 'lucide-react'
 import { useUserPortfolios } from '../hooks/queries/usePortfolioQuery'
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 
 const DISMISSED_KEY = 'onboarding-checklist-dismissed'
+const COMPLETED_KEY = 'onboarding-checklist-completed'
 const CHECKLIST_VERSION = '1'
 
 interface ChecklistStep {
@@ -25,6 +26,23 @@ interface OnboardingChecklistProps {
   onNavigate: (view: string) => void
 }
 
+function loadCompletedSteps(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COMPLETED_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as string[]
+      return new Set(parsed)
+    }
+  } catch {}
+  return new Set()
+}
+
+function saveCompletedSteps(steps: Set<string>): void {
+  try {
+    localStorage.setItem(COMPLETED_KEY, JSON.stringify(Array.from(steps)))
+  } catch {}
+}
+
 function OnboardingChecklist({ publicKey, onNavigate }: OnboardingChecklistProps) {
   const [dismissed, setDismissed] = useState(() => {
     try {
@@ -34,7 +52,10 @@ function OnboardingChecklist({ publicKey, onNavigate }: OnboardingChecklistProps
     }
   })
   const [open, setOpen] = useState(false)
-  const [hasAutoShown, setHasAutoShown] = useState(false)
+  const hasAutoShownRef = useRef(false)
+
+  const [completedSteps, setCompletedSteps] = useState<Set<string>>(loadCompletedSteps)
+  const initialLoadDone = useRef(false)
 
   const { data: portfolios } = useUserPortfolios(publicKey)
 
@@ -76,35 +97,77 @@ function OnboardingChecklist({ publicKey, onNavigate }: OnboardingChecklistProps
     return latest?.autoRebalance === true
   }, [portfolios])
 
-  const allCompleted = publicKey && hasPortfolio && hasAllocations && hasRebalanced && hasAutoRebalance
+  const liveStepStatuses = useMemo(() => {
+    const statuses: Record<string, boolean> = {}
+    STEPS.forEach((step) => {
+      switch (step.id) {
+        case 'connect-wallet':
+          statuses[step.id] = !!publicKey
+          break
+        case 'create-portfolio':
+          statuses[step.id] = hasPortfolio
+          break
+        case 'set-allocations':
+          statuses[step.id] = hasAllocations
+          break
+        case 'execute-rebalance':
+          statuses[step.id] = hasRebalanced
+          break
+        case 'enable-auto-rebalance':
+          statuses[step.id] = hasAutoRebalance
+          break
+        default:
+          statuses[step.id] = false
+      }
+    })
+    return statuses
+  }, [publicKey, hasPortfolio, hasAllocations, hasRebalanced, hasAutoRebalance])
+
+  useEffect(() => {
+    if (!initialLoadDone.current) {
+      initialLoadDone.current = true
+      const saved = loadCompletedSteps()
+      const merged = new Set(saved)
+      for (const [id, done] of Object.entries(liveStepStatuses)) {
+        if (done) merged.add(id)
+      }
+      setCompletedSteps(merged)
+    }
+  }, [liveStepStatuses])
+
+  useEffect(() => {
+    if (!initialLoadDone.current) return
+    const updated = new Set(completedSteps)
+    let changed = false
+    for (const [id, done] of Object.entries(liveStepStatuses)) {
+      if (done && !updated.has(id)) {
+        updated.add(id)
+        changed = true
+      }
+    }
+    if (changed) {
+      setCompletedSteps(updated)
+      saveCompletedSteps(updated)
+    }
+  }, [liveStepStatuses])
+
+  useEffect(() => {
+    saveCompletedSteps(completedSteps)
+  }, [completedSteps])
+
+  const allCompleted = useMemo(() => STEPS.every((s) => completedSteps.has(s.id)), [completedSteps])
 
   const stepStatus = useCallback(
-    (id: string) => {
-      switch (id) {
-        case 'connect-wallet':
-          return !!publicKey
-        case 'create-portfolio':
-          return hasPortfolio
-        case 'set-allocations':
-          return hasAllocations
-        case 'execute-rebalance':
-          return hasRebalanced
-        case 'enable-auto-rebalance':
-          return hasAutoRebalance
-        default:
-          return false
-      }
-    },
-    [publicKey, hasPortfolio, hasAllocations, hasRebalanced, hasAutoRebalance]
+    (id: string) => completedSteps.has(id),
+    [completedSteps]
   )
 
   useEffect(() => {
-    if (!dismissed && !hasAutoShown && !allCompleted) {
-      const timer = setTimeout(() => setOpen(true), 800)
-      setHasAutoShown(true)
-      return () => clearTimeout(timer)
-    }
-  }, [dismissed, hasAutoShown, allCompleted])
+    if (dismissed || hasAutoShownRef.current || allCompleted) return
+    hasAutoShownRef.current = true
+    const timer = setTimeout(() => setOpen(true), 800)
+    return () => clearTimeout(timer)
+  }, [dismissed, allCompleted])
 
   useEffect(() => {
     if (!open) return
@@ -131,6 +194,12 @@ function OnboardingChecklist({ publicKey, onNavigate }: OnboardingChecklistProps
 
   const toggle = useCallback(() => {
     setOpen((prev) => !prev)
+  }, [])
+
+  const resetProgress = useCallback(() => {
+    const empty = new Set<string>()
+    setCompletedSteps(empty)
+    saveCompletedSteps(empty)
   }, [])
 
   if (!open) {
@@ -240,10 +309,19 @@ function OnboardingChecklist({ publicKey, onNavigate }: OnboardingChecklistProps
           )}
         </div>
 
-        <div className="border-t border-gray-200 px-5 py-3 dark:border-gray-700">
+        <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3 dark:border-gray-700">
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {STEPS.filter((s) => stepStatus(s.id)).length} of {STEPS.length} steps completed
           </p>
+          <button
+            type="button"
+            onClick={resetProgress}
+            className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition-colors"
+            title="Reset onboarding progress"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Reset
+          </button>
         </div>
       </div>
     </div>

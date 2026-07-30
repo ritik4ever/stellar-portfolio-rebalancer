@@ -1,4 +1,9 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { AlertTriangle, RefreshCw, ArrowLeft } from 'lucide-react'
+
+const RETRY_BASE_DELAY_MS = 1000
+const RETRY_MAX_DELAY_MS = 16000
+const RETRY_RESET_TIMEOUT_MS = 5000
 
 type Props = {
     title: string
@@ -21,6 +26,31 @@ export default function RouteErrorState({
     backLabel = 'Back',
     loading = false,
 }: Props) {
+    const [retryCount, setRetryCount] = useState(0)
+    const [backoffLoading, setBackoffLoading] = useState(false)
+    const prevLoading = useRef(loading)
+
+    const isRetrying = loading || backoffLoading
+
+    useEffect(() => {
+        if (prevLoading.current && !loading && retryCount > 0) {
+            const timer = setTimeout(() => setRetryCount(0), RETRY_RESET_TIMEOUT_MS)
+            return () => clearTimeout(timer)
+        }
+        prevLoading.current = loading
+    }, [loading, retryCount])
+
+    const handleRetry = useCallback(() => {
+        if (isRetrying) return
+        const delay = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, retryCount), RETRY_MAX_DELAY_MS)
+        setRetryCount(c => c + 1)
+        setBackoffLoading(true)
+        setTimeout(() => {
+            setBackoffLoading(false)
+            onRetry()
+        }, delay)
+    }, [isRetrying, retryCount, onRetry])
+
     return (
         <div className="min-h-[70vh] bg-gray-50 px-6 py-16 dark:bg-gray-900">
             <div className="mx-auto flex max-w-2xl flex-col items-start gap-6 rounded-3xl border border-red-200 bg-white p-8 shadow-sm dark:border-red-900/60 dark:bg-gray-800">
@@ -46,12 +76,12 @@ export default function RouteErrorState({
                 <div className="flex flex-wrap gap-3">
                     <button
                         type="button"
-                        onClick={onRetry}
-                        disabled={loading}
+                        onClick={handleRetry}
+                        disabled={isRetrying}
                         className="inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden />
-                        {loading ? 'Retrying…' : retryLabel}
+                        <RefreshCw className={`h-4 w-4 ${isRetrying ? 'animate-spin' : ''}`} aria-hidden />
+                        {isRetrying ? 'Retrying…' : retryLabel}
                     </button>
                     {onBack ? (
                         <button

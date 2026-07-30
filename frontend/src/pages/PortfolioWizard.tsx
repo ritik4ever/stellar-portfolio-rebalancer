@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -13,7 +13,8 @@ import {
   ExternalLink,
   ChevronRight,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  RotateCcw
 } from 'lucide-react';
 import { api, ENDPOINTS } from '../config/api';
 import { useCreatePortfolioMutation } from '../hooks/mutations/usePortfolioMutations';
@@ -21,6 +22,7 @@ import { remainingAllocation } from '../utils/calculations';
 import AssetSelector from '../components/AssetSelector';
 import ThemeToggle from '../components/ThemeToggle';
 import { walletManager } from '../utils/walletManager';
+import { saveWizardDraft, loadWizardDraft, clearWizardDraft } from '../utils/wizardDraft';
 
 interface PortfolioWizardProps {
   onNavigate: (view: string) => void;
@@ -98,6 +100,52 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [shareHash, setShareHash] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState<boolean>(false);
+
+  // Draft resume state
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<ReturnType<typeof loadWizardDraft> | null>(null);
+
+  // Check for existing draft on mount
+  useEffect(() => {
+    const draft = loadWizardDraft();
+    if (draft && draft.step >= 1 && draft.step <= 4) {
+      setPendingDraft(draft);
+      setShowResumePrompt(true);
+    }
+  }, []);
+
+  // Save draft on state changes (persist wizard progress)
+  useEffect(() => {
+    if (step >= 1 && step <= 4 && !showResumePrompt) {
+      saveWizardDraft({
+        step,
+        selectedTemplateId,
+        allocations,
+        threshold,
+        cooldown,
+        autoRebalance,
+        savedAt: new Date().toISOString(),
+      });
+    }
+  }, [step, selectedTemplateId, allocations, threshold, cooldown, autoRebalance, showResumePrompt]);
+
+  const handleResumeDraft = useCallback(() => {
+    if (!pendingDraft) return;
+    setStep(pendingDraft.step);
+    setSelectedTemplateId(pendingDraft.selectedTemplateId);
+    setAllocations(pendingDraft.allocations);
+    setThreshold(pendingDraft.threshold);
+    setCooldown(pendingDraft.cooldown);
+    setAutoRebalance(pendingDraft.autoRebalance);
+    setShowResumePrompt(false);
+    setPendingDraft(null);
+  }, [pendingDraft]);
+
+  const handleDiscardDraft = useCallback(() => {
+    clearWizardDraft();
+    setShowResumePrompt(false);
+    setPendingDraft(null);
+  }, []);
 
   // Live sum validation calculations
   const totalPercentage = allocations.reduce((sum, item) => sum + (item.percentage || 0), 0);
@@ -220,6 +268,9 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
           console.error('Failed to generate share link:', shareErr);
         }
 
+        // Clear saved draft on successful completion
+        clearWizardDraft();
+
         // Advance to Step 5 (Success)
         setStep(5);
       } else {
@@ -323,6 +374,38 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
 
         {/* Wizard Panel */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800/80 p-6 md:p-8 transition-all">
+          
+          {/* Resume Draft Prompt */}
+          {showResumePrompt && pendingDraft && (
+            <div className="mb-6 p-4 rounded-xl border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-950/20 text-blue-800 dark:text-blue-300">
+              <div className="flex items-start gap-3">
+                <RotateCcw className="w-5 h-5 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-bold mb-1">Resume where you left off?</p>
+                  <p className="text-xs opacity-80 mb-3">
+                    You have an unfinished wizard session from {new Date(pendingDraft.savedAt).toLocaleString()}. 
+                    Would you like to resume or start fresh?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleResumeDraft}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      Resume Draft
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDiscardDraft}
+                      className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      Start Fresh
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* STEP 1: Select Template */}
           {step === 1 && (

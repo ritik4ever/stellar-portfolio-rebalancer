@@ -36,7 +36,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
 
-- **Purpose:** Creates a new user portfolio and emits a `("portfolio","created")` event.
+- **Purpose:** Creates a new user portfolio (with default `StrategyType::Threshold` strategy) and emits a `("portfolio","created")` event.
 - **Parameters:**
   - `user`: Portfolio owner; must authorize this call.
   - `target_allocations`: Target allocations per asset (`Address -> percentage`).
@@ -56,6 +56,15 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `user.require_auth()` succeeds.
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
+
+### `create_portfolio_with_strategy(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32, strategy: StrategyType, strategy_config: StrategyConfig) -> Result<u64, Error>`
+
+- **Purpose:** Creates a new user portfolio with an explicit rebalancing strategy and emits a `("portfolio","created")` event.
+- **Parameters:**
+  - Same as `create_portfolio` plus:
+  - `strategy`: `StrategyType` enum — `Threshold (0)`, `Periodic (1)`, `Volatility (2)`, or `Custom (3)`.
+  - `strategy_config`: `StrategyConfig` struct with fields `interval_seconds`, `volatility_threshold_bps`, `min_interval_seconds`.
+- **Returns:** Same as `create_portfolio`.
 
 #### Portfolio ID derivation (deterministic)
 
@@ -316,6 +325,16 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `total_value: i128`
   - `is_active: bool`
   - `pause_reason: PauseReason`
+  - `strategy: StrategyType` — rebalancing strategy (`Threshold`, `Periodic`, `Volatility`, `Custom`)
+  - `strategy_config: StrategyConfig` — per-strategy parameters
+- `StrategyType` (`contracts/src/types.rs`)
+  - Enum: `Threshold = 0`, `Periodic = 1`, `Volatility = 2`, `Custom = 3`
+  - Mirrors backend `RebalanceStrategyType` (excluding `dca`, which is handled separately)
+- `StrategyConfig` (`contracts/src/types.rs`)
+  - Struct: `interval_seconds: u64`, `volatility_threshold_bps: u32`, `min_interval_seconds: u64`
+  - Default: 7-day interval, 10% volatility threshold, 1-day minimum interval
+- `LegacyPortfolio` (`contracts/src/types.rs`)
+  - Pre-strategy schema Portfolio struct used for on-read migration of existing stored portfolios
 - `ContractCapabilitySummary` (`contracts/src/types.rs`)
   - Struct with `version: u32`, `schema_version: u32`, `capability_flags: u32`, `min_rebalance_threshold: u32`, `max_rebalance_threshold: u32`, `min_slippage_tolerance_bps: u32`, `max_slippage_tolerance_bps: u32`, `max_portfolio_assets: u32`.
 - `Asset` (`contracts/src/reflector.rs`)

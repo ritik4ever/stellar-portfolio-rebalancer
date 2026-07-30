@@ -58,6 +58,8 @@ consentRouter.post('/consent/grant', requireJwtWhenEnabled, idempotencyMiddlewar
             terms: req.body.terms,
             privacy: req.body.privacy,
             cookies: req.body.cookies,
+            analytics: req.body.analytics,
+            marketing: req.body.marketing,
             documentText: req.body.documentText,
             ...meta
         })
@@ -120,8 +122,8 @@ consentRouter.get('/consent/audit', requireJwtWhenEnabled, validateQuery(consent
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
 consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
     try {
-        const { userId, terms, privacy, cookies, documentText } = req.body
-        databaseService.recordConsent(userId, { terms, privacy, cookies, documentText, ...consentRequestMeta(req) })
+        const { userId, terms, privacy, cookies, analytics, marketing, documentText } = req.body
+        databaseService.recordConsent(userId, { terms, privacy, cookies, analytics, marketing, documentText, ...consentRequestMeta(req) })
         const consent = databaseService.getConsent(userId)
         return ok(res, { message: 'Consent recorded', accepted: true, documentVersion: consent?.documentVersion ?? null })
     } catch (error) {
