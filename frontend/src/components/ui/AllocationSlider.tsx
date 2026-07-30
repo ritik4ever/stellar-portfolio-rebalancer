@@ -30,6 +30,21 @@ export const AllocationSlider: React.FC<AllocationSliderProps> = ({
     onChange(Number(e.target.value))
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    
+    const largeStep = step * 10;
+    const increment = e.shiftKey ? largeStep : step;
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      onChange(Math.min(max, value + increment));
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      onChange(Math.max(min, value - increment));
+    }
+  }
+
   return (
     <div className={`w-full ${className}`}>
       <div className="flex items-center justify-between">
@@ -52,7 +67,11 @@ export const AllocationSlider: React.FC<AllocationSliderProps> = ({
         value={value}
         disabled={disabled}
         onChange={handleChange}
+        onKeyDown={handleKeyDown}
         aria-describedby={`${id}-output`}
+        aria-valuenow={value}
+        aria-valuemin={min}
+        aria-valuemax={max}
         className="mt-2 h-2 w-full cursor-pointer appearance-none rounded-full bg-gray-200 accent-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-700"
       />
     </div>

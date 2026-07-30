@@ -6,6 +6,7 @@ export interface NetworkDetectionResult {
   mismatch: boolean
   checking: boolean
   error: string | null
+  pendingWalletNetwork?: StellarNetwork | null
 }
 
 const STELLAR_NETWORK_PASSPHRASES: Record<string, StellarNetwork> = {
