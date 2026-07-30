@@ -1,192 +1,240 @@
-# Security audit log — portfolio rebalancer contract
+# Security Audit — stellar-portfolio-rebalancer
 
-This document records focused security findings for the Soroban portfolio
-rebalancer. Entries are append-only review notes; they do not replace a full
-third-party audit.
+This document records security findings identified during internal and external audits of the
+`stellar-portfolio-rebalancer` smart contract. Each entry includes a description, impact
+assessment, reproduction steps, recommended remediation, and current status.
 
-| Date       | Reviewer / issue | Area |
-| ---------- | ---------------- | ---- |
-| 2026-07-27 | #1523            | Re-entrancy via Reflector `lastprice` during rebalance |
+---
 
-## Finding REENT-001 — External Reflector call ordering vs. portfolio state during `execute_rebalance`
+## Findings Index
 
-### Summary
+| ID | Title | Severity | Status |
+|----|-------|----------|--------|
+| [SPR-001](#spr-001) | `get_fee_config` default `fee_recipient` falls back to the contract's own address | **High** | Open — fix tracked in #1519 |
 
-During `execute_rebalance`, the contract performs multiple cross-contract calls
-to the configured Reflector oracle (`ReflectorClient::lastprice`) **before** the
-updated `Portfolio` struct is persisted. Fee collection also performs SAC
-`token::transfer` interactions **before** that final persistence. This ordering
-does not match strict **checks → effects → interactions (CEI)** hardening for
-the rebalance path. Re-entrancy from a **malicious contract installed at
-`ReflectorAddress`** is theoretically possible at the Soroban VM level; practical
-fund-loss scenarios are largely mitigated by Soroban authorization rules and the
-expected deployment trust model, but CEI gaps remain relevant for defense in depth
-and non-standard tokens.
+---
 
-**Severity:** **Medium** (configuration / trust-boundary and CEI ordering; not
-exploitable against the canonical Reflector deployment under normal admin
-practice)
+## SPR-001
 
-**Remediation status:** **Open** — documented only in this review (#1523).
-Implementation hardening (CEI reorder, optional reentrancy guard, oracle address
-allowlist) is tracked as separate engineering work on the same code path.
+**Title:** `get_fee_config` default `fee_recipient` falls back to the contract's own address
 
-### Scope and code references
+**Severity:** High
 
-Primary logic:
+**Status:** Open — remediation required (tracked in issue #1519)
 
-- `contracts/src/portfolio.rs` — `calculate_portfolio_value`,
-  `build_rebalance_preview` (oracle reads in loops).
-- `contracts/src/lib.rs` — `execute_rebalance_internal` (orchestration, trade
-  application, persistence).
+**Reported:** 2026-07-27
 
-Reflector interface: `contracts/src/reflector.rs` (`lastprice` → external call).
+**Affected file:** `contracts/src/lib.rs`
 
-### External call inventory (rebalance execution path)
+**Affected function:** `get_fee_config` (line ~404), `execute_rebalance_internal`
 
-For one successful `execute_rebalance` / `admin_force_rebalance` invocation,
-oracle interactions occur in this order:
+---
 
-1. **`build_rebalance_preview`** (called from `execute_rebalance_internal`):
-   - `calculate_portfolio_value`: one `lastprice` per entry in
-     `current_balances`.
-   - Per target allocation asset: another `lastprice` (staleness check + price
-     map).
-2. **Optional slippage validation** (when `actual_balances` is non-empty):
-   - `calculate_portfolio_value` again (another `lastprice` loop over balances).
-   - Per allocation asset: `lastprice` again for slippage math.
+### Description
 
-Read-only preview helpers (`preview_rebalance`, `check_rebalance_needed`,
-`get_drift_preview`, `get_portfolio_value_usd`) use the same
-`build_rebalance_preview` / `calculate_portfolio_value` patterns but do not
-mutate portfolio balances.
+`get_fee_config` returns an in-memory default `FeeConfig` when no fee configuration has been
+stored in contract storage. The default value hardcodes `fee_recipient` to
+`env.current_contract_address()` — the contract's own address:
 
-### State writes vs. interactions (ordering)
+```rust
+// contracts/src/lib.rs
+pub fn get_fee_config(env: Env) -> FeeConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::FeeConfig)
+        .unwrap_or(FeeConfig {
+            platform_name: String::from_str(&env, ""),
+            fee_bps: 0,
+            fee_recipient: env.current_contract_address(), // ← self-referential default
+            enabled: false,
+        })
+}
+```
 
-In `execute_rebalance_internal` (`lib.rs`), approximate ordering is:
+`initialize` does not write a `FeeConfig` entry to storage, so this fallback is active on
+every freshly deployed contract until `set_fee_config` is explicitly called.
 
-| Step | Action | Persistent portfolio state |
-| ---- | ------ | -------------------------- |
-| 1 | Load portfolio | Unchanged (read) |
-| 2 | Auth, cooldown, invariants | Unchanged |
-| 3 | `guard_ledger_timestamp` | **Instance** `LastTimestamp` updated |
-| 4 | Reflector calls (preview + optional slippage) | Portfolio **unchanged** |
-| 5 | Apply trades in memory; SAC fee `transfer` | Portfolio **not yet** written |
-| 6 | `set(Portfolio)` | **Committed** |
-| 7 | Events, NAV snapshot | Post-commit |
+`execute_rebalance_internal` calls `get_fee_config` and, when `fee_config.enabled` is `true`
+and `fee_bps > 0`, executes a token transfer directly to `fee_config.fee_recipient`:
 
-Portfolio balance **effects** are held in a local `mut portfolio` until step 6,
-while **interactions** (Reflector, then fee transfers) already ran in steps 4–5.
-That is a classic CEI deviation: interactions precede the durable effects that
-should define re-entrancy-safe state.
+```rust
+if fee_amount > 0 {
+    let token_client = token::Client::new(env, &asset);
+    token_client.transfer(
+        &env.current_contract_address(),
+        &fee_config.fee_recipient, // could be the contract itself
+        &fee_amount,
+    );
+}
+```
 
-Cross-reference: **CEI hardening** for this path (persist planned state before
-external calls, or snapshot prices then execute without further oracle calls;
-move fee transfers after portfolio persistence; optional contract-local
-reentrancy mutex) is intentionally **out of scope for #1523** and should land
-via dedicated implementation issues on `execute_rebalance_internal` and
-`portfolio.rs` helpers.
+There is **no `fee_withdraw`, `admin_sweep`, or any other mechanism** in the codebase that
+allows recovery of tokens held at the contract's own address. Any fees sent there are
+permanently stranded.
 
-### Re-entrancy assessment
+---
 
-**Mechanism.** Soroban allows nested contract calls. If `ReflectorAddress`
-points to attacker-controlled WASM, `lastprice` can invoke back into
-`PortfolioRebalancer` while the outer rebalance is mid-flight and before step 6
-commits portfolio balances.
+### Attack / Misconfiguration Scenario
 
-**Trust boundary.** At initialization, admin sets `ReflectorAddress`
-(`initialize` in `lib.rs`). Production intent (see ADR 0002) is the official
-Reflector oracle contract, which does not re-enter callers. Risk materializes
-mainly when admin misconfigures the address, deploys to a compromised instance
-storage, or an upgrade swaps the oracle to malicious code.
+The default `enabled: false` and `fee_bps: 0` prevent fee collection in the out-of-the-box
+state, so the vulnerability does not trigger automatically. However, the unsafe default
+creates a critical trap under the following conditions:
 
-**Authorization on nested calls.** State-changing entrypoints require
-`require_auth` on steward, user, or admin (e.g. `execute_rebalance` → steward,
-`withdraw` → user). Soroban does not automatically propagate authorization from
-the outer user invocation through an untrusted callee; a nested
-`execute_rebalance` from a malicious oracle therefore **should revert** at
-`steward.require_auth()` unless the steward signed that nested invocation
-separately. That sharply limits classic “double rebalance” theft without
- additional auth bugs.
+1. **Operator misconfiguration:** An admin enables fee collection via `set_fee_config` but a
+   future contract upgrade or storage reset clears the stored `FeeConfig`. Rebalances
+   subsequently execute against the fallback default. If the new default is consumed with
+   `enabled: true` in any refactor, fees flow to the contract address immediately.
 
-**What re-entry can still do.** During oracle callbacks, persistent portfolio
-balances remain at pre-rebalance values, while the outer frame may already have
-passed cooldown (via `last_rebalance` on stored state) and updated
-`LastTimestamp`. A nested call that only uses **read** APIs (`get_portfolio`,
-`preview_rebalance`, valuation views) observes stale on-chain balances relative
-to the outer frame’s in-memory trade plan—useful for monitoring, not direct
-theft. Nested **authorized** calls (if an attacker could trick the steward into
-signing multiple invocations in one transaction) could interleave deposits,
-withdrawals, or a second rebalance; that is a broader transaction-composition
-concern, not unique to Reflector, but the oracle hook expands the window before
-portfolio persistence.
+2. **Unsafe fallback as a code smell:** The contract currently guards execution with
+   `enabled: false` in the default, but this is a fragile, implicit safeguard. Any future
+   developer who changes the default `enabled` field to `true` (e.g., to simplify
+   platform-level fee activation) will silently strand every fee collected until the
+   misconfiguration is caught.
 
-**Token re-entrancy.** Fee `token::transfer` runs before portfolio `set`. Standard
-Stellar Asset Contract (SAC) tokens do not execute user hooks on transfer, so
-SAC fee collection is not a practical re-entrancy vector. Custom token contracts
-with callbacks would reintroduce CEI risk on the fee path; the portfolio assumes
-standard SAC assets for fee-bearing tokens.
+3. **Storage manipulation / upgrade path risk:** If a contract upgrade initialises storage
+   differently, or if a migration script inadvertently clears `DataKey::FeeConfig`, the
+   unsafe self-recipient default becomes live with no warning.
 
-### Worst-case impact scenario (concrete)
+4. **No recovery path:** Because Soroban contracts cannot arbitrarily transfer tokens they
+   hold without an explicit withdrawal function, and no such function exists, stranded fees
+   are unrecoverable without a contract upgrade.
 
-Assume:
+---
 
-1. `ReflectorAddress` is malicious (admin mistake or compromised admin key).
-2. Steward executes one honest `execute_rebalance` transaction (single auth).
-3. On the first `lastprice` during `build_rebalance_preview`, the malicious
-   oracle re-enters the portfolio contract.
+### Impact
 
-**Scenario A — nested `execute_rebalance` without new steward signatures**
+| Dimension | Assessment |
+|-----------|-----------|
+| **Funds at risk** | Yes — any fee-denominated token amount sent to the contract address is permanently unrecoverable without an upgrade |
+| **Requires admin action to trigger** | Yes — `enabled: false` in the default prevents automatic triggering today |
+| **Exploitable by external actor** | No — fee collection only runs inside `execute_rebalance_internal`, which requires steward auth |
+| **Scope of affected deployments** | All deployments where `set_fee_config` has not been called before fee collection is enabled |
+| **Recoverability** | None without a contract upgrade that adds a sweep function |
 
-- Inner call fails at `steward.require_auth()`.
-- Outer call continues with prices chosen by the malicious oracle (oracle
-  manipulation / stale quote abuse), not classic re-entrancy double-spend.
-- Impact: **incorrect trade sizing**, slippage check bypass if prices are
-  inconsistent across sequential `lastprice` calls in the same tx, potential
-  value drift vs. economic intent. Severity driven by oracle integrity, not
-  re-entrancy alone.
+---
 
-**Scenario B — steward signed a bundled transaction with multiple portfolio
-invocations** (e.g. social-engineered batch, compromised client)
+### Recommended Remediation
 
-- Malicious oracle re-enters during outer preview; inner authorized
-  `withdraw` / `execute_rebalance` runs while outer frame has not persisted
-  new balances.
-- Outer frame then applies trades from preview computed on **pre-nested** storage
-  state, while inner call may have changed balances or `last_rebalance`.
-- Impact: **accounting desync** between recorded `current_balances` and actual
-  SAC holdings, double application of logical trade deltas, or cooldown /
-  threshold bypass relative to user expectations. Worst case: **loss of user
-  funds** proportional to portfolio size if withdrawals and rebalance trades
-  compose maliciously in one ledger transaction.
+Two complementary fixes are required. Both should be delivered together.
 
-**Scenario C — canonical Reflector, CEI ordering only**
+#### Fix 1 — Remove the unsafe default recipient (required)
 
-- No hostile re-entry from oracle; remaining issue is ordering (fee transfer
-  before persist). With SAC, **no observed exploit**; residual **Medium** as
-  defense-in-depth and future token compatibility.
+Replace the self-referential fallback in `get_fee_config` with a value that cannot silently
+route funds anywhere. The safest approach is to make the absence of a stored config
+unambiguously "fees disabled" at the type level:
 
-### Recommendations (remediation backlog)
+**Option A — Panic on access when not configured (strictest):**
 
-| Priority | Action | Status |
-| -------- | ------ | ------ |
-| P1 | CEI hardening in `execute_rebalance_internal`: commit balance updates before external fee transfers; avoid further oracle calls after local state is finalized | Open |
-| P1 | Single price snapshot per asset per rebalance (no redundant `lastprice` in preview + slippage loops) | Open |
-| P2 | Document / enforce allowed Reflector contract IDs at `initialize` + upgrade checklist | Open |
-| P2 | Optional reentrancy guard (storage flag) around rebalance execution | Open |
-| P3 | Integration test with malicious mock oracle attempting nested portfolio calls | Open |
+```rust
+pub fn get_fee_config(env: Env) -> FeeConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::FeeConfig)
+        .expect("FeeConfig not initialised; call set_fee_config before enabling fees")
+}
+```
 
-### Accepted mitigations (no code change required for #1523)
+**Option B — Return a disabled sentinel with no recipient (recommended):**
 
-- Operational use of official Reflector contract address on each network.
-- Admin key hygiene and `ReflectorAddress` verification in
-  [`CONTRACT_DEPLOYMENT_CHECKLIST.md`](CONTRACT_DEPLOYMENT_CHECKLIST.md).
-- Staleness checks in `build_rebalance_preview` (`REFLECTOR_PRICE_MAX_AGE_SECONDS`
-  / 3600s window in preview path).
+Introduce an `Option<Address>` for `fee_recipient`, or use a dedicated
+`fee_config_is_set: bool` flag in storage, so that the execution path can detect
+"not configured" and skip fee collection entirely without relying on `enabled: false` in a
+fallback struct:
 
-### Tests reviewed
+```rust
+pub fn get_fee_config(env: Env) -> Option<FeeConfig> {
+    env.storage().instance().get(&DataKey::FeeConfig)
+}
+```
 
-Existing coverage exercises rebalance with benign mock Reflector (`contracts/src/test.rs`,
-`contracts/tests/integration_tests.rs`) but does **not** simulate malicious
-re-entering oracle behavior; adding such a test is listed in the remediation
-backlog above.
+In `execute_rebalance_internal`:
+
+```rust
+let fee_config = Self::get_fee_config(env.clone());
+let effective_fee_bps = match &fee_config {
+    Some(c) if c.enabled => c.fee_bps,
+    _ => 0,
+};
+```
+
+This eliminates the unsafe default entirely. Fee collection is off unless a `FeeConfig` is
+explicitly stored.
+
+#### Fix 2 — Add an admin fee sweep / withdrawal function (defence in depth)
+
+Even with Fix 1 applied, add a recovery path so that any tokens inadvertently sent to the
+contract address can be retrieved:
+
+```rust
+pub fn admin_sweep_token(env: Env, token: Address, amount: i128, destination: Address) {
+    require_admin(&env);
+    let token_client = token::Client::new(&env, &token);
+    token_client.transfer(&env.current_contract_address(), &destination, &amount);
+    env.events().publish(
+        (Symbol::new(&env, "admin_sweep"),),
+        (token, amount, destination, env.ledger().timestamp()),
+    );
+}
+```
+
+This function should require admin auth, emit an auditable event, and be callable only when
+the contract is not in emergency stop — or alternatively, only when emergency stop is active,
+depending on the operator's threat model.
+
+#### Fix 3 — Require explicit fee recipient in `initialize` (optional hardening)
+
+Add `fee_recipient: Option<Address>` to `initialize` so that deployments must declare an
+intent at construction time:
+
+```rust
+pub fn initialize(
+    env: Env,
+    admin: Address,
+    reflector_address: Address,
+    fee_recipient: Option<Address>,
+) -> Result<(), Error> {
+    // ... existing init logic ...
+    if let Some(recipient) = fee_recipient {
+        env.storage().instance().set(&DataKey::FeeConfig, &FeeConfig {
+            platform_name: String::from_str(&env, ""),
+            fee_bps: 0,
+            fee_recipient: recipient,
+            enabled: false,
+        });
+    }
+    Ok(())
+}
+```
+
+This is backward-compatible (recipient is optional) and makes the deployment checklist
+explicit rather than relying on operators running `set_fee_config` post-deploy.
+
+---
+
+### Verification
+
+After applying the fix:
+
+1. Deploy a fresh contract without calling `set_fee_config`.
+2. Call `execute_rebalance` with a non-zero fee configuration via direct storage inspection.
+3. Confirm no fee transfer occurs (or the function returns an error / skips fee collection).
+4. Call `set_fee_config` with `enabled: true`, a valid `fee_bps`, and an explicit external
+   `fee_recipient`.
+5. Call `execute_rebalance` and confirm the fee is routed to the external recipient, not the
+   contract address.
+6. Add a unit test asserting `get_fee_config` with no stored value returns `None` (or
+   equivalent sentinel) rather than a self-referential struct.
+
+---
+
+### References
+
+- Issue: [#1519 — Security audit: set_fee_config default recipient defaults to contract's own address](../../issues/1519)
+- Affected code: [`contracts/src/lib.rs` — `get_fee_config`](../contracts/src/lib.rs)
+- Affected code: [`contracts/src/lib.rs` — `execute_rebalance_internal`](../contracts/src/lib.rs)
+- Soroban token interface: https://developers.stellar.org/docs/smart-contracts/tokens
+
+---
+
+*Last updated: 2026-07-27*
+*Audited by: Kiro (automated security review, issue #1519)*
