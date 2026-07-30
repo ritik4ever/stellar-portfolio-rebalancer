@@ -355,6 +355,72 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
+fn test_batch_rebalance_mixed_success_and_failure() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+
+    let success_pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    let cooldown_pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    let results = client
+        .batch_rebalance(&vec![&env, success_pid, 999, cooldown_pid])
+        .unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results.get(0).unwrap().portfolio_id, success_pid);
+    assert_eq!(
+        results.get(0).unwrap().result,
+        BatchRebalanceResultStatus::Success
+    );
+    assert_eq!(results.get(1).unwrap().portfolio_id, 999);
+    assert_eq!(
+        results.get(1).unwrap().result,
+        BatchRebalanceResultStatus::Failed(Error::PortfolioNotFound)
+    );
+    assert_eq!(results.get(2).unwrap().portfolio_id, cooldown_pid);
+    assert_eq!(
+        results.get(2).unwrap().result,
+        BatchRebalanceResultStatus::Failed(Error::CooldownActive)
+    );
+
+    assert_eq!(client.get_portfolio(&success_pid).last_rebalance, 15000);
+}
+
+#[test]
+fn test_batch_rebalance_size_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let result = client.try_batch_rebalance(&vec![&env, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert_eq!(result, Err(Ok(Error::BatchTooLarge)));
+}
+
+#[test]
 fn test_fee_config_supports_platform_name_and_zero_fee() {
     let env = Env::default();
     env.mock_all_auths();
@@ -725,6 +791,11 @@ fn build_trade_test_portfolio(
         total_value,
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     }
 }
 
@@ -765,6 +836,11 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
         total_value: target_balance,
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     let mut prices = Map::new(&env);
@@ -805,6 +881,11 @@ fn test_calculate_rebalance_trades_2_asset() {
         total_value: 200 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     let mut prices = Map::new(&env);
@@ -874,6 +955,11 @@ fn test_calculate_rebalance_trades_5_asset() {
         total_value: 500 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     let mut prices = Map::new(&env);
@@ -919,6 +1005,11 @@ fn test_calculate_rebalance_trades_direction_buy_sell() {
         total_value: 200 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     let mut prices = Map::new(&env);
@@ -969,6 +1060,11 @@ fn test_calculate_rebalance_trades_price_precision() {
         total_value: 100 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     let mut prices = Map::new(&env);
@@ -1046,6 +1142,11 @@ fn test_calculate_rebalance_trades_exact_boundary() {
         total_value: 100_000_000i128,
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     let mut prices = Map::new(&env);
@@ -1992,6 +2093,11 @@ fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
         total_value: 0,
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
     assert_eq!(
         crate::portfolio::check_portfolio_invariants(&portfolio),
@@ -2847,6 +2953,388 @@ fn test_circuit_breaker_boundary_just_above_threshold_trips_with_exact_reason() 
     // actually checks. So this attempt is not currently blocked by the trip.
     // Flagging this as a pre-existing gap rather than asserting a false pass.
     let _ = client.try_execute_rebalance(&pid, &Map::new(&env));
+}
+
+#[test]
+fn test_per_portfolio_circuit_breaker_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Create two portfolios with the same asset
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    
+    let pid1 = create_portfolio_with_defaults(&env, &client, &user1, &allocations, 5, 50);
+    let pid2 = create_portfolio_with_defaults(&env, &client, &user2, &allocations, 5, 50);
+    
+    // Configure portfolio 1 with a low threshold (1%)
+    client.set_circuit_breaker_config(&pid1, &100, &3600);
+    
+    // Configure portfolio 2 with a high threshold (10%)
+    client.set_circuit_breaker_config(&pid2, &1000, &3600);
+    
+    // Verify configs were set
+    let portfolio1 = client.get_portfolio(&pid1);
+    let portfolio2 = client.get_portfolio(&pid2);
+    assert_eq!(portfolio1.circuit_breaker_config.spike_threshold_bps, 100);
+    assert_eq!(portfolio1.circuit_breaker_config.window_seconds, 3600);
+    assert_eq!(portfolio2.circuit_breaker_config.spike_threshold_bps, 1000);
+    assert_eq!(portfolio2.circuit_breaker_config.window_seconds, 3600);
+    
+    // Test that portfolio 1 trips at 5% deviation but portfolio 2 does not
+    let config1 = portfolio1.circuit_breaker_config;
+    let config2 = portfolio2.circuit_breaker_config;
+    
+    let mut current_prices = Map::new(&env);
+    // Price has spiked 5% (500 bps)
+    current_prices.set(asset.clone(), 105_00000000000000i128);
+    
+    let reflector_client = ReflectorClient::new(&env, &reflector_id);
+    
+    // Portfolio 1 with 1% threshold should trip
+    let result1 = crate::circuit_breaker::check_volatility(&env, &config1, &reflector_client, &current_prices);
+    assert_eq!(result1, Err(Error::EmergencyStop));
+    
+    // Portfolio 2 with 10% threshold should not trip
+    let result2 = crate::circuit_breaker::check_volatility(&env, &config2, &reflector_client, &current_prices);
+    assert_eq!(result2, Ok(()));
+    
+    // Reset pause reason for next test
+    client.set_emergency_stop(&false);
+    
+    // Test that portfolio 2 trips at 15% deviation
+    let mut high_prices = Map::new(&env);
+    // Price has spiked 15% (1500 bps)
+    high_prices.set(asset.clone(), 115_00000000000000i128);
+    
+    let result2_high = crate::circuit_breaker::check_volatility(&env, &config2, &reflector_client, &high_prices);
+    assert_eq!(result2_high, Err(Error::EmergencyStop));
+}
+
+#[test]
+fn test_default_circuit_breaker_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Create a portfolio without setting custom config
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Verify default config is used
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.circuit_breaker_config.spike_threshold_bps, DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS);
+    assert_eq!(portfolio.circuit_breaker_config.window_seconds, DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS);
+}
+
+#[test]
+fn test_global_max_slippage_cap_aggregate_breach() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Create a portfolio with 3 assets
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let asset3 = Address::generate(&env);
+    allocations.set(asset1.clone(), 3334);
+    allocations.set(asset2.clone(), 3333);
+    allocations.set(asset3.clone(), 3333);
+    
+    // Set per-asset slippage tolerance to 2% (200 bps)
+    // Set global max slippage to 3% (300 bps)
+    let pid = client.create_portfolio(
+        &user,
+        &allocations,
+        &allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS),
+        &5,
+        &200, // 2% per-asset tolerance
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    
+    // Set global max slippage to 3% (300 bps)
+    client.set_global_max_slippage(&pid, &300);
+    
+    // Deposit initial balances
+    client.deposit(&pid, &asset1, &100_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset3, &100_000_000, &String::from_str(&env, ""));
+    
+    // Simulate actual balances with small slippage on each leg (1.5% each)
+    // Each leg is under the 2% per-asset limit, but total (4.5%) exceeds the 3% global cap
+    let mut actual_balances = Map::new(&env);
+    // Expected: 100M each, actual: 98.5M each (1.5% slippage per leg)
+    actual_balances.set(asset1.clone(), 98_500_000);
+    actual_balances.set(asset2.clone(), 98_500_000);
+    actual_balances.set(asset3.clone(), 98_500_000);
+    
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    // Should fail due to global slippage cap (4.5% total > 3% cap)
+    assert_eq!(result, Err(Ok(Error::SlippageExceeded)));
+    
+    // Now test with lower slippage that stays under global cap
+    let mut low_slippage_balances = Map::new(&env);
+    // Expected: 100M each, actual: 99M each (1% slippage per leg, 3% total)
+    low_slippage_balances.set(asset1.clone(), 99_000_000);
+    low_slippage_balances.set(asset2.clone(), 99_000_000);
+    low_slippage_balances.set(asset3.clone(), 99_000_000);
+    
+    let result_low = client.try_execute_rebalance(&pid, &low_slippage_balances);
+    // Should succeed (3% total <= 3% cap)
+    assert_eq!(result_low, Ok(()));
+}
+
+#[test]
+fn test_close_portfolio_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Create a portfolio with 2 assets
+    let mut allocations = Map::new(&env);
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Deposit assets
+    client.deposit(&pid, &asset1, &100_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &50_000_000, &String::from_str(&env, ""));
+    
+    // Verify portfolio exists
+    let portfolio_before = client.get_portfolio(&pid);
+    assert_eq!(portfolio_before.current_balances.get(asset1.clone()).unwrap(), 100_000_000);
+    assert_eq!(portfolio_before.current_balances.get(asset2.clone()).unwrap(), 50_000_000);
+    
+    // Close portfolio
+    client.close_portfolio(&pid);
+    
+    // Verify portfolio no longer exists
+    let result = client.try_get_portfolio(&pid);
+    assert_eq!(result, Err(Ok(Error::PortfolioNotFound)));
+    
+    // Verify portfolio_closed event was emitted
+    let events = env.events().all();
+    let close_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            if let Some(topics) = e.topics.first() {
+                topics == &Symbol::new(&env, "portfolio_closed")
+            } else {
+                false
+            }
+        })
+        .collect();
+    
+    assert!(!close_events.is_empty(), "portfolio_closed event should be emitted");
+}
+
+#[test]
+fn test_close_portfolio_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Create a portfolio
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Try to close portfolio as unauthorized user
+    env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "close_portfolio",
+            args: (pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    
+    let result = client.try_close_portfolio(&pid);
+    assert_eq!(result, Err(Ok(Error::PortfolioNotFound)));
+    
+    // Verify portfolio still exists
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.user, user);
+}
+
+#[test]
+fn test_timelock_fee_config_early_execution_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Queue a fee config change
+    let new_config = FeeConfig {
+        platform_name: String::from_str(&env, "TestPlatform"),
+        fee_bps: 25,
+        fee_recipient: admin.clone(),
+        enabled: true,
+    };
+    client.queue_fee_config(&new_config);
+    
+    // Try to execute immediately (should fail due to timelock)
+    let result = client.try_execute_fee_config();
+    assert_eq!(result, Err(Ok(Error::TimelockNotElapsed)));
+    
+    // Verify original config is still in place
+    let current_config = client.get_fee_config();
+    assert_eq!(current_config.fee_bps, 0);
+    assert!(!current_config.enabled);
+}
+
+#[test]
+fn test_timelock_fee_config_post_delay_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Queue a fee config change
+    let new_config = FeeConfig {
+        platform_name: String::from_str(&env, "TestPlatform"),
+        fee_bps: 25,
+        fee_recipient: admin.clone(),
+        enabled: true,
+    };
+    client.queue_fee_config(&new_config);
+    
+    // Advance ledger time past the timelock delay
+    env.ledger().with_mut(|li| {
+        li.timestamp = TIMELOCK_DELAY_SECONDS + 1;
+    });
+    
+    // Execute after delay (should succeed)
+    let result = client.execute_fee_config();
+    assert_eq!(result, Ok(()));
+    
+    // Verify new config is applied
+    let current_config = client.get_fee_config();
+    assert_eq!(current_config.fee_bps, 25);
+    assert!(current_config.enabled);
+}
+
+#[test]
+fn test_timelock_upgrade_early_execution_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Queue an upgrade
+    let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+    client.queue_upgrade(&new_wasm_hash);
+    
+    // Try to execute immediately (should fail due to timelock)
+    let result = client.try_execute_upgrade();
+    assert_eq!(result, Err(Ok(Error::TimelockNotElapsed)));
+}
+
+#[test]
+fn test_timelock_upgrade_post_delay_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    // Queue an upgrade
+    let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+    client.queue_upgrade(&new_wasm_hash);
+    
+    // Advance ledger time past the timelock delay
+    env.ledger().with_mut(|li| {
+        li.timestamp = TIMELOCK_DELAY_SECONDS + 1;
+    });
+    
+    // Execute after delay (should succeed)
+    let result = client.execute_upgrade();
+    assert_eq!(result, Ok(()));
+    
+    // Verify upgrade_queued and upgraded events were emitted
+    let events = env.events().all();
+    let queue_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            if let Some(topics) = e.topics.first() {
+                topics == &Symbol::new(&env, "upgrade_queued")
+            } else {
+                false
+            }
+        })
+        .collect();
+    
+    let upgrade_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            if let Some(topics) = e.topics.first() {
+                topics == &Symbol::short!("portfolio")
+            } else {
+                false
+            }
+        })
+        .collect();
+    
+    assert!(!queue_events.is_empty(), "upgrade_queued event should be emitted");
+    assert!(!upgrade_events.is_empty(), "upgraded event should be emitted");
 }
 
 #[test]
