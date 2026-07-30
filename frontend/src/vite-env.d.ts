@@ -26,3 +26,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
     readonly env: ImportMetaEnv
 }
+
+interface HanaWallet {
+    getNetwork(): Promise<string | { network: string } | { networkPassphrase: string }>
+    request(args: { method: string; params?: unknown[] }): Promise<unknown>
+}
+
+interface Window {
+    hana?: HanaWallet
+}

@@ -37,6 +37,8 @@ describe('DriftGauge', () => {
   it('renders negative drift', () => {
     const { container } = render(<DriftGauge asset={{ name: 'XLM', target: 50, current: 46.5, threshold: 5 }} />)
     expect(container).toMatchSnapshot()
+  })
+
   const baseAsset: DriftGaugeAsset = { name: 'XLM', target: 40, current: 42.5, threshold: 5 }
 
   it('renders the asset name and drift value', () => {

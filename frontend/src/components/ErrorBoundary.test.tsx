@@ -16,7 +16,7 @@ vi.mock('../utils/walletManager', () => ({
 import { ErrorBoundary } from './ErrorBoundary'
 import { Sentry } from '../observability'
 
-function Bomb() {
+function Bomb(): React.ReactElement {
     throw new Error('Test render error')
 }
 

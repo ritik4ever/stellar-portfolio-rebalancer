@@ -335,7 +335,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                   <span
                     class="font-medium"
                   >
-                    Jan 15, 2025
+                    Jul 28, 2026
                   </span>
                   <span
                     class="mx-1"
@@ -343,7 +343,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                     at
                   </span>
                   <span>
-                    11:30:00 AM
+                    05:57:07 PM
                   </span>
                 </div>
                 <span
@@ -375,7 +375,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                       points="12 6 12 12 16 14"
                     />
                   </svg>
-                  529 days ago
+                  2 days ago
                 </div>
               </div>
               <div

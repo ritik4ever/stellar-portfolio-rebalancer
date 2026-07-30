@@ -12,6 +12,7 @@
  * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
  */
 
+export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
 
 export interface WalletAdapter {
     readonly name: string
@@ -210,42 +211,6 @@ export class XBullAdapter implements WalletAdapter {
                 throw new Error('No signed transaction returned')
             }
             return result.signedXDR
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
-}
-
-
-    }
-
-    async connect(): Promise<string> {
-        if (!this.isAvailable()) {
-
-            if (!result?.publicKey) {
-                throw new Error('No public key returned')
-            }
-            return result.publicKey
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
-
-    async isConnected(): Promise<boolean> {
-        if (!this.isAvailable()) return false
-        try {
-
-        } catch {
-            return false
-        }
-    }
-
-    async disconnect(): Promise<void> {
-    }
-
-    async signTransaction(xdr: string, network?: string): Promise<string> {
-        if (!this.isAvailable()) {
-
         } catch (error) {
             throw normalizeError(error, this.type)
         }
