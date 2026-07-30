@@ -308,12 +308,7 @@ function App() {
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
             <RealtimeStatusBanner />
-            <BackendCapabilitiesBanner
-                notices={notices}
-                loadError={loadError}
-                loading={readinessLoading}
-                belowRealtimeBar={false}
-            />
+            <BackendCapabilitiesBanner belowRealtimeBar={false} />
             {showApiCompatibilityBanner && apiCompatibility ? (
                 <div
                     className={`fixed left-0 right-0 z-40 border-b px-4 py-3 text-sm ${

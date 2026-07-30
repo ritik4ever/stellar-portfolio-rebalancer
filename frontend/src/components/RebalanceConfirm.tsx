@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { AlertCircle, Clock, TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react'
+import { AlertCircle, Clock, TrendingUp, TrendingDown, RefreshCw, X, AlertTriangle } from 'lucide-react'
 import { useRebalanceEstimate, useRebalancePlan } from '../hooks/queries/usePortfolioQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { Button } from './ui/Button'
@@ -10,6 +10,7 @@ interface RebalanceConfirmProps {
   onClose: () => void
   onSuccess?: (result: any) => void
   cooldownSeconds?: number
+  maxSlippageThresholdBps?: number
 }
 
 interface TradeEstimate {
@@ -29,7 +30,11 @@ interface RebalanceSimulationData {
   tradeCount: number
   gasWarning: boolean
   cooldownRemaining?: number
+  planMaxSlippagePercent?: number
+  highSlippageLegs: TradeEstimate[]
 }
+
+const DEFAULT_SLIPPAGE_THRESHOLD_BPS = 500
 
 function formatSlippage(bps: number): string {
   return `${(bps / 100).toFixed(2)}%`
@@ -46,12 +51,14 @@ const RebalanceConfirm: React.FC<RebalanceConfirmProps> = ({
   onClose,
   onSuccess,
   cooldownSeconds = 60,
+  maxSlippageThresholdBps = DEFAULT_SLIPPAGE_THRESHOLD_BPS,
 }) => {
   const [confirmed, setConfirmed] = useState(false)
   const [cooldownRemaining, setCooldownRemaining] = useState(0)
   const [lastRebalanceTime, setLastRebalanceTime] = useState<number | null>(null)
 
   const { data: estimate, isLoading: estimateLoading } = useRebalanceEstimate(portfolioId)
+  const { data: plan } = useRebalancePlan(portfolioId)
   const executeRebalance = useExecuteRebalanceMutation(portfolioId)
 
   useEffect(() => {
@@ -93,17 +100,23 @@ const RebalanceConfirm: React.FC<RebalanceConfirmProps> = ({
 
   const simData = useMemo<RebalanceSimulationData | null>(() => {
     if (!estimate) return null
+    const trades = estimate.trades ?? []
+    const highSlippageLegs = trades.filter(
+      (t: TradeEstimate) => t.estimatedSlippageBps > maxSlippageThresholdBps
+    )
     return {
-      trades: estimate.trades ?? [],
+      trades,
       totalGasXlm: estimate.gasEstimateXlm ?? 0,
       totalGasUsd: estimate.gasEstimateUsd ?? 0,
       maxSlippageBps: estimate.maxSlippageBps ?? estimate.slippageToleranceBps ?? 100,
       estimatedSlippageBps: estimate.estimatedSlippageBps ?? 0,
-      tradeCount: estimate.tradeCount ?? estimate.trades?.length ?? 0,
+      tradeCount: estimate.tradeCount ?? trades.length ?? 0,
       gasWarning: estimate.gasWarning ?? (estimate.gasEstimateXlm ?? 0) > 0.5,
       cooldownRemaining: effectiveCooldown,
+      planMaxSlippagePercent: plan?.maxSlippagePercent,
+      highSlippageLegs,
     }
-  }, [estimate, effectiveCooldown])
+  }, [estimate, effectiveCooldown, plan, maxSlippageThresholdBps])
 
   const handleConfirm = useCallback(async () => {
     if (cooldownRemaining > 0 || !confirmed) return
@@ -234,6 +247,25 @@ const RebalanceConfirm: React.FC<RebalanceConfirmProps> = ({
                   <p className="text-xs text-red-700 dark:text-red-400">
                     Estimated gas is higher than usual ({simData.totalGasXlm.toFixed(2)} XLM). Consider fewer trades or waiting for calmer network conditions.
                   </p>
+                </div>
+              </div>
+            )}
+
+            {simData.highSlippageLegs.length > 0 && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg" role="alert">
+                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-red-800 dark:text-red-300">High slippage detected</p>
+                  <p className="text-xs text-red-700 dark:text-red-400">
+                    {simData.highSlippageLegs.length} leg{simData.highSlippageLegs.length !== 1 ? 's' : ''} exceed{simData.highSlippageLegs.length === 1 ? 's' : ''} the {formatSlippage(maxSlippageThresholdBps)} slippage threshold:
+                  </p>
+                  <ul className="mt-1 text-xs text-red-700 dark:text-red-400 list-disc list-inside">
+                    {simData.highSlippageLegs.map((leg, i) => (
+                      <li key={i}>
+                        {leg.fromAsset} → {leg.toAsset}: {formatSlippage(leg.estimatedSlippageBps)} slippage
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             )}
