@@ -22,6 +22,17 @@ All portfolio lifecycle events share these rules (see `contracts/src/portfolio.r
 | Timestamps | `u64` ledger timestamp at the last payload field when present |
 | Asset + amount events | `(portfolio_id, asset: Address, amount: i128)` |
 
+## Event payload changes for strategy-aware portfolios
+
+Starting from `CONTRACT_VERSION = 2`, newly created portfolios include `strategy: StrategyType` and `strategy_config: StrategyConfig` fields (see `contracts/src/types.rs`). The `Portfolio` struct stored under `DataKey::PortfolioV2` now contains:
+
+- `strategy: StrategyType` — `Threshold (0)`, `Periodic (1)`, `Volatility (2)`, or `Custom (3)`
+- `strategy_config: StrategyConfig` — `{ interval_seconds, volatility_threshold_bps, min_interval_seconds }`
+
+Legacy portfolios (created before the schema bump) are migrated on first read: the old XDR is deserialized as `LegacyPortfolio`, converted with `StrategyType::Threshold` + default `StrategyConfig`, and re-written under `DataKey::PortfolioV2`. Old entries under `DataKey::Portfolio(u64)` are removed after migration.
+
+Event topics and payload shapes remain unchanged — the strategy fields are storage-only and do not alter event payloads. Backend indexers that decode `Portfolio` from events (e.g. `portfolio.created`) will see the new fields automatically once old portfolios are migrated.
+
 ## Expected event topics and payloads
 
 Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.

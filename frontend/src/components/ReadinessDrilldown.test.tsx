@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import ReadinessDrilldown from './ReadinessDrilldown'
 import type { ReadinessReport } from '../hooks/useReadinessReport'
+import type { ReadinessHistoryEntry } from '../hooks/useReadinessHistory'
 
 afterEach(cleanup)
 
@@ -105,5 +106,111 @@ describe('ReadinessDrilldown', () => {
         fireEvent.click(screen.getByRole('button'))
         // "ok" message should not appear for ready checks
         expect(screen.queryByText(/— ok/)).toBeNull()
+    })
+
+    describe('historical timeline', () => {
+        function makeHistoryEntry(overrides: Partial<ReadinessHistoryEntry> = {}): ReadinessHistoryEntry {
+            return {
+                status: 'ready',
+                timestamp: new Date().toISOString(),
+                summary: 'All systems operational',
+                ...overrides,
+            }
+        }
+
+        it('shows history section when history data is provided', () => {
+            const history = [
+                makeHistoryEntry({ status: 'ready', summary: 'All systems operational' }),
+                makeHistoryEntry({ status: 'not_ready', summary: 'Database connection lost' }),
+            ]
+            render(
+                <ReadinessDrilldown
+                    report={makeReport()}
+                    loading={false}
+                    loadError={false}
+                    history={history}
+                    historyLoading={false}
+                    historyError={false}
+                />,
+            )
+            fireEvent.click(screen.getByRole('button'))
+            expect(screen.getByText('Readiness history')).toBeInTheDocument()
+            expect(screen.getByText('All systems operational')).toBeInTheDocument()
+            expect(screen.getByText('Database connection lost')).toBeInTheDocument()
+        })
+
+        it('shows loading indicator when history is loading', () => {
+            render(
+                <ReadinessDrilldown
+                    report={makeReport()}
+                    loading={false}
+                    loadError={false}
+                    history={[]}
+                    historyLoading
+                    historyError={false}
+                />,
+            )
+            fireEvent.click(screen.getByRole('button'))
+            expect(screen.getByText('Loading history...')).toBeInTheDocument()
+        })
+
+        it('shows error when history fails to load', () => {
+            render(
+                <ReadinessDrilldown
+                    report={makeReport()}
+                    loading={false}
+                    loadError={false}
+                    history={[]}
+                    historyLoading={false}
+                    historyError
+                />,
+            )
+            fireEvent.click(screen.getByRole('button'))
+            expect(screen.getByText('Could not load readiness history.')).toBeInTheDocument()
+        })
+
+        it('visually distinguishes degraded periods from healthy periods', () => {
+            const history = [
+                makeHistoryEntry({ status: 'ready', summary: 'All systems operational', timestamp: new Date(Date.now() - 120000).toISOString() }),
+                makeHistoryEntry({ status: 'not_ready', summary: 'Queue unavailable', timestamp: new Date(Date.now() - 60000).toISOString() }),
+                makeHistoryEntry({ status: 'ready', summary: 'Recovered', timestamp: new Date().toISOString() }),
+            ]
+            render(
+                <ReadinessDrilldown
+                    report={makeReport()}
+                    loading={false}
+                    loadError={false}
+                    history={history}
+                />,
+            )
+            fireEvent.click(screen.getByRole('button'))
+
+            const dots = document.querySelectorAll('span.inline-block.h-2.w-2')
+            expect(dots.length).toBe(3)
+        })
+
+        it('renders correctly for a mixed healthy/degraded sample dataset', () => {
+            const history = [
+                makeHistoryEntry({ status: 'ready', summary: 'All systems operational', timestamp: '2025-06-01T08:00:00Z' }),
+                makeHistoryEntry({ status: 'not_ready', summary: 'Indexer sync failed', timestamp: '2025-06-01T08:05:00Z' }),
+                makeHistoryEntry({ status: 'not_ready', summary: 'Database timeout', timestamp: '2025-06-01T08:10:00Z' }),
+                makeHistoryEntry({ status: 'ready', summary: 'Back to normal', timestamp: '2025-06-01T08:15:00Z' }),
+            ]
+            render(
+                <ReadinessDrilldown
+                    report={makeReport()}
+                    loading={false}
+                    loadError={false}
+                    history={history}
+                />,
+            )
+            fireEvent.click(screen.getByRole('button'))
+
+            expect(screen.getByText('Readiness history')).toBeInTheDocument()
+            expect(screen.getByText('All systems operational')).toBeInTheDocument()
+            expect(screen.getByText('Indexer sync failed')).toBeInTheDocument()
+            expect(screen.getByText('Database timeout')).toBeInTheDocument()
+            expect(screen.getByText('Back to normal')).toBeInTheDocument()
+        })
     })
 })

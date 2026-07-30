@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { ArrowLeft, Save, CheckCircle } from 'lucide-react'
+import { ArrowLeft, Save, CheckCircle, Download, Upload, X } from 'lucide-react'
 import ThemeToggle from '../components/ThemeToggle'
 import { getAnalyticsOptOut, setAnalyticsOptOut } from '../analytics'
+import { downloadJSON } from '../utils/export'
 
 const REBALANCE_THRESHOLD_KEY = 'user-rebalance-threshold'
 
@@ -27,6 +28,25 @@ function loadSaved(): FormValues {
     }
 }
 
+interface ImportPreview {
+    values: FormValues
+    filename: string
+}
+
+function validateImportData(data: unknown): { valid: true; values: FormValues } | { valid: false; error: string } {
+    if (!data || typeof data !== 'object') {
+        return { valid: false, error: 'File must contain a JSON object.' }
+    }
+    const obj = data as Record<string, unknown>
+    if (typeof obj.analyticsOptOut !== 'boolean') {
+        return { valid: false, error: 'Missing or invalid "analyticsOptOut" field (must be boolean).' }
+    }
+    if (typeof obj.rebalanceThreshold !== 'number' || !Number.isFinite(obj.rebalanceThreshold) || obj.rebalanceThreshold < 0 || obj.rebalanceThreshold > 100) {
+        return { valid: false, error: 'Missing or invalid "rebalanceThreshold" field (must be a number between 0 and 100).' }
+    }
+    return { valid: true, values: { analyticsOptOut: obj.analyticsOptOut, rebalanceThreshold: obj.rebalanceThreshold } }
+}
+
 interface SettingsProps {
     onNavigate: (view: string) => void
     onDirtyChange?: (dirty: boolean) => void
@@ -36,6 +56,10 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
     const [saved, setSaved] = useState<FormValues>(loadSaved)
     const [form, setForm] = useState<FormValues>(loadSaved)
     const [saveSuccess, setSaveSuccess] = useState(false)
+    const [importError, setImportError] = useState<string | null>(null)
+    const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
+    const [importSuccess, setImportSuccess] = useState(false)
+    const fileInputRef = useRef<HTMLInputElement>(null)
     const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     const isDirty =
@@ -75,6 +99,50 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
         if (successTimer.current) clearTimeout(successTimer.current)
         setSaveSuccess(true)
         successTimer.current = setTimeout(() => setSaveSuccess(false), 2500)
+    }
+
+    const handleExport = () => {
+        const data: FormValues = {
+            analyticsOptOut: getAnalyticsOptOut(),
+            rebalanceThreshold: readThreshold(),
+        }
+        downloadJSON('settings.json', data)
+    }
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setImportError(null)
+        setImportPreview(null)
+        const file = e.target.files?.[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => {
+            try {
+                const parsed = JSON.parse(reader.result as string)
+                const result = validateImportData(parsed)
+                if (result.valid) {
+                    setImportPreview({ values: result.values, filename: file.name })
+                } else {
+                    setImportError(result.error)
+                }
+            } catch {
+                setImportError('Invalid JSON file. Please upload a valid JSON file.')
+            }
+        }
+        reader.readAsText(file)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+
+    const handleApplyImport = () => {
+        if (!importPreview) return
+        setForm(importPreview.values)
+        setImportPreview(null)
+        setImportSuccess(true)
+        setTimeout(() => setImportSuccess(false), 3000)
+    }
+
+    const handleCancelImport = () => {
+        setImportPreview(null)
+        setImportError(null)
     }
 
     useEffect(() => () => {
@@ -184,6 +252,106 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
                             />
                         </div>
                     </section>
+
+                    {/* Import / Export */}
+                    <section className="rounded-xl bg-white p-6 shadow-sm dark:bg-gray-800">
+                        <h2 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">
+                            Import / Export Settings
+                        </h2>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                            Export your settings as a JSON file or import settings from a previously exported file.
+                        </p>
+                        <div className="flex flex-wrap gap-3">
+                            <button
+                                type="button"
+                                onClick={handleExport}
+                                className="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                <Download className="h-4 w-4" aria-hidden />
+                                Export
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                <Upload className="h-4 w-4" aria-hidden />
+                                Import
+                            </button>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".json"
+                                className="hidden"
+                                onChange={handleFileSelect}
+                                data-testid="import-file-input"
+                            />
+                        </div>
+                        {importError && (
+                            <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+                                {importError}
+                            </div>
+                        )}
+                        {importSuccess && (
+                            <div className="mt-3 flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                                <CheckCircle className="h-4 w-4" aria-hidden />
+                                Settings imported successfully. Review and save to apply.
+                            </div>
+                        )}
+                    </section>
+
+                    {/* Import Preview Modal */}
+                    {importPreview && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="import-preview-modal">
+                            <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-800 p-6 shadow-xl border border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                        Import Preview
+                                    </h3>
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelImport}
+                                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                                    >
+                                        <X className="h-5 w-5" />
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                                    File: {importPreview.filename}
+                                </p>
+                                <div className="space-y-3 text-sm">
+                                    <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40">
+                                        <span className="text-gray-600 dark:text-gray-400">Analytics opt-out</span>
+                                        <span className="font-semibold text-gray-900 dark:text-white">
+                                            {importPreview.values.analyticsOptOut ? 'Opted out' : 'Enabled'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40">
+                                        <span className="text-gray-600 dark:text-gray-400">Drift threshold</span>
+                                        <span className="font-semibold text-gray-900 dark:text-white">
+                                            {importPreview.values.rebalanceThreshold}%
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="mt-4 flex justify-end gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelImport}
+                                        className="px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleApplyImport}
+                                        className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                                    >
+                                        Apply to Form
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Save row */}
                     <div className="flex items-center justify-end gap-3">
