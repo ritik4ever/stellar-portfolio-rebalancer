@@ -11,7 +11,7 @@
  * 2. Add to walletAdapters array
  * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
  */
-export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
+export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'lobstr' | 'mock'
 
 export interface WalletAdapter {
     readonly name: string
@@ -215,6 +215,60 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
+export class LobstrAdapter implements WalletAdapter {
+    readonly name = 'LOBSTR'
+    readonly type: WalletType = 'lobstr'
+
+    isAvailable(): boolean {
+        return typeof window !== 'undefined' && !!window.lobstr
+    }
+
+    async connect(): Promise<string> {
+        if (!this.isAvailable()) {
+            throw new WalletError('LOBSTR wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            const result = await window.lobstr!.requestAccess()
+            if (!result?.publicKey) {
+                throw new Error('No public key returned')
+            }
+            return result.publicKey
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+
+    async isConnected(): Promise<boolean> {
+        if (!this.isAvailable()) return false
+        try {
+            return await window.lobstr!.isConnected()
+        } catch {
+            return false
+        }
+    }
+
+    async disconnect(): Promise<void> {
+    }
+
+    async signTransaction(xdr: string, network?: string): Promise<string> {
+        if (!this.isAvailable()) {
+            throw new WalletError('LOBSTR wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            const opts = network ? { networkPassphrase: network } : undefined
+            const result = await window.lobstr!.signTransaction(xdr, opts)
+            if (!result) {
+                throw new Error('No signed transaction returned')
+            }
+            return result
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+}
+
 export class MockAdapter implements WalletAdapter {
     readonly name = 'Mock Wallet (Test)'
     readonly type: WalletType = 'mock'
@@ -250,7 +304,8 @@ export class MockAdapter implements WalletAdapter {
 export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
-    new XBullAdapter()
+    new XBullAdapter(),
+    new LobstrAdapter()
 ]
 
 // Add the mock adapter if we're in E2E mode
