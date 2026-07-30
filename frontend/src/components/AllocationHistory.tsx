@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine,
 } from 'recharts'
-import { BarChart3, AlertCircle } from 'lucide-react'
+import { BarChart3, AlertCircle, TrendingUp, TrendingDown, ArrowRight } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 import { usePortfolioAnalytics } from '../hooks/queries/useAnalyticsQuery'
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
@@ -29,6 +29,60 @@ interface AllocationHistoryProps {
   portfolioId: string | null
 }
 
+type DiffType = 'increase' | 'decrease' | 'unchanged' | 'added' | 'removed'
+
+interface AllocationDiff {
+  asset: string
+  fromValue: number
+  toValue: number
+  change: number
+  type: DiffType
+}
+
+// Export for testing
+export function computeAllocationDiff(
+  fromSnapshot: any,
+  toSnapshot: any,
+  allAssets: string[]
+): AllocationDiff[] {
+  const fromAllocations = fromSnapshot?.allocations || {}
+  const toAllocations = toSnapshot?.allocations || {}
+
+  const diffs: AllocationDiff[] = []
+
+  for (const asset of allAssets) {
+    const fromValue = fromAllocations[asset] || 0
+    const toValue = toAllocations[asset] || 0
+
+    if (fromValue === 0 && toValue === 0) continue
+
+    const change = toValue - fromValue
+    let type: DiffType
+
+    if (fromValue === 0 && toValue > 0) {
+      type = 'added'
+    } else if (fromValue > 0 && toValue === 0) {
+      type = 'removed'
+    } else if (change > 0) {
+      type = 'increase'
+    } else if (change < 0) {
+      type = 'decrease'
+    } else {
+      type = 'unchanged'
+    }
+
+    diffs.push({
+      asset,
+      fromValue,
+      toValue,
+      change,
+      type,
+    })
+  }
+
+  return diffs.sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+}
+
 function formatChartDate(timestamp: string): string {
   const date = new Date(timestamp)
   if (!Number.isFinite(date.getTime())) return 'Unknown'
@@ -51,6 +105,9 @@ function formatTooltipDate(timestamp: string): string {
 const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) => {
   const [days, setDays] = useState(30)
   const [hiddenAssets, setHiddenAssets] = useState<Set<string>>(new Set())
+  const [diffMode, setDiffMode] = useState(false)
+  const [selectedFromIndex, setSelectedFromIndex] = useState<number | null>(null)
+  const [selectedToIndex, setSelectedToIndex] = useState<number | null>(null)
   const { isDark } = useTheme()
 
   const { data: analyticsDataResult, isLoading: analyticsLoading, error: analyticsError } = usePortfolioAnalytics(portfolioId, days)
@@ -108,6 +165,31 @@ const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) =>
       return next
     })
   }
+
+  const handlePointSelect = (index: number) => {
+    if (!diffMode) return
+    if (selectedFromIndex === null) {
+      setSelectedFromIndex(index)
+    } else if (selectedToIndex === null && index !== selectedFromIndex) {
+      setSelectedToIndex(index)
+    } else {
+      setSelectedFromIndex(index)
+      setSelectedToIndex(null)
+    }
+  }
+
+  const exitDiffMode = () => {
+    setDiffMode(false)
+    setSelectedFromIndex(null)
+    setSelectedToIndex(null)
+  }
+
+  const allocationDiffs = useMemo(() => {
+    if (selectedFromIndex === null || selectedToIndex === null) return []
+    const fromSnapshot = dailyValues[selectedFromIndex]
+    const toSnapshot = dailyValues[selectedToIndex]
+    return computeAllocationDiff(fromSnapshot, toSnapshot, assetNames)
+  }, [selectedFromIndex, selectedToIndex, dailyValues, assetNames])
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null
@@ -214,22 +296,43 @@ const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) =>
           Allocation History
         </h2>
         <div className="flex items-center gap-2" role="group" aria-label="Time range selector">
-          {TIME_RANGES.map((range) => (
+          {!diffMode ? (
+            <>
+              {TIME_RANGES.map((range) => (
+                <button
+                  key={range.days}
+                  type="button"
+                  onClick={() => setDays(range.days)}
+                  aria-pressed={days === range.days}
+                  aria-label={`Show ${range.label}`}
+                  className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                    days === range.days
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setDiffMode(true)}
+                className="px-3 py-1.5 text-sm rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-purple-600 text-white hover:bg-purple-700"
+                aria-label="Compare two points in history"
+              >
+                Compare
+              </button>
+            </>
+          ) : (
             <button
-              key={range.days}
               type="button"
-              onClick={() => setDays(range.days)}
-              aria-pressed={days === range.days}
-              aria-label={`Show ${range.label}`}
-              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                days === range.days
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-              }`}
+              onClick={exitDiffMode}
+              className="px-3 py-1.5 text-sm rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-gray-600 text-white hover:bg-gray-700"
+              aria-label="Exit comparison mode"
             >
-              {range.label}
+              Exit Compare
             </button>
-          ))}
+          )}
         </div>
       </div>
 
@@ -299,6 +402,75 @@ const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) =>
               </AreaChart>
             </ResponsiveContainer>
           </div>
+
+          {diffMode && (
+            <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+              <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-4">
+                Compare Allocations
+              </h3>
+              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                {selectedFromIndex === null ? (
+                  <p>Select the first point to compare by clicking on the chart</p>
+                ) : selectedToIndex === null ? (
+                  <p>
+                    First point selected: <strong>{formatChartDate(dailyValues[selectedFromIndex]?.timestamp)}</strong>.
+                    Select the second point to compare.
+                  </p>
+                ) : (
+                  <p>
+                    Comparing <strong>{formatChartDate(dailyValues[selectedFromIndex]?.timestamp)}</strong>
+                    <ArrowRight className="inline w-4 h-4 mx-2" />
+                    <strong>{formatChartDate(dailyValues[selectedToIndex]?.timestamp)}</strong>
+                  </p>
+                )}
+              </div>
+
+              {allocationDiffs.length > 0 && (
+                <div className="space-y-2">
+                  {allocationDiffs.map((diff) => (
+                    <div
+                      key={diff.asset}
+                      className={`flex items-center justify-between rounded-lg px-4 py-3 ${
+                        diff.type === 'increase'
+                          ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                          : diff.type === 'decrease'
+                          ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                          : diff.type === 'added'
+                          ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+                          : diff.type === 'removed'
+                          ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800'
+                          : 'bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {diff.type === 'increase' && <TrendingUp className="w-4 h-4 text-green-600 dark:text-green-400" />}
+                        {diff.type === 'decrease' && <TrendingDown className="w-4 h-4 text-red-600 dark:text-red-400" />}
+                        {diff.type === 'added' && <TrendingUp className="w-4 h-4 text-blue-600 dark:text-blue-400" />}
+                        {diff.type === 'removed' && <TrendingDown className="w-4 h-4 text-orange-600 dark:text-orange-400" />}
+                        <span className="font-medium text-gray-900 dark:text-white">{diff.asset}</span>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {diff.fromValue.toFixed(1)}% → {diff.toValue.toFixed(1)}%
+                        </span>
+                        <span
+                          className={`font-semibold ${
+                            diff.change > 0
+                              ? 'text-green-600 dark:text-green-400'
+                              : diff.change < 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          {diff.change > 0 ? '+' : ''}{diff.change.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
