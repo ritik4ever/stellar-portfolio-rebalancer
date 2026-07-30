@@ -199,6 +199,141 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
+## Database and Redis credential rotation (AWS Secrets Manager)
+
+The deployment infrastructure uses AWS Secrets Manager automatic rotation for both RDS PostgreSQL database master credentials (`manage_master_user_password = true`) and Redis ElastiCache AUTH tokens. By default, secrets are configured in Terraform to rotate automatically every 30 days (`secret_rotation_days = 30`).
+
+### Dynamic credential resolution & rotation tolerance
+
+The backend service uses `CredentialManager` (`backend/src/config/credentialManager.ts`) to read database and Redis credentials dynamically from AWS Secrets Manager or environment variables rather than caching static credentials indefinitely.
+
+When a scheduled or manual rotation occurs:
+- **Database (`backend/src/db/client.ts`):** If a PostgreSQL connection or query fails with an authentication error (such as error code `28P01` or `password authentication failed`), `query()` detects the rotation event, automatically invokes `refreshDbPool()` to clear cached credentials and recreate the connection pool, and retries the query without failing the request.
+- **Redis (`backend/src/queue/connection.ts`):** Redis clients and BullMQ workers resolve connection options dynamically via `getRedisUrl()`. When an authentication error occurs (`NOAUTH`, `WRONGPASS`), `refreshRedisCredentials()` is invoked to re-read the rotated token and reconnect automatically.
+
+Backend services continue operating without manual intervention across rotation events.
+
+### Runbook: Verifying successful rotation
+
+#### 1. Check AWS Secrets Manager rotation status
+Use the AWS CLI to confirm that automatic rotation is enabled and check the last rotated timestamp:
+```bash
+# Verify RDS database secret rotation status
+aws secretsmanager describe-secret --secret-id <db_secret_arn> \
+  --query '{RotationEnabled:RotationEnabled,LastRotatedDate:LastRotatedDate,RotationRules:RotationRules}'
+
+# Verify Redis AUTH token secret rotation status
+aws secretsmanager describe-secret --secret-id <redis_secret_arn> \
+  --query '{RotationEnabled:RotationEnabled,LastRotatedDate:LastRotatedDate,RotationRules:RotationRules}'
+```
+
+#### 2. Perform an on-demand rotation test (Drill)
+To verify rotation without waiting for the scheduled interval:
+```bash
+# Trigger immediate rotation for RDS database credentials
+aws secretsmanager rotate-secret --secret-id <db_secret_arn>
+
+# Trigger immediate rotation for Redis AUTH token
+aws secretsmanager rotate-secret --secret-id <redis_secret_arn>
+```
+
+#### 3. Verify zero-downtime backend tolerance
+Inspect backend application logs for automatic credential refresh events:
+```bash
+# Check logs for automatic DB pool refresh after password change
+docker compose logs --tail=100 backend | grep -E "DB-POOL.*Refreshing|QUEUE.*Refreshing|CREDENTIALS"
+```
+Expected log entries:
+- `[DB-POOL] Password authentication or connection failed — possible secret rotation event detected. Refreshing credentials and DB pool...`
+- `[DB-POOL] Refreshing database credentials and resetting connection pool to tolerate rotation...`
+- `[QUEUE] Refreshing Redis credentials to tolerate rotation...`
+
+#### 4. Verify rotation status via administrative API
+Query the backend administrative endpoints to verify the credential manager state:
+```bash
+# Inspect current credential status and lastRefreshed timestamps
+curl -X GET https://<backend_host>/api/ops/credentials/status \
+  -H "X-Public-Key: <admin_public_key>" \
+  -H "X-Message: <timestamp>" \
+  -H "X-Signature: <signature>"
+
+# Manually trigger a proactive credential reload across DB and Redis pools
+curl -X POST https://<backend_host>/api/ops/credentials/refresh \
+  -H "X-Public-Key: <admin_public_key>" \
+  -H "X-Message: <timestamp>" \
+  -H "X-Signature: <signature>"
+```
+The response confirms `refreshed: true` for both database and redis subsystems.
+
+#### 5. Verify direct database and Redis connectivity with rotated credentials
+Retrieve the rotated secret value from Secrets Manager and test connectivity:
+```bash
+# Get current DB secret and connect via psql
+SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id <db_secret_arn> --query SecretString --output text)
+DB_PASS=$(echo $SECRET_JSON | jq -r .password)
+DB_HOST=$(echo $SECRET_JSON | jq -r .host)
+PGPASSWORD=$DB_PASS psql -h $DB_HOST -U dbadmin -d stellar_portfolio -c "SELECT 1;"
+
+# Get current Redis AUTH token and test via redis-cli
+REDIS_TOKEN=$(aws secretsmanager get-secret-value --secret-id <redis_secret_arn> --query SecretString --output text | jq -r .auth_token)
+redis-cli -h <redis_endpoint> -p 6379 -a "$REDIS_TOKEN" PING
+```
+
+### Runbook: Rollback procedure if needed
+
+If an automatic rotation fails or causes persistent authentication failures, follow these steps to roll back to the previous credential version:
+
+#### 1. Identify a failed rotation event
+Check AWS CloudWatch Logs or AWS Secrets Manager console for error messages on the rotation Lambda function, or monitor backend alerts for persistent `503 Service Unavailable` or database authentication loops.
+
+#### 2. Identify the previous secret version in AWS Secrets Manager
+List version IDs for the secret to find the stage labeled `AWSPREVIOUS`:
+```bash
+aws secretsmanager list-secret-version-ids --secret-id <secret_arn>
+```
+
+#### 3. Roll back the secret version stage
+Move the `AWSCURRENT` staging label back to the previous version ID:
+```bash
+aws secretsmanager update-secret-version-stage --secret-id <secret_arn> \
+  --version-stage AWSCURRENT \
+  --move-to-version-id <previous-version-id>
+```
+
+#### 4. Revert RDS or ElastiCache password if out-of-sync
+If AWS Secrets Manager is reverted but the underlying RDS or ElastiCache instance was already modified:
+```bash
+# Retrieve the restored password from AWSCURRENT
+REVERTED_PASS=$(aws secretsmanager get-secret-value --secret-id <db_secret_arn> --query SecretString --output text | jq -r .password)
+
+# Apply the reverted password directly to the RDS instance
+aws rds modify-db-instance \
+  --db-instance-identifier <db_instance_identifier> \
+  --master-user-password "$REVERTED_PASS" \
+  --apply-immediately
+
+# For ElastiCache Redis replication group
+REVERTED_TOKEN=$(aws secretsmanager get-secret-value --secret-id <redis_secret_arn> --query SecretString --output text | jq -r .auth_token)
+aws elasticache modify-replication-group \
+  --replication-group-id <redis_cluster_id> \
+  --auth-token "$REVERTED_TOKEN" \
+  --auth-token-update-strategy SET \
+  --apply-immediately
+```
+
+#### 5. Force immediate credential reload on backend instances
+Once the secret is reverted, invoke the administrative refresh endpoint so all backend tasks immediately re-read the reverted credentials without waiting for cache expiration:
+```bash
+curl -X POST https://<backend_host>/api/ops/credentials/refresh \
+  -H "X-Public-Key: <admin_public_key>" \
+  -H "X-Message: <timestamp>" \
+  -H "X-Signature: <signature>"
+```
+Or force a rolling restart of the ECS service:
+```bash
+aws ecs update-service --cluster <ecs_cluster_name> --service <ecs_service_name> --force-new-deployment
+```
+
 ## Database Backups and Restores
 
 The application supports two database backends: SQLite (for development) and PostgreSQL (for production). Both have automated backup and restore capabilities.

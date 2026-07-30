@@ -120,6 +120,7 @@ resource "aws_iam_policy" "ecs_secrets_policy" {
         ]
         Resource = [
           var.db_secret_arn,
+          var.redis_secret_arn,
           # Optionally add external API keys ARNs here
         ]
       }
@@ -139,6 +140,7 @@ resource "aws_ecs_task_definition" "main" {
   cpu                      = var.task_cpu
   memory                   = var.task_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_execution_role.arn
 
   container_definitions = jsonencode([
     {
@@ -163,6 +165,14 @@ resource "aws_ecs_task_definition" "main" {
         {
           name  = "REDIS_HOST"
           value = var.redis_host
+        },
+        {
+          name  = "DB_SECRET_ARN"
+          value = var.db_secret_arn
+        },
+        {
+          name  = "REDIS_SECRET_ARN"
+          value = var.redis_secret_arn
         }
       ]
       secrets = [
@@ -173,6 +183,10 @@ resource "aws_ecs_task_definition" "main" {
         {
           name      = "DB_USER"
           valueFrom = "${var.db_secret_arn}:username::"
+        },
+        {
+          name      = "REDIS_AUTH_TOKEN"
+          valueFrom = "${var.redis_secret_arn}:auth_token::"
         }
       ]
       logConfiguration = {
