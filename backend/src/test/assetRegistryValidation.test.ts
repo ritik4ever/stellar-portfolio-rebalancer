@@ -9,8 +9,7 @@ import { parseAssetCreatePayload, AssetRegistryValidationError } from '../servic
 const VALID_CONTRACT = StrKey.encodeContract(Buffer.alloc(32, 2))
 const VALID_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
 
-
-
+describe('parseAssetCreatePayload validation', () => {
     it('trims symbol and name', () => {
       const p = parseAssetCreatePayload(' ABC ', ' Asset Name ', {})
 
@@ -63,5 +62,4 @@ const VALID_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
         AssetRegistryValidationError
       )
     })
-
 })

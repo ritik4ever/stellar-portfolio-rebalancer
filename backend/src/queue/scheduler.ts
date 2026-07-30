@@ -368,9 +368,12 @@ export async function stopQueueScheduler(): Promise<void> {
     const analyticsSnapshotQueue = getAnalyticsSnapshotQueue()
     const analyticsCompactionQueue = getAnalyticsCompactionQueue()
     const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
+    const priceHistorySnapshotQueue = getPriceHistorySnapshotQueue()
+    const priceHistoryPruneQueue = getPriceHistoryPruneQueue()
     const userAlertsQueue = getQueueByName('user-alerts')
 
-
+    const allQueues = [portfolioCheckQueue, autoRebalanceCheckQueue, analyticsSnapshotQueue, analyticsCompactionQueue, idempotencyCleanupQueue, priceHistorySnapshotQueue, priceHistoryPruneQueue, userAlertsQueue]
+    for (const queue of allQueues) {
         if (queue) {
             const repeatableJobs = await queue.getRepeatableJobs()
             for (const job of repeatableJobs) {

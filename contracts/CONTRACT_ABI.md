@@ -1,4 +1,4 @@
-# Portfolio Rebalancer Contract ABI
+# Portfolio Rebalancer Contract ABI and Invariants
 
 Contract source:
 
@@ -9,6 +9,25 @@ Contract source:
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOSSARY.md).
+
+## Property-Based Invariants
+
+The contract's pure business logic is verified using property-based testing (via the `proptest` crate). The following invariants hold across 10,000 randomly-generated inputs per property:
+
+### P1: Allocation Sum Invariant
+- **Description:** A portfolio's target allocations must always sum to exactly 10000 basis points (100%).
+- **Invariant Statement:** Any non-empty vector of `u32` basis-point percentages that sums to 10000 with no zeroes is accepted by `validate_allocations`. Any vector that sums to a value other than 10000, is empty, or contains a zero is rejected.
+
+### P2: Drift Range Invariant
+- **Description:** Portfolio drift is the absolute percentage-point difference between the current allocation and the target allocation, both expressed in basis points.
+- **Invariant Statement:** For any current percentage `c ∈ [0, 10000]` and target percentage `t ∈ [1, 10000]`:
+  - `compute_drift(c, t) ∈ [0, 10000]`
+  - Drift is symmetric: `compute_drift(a, b) == compute_drift(b, a)`
+  - Drift is zero when equal: `compute_drift(p, p) == 0`
+
+### P3: Rebalance Idempotency
+- **Description:** Rebalancing a portfolio that is already at its target allocation produces no trades. P3 exercises the production `portfolio::value_to_balance` function so that arithmetic scaling regressions in `calculate_rebalance_trades` are detected.
+- **Invariant Statement:** When `current_balance == target_balance`, the computed trade amount is exactly `0`. Furthermore, trade signs correctly reflect the weight direction (over-weight produces a sell/≤0; under-weight produces a buy/≥0). Both target balances and trade amounts are computed via the shared production arithmetic.
 
 ## Public Functions
 

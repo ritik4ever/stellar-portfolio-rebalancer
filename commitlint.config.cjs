@@ -13,6 +13,12 @@ const conventionalTypes = [
 ]
 
 module.exports = {
+  ignores: [
+    // Skip merge commits and conflict resolution commits
+    (commit) => commit.startsWith('Merge'),
+    (commit) => commit.startsWith('Resolve merge'),
+    (commit) => commit.startsWith('Revert'),
+  ],
   rules: {
     'body-leading-blank': [2, 'always'],
     'footer-leading-blank': [2, 'always'],

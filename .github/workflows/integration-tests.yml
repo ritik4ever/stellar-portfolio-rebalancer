@@ -1,6 +1,9 @@
 name: Integration Tests
 
 on:
+  schedule:
+    - cron: '0 4 * * *'  # Nightly at 4am UTC
+  workflow_dispatch:  # Manual trigger for ad-hoc testnet integration runs
   pull_request:
     paths:
       - 'contracts/**'
@@ -14,6 +17,7 @@ on:
       - '.github/workflows/integration-tests.yml'
 
 jobs:
+  # ── Local / mock-based integration tests (always run) ────────────────
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -26,10 +30,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Setup Rust (pinned to 1.79)
+        # Pin to 1.79 — soroban-env-host 21.2.1 breaks on newer Rust
+        # (ChaCha20Rng: ed25519_dalek::CryptoRng trait bound error)
+        run: |
+          rustup toolchain install 1.79.0 --profile minimal --no-self-update
+          rustup default 1.79.0
+          rustup target add wasm32-unknown-unknown
 
       - name: Cache Cargo
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -42,10 +49,78 @@ jobs:
           restore-keys: |
             integration-${{ runner.os }}-
 
-      - name: Run integration tests
+      - name: Run mock integration tests (skip testnet tests)
         working-directory: ./contracts
-        run: cargo test --features integration -- --nocapture
+        run: cargo test --features integration integration_ -- --nocapture
 
       - name: Run unit tests
         working-directory: ./contracts
         run: cargo test -- --nocapture
+
+  # ── Real testnet integration tests (nightly + manual dispatch) ──────
+  testnet-integration:
+    # Only run nightly or on manual dispatch, not on every PR/push
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      STELLAR_TESTNET_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_SECRET_KEY }}
+      SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      SOROBAN_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Ensure testnet secret exists
+        run: |
+          if [ -z "${STELLAR_TESTNET_SECRET_KEY}" ]; then
+            echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
+            exit 1
+          fi
+
+      - name: Setup Rust (pinned to 1.79)
+        # Pin to 1.79 — soroban-env-host 21.2.1 breaks on newer Rust
+        # (ChaCha20Rng: ed25519_dalek::CryptoRng trait bound error)
+        run: |
+          rustup toolchain install 1.79.0 --profile minimal --no-self-update
+          rustup default 1.79.0
+          rustup target add wasm32-unknown-unknown
+
+      - name: Cache Cargo and Soroban
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.soroban
+            contracts/target
+            contracts/mock-reflector/target
+          key: testnet-int-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml', 'contracts/mock-reflector/Cargo.lock', 'contracts/mock-reflector/Cargo.toml') }}
+          restore-keys: |
+            testnet-int-${{ runner.os }}-
+
+      - name: Install Soroban CLI
+        run: cargo install --locked soroban-cli
+
+      - name: Build contracts for testnet
+        working-directory: ./contracts
+        run: make build-testnet
+
+      - name: Run testnet integration tests
+        working-directory: ./contracts
+        run: cargo test --features integration testnet_ -- --nocapture --test-threads=1
+
+      - name: Post test summary
+        if: always()
+        run: |
+          {
+            echo "## 🔗 Testnet Integration Test Results"
+            echo ""
+            echo "- **Network:** Testnet (Test SDF Network ; September 2015)"
+            echo "- **RPC:** $SOROBAN_RPC_URL"
+            echo "- **Trigger:** ${{ github.event_name }}"
+            echo ""
+            echo "Full test logs available in the workflow run output above."
+          } >> "$GITHUB_STEP_SUMMARY"

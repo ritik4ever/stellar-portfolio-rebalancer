@@ -43,9 +43,35 @@ hash:
 		fi; \
 	fi
 
-# Run tests
+# Run unit tests
 test:
 	cargo test
+
+# Build the mock reflector contract for testnet integration tests
+build-mock-reflector:
+	cd mock-reflector && cargo build --target wasm32-unknown-unknown --release --target-dir ../target
+
+# Build both contracts for testnet integration
+build-testnet:
+	cargo build --target wasm32-unknown-unknown --release
+	cd mock-reflector && cargo build --target wasm32-unknown-unknown --release --target-dir ../target
+
+# Run testnet integration tests (requires STELLAR_TESTNET_SECRET_KEY env var)
+# First builds contracts, then runs only the testnet integration test suite
+testnet-integration: build-testnet
+	@if [ -z "$(STELLAR_TESTNET_SECRET_KEY)" ]; then \
+		echo "Error: STELLAR_TESTNET_SECRET_KEY must be set for testnet tests"; \
+		exit 1; \
+	fi
+	cargo test --features integration testnet_ -- --nocapture --test-threads=1
+
+# Run only the on-chain testnet tests (skipping mock integration tests)
+testnet-only: build-testnet
+	cargo test --features integration testnet_ -- --nocapture --test-threads=1
+
+# Run local mock-based integration tests (no network required)
+test-integration:
+	cargo test --features integration integration_ -- --nocapture
 
 # Run gas/cost benchmarks
 bench:
@@ -179,16 +205,21 @@ snapshot-diff:
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  build           - Build the contract"
-	@echo "  build-optimized - Build with optimization"
-	@echo "  test            - Run tests"
-	@echo "  bench           - Run gas benchmark tests"
-	@echo "  clean           - Clean build artifacts"
-	@echo "  deploy-testnet  - Deploy to Stellar testnet"
-	@echo "  deploy-mainnet  - Deploy to Stellar mainnet (with confirmation)"
-	@echo "  init-contract   - Initialize deployed contract"
-	@echo "  install-tools   - Install required tools"
-	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
+	@echo "  build              - Build the contract"
+	@echo "  build-optimized    - Build with optimization"
+	@echo "  build-mock-reflector - Build mock reflector for testnet tests"
+	@echo "  build-testnet      - Build both contracts for testnet integration"
+	@echo "  test               - Run unit tests"
+	@echo "  test-integration   - Run local mock-based integration tests"
+	@echo "  testnet-integration - Run testnet integration tests (needs STELLAR_TESTNET_SECRET_KEY)"
+	@echo "  testnet-only       - Run only on-chain testnet tests"
+	@echo "  bench              - Run gas benchmark tests"
+	@echo "  clean              - Clean build artifacts"
+	@echo "  deploy-testnet     - Deploy to Stellar testnet"
+	@echo "  deploy-mainnet     - Deploy to Stellar mainnet (with confirmation)"
+	@echo "  init-contract      - Initialize deployed contract"
+	@echo "  install-tools      - Install required tools"
+	@echo "  setup-testnet      - Prepare local Soroban testnet tooling/profile"
 
 # Contract release checklist
 release-checklist:

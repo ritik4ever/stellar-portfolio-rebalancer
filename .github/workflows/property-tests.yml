@@ -1,0 +1,63 @@
+name: Property Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/property-tests.yml'
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/property-tests.yml'
+
+jobs:
+  property-tests:
+    name: Run Property Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: property-tests-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            property-tests-${{ runner.os }}-
+
+      - name: Run Property Tests
+        working-directory: contracts
+        # Bash strict mode: -e aborts on any non-zero, -u on unset vars,
+        # -o pipefail propagates the cargo exit code through `tee` so that
+        # the `if: failure()` upload step below correctly triggers.
+        run: |
+          set -euo pipefail
+          cargo test --test property_tests -- --nocapture 2>&1 | tee property-test-results.txt
+
+      - name: Upload Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: property-test-results
+          path: contracts/property-test-results.txt
+          retention-days: 14
+
+      - name: Upload Proptest Failure Corpus
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: proptest-failure-corpus
+          path: contracts/proptest-regressions/
+          retention-days: 14
+          if-no-files-found: warn
