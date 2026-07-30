@@ -191,6 +191,7 @@ services:
       - observability
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./observability/alertmanager/oncall-secrets:/etc/alertmanager/secrets:ro
       - alertmanager_data:/alertmanager
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
