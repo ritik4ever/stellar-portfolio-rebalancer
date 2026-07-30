@@ -432,6 +432,45 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/portfolios/summary': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Multi-portfolio dashboard summary',
+                description: 'Get a compact summary of every portfolio belonging to one address in a single request, instead of one call per portfolio. Prices are read once from the oracle cache and shared across every portfolio in the response. Returns an empty array when the address has no portfolios. When JWT auth is enabled, only the authenticated user (token subject) may summarise their own address.',
+                parameters: [{ name: 'userAddress', in: 'query', required: true, schema: { type: 'string' }, description: 'Stellar address whose portfolios are summarised.' }],
+                security: [{ adminAuth: [] }],
+                responses: {
+                    '200': {
+                        description: 'Portfolio summaries',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolios: {
+                                                    type: 'array',
+                                                    items: { $ref: '#/components/schemas/PortfolioSummary' },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/portfolio/{id}/rebalance-plan': {
             get: {
                 tags: ['Portfolio'],
@@ -1272,6 +1311,22 @@ const spec: Record<string, any> = {
                 },
             },
             Portfolio: { type: 'object' },
+            PortfolioSummary: {
+                type: 'object',
+                required: ['id', 'name', 'total_value_usd', 'drift_status', 'last_rebalanced'],
+                properties: {
+                    id: { type: 'string', example: 'portfolio-abc123' },
+                    name: { type: 'string', nullable: true, description: 'Null when the portfolio was never named.', example: 'Core holdings' },
+                    total_value_usd: { type: 'number', description: 'Current USD value of all holdings. An asset with no available price contributes zero.', example: 10000 },
+                    drift_status: {
+                        type: 'string',
+                        enum: ['ok', 'warning', 'critical'],
+                        description: 'Largest allocation drift measured against the portfolio\'s own rebalance threshold: critical past the threshold, warning from half the threshold up to it, otherwise ok.',
+                        example: 'warning',
+                    },
+                    last_rebalanced: { type: 'string', format: 'date-time', nullable: true, example: '2026-01-02T00:00:00.000Z' },
+                },
+            },
             PriceData: { type: 'object' },
             RiskMetrics: { type: 'object' },
             RebalanceResult: { type: 'object' },

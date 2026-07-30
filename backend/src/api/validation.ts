@@ -57,6 +57,11 @@ export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
     version: z.number().int().min(1, "Version must be a positive integer")
 });
 
+// Schema for GET /portfolios/summary
+export const portfolioSummaryQuerySchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required"),
+});
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({
