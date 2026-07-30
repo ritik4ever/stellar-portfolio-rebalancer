@@ -11,7 +11,7 @@
  * 2. Add to walletAdapters array
  * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
  */
-export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
+export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'hana' | 'mock'
 
 export interface WalletAdapter {
     readonly name: string
@@ -21,6 +21,7 @@ export interface WalletAdapter {
     isConnected(): Promise<boolean>
     disconnect(): Promise<void>
     signTransaction(xdr: string, network?: string): Promise<string>
+    switchNetwork?(network: string): Promise<void>
 }
 
 export class WalletError extends Error {
@@ -215,6 +216,71 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
+export class HanaAdapter implements WalletAdapter {
+    readonly name = 'Hana'
+    readonly type: WalletType = 'hana'
+
+    isAvailable(): boolean {
+        return typeof window !== 'undefined' && !!window.hana
+    }
+
+    async connect(): Promise<string> {
+        if (!this.isAvailable()) {
+            throw new WalletError('Hana wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            const result = await window.hana!.connect()
+            if (!result?.publicKey) {
+                throw new Error('No public key returned')
+            }
+            return result.publicKey
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+
+    async isConnected(): Promise<boolean> {
+        if (!this.isAvailable()) return false
+        try {
+            return await window.hana!.isConnected()
+        } catch {
+            return false
+        }
+    }
+
+    async disconnect(): Promise<void> {
+    }
+
+    async signTransaction(xdr: string, network?: string): Promise<string> {
+        if (!this.isAvailable()) {
+            throw new WalletError('Hana wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            const result = await window.hana!.signTransaction(xdr, network)
+            if (!result?.signedTxXdr) {
+                throw new Error('No signed transaction returned')
+            }
+            return result.signedTxXdr
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+
+    async switchNetwork(network: string): Promise<void> {
+        if (!this.isAvailable()) {
+            throw new WalletError('Hana wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            await window.hana!.switchNetwork?.(network)
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+}
+
 export class MockAdapter implements WalletAdapter {
     readonly name = 'Mock Wallet (Test)'
     readonly type: WalletType = 'mock'
@@ -250,7 +316,8 @@ export class MockAdapter implements WalletAdapter {
 export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
-    new XBullAdapter()
+    new XBullAdapter(),
+    new HanaAdapter()
 ]
 
 // Add the mock adapter if we're in E2E mode
