@@ -247,6 +247,159 @@ Validation:
 - `slippageTolerance`: 0.1–5% (optional, default: 1)
 - `strategy`: `threshold` | `periodic` | `volatility` | `custom` (optional, default: `threshold`)
 
+### Bulk Import Portfolio
+
+Create a new portfolio by uploading allocations from a CSV or JSON file. This is the primary endpoint consumed by the frontend [`BulkPortfolioImport.tsx`](frontend/src/components/BulkPortfolioImport.tsx) component.
+
+```bash
+POST /api/v1/portfolio/import
+Content-Type: application/json | text/csv
+```
+
+#### Accepted Formats
+
+**JSON — wrapped object:**
+```json
+{
+  "allocations": [
+    { "asset": "XLM", "allocation_pct": 40 },
+    { "asset": "USDC", "allocation_pct": 35 },
+    { "asset": "BTC", "allocation_pct": 25 }
+  ],
+  "userAddress": "GALPHABET...",
+  "name": "My Portfolio",
+  "description": "Optional description"
+}
+```
+
+**JSON — bare array:**
+```json
+[
+  { "asset": "XLM", "allocation_pct": 40 },
+  { "asset": "USDC", "allocation_pct": 35 },
+  { "asset": "BTC", "allocation_pct": 25 }
+]
+```
+
+> When using a bare array, `userAddress` must be included as a top-level field of the request or authenticated via JWT.
+
+**CSV — raw text with required headers:**
+```csv
+asset,allocation_pct
+XLM,40
+USDC,35
+BTC,25
+```
+
+> Send with `Content-Type: text/csv`. Headers must include `asset` and `allocation_pct`.
+
+#### Request Schema
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `allocations` | `AllocationInputRow[]` | Yes | Array of `{ asset, allocation_pct }`. May also be the top-level body for JSON. |
+| `userAddress` | `string` | Yes | Stellar public key. Required in body or via JWT auth. |
+| `name` | `string` | No | Portfolio display name. |
+| `description` | `string` | No | Portfolio description. |
+
+Each `AllocationInputRow`:
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `asset` | `string` | Required, normalized to uppercase. Must exist in the asset registry, be enabled, and not quarantined. |
+| `allocation_pct` | `number` | Required, finite, `0–100`. Duplicate assets are merged by summing percentages. |
+
+#### Validation Rules
+
+- Allocations must sum to **100%** (tolerance: 0.01%).
+- Maximum **10 distinct assets**.
+- Maximum **5 000 rows**.
+- `allocation_pct` must be a finite number between 0 and 100 inclusive.
+- Asset codes are validated against the internal asset registry; unknown, disabled, or quarantined assets are rejected.
+- Duplicate asset rows are merged (percentages summed) before validation.
+
+#### Sample cURL — JSON
+
+```bash
+curl -X POST http://localhost:3001/api/v1/portfolio/import \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allocations": [
+      { "asset": "XLM", "allocation_pct": 60 },
+      { "asset": "USDC", "allocation_pct": 40 }
+    ],
+    "userAddress": "GALPHABET...",
+    "name": "Imported Portfolio"
+  }'
+```
+
+#### Sample cURL — CSV
+
+```bash
+curl -X POST http://localhost:3001/api/v1/portfolio/import \
+  -H "Content-Type: text/csv" \
+  --data-binary "asset,allocation_pct
+XLM,60
+USDC,40"
+```
+
+#### Success Response (201)
+
+```json
+{
+  "success": true,
+  "data": {
+    "portfolioId": "portfolio-abc123",
+    "status": "created"
+  },
+  "error": null,
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+#### Validation Error Response (400)
+
+Returned when the payload fails validation. The `errors` array contains per-row details; `meta` summarises totals.
+
+```json
+{
+  "error": "VALIDATION_ERROR",
+  "message": "Bulk import validation failed",
+  "code": "VALIDATION_ERROR",
+  "errors": [
+    { "row": 2, "field": "asset", "message": "Invalid or unknown asset code: FAKE" },
+    { "row": 3, "field": "allocation_pct", "message": "allocation_pct must be a number" },
+    { "row": 0, "field": "allocation_pct", "message": "Allocations must sum to 100% (received 85%)" }
+  ],
+  "meta": {
+    "totalRows": 3,
+    "validRows": 1
+  }
+}
+```
+
+Each error object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `row` | `number` | 1-based row index (header = 1 for CSV). `0` indicates a payload-level error (e.g., sum check). |
+| `field` | `string` | Field that failed (`asset`, `allocation_pct`, `header`, `csv_or_json`, `rows`, `json`). |
+| `message` | `string` | Human-readable description of the failure. |
+
+`meta` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `totalRows` | `number` | Total data rows received. |
+| `validRows` | `number` | Rows that passed all validation checks. |
+
+#### Other Error Responses
+
+| HTTP Status | Code | Condition |
+|-------------|------|-----------|
+| 400 | `VALIDATION_ERROR` | Missing `userAddress` in body or JWT. |
+| 500 | `INTERNAL_ERROR` | Unexpected server error during portfolio creation. |
+
 ### Get Portfolio
 
 ```bash
