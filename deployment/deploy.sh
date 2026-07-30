@@ -195,6 +195,7 @@ deploy_contracts() {
         
         print_status "Contract deployed with ID: $CONTRACT_ID"
         
+        REFLECTOR_ADDRESS=${REFLECTOR_ADDRESS:-"CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO"}
         # Initialize the contract
         soroban contract invoke \
             --id $CONTRACT_ID \
