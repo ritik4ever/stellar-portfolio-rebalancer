@@ -16,7 +16,9 @@
     "test:e2e:visual": "playwright test --project=visual-regression",
     "test:e2e:visual-update": "playwright test --project=visual-regression --update-snapshots",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "lint:i18n": "node scripts/audit-i18n.js",
+    "lint": "npm run lint:i18n"
   },
   "dependencies": {
     "@sentry/react": "^9.14.0",
