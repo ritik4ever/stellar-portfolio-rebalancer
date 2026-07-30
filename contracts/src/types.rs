@@ -85,6 +85,13 @@ impl Default for StrategyConfig {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub window_seconds: u64,
+    pub spike_threshold_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractCapabilitySummary {
     pub version: u32,
     pub schema_version: u32,

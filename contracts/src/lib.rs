@@ -20,6 +20,9 @@ use strategies::dca;
 
 pub use reflector::*;
 pub use types::*;
+pub use events::emit_dca_executed;
+pub use strategies::dca;
+pub use strategies::*;
 
 #[contract]
 pub struct PortfolioRebalancer;

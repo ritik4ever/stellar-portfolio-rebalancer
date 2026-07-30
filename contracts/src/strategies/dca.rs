@@ -76,6 +76,13 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         return Err(Error::PortfolioPaused);
     }
 
+    // Get the invoker (steward or user) for event emission
+    let invoker = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Steward(portfolio_id))
+        .unwrap_or(portfolio.user.clone());
+
     // Assume USDC is represented by an asset address that exists in target allocations.
     // The DCA amount is split according to target allocation percentages.
     // For each asset, increase balance by proportional amount.
