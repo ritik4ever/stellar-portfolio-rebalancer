@@ -38,7 +38,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
   const togglePortfolio = (portfolioId: string) => {
     if (selectedPortfolioIds.includes(portfolioId)) {
       setSelectedPortfolioIds(prev => prev.filter(id => id !== portfolioId))
-    } else if (selectedPortfolioIds.length < 3) {
+    } else if (selectedPortfolioIds.length < 5) {
       setSelectedPortfolioIds(prev => [...prev, portfolioId])
     }
   }
@@ -101,7 +101,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
             </div>
           </div>
           <div className="text-sm text-gray-600 dark:text-gray-400">
-            {selectedPortfolioIds.length}/3 {t('compare.selectPortfolios')}
+            {selectedPortfolioIds.length}/5 {t('compare.selectPortfolios')}
           </div>
         </div>
 
@@ -142,7 +142,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('compare.allocation')}</h2>
-              <div className={`grid gap-6 ${selectedPortfolioIds.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-3'}`}>
+              <div className={`grid gap-6 ${selectedPortfolioIds.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
                 {selectedPortfolios.map((portfolio, index) => {
                   const allocationData = getAllocationData(portfolio)
                   return (
