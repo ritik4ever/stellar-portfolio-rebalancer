@@ -130,6 +130,7 @@ impl PortfolioRebalancer {
             target_allocations,
             current_balances: Map::new(&env),
             asset_decimals,
+            frozen_assets: Map::new(&env),
             rebalance_threshold,
             slippage_tolerance,
             slippage_policy_version,
@@ -707,6 +708,11 @@ impl PortfolioRebalancer {
         let mut result: Vec<AssetDrift> = Vec::new(&env);
 
         for (asset, target_pct) in portfolio.target_allocations.iter() {
+            // Skip frozen assets in drift preview
+            if portfolio.frozen_assets.get(asset.clone()).unwrap_or(false) {
+                continue;
+            }
+
             if let Some(decision) = preview.threshold_decisions.get(asset.clone()) {
                 result.push_back(AssetDrift {
                     asset,
@@ -872,6 +878,45 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
+    pub fn set_asset_frozen(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+        frozen: bool,
+    ) -> Result<(), Error> {
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let caller_is_admin = env.auth().is_authorized(&admin);
+        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
+        
+        if !caller_is_admin && !caller_is_owner {
+            return Err(Error::PortfolioNotFound);
+        }
+        
+        // Ensure asset is part of the portfolio
+        if !portfolio.target_allocations.contains_key(asset.clone()) {
+            return Err(Error::AssetNotSupported);
+        }
+        
+        if frozen {
+            portfolio.frozen_assets.set(asset.clone(), true);
+        } else {
+            portfolio.frozen_assets.remove(asset.clone());
+        }
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            (Symbol::new(&env, "asset_frozen_updated"),),
+            (portfolio_id, asset, frozen),
+        );
+        
+        Ok(())
+    }
+
     pub fn get_portfolio_value_usd(
         env: Env,
         portfolio_id: u64,
@@ -984,25 +1029,6 @@ impl PortfolioRebalancer {
             .get(&DataKey::ReflectorAddress)
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
-
-        let cb_config: CircuitBreakerConfig = env
-            .storage()
-            .instance()
-            .get(&DataKey::CircuitBreakerConfig)
-            .unwrap_or(CircuitBreakerConfig {
-                spike_threshold_bps: 500,
-                window_seconds: 3600,
-            });
-
-        let mut current_prices = Map::new(env);
-        for (asset, _) in portfolio.target_allocations.iter() {
-            if let Some(price_data) =
-                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
-            {
-                current_prices.set(asset.clone(), price_data.price);
-            }
-        }
-        circuit_breaker::check_volatility(env, &cb_config, &reflector_client, &current_prices)?;
 
         let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
 

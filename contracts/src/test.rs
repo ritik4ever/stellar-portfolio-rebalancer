@@ -3590,3 +3590,264 @@ fn test_update_allocations_then_rebalance() {
     assert_eq!(portfolio.last_rebalance, 15000);
     assert!(portfolio.current_balances.get(asset1).unwrap() > portfolio.current_balances.get(asset2).unwrap());
 }
+
+#[test]
+fn test_set_asset_frozen_owner() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Owner can freeze asset
+    client.set_asset_frozen(&pid, &asset1, &true);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.frozen_assets.get(asset1).unwrap(), true);
+    assert_eq!(portfolio.frozen_assets.get(asset2).unwrap_or(false), false);
+}
+
+#[test]
+fn test_set_asset_frozen_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Admin can freeze asset
+    env.mock_auths(&admin);
+    client.set_asset_frozen(&pid, &asset1, &true);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.frozen_assets.get(asset1).unwrap(), true);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #21)")]
+fn test_set_asset_frozen_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Unauthorized user cannot freeze asset
+    env.mock_auths(&unauthorized);
+    client.set_asset_frozen(&pid, &asset1, &true);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #25)")]
+fn test_set_asset_frozen_unknown_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let unknown_asset = Address::generate(&env);
+    // Cannot freeze asset not in portfolio
+    client.set_asset_frozen(&pid, &unknown_asset, &true);
+}
+
+#[test]
+fn test_frozen_asset_excluded_from_rebalance_trades() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Deposit more of asset1 to create drift
+    client.deposit(&pid, &asset1, &100_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &50_000_000, &String::from_str(&env, ""));
+
+    // Freeze asset1
+    client.set_asset_frozen(&pid, &asset1, &true);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    let preview = client.preview_rebalance(&pid);
+
+    // Frozen asset should be in skipped_assets with Frozen reason
+    assert!(preview.skipped_assets.contains(&asset1));
+    assert_eq!(preview.skip_reasons.get(asset1).unwrap(), AssetSkipReason::Frozen);
+
+    // Frozen asset should not be in candidate_trades
+    assert!(!preview.candidate_trades.contains_key(&asset1));
+}
+
+#[test]
+fn test_frozen_asset_excluded_from_drift_preview() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Deposit more of asset1 to create drift
+    client.deposit(&pid, &asset1, &100_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &50_000_000, &String::from_str(&env, ""));
+
+    // Freeze asset1
+    client.set_asset_frozen(&pid, &asset1, &true);
+
+    let drift_preview = client.get_drift_preview(&pid);
+
+    // Frozen asset should not appear in drift preview
+    for drift in drift_preview.iter() {
+        assert_ne!(drift.asset, asset1);
+    }
+}
+
+#[test]
+fn test_unfreeze_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Freeze asset
+    client.set_asset_frozen(&pid, &asset1, &true);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.frozen_assets.get(asset1).unwrap(), true);
+
+    // Unfreeze asset
+    client.set_asset_frozen(&pid, &asset1, &false);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.frozen_assets.get(asset1).unwrap_or(false), false);
+}
+
+#[test]
+fn test_rebalance_with_frozen_asset_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Deposit more of asset1 to create drift
+    client.deposit(&pid, &asset1, &100_000_000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &50_000_000, &String::from_str(&env, ""));
+
+    // Freeze asset1
+    client.set_asset_frozen(&pid, &asset1, &true);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    // Rebalance should succeed, skipping frozen asset
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    let portfolio = client.get_portfolio(&pid);
+    // Asset1 balance should remain unchanged (frozen)
+    assert_eq!(portfolio.current_balances.get(asset1).unwrap(), 100_000_000);
+}

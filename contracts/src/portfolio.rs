@@ -62,6 +62,11 @@ pub fn calculate_rebalance_trades(
     let total_value = portfolio.total_value;
 
     for (asset, target_percentage) in portfolio.target_allocations.iter() {
+        // Skip frozen assets
+        if portfolio.frozen_assets.get(asset.clone()).unwrap_or(false) {
+            continue;
+        }
+
         let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
         let target_value =
             (total_value * target_percentage as i128) / ALLOCATION_DENOMINATOR as i128;
@@ -130,6 +135,13 @@ pub fn build_rebalance_preview(
     }
 
     for (asset, target_percent) in portfolio.target_allocations.iter() {
+        // Skip frozen assets
+        if portfolio.frozen_assets.get(asset.clone()).unwrap_or(false) {
+            skipped_assets.push_back(asset.clone());
+            skip_reasons.set(asset.clone(), AssetSkipReason::Frozen);
+            continue;
+        }
+
         if skip_reasons.contains_key(asset.clone()) {
             continue;
         }

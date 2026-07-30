@@ -62,6 +62,7 @@ pub struct Portfolio {
     pub target_allocations: Map<Address, u32>,
     pub current_balances: Map<Address, i128>,
     pub asset_decimals: Map<Address, u32>,
+    pub frozen_assets: Map<Address, bool>,
     pub rebalance_threshold: u32,
     pub slippage_tolerance: u32,
     pub slippage_policy_version: u32,
@@ -92,6 +93,7 @@ pub enum AssetSkipReason {
     StalePrice = 2,
     BelowMinTrade = 3,
     WithinThreshold = 4,
+    Frozen = 5,
 }
 
 #[contracttype]
@@ -216,9 +218,6 @@ pub struct BatchRebalanceResult {
 pub enum BatchRebalanceResultStatus {
     Success,
     Failed(Error),
-
-    InvalidOracleAddress = 29,
-
 }
 
 #[contracttype]
@@ -281,13 +280,6 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CircuitBreakerConfig {
-    pub spike_threshold_bps: u32,
-    pub window_seconds: u64,
 }
 
 #[contracttype]
