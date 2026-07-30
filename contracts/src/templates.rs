@@ -53,6 +53,11 @@ fn validate_template_size(env: &Env, allocations: &Map<Address, u32>) -> Result<
         total_value: 0,
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+            window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+        },
+        global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
     };
 
     crate::portfolio::validate_portfolio_storage_footprint(env, 0, &synthetic_portfolio)?;
