@@ -796,6 +796,8 @@ fn build_trade_test_portfolio(
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     }
 }
 
@@ -841,6 +843,8 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     let mut prices = Map::new(&env);
@@ -886,6 +890,8 @@ fn test_calculate_rebalance_trades_2_asset() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     let mut prices = Map::new(&env);
@@ -960,6 +966,8 @@ fn test_calculate_rebalance_trades_5_asset() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     let mut prices = Map::new(&env);
@@ -1010,6 +1018,8 @@ fn test_calculate_rebalance_trades_direction_buy_sell() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     let mut prices = Map::new(&env);
@@ -1065,6 +1075,8 @@ fn test_calculate_rebalance_trades_price_precision() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     let mut prices = Map::new(&env);
@@ -1147,6 +1159,8 @@ fn test_calculate_rebalance_trades_exact_boundary() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     let mut prices = Map::new(&env);
@@ -2098,6 +2112,8 @@ fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
     assert_eq!(
         crate::portfolio::check_portfolio_invariants(&portfolio),
@@ -3589,4 +3605,157 @@ fn test_update_allocations_then_rebalance() {
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.last_rebalance, 15000);
     assert!(portfolio.current_balances.get(asset1).unwrap() > portfolio.current_balances.get(asset2).unwrap());
+}
+
+#[test]
+fn test_create_portfolio_with_strategy_defaults_to_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.strategy, StrategyType::Threshold);
+    assert_eq!(
+        portfolio.strategy_config,
+        StrategyConfig::default()
+    );
+}
+
+#[test]
+fn test_create_portfolio_with_strategy_periodic() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+
+    let strategy_config = StrategyConfig {
+        interval_seconds: 86400, // 1 day
+        volatility_threshold_bps: 1000,
+        min_interval_seconds: 86400,
+    };
+
+    let pid = client.create_portfolio_with_strategy(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+        &StrategyType::Periodic,
+        &strategy_config,
+    ).unwrap();
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.strategy, StrategyType::Periodic);
+    assert_eq!(portfolio.strategy_config.interval_seconds, 86400);
+}
+
+#[test]
+fn test_create_portfolio_with_strategy_volatility() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+
+    let strategy_config = StrategyConfig {
+        interval_seconds: 604800,
+        volatility_threshold_bps: 2000, // 20%
+        min_interval_seconds: 86400,
+    };
+
+    let pid = client.create_portfolio_with_strategy(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+        &StrategyType::Volatility,
+        &strategy_config,
+    ).unwrap();
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.strategy, StrategyType::Volatility);
+    assert_eq!(portfolio.strategy_config.volatility_threshold_bps, 2000);
+}
+
+#[test]
+fn test_create_portfolio_with_strategy_custom() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+
+    let strategy_config = StrategyConfig {
+        interval_seconds: 3600,
+        volatility_threshold_bps: 500,
+        min_interval_seconds: 43200, // 12 hours
+    };
+
+    let pid = client.create_portfolio_with_strategy(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+        &StrategyType::Custom,
+        &strategy_config,
+    ).unwrap();
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.strategy, StrategyType::Custom);
+    assert_eq!(portfolio.strategy_config.min_interval_seconds, 43200);
 }

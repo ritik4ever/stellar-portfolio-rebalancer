@@ -117,7 +117,7 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
     config.next_execution = current_ts + config.interval;
     env.storage()
         .persistent()
-        .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
     env.storage()
         .persistent()
         .set(&DataKey::DCAConfig(portfolio_id), &config);
