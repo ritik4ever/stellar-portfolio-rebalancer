@@ -32,6 +32,17 @@ All portfolio lifecycle events share these rules (see `contracts/src/portfolio.r
 | Timestamps            | `u64` ledger timestamp at the last payload field when present |
 | Asset + amount events | `(portfolio_id, asset: Address, amount: i128)`                |
 
+## Event payload changes for strategy-aware portfolios
+
+Starting from `CONTRACT_VERSION = 2`, newly created portfolios include `strategy: StrategyType` and `strategy_config: StrategyConfig` fields (see `contracts/src/types.rs`). The `Portfolio` struct stored under `DataKey::PortfolioV2` now contains:
+
+- `strategy: StrategyType` — `Threshold (0)`, `Periodic (1)`, `Volatility (2)`, or `Custom (3)`
+- `strategy_config: StrategyConfig` — `{ interval_seconds, volatility_threshold_bps, min_interval_seconds }`
+
+Legacy portfolios (created before the schema bump) are migrated on first read: the old XDR is deserialized as `LegacyPortfolio`, converted with `StrategyType::Threshold` + default `StrategyConfig`, and re-written under `DataKey::PortfolioV2`. Old entries under `DataKey::Portfolio(u64)` are removed after migration.
+
+Event topics and payload shapes remain unchanged — the strategy fields are storage-only and do not alter event payloads. Backend indexers that decode `Portfolio` from events (e.g. `portfolio.created`) will see the new fields automatically once old portfolios are migrated.
+
 ## Expected event topics and payloads
 
 Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
@@ -50,6 +61,22 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 | `portfolio` | `rebalanced`        | `(portfolio_id: u64, current_time: u64)`                          | `rebalance_executed`                 |
 | `portfolio` | `fee_charged`       | `(portfolio_id: u64, recipient: Address, amount: i128)`           | `fee_charged`                        |
 | `portfolio` | `upgraded`          | `(from_hash: Bytes, to_hash: Bytes, timestamp: u64)`              | `contract_upgraded`                  |
+| Topic[0] | Topic[1] | Payload shape (Rust tuple) | Indexed as |
+|----------|----------|------------------------------|------------|
+| `portfolio` | `created` | `(portfolio_id, user)` | `portfolio_created` |
+| `portfolio` | `deposit` | `(portfolio_id, asset, amount)` | `deposit` |
+| `portfolio` | `withdraw` | `(portfolio_id, asset, amount)` | `withdraw` |
+| `portfolio` | `rebalanced` | `(portfolio_id, timestamp)` | `rebalance_executed` |
+| `portfolio` | `cooldown_override` | `(portfolio_id, admin, timestamp)` | (audit only; not indexed by default) |
+| `portfolio` | `alloc_upd` | `(portfolio_id, old_allocations, new_allocations)` | `allocation_updated` |
+| Topic[0] | Topic[1] | Payload shape (Rust) | Indexed as |
+|----------|----------|----------------------|------------|
+| `portfolio` | `created` | `(portfolio_id: u64, user: Address)` | `portfolio_created` |
+| `portfolio` | `deposit` | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit` |
+| `portfolio` | `rebalanced` | `(portfolio_id: u64, current_time: u64)` | `rebalance_executed` |
+| `portfolio` | `fee_charged` | `(portfolio_id: u64, recipient: Address, amount: i128)` | `fee_charged` |
+| `portfolio` | `upgraded` | `(from_hash: Bytes, to_hash: Bytes, timestamp: u64)` | `contract_upgraded` |
+| `portfolio` | `alloc_upd` | `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` | `allocation_updated` |
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
 
@@ -57,14 +84,48 @@ The `deposit` event now includes a `memo: String` field at tuple index `3`. Back
 
 ## Payload parsing (backend)
 
-* **Portfolio id:** tuple index `0`, or object keys `portfolioId`, `portfolio_id`, `id`.
-* **User (created):** tuple index `1`, or object keys `user`, `userAddress`, `user_address`.
-* **Asset (deposit / withdraw):** tuple index `1`.
-* **Amount (deposit / withdraw):** tuple index `2`.
-* **Timestamp (rebalanced / cooldown_override):** tuple index `1` for rebalanced; index `2` for cooldown_override when admin is at index `1`.
-* **Memo (deposit):** tuple index `3`, or object keys `memo`.
+- **Portfolio id:** tuple index `0`, or object keys `portfolioId`, `portfolio_id`, `id`.
+- **User (created):** tuple index `1`, or object keys `user`, `userAddress`, `user_address`.
+- **Asset (deposit / withdraw):** tuple index `1`.
+- **Amount (deposit / withdraw):** tuple index `2`.
+- **Timestamp (rebalanced / cooldown_override):** tuple index `1` for rebalanced; index `2` for cooldown_override when admin is at index `1`.
+- **Memo (deposit):** tuple index `3`, or object keys `memo`.
+- **Old allocations (alloc_upd):** tuple index `1`, `Map<Address, u32>` of previous target allocations.
+- **New allocations (alloc_upd):** tuple index `2`, `Map<Address, u32>` of updated target allocations.
 
 Events from other contracts or with unknown second topics are skipped without failing the batch.
+
+### `alloc_upd` event details
+
+Emitted by the `update_allocations` entrypoint when a user changes a portfolio's target allocation percentages.
+
+**Contract entrypoint:** `update_allocations(portfolio_id: u64, new_allocations: Map<Address, u32>)` — see [`contracts/src/lib.rs`](../contracts/src/lib.rs) and the [Contract Capability Matrix](CONTRACT_CAPABILITY_MATRIX.md) (`update_allocations` row).
+
+**Emit source:** `contracts/src/events.rs` (`emit_allocation_updated`) and inline in `contracts/src/lib.rs`.
+
+**Sample event payload:**
+
+```json
+{
+  "type": "contract",
+  "topics": ["portfolio", "alloc_upd"],
+  "data": {
+    "portfolio_id": 1,
+    "old_allocations": {
+      "CDLZFC...XLM": 40,
+      "CDMLFK...USDC": 35,
+      "CBKTPM...BTC": 25
+    },
+    "new_allocations": {
+      "CDLZFC...XLM": 50,
+      "CDMLFK...USDC": 30,
+      "CBKTPM...BTC": 20
+    }
+  }
+}
+```
+
+> **Note:** The `events.rs` helper (`emit_allocation_updated`) emits the event with topics `(alloc_upd, invoker, correlation_id)` and payload `portfolio_id`. The inline emit in `lib.rs` uses topics `(portfolio, alloc_upd)` with payload `(portfolio_id, old_allocations, new_allocations)`. Backend indexers should handle both shapes.
 
 ## Reusable test fixtures
 
@@ -91,6 +152,14 @@ The contract test suite emits canonical event sequences that backend integration
 | `test_deposit_with_memo.1.json`         | `portfolio.created`, `portfolio.deposit`                             | Deposit with explicit reference memo |
 | `test_execute_rebalance_success.1.json` | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced`     | Full rebalance lifecycle             |
 | `test_set_fee_config.1.json`            | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled    |
+| Fixture | Events produced | Description |
+|---------|----------------|-------------|
+| `test_create_portfolio.1.json` | `portfolio.created` | Portfolio creation with allocations |
+| `test_deposit_valid.1.json` | `portfolio.created`, `portfolio.deposit` | Valid deposit with memo |
+| `test_deposit_with_memo.1.json` | `portfolio.created`, `portfolio.deposit` | Deposit with explicit reference memo |
+| `test_execute_rebalance_success.1.json` | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced` | Full rebalance lifecycle |
+| `test_set_fee_config.1.json` | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled |
+| `test_update_allocations_success.1.json` | `portfolio.created`, `portfolio.alloc_upd` | Allocation update with old and new maps |
 
 ### Exporting fixtures for external use
 
@@ -111,6 +180,7 @@ The `test_contract_events_fixture_export` test in `contracts/src/test.rs` valida
 
 ## Related tests
 
-* `contracts/src/test.rs` — Soroban contract tests that produce event snapshot fixtures.
-* `backend/src/test/contractEventSchema.test.ts` — version string parsing and mismatch behavior.
-* `contracts/src/test.rs` — Soroban integration tests and snapshot fixtures for contract calls.
+- `contracts/src/test.rs` — Soroban contract tests that produce event snapshot fixtures.
+- `backend/src/test/contractEventSchema.test.ts` — version string parsing and mismatch behavior.
+- `contracts/src/test.rs` — Soroban integration tests and snapshot fixtures for contract calls.
+- `contracts/src/test.rs` (`test_update_allocations_success`) — Verifies `alloc_upd` event emission with correct old/new allocation maps.

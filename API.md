@@ -247,6 +247,159 @@ Validation:
 - `slippageTolerance`: 0.1–5% (optional, default: 1)
 - `strategy`: `threshold` | `periodic` | `volatility` | `custom` (optional, default: `threshold`)
 
+### Bulk Import Portfolio
+
+Create a new portfolio by uploading allocations from a CSV or JSON file. This is the primary endpoint consumed by the frontend [`BulkPortfolioImport.tsx`](frontend/src/components/BulkPortfolioImport.tsx) component.
+
+```bash
+POST /api/v1/portfolio/import
+Content-Type: application/json | text/csv
+```
+
+#### Accepted Formats
+
+**JSON — wrapped object:**
+```json
+{
+  "allocations": [
+    { "asset": "XLM", "allocation_pct": 40 },
+    { "asset": "USDC", "allocation_pct": 35 },
+    { "asset": "BTC", "allocation_pct": 25 }
+  ],
+  "userAddress": "GALPHABET...",
+  "name": "My Portfolio",
+  "description": "Optional description"
+}
+```
+
+**JSON — bare array:**
+```json
+[
+  { "asset": "XLM", "allocation_pct": 40 },
+  { "asset": "USDC", "allocation_pct": 35 },
+  { "asset": "BTC", "allocation_pct": 25 }
+]
+```
+
+> When using a bare array, `userAddress` must be included as a top-level field of the request or authenticated via JWT.
+
+**CSV — raw text with required headers:**
+```csv
+asset,allocation_pct
+XLM,40
+USDC,35
+BTC,25
+```
+
+> Send with `Content-Type: text/csv`. Headers must include `asset` and `allocation_pct`.
+
+#### Request Schema
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `allocations` | `AllocationInputRow[]` | Yes | Array of `{ asset, allocation_pct }`. May also be the top-level body for JSON. |
+| `userAddress` | `string` | Yes | Stellar public key. Required in body or via JWT auth. |
+| `name` | `string` | No | Portfolio display name. |
+| `description` | `string` | No | Portfolio description. |
+
+Each `AllocationInputRow`:
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `asset` | `string` | Required, normalized to uppercase. Must exist in the asset registry, be enabled, and not quarantined. |
+| `allocation_pct` | `number` | Required, finite, `0–100`. Duplicate assets are merged by summing percentages. |
+
+#### Validation Rules
+
+- Allocations must sum to **100%** (tolerance: 0.01%).
+- Maximum **10 distinct assets**.
+- Maximum **5 000 rows**.
+- `allocation_pct` must be a finite number between 0 and 100 inclusive.
+- Asset codes are validated against the internal asset registry; unknown, disabled, or quarantined assets are rejected.
+- Duplicate asset rows are merged (percentages summed) before validation.
+
+#### Sample cURL — JSON
+
+```bash
+curl -X POST http://localhost:3001/api/v1/portfolio/import \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allocations": [
+      { "asset": "XLM", "allocation_pct": 60 },
+      { "asset": "USDC", "allocation_pct": 40 }
+    ],
+    "userAddress": "GALPHABET...",
+    "name": "Imported Portfolio"
+  }'
+```
+
+#### Sample cURL — CSV
+
+```bash
+curl -X POST http://localhost:3001/api/v1/portfolio/import \
+  -H "Content-Type: text/csv" \
+  --data-binary "asset,allocation_pct
+XLM,60
+USDC,40"
+```
+
+#### Success Response (201)
+
+```json
+{
+  "success": true,
+  "data": {
+    "portfolioId": "portfolio-abc123",
+    "status": "created"
+  },
+  "error": null,
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+#### Validation Error Response (400)
+
+Returned when the payload fails validation. The `errors` array contains per-row details; `meta` summarises totals.
+
+```json
+{
+  "error": "VALIDATION_ERROR",
+  "message": "Bulk import validation failed",
+  "code": "VALIDATION_ERROR",
+  "errors": [
+    { "row": 2, "field": "asset", "message": "Invalid or unknown asset code: FAKE" },
+    { "row": 3, "field": "allocation_pct", "message": "allocation_pct must be a number" },
+    { "row": 0, "field": "allocation_pct", "message": "Allocations must sum to 100% (received 85%)" }
+  ],
+  "meta": {
+    "totalRows": 3,
+    "validRows": 1
+  }
+}
+```
+
+Each error object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `row` | `number` | 1-based row index (header = 1 for CSV). `0` indicates a payload-level error (e.g., sum check). |
+| `field` | `string` | Field that failed (`asset`, `allocation_pct`, `header`, `csv_or_json`, `rows`, `json`). |
+| `message` | `string` | Human-readable description of the failure. |
+
+`meta` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `totalRows` | `number` | Total data rows received. |
+| `validRows` | `number` | Rows that passed all validation checks. |
+
+#### Other Error Responses
+
+| HTTP Status | Code | Condition |
+|-------------|------|-----------|
+| 400 | `VALIDATION_ERROR` | Missing `userAddress` in body or JWT. |
+| 500 | `INTERNAL_ERROR` | Unexpected server error during portfolio creation. |
+
 ### Get Portfolio
 
 ```bash
@@ -286,11 +439,56 @@ Response:
 }
 ```
 
+### Multi-Portfolio Dashboard Summary
+
+Summarises every portfolio for one address in a single request, so a dashboard
+listing N portfolios costs one call rather than N. Prices are resolved once from
+the oracle cache and shared across the whole response.
+
+```bash
+GET /api/v1/portfolios/summary?userAddress={address}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "portfolios": [
+      {
+        "id": "portfolio-abc123",
+        "name": "Core holdings",
+        "total_value_usd": 10000,
+        "drift_status": "warning",
+        "last_rebalanced": "2026-01-02T00:00:00.000Z"
+      }
+    ]
+  },
+  "error": null,
+  "timestamp": "2026-01-02T12:00:00.000Z"
+}
+```
+
+`data.portfolios` is an empty array when the address has no portfolios.
+
+`drift_status` compares the largest allocation drift against that portfolio's own
+`threshold`, so each portfolio is judged against the tolerance its owner chose:
+
+| Status | Condition |
+|---|---|
+| `critical` | Largest drift is past the threshold. This is the same comparison the auto-rebalancer uses to decide a portfolio has drifted. |
+| `warning` | Largest drift is at or above half the threshold, but not past it. |
+| `ok` | Anything below that, including a portfolio holding nothing. |
+
+`name` is `null` for a portfolio that was never named, and an asset with no
+available price contributes zero to `total_value_usd` rather than being assumed.
+
 ### Get Rebalance Plan
 
 - **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%. Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}** — Get portfolio by ID.
 - **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address. When JWT auth is enabled, the token subject must match `:address` (otherwise `403`). In demo mode, public-by-address listing is allowed only when `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is enabled.
+- **GET /api/portfolios/summary** — Dashboard summary of every portfolio for one address in a single request (query: `userAddress`, required). Returns `id`, `name`, `total_value_usd`, `drift_status` (`ok`/`warning`/`critical`), and `last_rebalanced` per portfolio; empty array for an unknown address. Prices are read once from the oracle cache for the whole response. Same ownership rules as `GET /api/user/{address}/portfolios`.
 - **GET /api/portfolio/{id}/rebalance-plan** — Get full read-only rebalance plan (per-asset buy/sell amounts, estimated fees, estimated slippage, projected allocations, prices).
 - **POST /api/portfolio/{id}/rebalance/dry-run** — Dry-run rebalance; returns the same response schema as `rebalance-plan` without DB writes, contract calls, or trade execution.
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.

@@ -39,6 +39,37 @@ function useDebounce<T>(value: T, delay: number): T {
 const CG_CACHE_KEY = 'coingecko_asset_cache'
 const CG_CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+const RECENT_SEARCHES_KEY = 'asset_recent_searches'
+const RECENT_SEARCHES_MAX = 10
+
+function getRecentSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCHES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.slice(0, RECENT_SEARCHES_MAX)
+  } catch {
+    return []
+  }
+}
+
+function saveRecentSearches(symbols: string[]) {
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(symbols))
+  } catch {}
+}
+
+function addRecentSearch(symbol: string) {
+  const current = getRecentSearches()
+  const updated = [symbol, ...current.filter(s => s !== symbol)].slice(0, RECENT_SEARCHES_MAX)
+  saveRecentSearches(updated)
+}
+
+function clearRecentSearches() {
+  localStorage.removeItem(RECENT_SEARCHES_KEY)
+}
+
 interface CGCacheEntry {
   logo: string
   description: string
@@ -78,6 +109,7 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
   const [isSearching, setIsSearching] = useState(false)
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => getRecentSearches())
   const dropdownRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const debouncedSearch = useDebounce(searchQuery, 250)
@@ -260,6 +292,8 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
 
   const handleSelect = useCallback((asset: AssetSearchResult) => {
     onChange(asset.symbol)
+    addRecentSearch(asset.symbol)
+    setRecentSearches(getRecentSearches())
     setIsOpen(false)
     setSearchQuery('')
     setHighlightedIndex(-1)
@@ -270,6 +304,11 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
     setSearchQuery('')
     setHighlightedIndex(-1)
   }, [onChange])
+
+  const handleClearRecentSearches = useCallback(() => {
+    clearRecentSearches()
+    setRecentSearches([])
+  }, [])
 
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
@@ -334,6 +373,44 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
             ) : dynamicError ? (
               <div className="p-4 text-center text-sm text-red-500 dark:text-red-400">
                 {dynamicError}
+              </div>
+            ) : !debouncedSearch && recentSearches.length > 0 ? (
+              <div>
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Recent searches
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearRecentSearches}
+                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {recentSearches.map((symbol, index) => (
+                  <button
+                    key={symbol}
+                    id={`asset-result-${index}`}
+                    role="option"
+                    aria-selected={false}
+                    type="button"
+                    onClick={() => {
+                      const asset = allResults.find(a => a.symbol === symbol)
+                      if (asset) handleSelect(asset)
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                      highlightedIndex === index ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-sm font-bold text-gray-500 dark:text-gray-400 flex-shrink-0">
+                      {symbol.slice(0, 2)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium text-gray-900 dark:text-white">{symbol}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             ) : allResults.length === 0 ? (
               <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
