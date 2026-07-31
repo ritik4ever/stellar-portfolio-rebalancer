@@ -1,35 +1,92 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { getWebSocketUrl } from '../config/api'
 import { getAccessToken } from '../services/authService'
 
-export type LiveFeedState = 'disconnected' | 'connecting' | 'connected' | 'error'
+export type LiveFeedStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
+
+/** Minimum delay (ms) before the first reconnect attempt. */
+export const BACKOFF_BASE_MS = 1_000
+
+/** Maximum delay (ms) between reconnect attempts. */
+export const BACKOFF_MAX_MS = 30_000
+
+/** Multiplier applied to the delay after each failed attempt. */
+export const BACKOFF_MULTIPLIER = 2
 
 export function usePortfolioLiveFeed(portfolioId: string | null) {
-    const [connectionState, setConnectionState] = useState<LiveFeedState>('disconnected')
+    const [status, setStatus] = useState<LiveFeedStatus>('disconnected')
     const [lastPricesTick, setLastPricesTick] = useState<Record<string, any> | null>(null)
+
     const wsRef = useRef<WebSocket | null>(null)
+    const retryCountRef = useRef<number>(0)
+    const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    /** Track whether the effect is still mounted so we skip stale callbacks. */
+    const mountedRef = useRef<boolean>(false)
+
+    const clearRetryTimer = useCallback(() => {
+        if (retryTimerRef.current !== null) {
+            clearTimeout(retryTimerRef.current)
+            retryTimerRef.current = null
+        }
+    }, [])
+
+    const closeSocket = useCallback(() => {
+        if (wsRef.current) {
+            // Remove handlers before closing so onclose doesn't schedule a retry.
+            wsRef.current.onopen = null
+            wsRef.current.onmessage = null
+            wsRef.current.onclose = null
+            wsRef.current.onerror = null
+            wsRef.current.close()
+            wsRef.current = null
+        }
+    }, [])
 
     useEffect(() => {
+        mountedRef.current = true
+
         if (!portfolioId) {
-            setConnectionState('disconnected')
-            return
+            setStatus('disconnected')
+            return () => {
+                mountedRef.current = false
+            }
         }
 
         const token = getAccessToken()
         if (!token) {
-            setConnectionState('error')
-            return
+            setStatus('error')
+            return () => {
+                mountedRef.current = false
+            }
+        }
+
+        /**
+         * Compute the next backoff delay (capped at BACKOFF_MAX_MS) and
+         * increment the retry counter.
+         */
+        const nextBackoffMs = (): number => {
+            const delay = Math.min(
+                BACKOFF_BASE_MS * Math.pow(BACKOFF_MULTIPLIER, retryCountRef.current),
+                BACKOFF_MAX_MS
+            )
+            retryCountRef.current += 1
+            return delay
         }
 
         const connect = () => {
-            if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) {
+            if (!mountedRef.current) return
+
+            // Avoid opening a second socket if one is already live.
+            if (
+                wsRef.current?.readyState === WebSocket.OPEN ||
+                wsRef.current?.readyState === WebSocket.CONNECTING
+            ) {
                 return
             }
 
-            setConnectionState('connecting')
-            
+            setStatus(retryCountRef.current === 0 ? 'connecting' : 'reconnecting')
+
             const baseUrl = getWebSocketUrl()
-            // Construct correct portfolio feed URL
             const url = new URL(`${baseUrl}/ws/portfolio/${portfolioId}`)
             url.searchParams.set('token', token)
 
@@ -37,14 +94,17 @@ export function usePortfolioLiveFeed(portfolioId: string | null) {
             wsRef.current = ws
 
             ws.onopen = () => {
-                setConnectionState('connected')
+                if (!mountedRef.current) return
+                // Successful connection — reset the backoff counter.
+                retryCountRef.current = 0
+                setStatus('connected')
             }
 
             ws.onmessage = (event) => {
+                if (!mountedRef.current) return
                 try {
                     const data = JSON.parse(event.data)
                     if (data.type === 'HEARTBEAT') {
-                        // send PING back
                         ws.send(JSON.stringify({ type: 'PING' }))
                     } else if (data.type === 'PORTFOLIO_VALUE_UPDATE') {
                         setLastPricesTick(data.prices)
@@ -55,29 +115,39 @@ export function usePortfolioLiveFeed(portfolioId: string | null) {
             }
 
             ws.onclose = () => {
-                setConnectionState('disconnected')
+                if (!mountedRef.current) return
                 wsRef.current = null
-                // Wait and try reconnect
-                setTimeout(connect, 5000)
+                setStatus('reconnecting')
+
+                const delay = nextBackoffMs()
+                retryTimerRef.current = setTimeout(() => {
+                    if (mountedRef.current) connect()
+                }, delay)
             }
 
             ws.onerror = () => {
-                setConnectionState('error')
+                if (!mountedRef.current) return
+                setStatus('error')
             }
         }
 
         connect()
 
         return () => {
-            if (wsRef.current) {
-                wsRef.current.close()
-                wsRef.current = null
-            }
+            mountedRef.current = false
+            clearRetryTimer()
+            closeSocket()
         }
-    }, [portfolioId])
+    }, [portfolioId, clearRetryTimer, closeSocket])
 
     return {
-        connectionState,
-        lastPricesTick
+        /** Current WebSocket connection status. */
+        status,
+        /**
+         * @deprecated Use `status` instead.
+         * Kept for backward-compatibility with components that read `connectionState`.
+         */
+        connectionState: status,
+        lastPricesTick,
     }
 }

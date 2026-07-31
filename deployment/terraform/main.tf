@@ -9,19 +9,23 @@ module "vpc" {
 }
 
 module "rds" {
-  source         = "./modules/rds"
-  name_prefix    = local.name_prefix
-  vpc_id         = module.vpc.vpc_id
-  subnet_ids     = module.vpc.private_subnet_ids
-  instance_class = lookup(var.db_instance_class, terraform.workspace, "db.t4g.micro")
+  source                     = "./modules/rds"
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  instance_class             = lookup(var.db_instance_class, terraform.workspace, "db.t4g.micro")
+  secret_rotation_days       = var.secret_rotation_days
+  secret_rotation_lambda_arn = var.secret_rotation_lambda_arn
 }
 
 module "elasticache" {
-  source      = "./modules/elasticache"
-  name_prefix = local.name_prefix
-  vpc_id      = module.vpc.vpc_id
-  subnet_ids  = module.vpc.private_subnet_ids
-  node_type   = lookup(var.redis_node_type, terraform.workspace, "cache.t4g.micro")
+  source                     = "./modules/elasticache"
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  node_type                  = lookup(var.redis_node_type, terraform.workspace, "cache.t4g.micro")
+  secret_rotation_days       = var.secret_rotation_days
+  secret_rotation_lambda_arn = var.secret_rotation_lambda_arn
 }
 
 module "ecs" {
@@ -33,8 +37,11 @@ module "ecs" {
   task_cpu           = lookup(var.ecs_task_cpu, terraform.workspace, 256)
   task_memory        = lookup(var.ecs_task_memory, terraform.workspace, 512)
   db_secret_arn      = module.rds.db_secret_arn
+  redis_secret_arn   = module.elasticache.redis_secret_arn
   db_host            = module.rds.db_endpoint
   redis_host         = module.elasticache.redis_endpoint
+  ecs_min_capacity   = lookup(var.ecs_min_capacity, terraform.workspace, 1)
+  ecs_max_capacity   = lookup(var.ecs_max_capacity, terraform.workspace, 5)
 }
 
 module "s3_cloudfront" {

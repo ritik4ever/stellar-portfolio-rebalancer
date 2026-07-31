@@ -30,6 +30,7 @@ import {
     onAuthSessionRestored,
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
+import { ToastContainer } from './components/ui/ToastContainer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
 import {
     detectContractCapabilities,
@@ -46,7 +47,12 @@ import AdminOps from './pages/AdminOps'
 
 function App() {
     const queryClient = useQueryClient()
-    const [currentView, setCurrentView] = useState('landing')
+    const [currentView, setCurrentView] = useState(() => {
+        if (typeof window !== 'undefined' && window.location.pathname === '/visual-test-components') {
+            return 'visual-test-components'
+        }
+        return 'landing'
+    })
     const [publicKey, setPublicKey] = useState<string | null>(null)
     const [pendingConsentPublicKey, setPendingConsentPublicKey] = useState<string | null>(null)
     const [legalDoc, setLegalDoc] = useState<LegalDocType | null>(null)
@@ -56,6 +62,20 @@ function App() {
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
     const { notices, loadError, loading: readinessLoading, bootReady } = useReadinessReport()
+    
+    // Network detection and confirmation
+    const {
+        walletNetwork,
+        pendingWalletNetwork,
+        confirmNetworkSwitch,
+        cancelNetworkSwitch
+    } = useNetworkDetection()
+    
+    const handleConfirmNetworkSwitch = async () => {
+        confirmNetworkSwitch()
+        await queryClient.invalidateQueries()
+    }
+    
     const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
     const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
     const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
@@ -308,12 +328,7 @@ function App() {
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
             <RealtimeStatusBanner />
-            <BackendCapabilitiesBanner
-                notices={notices}
-                loadError={loadError}
-                loading={readinessLoading}
-                belowRealtimeBar={false}
-            />
+            <BackendCapabilitiesBanner belowRealtimeBar={false} />
             {showApiCompatibilityBanner && apiCompatibility ? (
                 <div
                     className={`fixed left-0 right-0 z-40 border-b px-4 py-3 text-sm ${
@@ -359,6 +374,14 @@ function App() {
                     }
                 }}
             />
+            {pendingWalletNetwork && walletNetwork && (
+                <NetworkSwitchModal
+                    currentNetwork={walletNetwork}
+                    pendingNetwork={pendingWalletNetwork}
+                    onConfirm={handleConfirmNetworkSwitch}
+                    onCancel={cancelNetworkSwitch}
+                />
+            )}
             <Onboarding />
             <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
@@ -418,6 +441,7 @@ function App() {
                 </div>
             )}
 
+            <ToastContainer />
             {pendingConsentPublicKey ? (
                 legalDoc ? (
                     <Legal doc={legalDoc} onBack={() => setLegalDoc(null)} />
