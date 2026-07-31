@@ -46,3 +46,12 @@ resource "aws_db_instance" "main" {
     Name = "${var.name_prefix}-db"
   }
 }
+
+resource "aws_secretsmanager_secret_rotation" "main" {
+  secret_id           = aws_db_instance.main.master_user_secret[0].secret_arn
+  rotation_lambda_arn = var.secret_rotation_lambda_arn
+
+  rotation_rules {
+    automatically_after_days = var.secret_rotation_days
+  }
+}
