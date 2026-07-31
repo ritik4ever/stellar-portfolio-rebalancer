@@ -43,8 +43,7 @@ import Compare from './pages/Compare'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
-import { useNetworkDetection } from './hooks/useNetworkDetection'
-import { NetworkSwitchModal } from './components/NetworkSwitchModal'
+import AdminOps from './pages/AdminOps'
 
 function App() {
     const queryClient = useQueryClient()
@@ -365,7 +364,7 @@ function App() {
                     {appCopy.checkingApiConfig}
                 </span>
             ) : null}
-            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} />
+            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} onNavigateToAdminOps={() => handleNavigate('admin-ops')} />
             <Shortcuts
                 onNewPortfolio={() => handleNavigate('setup')}
                 onOpenSettings={() => {
@@ -543,9 +542,9 @@ function App() {
                         onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
                     />
                 </ErrorBoundary>
-            ) : currentView === 'visual-test-components' ? (
-                <ErrorBoundary fallbackTitle="Visual Tests">
-                    <VisualTestComponents />
+            ) : currentView === 'admin-ops' ? (
+                <ErrorBoundary fallbackTitle="Admin Operations">
+                    <AdminOps />
                 </ErrorBoundary>
             ) : null}
         </div>

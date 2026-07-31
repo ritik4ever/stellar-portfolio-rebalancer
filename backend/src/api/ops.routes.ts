@@ -641,6 +641,24 @@ opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) =>
     }
 })
 
+opsRouter.post('/risk/circuit-breakers/:asset/reset', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { asset } = req.params
+        if (!asset) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Asset is required')
+        }
+
+        const upperAsset = asset.toUpperCase()
+        riskManagementService.resetCircuitBreaker(upperAsset)
+        logger.info('[ADMIN] Circuit breaker reset', { asset: upperAsset, adminPublicKey: req.adminPublicKey })
+
+        return ok(res, { message: `Circuit breaker reset for ${upperAsset}`, asset: upperAsset })
+    } catch (error) {
+        logger.error('[ERROR] Failed to reset circuit breaker', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 // ================================
 // PRICE DATA ROUTES
 // ================================

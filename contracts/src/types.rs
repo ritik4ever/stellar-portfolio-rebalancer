@@ -262,11 +262,10 @@ pub enum DataKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DCAConfig {
     pub enabled: bool,
-    pub amount: i128, // Fixed USDC amount per execution (in smallest units)
-    pub interval: u64, // Execution interval in seconds
+    pub amount: i128,        // Fixed USDC amount per execution (in smallest units)
+    pub interval: u64,       // Execution interval in seconds
     pub next_execution: u64, // Timestamp of next scheduled execution
 }
-
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]

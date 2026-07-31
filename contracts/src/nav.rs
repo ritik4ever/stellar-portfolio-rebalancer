@@ -1,7 +1,7 @@
-use crate::types::{DataKey, Error, NavSnapshot, Portfolio};
-use soroban_sdk::{Env, Vec, Symbol, symbol_short};
-use crate::reflector::ReflectorClient;
 use crate::portfolio::calculate_portfolio_value;
+use crate::reflector::ReflectorClient;
+use crate::types::{DataKey, Error, NavSnapshot, Portfolio};
+use soroban_sdk::{symbol_short, Env, Symbol, Vec};
 
 pub const MAX_NAV_SNAPSHOTS: u32 = 100;
 
@@ -38,7 +38,11 @@ pub fn snapshot_nav(env: &Env, portfolio_id: u64) -> Result<NavSnapshot, Error> 
     Ok(snapshot)
 }
 
-pub fn save_nav_snapshot(env: &Env, portfolio_id: u64, snapshot: &NavSnapshot) -> Result<(), Error> {
+pub fn save_nav_snapshot(
+    env: &Env,
+    portfolio_id: u64,
+    snapshot: &NavSnapshot,
+) -> Result<(), Error> {
     let key = DataKey::NavHistory(portfolio_id);
     let mut history: Vec<NavSnapshot> = env
         .storage()
@@ -55,17 +59,23 @@ pub fn save_nav_snapshot(env: &Env, portfolio_id: u64, snapshot: &NavSnapshot) -
     env.storage().persistent().set(&key, &history);
 
     env.events().publish(
+        (symbol_short!("portfolio"), Symbol::new(env, "nav_snapshot")),
         (
-            symbol_short!("portfolio"),
-            Symbol::new(env, "nav_snapshot"),
+            portfolio_id,
+            snapshot.usd_nav,
+            snapshot.sequence,
+            snapshot.timestamp,
         ),
-        (portfolio_id, snapshot.usd_nav, snapshot.sequence, snapshot.timestamp),
     );
 
     Ok(())
 }
 
-pub fn get_nav_history(env: &Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
+pub fn get_nav_history(
+    env: &Env,
+    portfolio_id: u64,
+    limit: u32,
+) -> Result<Vec<NavSnapshot>, Error> {
     let portfolio_key = DataKey::Portfolio(portfolio_id);
     if !env.storage().persistent().has(&portfolio_key) {
         return Err(Error::PortfolioNotFound);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Bug, ChevronDown, ChevronUp, RefreshCw, X, Plus, Minus } from 'lucide-react'
+import { Bug, ChevronDown, ChevronUp, RefreshCw, X, Shield } from 'lucide-react'
 import { API_CONFIG, testBrowserPrices } from '../config/api'
 import { API_RESOURCE_ROOT } from '../config/api'
 import { getFrontendDebugConfig } from '../utils/debug'
@@ -74,6 +74,7 @@ export function unlockDeveloperDrawer(): void {
 interface DeveloperDrawerProps {
     publicKey: string | null
     contractCapabilities?: ContractCapabilityReport | null
+    onNavigateToAdminOps?: () => void
 }
 
 function formatAge(ms: number | undefined): string {
@@ -371,6 +372,18 @@ const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey, contractCa
                             <p className="text-gray-500 dark:text-gray-400">
                                 Connect a wallet to run notification delivery tests.
                             </p>
+                        )}
+                        {onNavigateToAdminOps && (
+                            <section className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                                <button
+                                    type="button"
+                                    onClick={onNavigateToAdminOps}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                                >
+                                    <Shield className="h-4 w-4" />
+                                    Admin Operations
+                                </button>
+                            </section>
                         )}
                     </div>
                 </div>
