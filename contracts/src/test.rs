@@ -4099,3 +4099,231 @@ fn test_create_portfolio_global_cap_enforced() {
     );
     assert_eq!(result, Err(Ok(Error::GlobalPortfolioCapExceeded)));
 }
+
+// ── Cross-oracle validation tests ────────────────────────────────────────────
+
+mod coingecko_deviating {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockCoinGecko;
+
+    #[contractimpl]
+    impl MockCoinGecko {
+        pub fn price(_env: Env, _asset: Address) -> Option<i128> {
+            Some(90_00000000000000i128)
+        }
+    }
+}
+
+mod coingecko_within_threshold {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockCoinGeckoWithin;
+
+    #[contractimpl]
+    impl MockCoinGeckoWithin {
+        pub fn price(_env: Env, _asset: Address) -> Option<i128> {
+            // 1% deviation — within the default 3% threshold
+            Some(99_00000000000000i128)
+        }
+    }
+}
+
+#[test]
+fn test_oracle_deviation_uses_conservative_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let coingecko_id = env.register_contract(None, coingecko_deviating::MockCoinGecko);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+    client.set_coingecko_address(&coingecko_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    // Reflector mock returns price 100, CoinGecko returns 90 (10% lower).
+    // Deviation 10% > 3% threshold → conservative price (90) used.
+    // Portfolio value should be: 100 * 90 = 9_000 (in USD stroops if decimals are 7)
+    let portfolio = client.get_portfolio(&pid);
+    // With price 90 (90_00000000000000) and balance 100_0000000:
+    // value = (100_0000000 * 90_00000000000000) / 10^14 = 90_000000000
+    // But actual_balances are empty, so rebalance just records the portfolio.
+    // The total_value after rebalance uses price from oracle validation.
+    // Since mock reflector returns price 100 for lastprice, but get_validated_price
+    // should return 90 (conservative), total_value = 100_0000000 * 90 / 10^14
+    // Wait, the actual_balances are empty so calculate_portfolio_value uses
+    // portfolio.current_balances which were set by deposit.
+    // balance = 100_0000000, validated_price = 90_00000000000000
+    // value = (100_0000000 * 90_00000000000000) / 10^14 = 900_00000000000 / 10^14
+    // Actually: 100_0000000 = 1_000_000_000 (1e9 with 7 decimals for 100 tokens)
+    // price = 90_00000000000000 = 9e15
+    // value = (1e9 * 9e15) / 1e14 = 9e10 = 90_000_000_000
+    // The Reflector-only price would give: (1e9 * 1e16) / 1e14 = 1e11 = 100_000_000_000
+    // The conservative value should be 90_000_000_000
+    let value_without_cg = (100_0000000i128 * 100_00000000000000i128) / 10i128.pow(14);
+    let value_with_cg = (100_0000000i128 * 90_00000000000000i128) / 10i128.pow(14);
+    // With oracle validation, conservative price (90) should have been used.
+    // total_value depends on build_rebalance_preview which calls calculate_portfolio_value
+    // which now uses get_validated_price.
+    assert_eq!(
+        portfolio.total_value, value_with_cg,
+        "conservative price should be used when deviation exceeds threshold"
+    );
+    assert_ne!(
+        portfolio.total_value, value_without_cg,
+        "should NOT use the higher reflector price"
+    );
+
+    // Verify OracleDeviationWarning event was emitted
+    let events = env.events().all();
+    let mut found_warning = false;
+    for event in events.iter() {
+        let (_contract_id, topics, _data): (Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val) = event;
+        if topics.len() >= 1 {
+            if let soroban_sdk::Val::Symbol(sym) = topics.get(0).unwrap() {
+                if sym == soroban_sdk::Symbol::new(&env, "oracle_dev_warn") {
+                    found_warning = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        found_warning,
+        "OracleDeviationWarning event must be emitted on price deviation"
+    );
+}
+
+#[test]
+fn test_oracle_deviation_within_threshold_no_warning() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let coingecko_id = env.register_contract(None, coingecko_within_threshold::MockCoinGeckoWithin);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+    client.set_coingecko_address(&coingecko_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    // 1% deviation is within 3% threshold → no warning emitted, reflector price used
+    let events = env.events().all();
+    let mut found_warning = false;
+    for event in events.iter() {
+        let (_contract_id, topics, _data): (Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val) = event;
+        if topics.len() >= 1 {
+            if let soroban_sdk::Val::Symbol(sym) = topics.get(0).unwrap() {
+                if sym == soroban_sdk::Symbol::new(&env, "oracle_dev_warn") {
+                    found_warning = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        !found_warning,
+        "no OracleDeviationWarning when deviation is within threshold"
+    );
+
+    // Reflector price (100) should be used since deviation is within threshold
+    let portfolio = client.get_portfolio(&pid);
+    let expected_value =
+        (100_0000000i128 * 100_00000000000000i128) / 10i128.pow(14);
+    assert_eq!(portfolio.total_value, expected_value);
+}
+
+#[test]
+fn test_oracle_deviation_no_coingecko_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    // No CoinGecko configured → reflector price used, no warning
+    let events = env.events().all();
+    let mut found_warning = false;
+    for event in events.iter() {
+        let (_contract_id, topics, _data): (Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val) = event;
+        if topics.len() >= 1 {
+            if let soroban_sdk::Val::Symbol(sym) = topics.get(0).unwrap() {
+                if sym == soroban_sdk::Symbol::new(&env, "oracle_dev_warn") {
+                    found_warning = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(!found_warning, "no warning when no CoinGecko configured");
+
+    let portfolio = client.get_portfolio(&pid);
+    let expected_value =
+        (100_0000000i128 * 100_00000000000000i128) / 10i128.pow(14);
+    assert_eq!(portfolio.total_value, expected_value);
+}

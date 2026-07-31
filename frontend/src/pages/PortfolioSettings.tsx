@@ -1,6 +1,6 @@
 import { Archive, ArrowLeft, Save, Trash2, Snowflake } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Toast } from "../components/ui/Toast";
+import React, { useCallback, useEffect, useState } from "react";
+import { useToast } from "../context/ToastContext";
 
 interface AllocationSettings {
   minAllocation: number;
@@ -97,13 +97,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
   const [frozenAssets, setFrozenAssets] = useState<string[]>([]);
   const [savedFrozenAssets, setSavedFrozenAssets] = useState<string[]>([]);
 
-  // Toast state
-  const [toast, setToast] = useState<{
-    title: string;
-    description: string;
-    tone: "success" | "error";
-  } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { showToast } = useToast();
 
   // Check if any section has unsaved changes
   const hasUnsavedChanges =
@@ -140,14 +134,11 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     [hasUnsavedChanges, onNavigate],
   );
 
-  // Show toast notification
-  const showToast = useCallback(
+  const notify = useCallback(
     (title: string, description: string, tone: "success" | "error") => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      setToast({ title, description, tone });
-      toastTimer.current = setTimeout(() => setToast(null), 3000);
+      showToast({ title, description, tone });
     },
-    [],
+    [showToast],
   );
 
   // Save individual sections
@@ -156,13 +147,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedAllocationSettings(allocationSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Allocation settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save allocation settings", "error");
+      notify("Save failed", "Could not save allocation settings", "error");
     }
   };
 
@@ -170,13 +161,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedRebalancingSettings(rebalancingSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Rebalancing settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save rebalancing settings", "error");
+      notify("Save failed", "Could not save rebalancing settings", "error");
     }
   };
 
@@ -184,13 +175,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedNotificationSettings(notificationSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Notification settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save notification settings", "error");
+      notify("Save failed", "Could not save notification settings", "error");
     }
   };
 
@@ -204,9 +195,9 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedFrozenAssets(frozenAssets);
-      showToast("Settings saved", "Asset freeze settings have been updated", "success");
+      notify("Settings saved", "Asset freeze settings have been updated", "success");
     } catch (error) {
-      showToast("Save failed", "Could not save asset freeze settings", "error");
+      notify("Save failed", "Could not save asset freeze settings", "error");
     }
   };
 
@@ -214,13 +205,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedRiskSettings(riskSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Risk management settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save risk settings", "error");
+      notify("Save failed", "Could not save risk settings", "error");
     }
   };
 
@@ -231,7 +222,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
         "Are you sure you want to archive this portfolio? This action can be undone.",
       )
     ) {
-      showToast(
+      notify(
         "Portfolio archived",
         "Your portfolio has been archived",
         "success",
@@ -252,7 +243,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
           'This will permanently delete your portfolio and all associated data. Type "DELETE" to confirm.',
         )
       ) {
-        showToast(
+        notify(
           "Portfolio deleted",
           "Your portfolio has been permanently deleted",
           "success",
@@ -261,14 +252,6 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       }
     }
   };
-
-  // Cleanup toast timer
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    },
-    [],
-  );
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -862,16 +845,6 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
           </section>
         </div>
 
-        {/* Toast notification */}
-        {toast && (
-          <div className="fixed bottom-4 right-4 z-50">
-            <Toast
-              title={toast.title}
-              description={toast.description}
-              tone={toast.tone}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
