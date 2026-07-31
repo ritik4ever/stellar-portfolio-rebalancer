@@ -29,9 +29,9 @@
         "info": 0,
         "low": 0,
         "moderate": 1,
-        "high": 3,
+        "high": 5,
         "critical": 0,
-        "total": 4
+        "total": 6
       }
     }
   }

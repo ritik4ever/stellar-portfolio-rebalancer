@@ -15,6 +15,7 @@ import { getRateLimitStoreType } from './middleware/rateLimit.js'
 import { initializeSentry, setupProcessErrorHandlers, captureException } from './observability/sentry.js'
 import { formatStartupSelfTestReport, runStartupSelfTest } from './monitoring/startupSelfTest.js'
 import { buildCorsOptions, enforceCorsOriginAllowlist } from './http/corsSecurity.js'
+import { blockUnsupportedMethods } from './middleware/methodNotAllowed.js'
 import spec from './openapi/spec.js'
 
 const isStartupSelfTestRequested = (argv: string[] = process.argv): boolean => argv.includes('--startup-self-test')
@@ -52,6 +53,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     app.use(enforceCorsOriginAllowlist(config.corsOrigins))
     app.use(cors(corsOptions))
     app.options('*', cors(corsOptions))
+    app.use(blockUnsupportedMethods)
     app.use(requestContextMiddleware)
     app.use(metricsMiddleware)
     app.use(express.json({ limit: '10mb' }))
