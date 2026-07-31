@@ -24,7 +24,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 5000
+                        "u32": 7000
                       }
                     },
                     {
@@ -32,7 +32,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                       },
                       "val": {
-                        "u32": 5000
+                        "u32": 3000
                       }
                     }
                   ]
@@ -91,7 +91,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 200
+                    "lo": 1000000
                   }
                 },
                 {
@@ -122,7 +122,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500000
                   }
                 },
                 {
@@ -140,7 +140,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 0,
-    "timestamp": 1000,
+    "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -261,7 +261,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 200
+                                "lo": 1000000
                               }
                             }
                           },
@@ -272,7 +272,7 @@
                             "val": {
                               "i128": {
                                 "hi": 0,
-                                "lo": 100
+                                "lo": 500000
                               }
                             }
                           }
@@ -292,7 +292,7 @@
                         "symbol": "last_rebalance"
                       },
                       "val": {
-                        "u64": 1000
+                        "u64": 0
                       }
                     },
                     {
@@ -338,7 +338,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                             },
                             "val": {
-                              "u32": 5000
+                              "u32": 7000
                             }
                           },
                           {
@@ -346,7 +346,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                             },
                             "val": {
-                              "u32": 5000
+                              "u32": 3000
                             }
                           }
                         ]
@@ -448,7 +448,7 @@
                           ]
                         },
                         "val": {
-                          "u64": 1000
+                          "u64": 0
                         }
                       },
                       {
@@ -712,7 +712,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       },
                       "val": {
-                        "u32": 5000
+                        "u32": 7000
                       }
                     },
                     {
@@ -720,7 +720,7 @@
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                       },
                       "val": {
-                        "u32": 5000
+                        "u32": 3000
                       }
                     }
                   ]
@@ -843,7 +843,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 200
+                    "lo": 1000000
                   }
                 },
                 {
@@ -882,7 +882,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 200
+                    "lo": 1000000
                   }
                 }
               ]
@@ -942,7 +942,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500000
                   }
                 },
                 {
@@ -981,7 +981,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500000
                   }
                 }
               ]
@@ -1027,7 +1027,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "check_rebalance_needed"
+                "symbol": "get_portfolio_value_usd"
               }
             ],
             "data": {
@@ -1095,7 +1095,7 @@
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 10000000000000000
+                      "lo": 5000000000000000
                     }
                   }
                 },
@@ -1104,7 +1104,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1171,7 +1171,7 @@
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 10000000000000000
+                      "lo": 5000000000000000
                     }
                   }
                 },
@@ -1180,7 +1180,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1247,7 +1247,7 @@
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 10000000000000000
+                      "lo": 5000000000000000
                     }
                   }
                 },
@@ -1256,7 +1256,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1323,7 +1323,7 @@
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 10000000000000000
+                      "lo": 5000000000000000
                     }
                   }
                 },
@@ -1332,7 +1332,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 0
                   }
                 }
               ]
@@ -1351,166 +1351,173 @@
           "v0": {
             "topics": [
               {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
-              },
-              {
-                "symbol": "lastprice"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "Stellar"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
                 "symbol": "fn_return"
               },
               {
-                "symbol": "lastprice"
+                "symbol": "get_portfolio_value_usd"
               }
             ],
             "data": {
               "map": [
                 {
                   "key": {
-                    "symbol": "price"
+                    "symbol": "assets"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "asset"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "current_pct"
+                            },
+                            "val": {
+                              "u32": 6666
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "drift"
+                            },
+                            "val": {
+                              "i32": -334
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "oracle_price"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 5000000000000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "quantity"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 1000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "target_pct"
+                            },
+                            "val": {
+                              "u32": 7000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "usd_value"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 50000000
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "asset"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "current_pct"
+                            },
+                            "val": {
+                              "u32": 3333
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "drift"
+                            },
+                            "val": {
+                              "i32": 333
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "oracle_price"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 5000000000000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "quantity"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 500000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "target_pct"
+                            },
+                            "val": {
+                              "u32": 3000
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "usd_value"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 25000000
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_usd_value"
                   },
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 10000000000000000
+                      "lo": 75000000
                     }
                   }
-                },
-                {
-                  "key": {
-                    "symbol": "timestamp"
-                  },
-                  "val": {
-                    "u64": 1000
-                  }
                 }
               ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
-              },
-              {
-                "symbol": "lastprice"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "Stellar"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "lastprice"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "price"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 10000000000000000
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "timestamp"
-                  },
-                  "val": {
-                    "u64": 1000
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "check_rebalance_needed"
-              }
-            ],
-            "data": {
-              "bool": true
             }
           }
         }

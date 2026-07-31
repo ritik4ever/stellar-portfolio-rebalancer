@@ -5,21 +5,23 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+use soroban_sdk::token::Client as TokenClient;
 
 mod circuit_breaker;
+mod events;
 mod nav;
 mod portfolio;
 mod reflector;
 mod stop_loss;
 mod strategies;
-#[cfg(test)]
+#[cfg(all(test, feature = "testutils"))]
 mod test;
 mod types;
 
-use strategies::dca;
-
 pub use reflector::*;
 pub use types::*;
+// Re-export for use by property tests (no testutils required).
+pub use portfolio::value_to_balance;
 pub use events::emit_dca_executed;
 pub use strategies::dca;
 pub use strategies::*;
@@ -832,7 +834,7 @@ impl PortfolioRebalancer {
         let portfolio: PortfolioOption = if let Some(p) = env
             .storage()
             .persistent()
-            .get::<Portfolio>(&DataKey::PortfolioV2(portfolio_id))
+            .get(&DataKey::PortfolioV2(portfolio_id))
         {
             PortfolioOption::Some(p)
         } else if let Some(legacy) = env
@@ -860,19 +862,19 @@ impl PortfolioRebalancer {
         }
     }
 
-    pub fn set_circuit_breaker_config(
+    /// Set per-portfolio circuit breaker config (admin or owner).
+    pub fn set_pf_circuit_breaker(
         env: Env,
         portfolio_id: u64,
         spike_threshold_bps: u32,
         window_seconds: u64,
+        caller: Address,
     ) -> Result<(), Error> {
+        caller.require_auth();
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let caller_is_admin = env.auth().is_authorized(&admin);
-        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
-        
-        if !caller_is_admin && !caller_is_owner {
+        if caller != admin && caller != portfolio.user {
             return Err(Error::PortfolioNotFound);
         }
         
@@ -897,14 +899,13 @@ impl PortfolioRebalancer {
         env: Env,
         portfolio_id: u64,
         global_max_slippage_bps: u32,
+        caller: Address,
     ) -> Result<(), Error> {
+        caller.require_auth();
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let caller_is_admin = env.auth().is_authorized(&admin);
-        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
-        
-        if !caller_is_admin && !caller_is_owner {
+        if caller != admin && caller != portfolio.user {
             return Err(Error::PortfolioNotFound);
         }
         
@@ -1197,12 +1198,12 @@ impl PortfolioRebalancer {
                 let token_client = token::Client::new(env, &asset);
                 token_client.transfer(
                     &env.current_contract_address(),
-                    &fee_config.fee_recipient,
+                    &fee_recipient,
                     &fee_amount,
                 );
                 env.events().publish(
                     (Symbol::new(env, "fee_collected"), asset.clone()),
-                    (fee_amount, fee_config.fee_recipient.clone(), current_time),
+                    (fee_amount, fee_recipient.clone(), current_time),
                 );
             }
         }
@@ -1235,14 +1236,12 @@ impl PortfolioRebalancer {
         nav::get_nav_history(&env, portfolio_id, limit)
     }
 
-    pub fn close_portfolio(env: Env, portfolio_id: u64) -> Result<(), Error> {
+    pub fn close_portfolio(env: Env, portfolio_id: u64, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
         let portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let caller_is_admin = env.auth().is_authorized(&admin);
-        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
-        
-        if !caller_is_admin && !caller_is_owner {
+        if caller != admin && caller != portfolio.user {
             return Err(Error::PortfolioNotFound);
         }
         

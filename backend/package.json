@@ -31,7 +31,8 @@
         "replay:run": "tsx scripts/verify-replay.ts replay",
         "sdk:generate": "tsx scripts/generate-sdk.ts",
         "api:validate": "tsx scripts/validate-api-docs.ts",
-        "indexer:reindex": "tsx scripts/reindex-events.ts"
+        "indexer:reindex": "tsx scripts/reindex-events.ts",
+        "lint": "tsc --noEmit"
     },
     "dependencies": {
         "@aws-sdk/client-secrets-manager": "^3.1098.0",
@@ -59,6 +60,7 @@
         "node-cron": "^3.0.3",
         "node-telegram-bot-api": "^0.67.0",
         "nodemailer": "^8.0.1",
+        "axios": "^1.7.9",
         "pdfkit": "^0.17.2",
         "pg": "^8.11.3",
         "pino": "^9.6.0",

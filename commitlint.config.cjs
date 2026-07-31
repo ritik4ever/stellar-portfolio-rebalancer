@@ -12,7 +12,15 @@ const conventionalTypes = [
   'revert',
 ]
 
+const IGNORE_PATTERNS = [
+  /^Merge /,
+  /^Resolve merge conflict/,
+  /^Auto-merge/,
+]
+
 module.exports = {
+  extends: ['@commitlint/config-conventional'],
+  defaultIgnores: true,
   rules: {
     'body-leading-blank': [2, 'always'],
     'footer-leading-blank': [2, 'always'],
@@ -23,4 +31,7 @@ module.exports = {
     'type-empty': [2, 'never'],
     'type-enum': [2, 'always', conventionalTypes],
   },
+  ignores: [
+    (commit) => IGNORE_PATTERNS.some((pattern) => pattern.test(commit)),
+  ],
 }

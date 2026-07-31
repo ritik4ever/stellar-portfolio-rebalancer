@@ -370,6 +370,7 @@ export async function stopQueueScheduler(): Promise<void> {
     const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
     const userAlertsQueue = getQueueByName('user-alerts')
 
+    const queues = [
     for (const queue of [
         portfolioCheckQueue,
         autoRebalanceCheckQueue,
@@ -377,6 +378,9 @@ export async function stopQueueScheduler(): Promise<void> {
         analyticsCompactionQueue,
         idempotencyCleanupQueue,
         userAlertsQueue,
+    ]
+
+    for (const queue of queues) {
     ]) {
         if (queue) {
             const repeatableJobs = await queue.getRepeatableJobs()

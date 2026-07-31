@@ -1,2 +1,5 @@
 [toolchain]
-channel = "stable"
+# Pin to 1.88 — minimum version supporting MSRV of transitive
+# dependencies (darling 0.23, serde_with 3.21, time 0.3, wasip2).
+# testutils is opt-in to avoid ed25519-dalek 3.0.0 incompatibility.
+channel = "1.88"

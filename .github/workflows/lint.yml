@@ -16,14 +16,14 @@ jobs:
       - name: Frontend lint
         working-directory: frontend
         run: |
-          npm ci
-          npm run lint || echo "No frontend lint configured"
+          npm ci --legacy-peer-deps
+          npm run lint --if-present
 
       - name: Backend lint
         working-directory: backend
         run: |
-          npm ci
-          npm run lint || echo "No backend lint configured"
+          npm ci --legacy-peer-deps
+          npm run lint --if-present
 
   commit-messages:
     name: Commit message lint
