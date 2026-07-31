@@ -1,2 +1,4 @@
 [toolchain]
-channel = "stable"
+# Pin to 1.91 — MSRV of soroban-sdk 27.x.
+# testutils is opt-in to avoid ed25519-dalek 3.0.0 incompatibility.
+channel = "1.91.0"

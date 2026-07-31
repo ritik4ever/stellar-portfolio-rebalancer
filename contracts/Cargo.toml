@@ -8,16 +8,24 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 soroban-sdk = "27.0.2"
+# Force ed25519-dalek 2.x — soroban-env-host depends on
+# ed25519-dalek >=2.0.0 (unbounded) which resolves to 3.0.0.
+# 3.0.0 is incompatible with the testutils module.
+ed25519-dalek = "=2.2.0"
 
 [dev-dependencies]
-soroban-sdk = { version = "27.0.2", features = ["testutils"] }
+soroban-sdk = "27.0.2"
 proptest = "1.4.0"
 ed25519-dalek = "2.2.0"
 
 [features]
 default = []
+# testutils enables soroban-sdk test utilities (needed for unit & integration tests).
+# It is NOT enabled by default to avoid pulling in soroban-env-host testutils
+# which has an ed25519-dalek 3.0.0 incompatibility on newer Rust versions.
+# Use `cargo test --features testutils` for unit/integration tests.
 testutils = ["soroban-sdk/testutils"]
-integration = []
+integration = ["testutils"]
 
 [profile.release]
 opt-level = "z"
