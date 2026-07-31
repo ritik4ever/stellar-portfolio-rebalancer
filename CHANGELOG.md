@@ -104,6 +104,11 @@ Release changelog entries are generated into these sections:
 
 ### Added
 
+- Multi-portfolio dashboard summary endpoint `GET /api/v1/portfolios/summary?userAddress=ADDR` ([#974](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/974))
+  - Returns `id`, `name`, `total_value_usd`, `drift_status`, and `last_rebalanced` for every portfolio belonging to one address in a single request, replacing one call per portfolio
+  - Resolves prices once from the oracle cache and shares them across the whole response; an address with no portfolios skips the price lookup entirely and returns an empty array
+  - `drift_status` is `ok`, `warning`, or `critical`, measured against each portfolio's own rebalance threshold
+
 - Public roadmap with Now, Next, Later buckets ([#573](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/573))
   - Created `docs/ROADMAP.md` with detailed project roadmap
   - Added roadmap summary table to `README.md` for quick reference
@@ -120,6 +125,10 @@ Release changelog entries are generated into these sections:
 - Sharded backend test execution in CI (4 parallel shards with merged coverage and threshold enforcement) plus `test:shard`/`test:merge-coverage` scripts and contributor docs for reproducing it locally.
 - Portable health smoke script (`scripts/health-smoke.sh`, `npm run smoke`) that probes `/health`, `/api/health`, `/ready`, and `/metrics` across local/staging/prod with a clear pass/fail summary, documented in OPERATIONS.md and API.md.
 - Tightened generated-artifact guard: `backend/openapi.json` freshness is now verified by regenerating from source and diffing (replacing a heuristic that referenced a non-existent spec path), wired into the Generated Artifact Guard workflow and documented in backend/docs/openapi.md.
+
+### Fixed
+
+- Portfolio reads dropped the stored `name` and `description`: `rowToPortfolio` never mapped the two columns, so both came back undefined from every read path. A versioned `PUT /portfolio/:id` then merged that undefined over the stored row and wrote the name back as `NULL`, silently erasing it.
 
 ## [1.3.0] - 2026-04-27
 

@@ -43,6 +43,8 @@ import Compare from './pages/Compare'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
+import { useNetworkDetection } from './hooks/useNetworkDetection'
+import { NetworkSwitchModal } from './components/NetworkSwitchModal'
 
 function App() {
     const queryClient = useQueryClient()
@@ -56,6 +58,20 @@ function App() {
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
     const { notices, loadError, loading: readinessLoading, bootReady } = useReadinessReport()
+    
+    // Network detection and confirmation
+    const {
+        walletNetwork,
+        pendingWalletNetwork,
+        confirmNetworkSwitch,
+        cancelNetworkSwitch
+    } = useNetworkDetection()
+    
+    const handleConfirmNetworkSwitch = async () => {
+        confirmNetworkSwitch()
+        await queryClient.invalidateQueries()
+    }
+    
     const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
     const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
     const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
@@ -308,12 +324,7 @@ function App() {
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
             <RealtimeStatusBanner />
-            <BackendCapabilitiesBanner
-                notices={notices}
-                loadError={loadError}
-                loading={readinessLoading}
-                belowRealtimeBar={false}
-            />
+            <BackendCapabilitiesBanner belowRealtimeBar={false} />
             {showApiCompatibilityBanner && apiCompatibility ? (
                 <div
                     className={`fixed left-0 right-0 z-40 border-b px-4 py-3 text-sm ${
@@ -359,6 +370,14 @@ function App() {
                     }
                 }}
             />
+            {pendingWalletNetwork && walletNetwork && (
+                <NetworkSwitchModal
+                    currentNetwork={walletNetwork}
+                    pendingNetwork={pendingWalletNetwork}
+                    onConfirm={handleConfirmNetworkSwitch}
+                    onCancel={cancelNetworkSwitch}
+                />
+            )}
             <Onboarding />
             <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
