@@ -26,6 +26,8 @@ export const idempotencyMiddleware: RequestHandler = async (req, res, next) => {
         ?? (req.headers['x-public-key'] as string | undefined)
         ?? 'anonymous'
 
+    const scopedKey = `${requestUser}:${key}`
+
     const requestHash = createHash('sha256')
         .update(req.method)
         .update(req.path)
@@ -33,8 +35,8 @@ export const idempotencyMiddleware: RequestHandler = async (req, res, next) => {
         .update(requestUser)
         .digest('hex')
 
-    const existingRedis = await redisGetIdempotencyResult(key)
-    const existing = existingRedis ?? dbGetIdempotencyResult(key)
+    const existingRedis = await redisGetIdempotencyResult(scopedKey)
+    const existing = existingRedis ?? dbGetIdempotencyResult(scopedKey)
 
     if (existing) {
         if (existing.requestHash !== requestHash) {
@@ -65,10 +67,10 @@ export const idempotencyMiddleware: RequestHandler = async (req, res, next) => {
     res.json = (body: unknown) => {
         try {
             dbStoreIdempotencyResult(
-                key, requestHash, req.method, req.path, res.statusCode, body
+                scopedKey, requestHash, req.method, req.path, res.statusCode, body
             )
             redisStoreIdempotencyResult(
-                key, requestHash, req.method, req.path, res.statusCode, body
+                scopedKey, requestHash, req.method, req.path, res.statusCode, body
             )
         } catch {
             // Never fail the actual request due to idempotency storage errors
