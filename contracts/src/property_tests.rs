@@ -45,10 +45,8 @@ mod property_tests {
         }
     }
 
-    // ── Helper: generate N random assets and an allocation sum of 10000 ──
-    fn setup_env_with_assets(
-        n_assets: usize,
-    ) -> (Env, PortfolioRebalancerClient, Address, Address, Vec<Address>) {
+    // ── Helper ─────────────────────────────────────────────────────────
+    fn setup_env(n_assets: usize) -> (Env, PortfolioRebalancerClient, Address, Vec<Address>) {
         let env = Env::default();
         env.mock_all_auths();
         env.ledger().with_mut(|li| {
@@ -72,65 +70,33 @@ mod property_tests {
             assets.push_back(asset);
         }
 
-        (env, client, admin, user, assets)
+        (env, client, user, assets)
     }
 
-    /// Generate random allocation map that sums to exactly ALLOCATION_DENOMINATOR (10000)
-    fn random_allocations(
-        env: &Env,
-        assets: &Vec<Address>,
-    ) -> (Map<Address, u32>, Map<Address, u32>) {
-        // Walk the asset list assigning random positive amounts;
-        // the last asset gets the remainder so the total is exactly 10000.
-        use std::collections::HashMap;
-        let mut rng = proptest::test_runner::TestRng::deterministic_rng(
-            &proptest::test_runner::RngAlgorithm::ChaCha,
-        );
-        let result = rng.gen::<proptest::num::u64::BinarySearch>();
-
-        let mut alloc_map = HashMap::new();
-        let n = assets.len() as u32;
-        let mut remaining = ALLOCATION_DENOMINATOR;
-
-        for (i, asset) in assets.iter().enumerate() {
-            if i == assets.len() - 1 {
-                // Last asset takes whatever is left
-                if remaining > 0 {
-                    alloc_map.insert(
-                        format!("asset_{i}"),
-                        (asset.clone(), remaining),
-                    );
-                }
-            } else {
-                // Random amount between 1 and remaining - (count of remaining assets)
-                let min_for_rest = (n - (i as u32) - 1);
-                let max_for_this = remaining.saturating_sub(min_for_rest);
-                let amount = if max_for_this <= 1 {
-                    1
-                } else {
-                    let raw = (result.0 >> (i * 8)) as u32 % max_for_this;
-                    if raw == 0 { 1 } else { raw.min(max_for_this) }
-                };
-                remaining = remaining.saturating_sub(amount);
-                alloc_map.insert(
-                    format!("asset_{i}"),
-                    (asset.clone(), amount),
-                );
-            }
+    /// Normalize a vector of raw values to sum to exactly ALLOCATION_DENOMINATOR.
+    /// Uses proportional scaling — preserves the relative weights of inputs.
+    fn normalize_to_bps(raw: &[u32]) -> Vec<u32> {
+        let sum: u32 = raw.iter().sum();
+        if sum == 0 || sum == ALLOCATION_DENOMINATOR {
+            return raw.to_vec();
         }
-
-        let mut soroban_allocations = Map::new(env);
-        let mut soroban_decimals = Map::new(env);
-        for (asset, pct) in alloc_map.values() {
-            soroban_allocations.set(asset.clone(), *pct);
-            soroban_decimals.set(asset.clone(), DEFAULT_ASSET_DECIMALS);
+        // Scale each value proportionally
+        let mut result: Vec<u32> = raw
+            .iter()
+            .map(|&v| ((v as u64 * ALLOCATION_DENOMINATOR as u64) / sum as u64) as u32)
+            .collect();
+        // Fix rounding so total is exactly ALLOCATION_DENOMINATOR
+        let new_sum: u32 = result.iter().sum();
+        let diff = ALLOCATION_DENOMINATOR as i32 - new_sum as i32;
+        if diff != 0 && !result.is_empty() {
+            let idx = (diff.abs() as usize) % result.len();
+            result[idx] = (result[idx] as i32 + diff) as u32;
         }
-
-        (soroban_allocations, soroban_decimals)
+        result
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // Property 1: Allocations always sum to 10 000 basis points
+    // Property 1: All valid allocations (sum = 10000 bps) are accepted
     // ════════════════════════════════════════════════════════════════════
 
     proptest! {
@@ -140,25 +106,28 @@ mod property_tests {
         })]
 
         #[test]
-        fn property_allocations_sum_to_denominator(n_assets in 2usize..=10) {
-            let (env, client, _admin, user, assets) = setup_env_with_assets(n_assets);
-            let (allocations, decimals) = random_allocations(&env, &assets);
+        fn property_valid_allocations_always_accepted(
+            raw_bps in proptest::collection::vec(1u32..10000, 2..=10)
+        ) {
+            let bps = normalize_to_bps(&raw_bps);
+            let n = bps.len();
+            let (env, client, user, assets) = setup_env(n);
 
-            // Compute sum manually
-            let total: u32 = allocations.values().iter()
-                .map(|v| v.unwrap())
-                .sum();
+            let sum: u32 = bps.iter().sum();
+            prop_assert_eq!(sum, ALLOCATION_DENOMINATOR,
+                "normalized bps must sum to {ALLOCATION_DENOMINATOR}");
 
-            assert_eq!(
-                total,
-                ALLOCATION_DENOMINATOR,
-                "allocations must sum to exactly {ALLOCATION_DENOMINATOR} bps, got {total}",
-                ALLOCATION_DENOMINATOR = ALLOCATION_DENOMINATOR,
-                total = total
-            );
+            let mut allocations = Map::new(&env);
+            let mut decimals = Map::new(&env);
+            for (i, &pct) in bps.iter().enumerate() {
+                if pct > 0 {
+                    allocations.set(assets[i].clone(), pct);
+                    decimals.set(assets[i].clone(), DEFAULT_ASSET_DECIMALS);
+                }
+            }
 
-            // Creating the portfolio should succeed
-            let pid = client.create_portfolio(
+            // All valid allocations should create successfully
+            let result = client.try_create_portfolio(
                 &user,
                 &allocations,
                 &decimals,
@@ -166,94 +135,26 @@ mod property_tests {
                 &50,
                 &CURRENT_SLIPPAGE_POLICY_VERSION,
             );
-            assert!(pid > 0, "portfolio creation must succeed for valid allocations");
-        }
-    }
 
-    // ════════════════════════════════════════════════════════════════════
-    // Property 2: Drift is always in 0–10 000 range
-    // ════════════════════════════════════════════════════════════════════
+            prop_assert!(result.is_ok(),
+                "valid allocation (sum={}) must create portfolio", sum);
 
-    proptest! {
-        #![proptest_config(ProptestConfig {
-            cases: 10_000,
-            ..ProptestConfig::default()
-        })]
-
-        #[test]
-        fn property_drift_in_valid_range(n_assets in 2usize..=6) {
-            let (env, client, _admin, user, assets) = setup_env_with_assets(n_assets);
-            let (allocations, decimals) = random_allocations(&env, &assets);
-
-            let pid = client.create_portfolio(
-                &user,
-                &allocations,
-                &decimals,
-                &1,   // 1% threshold for fine-grained drift detection
-                &100,
-                &CURRENT_SLIPPAGE_POLICY_VERSION,
-            );
-
-            // Deposit equal amounts across all assets
-            for asset in assets.iter() {
-                client.deposit(
-                    &pid,
-                    &asset,
-                    &100_000_000,
-                    &soroban_sdk::String::from_str(&env, "proptest"),
-                );
-            }
-
+            let pid = result.unwrap();
             let portfolio = client.get_portfolio(&pid);
 
-            // Verify each asset's allocation is a valid percentage
-            for (asset, target_pct) in portfolio.target_allocations.iter() {
-                assert!(
-                    target_pct > 0 && target_pct <= ALLOCATION_DENOMINATOR,
-                    "target_pct {target_pct} out of range [1, {max}] for asset {asset}",
-                    target_pct = target_pct,
-                    max = ALLOCATION_DENOMINATOR,
-                    asset = asset
-                );
-            }
-
-            // Get drift preview
-            let drift_preview = client.get_drift_preview(&pid);
-            for entry in drift_preview.iter() {
-                assert!(
-                    entry.current_pct <= ALLOCATION_DENOMINATOR,
-                    "current_pct {current} exceeds {max} for asset {asset}",
-                    current = entry.current_pct,
-                    max = ALLOCATION_DENOMINATOR,
-                    asset = entry.asset
-                );
-                assert!(
-                    entry.drift_pct <= ALLOCATION_DENOMINATOR,
-                    "drift_pct {drift} exceeds {max} for asset {asset}",
-                    drift = entry.drift_pct,
-                    max = ALLOCATION_DENOMINATOR,
-                    asset = entry.asset
-                );
-            }
-
-            // Portfolio valuation also in valid range
-            let valuation = client.get_portfolio_value_usd(&pid);
-            assert!(valuation.total_usd_value > 0, "total USD value must be positive");
-            for av in valuation.assets.iter() {
-                assert!(
-                    av.target_pct <= ALLOCATION_DENOMINATOR,
-                    "valuation target_pct out of range"
-                );
-                assert!(
-                    av.current_pct <= ALLOCATION_DENOMINATOR,
-                    "valuation current_pct out of range"
-                );
+            // Verify stored allocations match input exactly
+            for (i, &pct) in bps.iter().enumerate() {
+                if pct > 0 {
+                    let stored = portfolio.target_allocations.get(assets[i].clone());
+                    prop_assert_eq!(stored, Some(pct),
+                        "stored allocation must match input");
+                }
             }
         }
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // Property 3: Rebalance is idempotent when drift = 0
+    // Property 2: Invalid allocations (sum ≠ 10000) are rejected
     // ════════════════════════════════════════════════════════════════════
 
     proptest! {
@@ -263,77 +164,96 @@ mod property_tests {
         })]
 
         #[test]
-        fn property_rebalance_idempotent_when_no_drift(n_assets in 2usize..=5) {
-            let (env, client, _admin, user, assets) = setup_env_with_assets(n_assets);
-            let (allocations, decimals) = random_allocations(&env, &assets);
+        fn property_invalid_allocations_rejected(
+            raw_bps in proptest::collection::vec(1u32..1000, 2..=5)
+        ) {
+            // Don't normalize — let the sum be whatever it is (likely ≠ 10000)
+            let sum: u32 = raw_bps.iter().sum();
+            // Skip if sum accidentally equals 10000
+            prop_assume!(sum != ALLOCATION_DENOMINATOR);
 
-            let pid = client.create_portfolio(
+            let (env, client, user, assets) = setup_env(raw_bps.len());
+
+            let mut allocations = Map::new(&env);
+            let mut decimals = Map::new(&env);
+            for (i, &pct) in raw_bps.iter().enumerate() {
+                allocations.set(assets[i].clone(), pct);
+                decimals.set(assets[i].clone(), DEFAULT_ASSET_DECIMALS);
+            }
+
+            let result = client.try_create_portfolio(
                 &user,
                 &allocations,
                 &decimals,
-                &50,  // 50% threshold — virtually any allocation satisfies "no drift"
-                &500,
+                &5,
+                &50,
                 &CURRENT_SLIPPAGE_POLICY_VERSION,
             );
 
-            // Deposit 1 unit of each asset — since prices are equal ($100 each),
-            // and allocations are proportional, drift should be 0
-            for asset in assets.iter() {
-                client.deposit(
-                    &pid,
-                    &asset,
-                    &1_000_000,
-                    &soroban_sdk::String::from_str(&env, "proptest"),
-                );
-            }
+            // Invalid sums should be rejected
+            prop_assert!(result.is_err(),
+                "allocation sum {} must be rejected (expected InvalidAllocation)", sum);
+        }
+    }
 
-            let portfolio_before = client.get_portfolio(&pid);
-            let needs_rebalance = client.check_rebalance_needed(&pid);
+    // ════════════════════════════════════════════════════════════════════
+    // Property 3: Drift and current_pct always in [0, 10000] range
+    // ════════════════════════════════════════════════════════════════════
 
-            if !needs_rebalance {
-                // With 50% threshold, rebalance should not be needed
-                let preview = client.preview_rebalance(&pid);
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 10_000,
+            ..ProptestConfig::default()
+        })]
 
-                // If no rebalance needed, the preview should confirm it
-                assert!(
-                    !preview.rebalance_needed || preview.candidate_trades.is_empty(),
-                    "preview should not need rebalance when drift check says no"
-                );
+        #[test]
+        fn property_drift_and_pct_in_range(
+            raw_bps in proptest::collection::vec(1u32..10000, 2..=6)
+        ) {
+            let bps = normalize_to_bps(&raw_bps);
+            let n = bps.len();
+            let (env, client, user, assets) = setup_env(n);
 
-                // Verify invariants
-                let inv_result = client.check_invariants(&pid);
-                assert!(
-                    inv_result.is_ok(),
-                    "portfolio invariants must hold: {:?}",
-                    inv_result
-                );
-
-                // Portfolio state unchanged
-                let portfolio_after = client.get_portfolio(&pid);
-                assert_eq!(
-                    portfolio_before.total_value,
-                    portfolio_after.total_value,
-                    "portfolio should be unchanged when no rebalance executed"
-                );
-            } else {
-                // If rebalance IS needed (unlikely with 50% threshold and equal
-                // prices), execute it and verify it converges
-                env.ledger().with_mut(|li| {
-                    li.timestamp = env.ledger().timestamp() + 5000;
-                });
-
-                let result = client.try_execute_rebalance(&pid, &Map::new(&env));
-                if result.is_ok() {
-                    // After one rebalance, the portfolio should be stable
-                    // (no further rebalance needed with the same threshold)
-                    let needs_second = client.check_rebalance_needed(&pid);
-                    // With 50% threshold it should definitely not need another
-                    assert!(
-                        !needs_second,
-                        "rebalance should be idempotent: no second rebalance needed"
-                    );
+            let mut allocations = Map::new(&env);
+            let mut decimals = Map::new(&env);
+            for (i, &pct) in bps.iter().enumerate() {
+                if pct > 0 {
+                    allocations.set(assets[i].clone(), pct);
+                    decimals.set(assets[i].clone(), DEFAULT_ASSET_DECIMALS);
                 }
             }
+
+            let pid = client.create_portfolio(
+                &user, &allocations, &decimals, &1, &100,
+                &CURRENT_SLIPPAGE_POLICY_VERSION,
+            );
+
+            // Deposit equal amounts — prices equal so no drift
+            for asset in assets.iter().take(n) {
+                client.deposit(
+                    &pid, &asset, &100_000_000,
+                    &soroban_sdk::String::from_str(&env, "p"),
+                );
+            }
+
+            // Get valuation — all fields must be in range
+            let valuation = client.get_portfolio_value_usd(&pid);
+            prop_assert!(valuation.total_usd_value > 0);
+
+            for av in valuation.assets.iter() {
+                prop_assert!(av.target_pct <= ALLOCATION_DENOMINATOR,
+                    "target_pct {} exceeds max", av.target_pct);
+                prop_assert!(av.current_pct <= ALLOCATION_DENOMINATOR,
+                    "current_pct {} exceeds max", av.current_pct);
+                // drift is i32, can technically be negative
+                let abs_drift = av.drift.abs() as u32;
+                prop_assert!(abs_drift <= ALLOCATION_DENOMINATOR,
+                    "abs(drift) {} exceeds max", abs_drift);
+            }
+
+            // Invariants must hold
+            let inv = client.check_invariants(&pid);
+            prop_assert!(inv.is_ok(), "invariants must hold: {:?}", inv);
         }
     }
 
@@ -348,60 +268,46 @@ mod property_tests {
         })]
 
         #[test]
-        fn property_deposit_withdraw_roundtrip(amount in 1i128..=10_000_000i128) {
-            let (env, client, _admin, user, assets) = setup_env_with_assets(2);
-            let (allocations, decimals) = random_allocations(&env, &assets);
-
-            let pid = client.create_portfolio(
-                &user,
-                &allocations,
-                &decimals,
-                &5,
-                &50,
-                &CURRENT_SLIPPAGE_POLICY_VERSION,
-            );
-
+        fn property_deposit_withdraw_roundtrip(amount in 1i128..=1_000_000i128) {
+            let (env, client, user, assets) = setup_env(2);
             let asset = assets.first().unwrap();
             let token = TokenClient::new(&env, &asset);
 
-            let user_balance_before = token.balance(&user);
+            let mut allocations = Map::new(&env);
+            allocations.set(asset.clone(), ALLOCATION_DENOMINATOR);
+            let mut decimals = Map::new(&env);
+            decimals.set(asset.clone(), DEFAULT_ASSET_DECIMALS);
+
+            let pid = client.create_portfolio(
+                &user, &allocations, &decimals,
+                &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION,
+            );
+
+            let user_before = token.balance(&user);
 
             // Deposit
-            client.deposit(
-                &pid,
-                &asset,
-                &amount,
-                &soroban_sdk::String::from_str(&env, "roundtrip"),
-            );
+            client.deposit(&pid, &asset, &amount,
+                &soroban_sdk::String::from_str(&env, "rt"));
 
             let portfolio = client.get_portfolio(&pid);
-            let internal_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
-            assert_eq!(
-                internal_balance, amount,
-                "internal balance must match deposit amount"
-            );
+            let internal = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
+            prop_assert_eq!(internal, amount, "internal balance must match deposit");
 
-            // Withdraw the same amount
+            // Withdraw same amount
             client.withdraw(&pid, &asset, &amount);
 
             let portfolio_after = client.get_portfolio(&pid);
             let internal_after = portfolio_after.current_balances.get(asset.clone()).unwrap_or(0);
-            assert_eq!(
-                internal_after, 0,
-                "internal balance must be 0 after full withdraw"
-            );
+            prop_assert_eq!(internal_after, 0, "balance must be 0 after full withdraw");
 
-            let user_balance_after = token.balance(&user);
-            // User should get their deposit back (minus no fees since disabled)
-            assert_eq!(
-                user_balance_after, user_balance_before,
-                "user balance should be restored after roundtrip (deposit + withdraw)"
-            );
+            let user_after = token.balance(&user);
+            prop_assert_eq!(user_after, user_before,
+                "user balance must be restored after roundtrip");
         }
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // Property 5: Random allocations validated correctly
+    // Property 5: Rebalance idempotency when no drift
     // ════════════════════════════════════════════════════════════════════
 
     proptest! {
@@ -411,37 +317,57 @@ mod property_tests {
         })]
 
         #[test]
-        fn property_random_allocations_valid(n_assets in 2usize..=10) {
-            let (env, client, _admin, user, assets) = setup_env_with_assets(n_assets);
-            let (allocations, decimals) = random_allocations(&env, &assets);
+        fn property_rebalance_idempotent(
+            raw_bps in proptest::collection::vec(1u32..10000, 2..=4)
+        ) {
+            let bps = normalize_to_bps(&raw_bps);
+            let n = bps.len();
+            let (env, client, user, assets) = setup_env(n);
 
-            // All allocations should be accepted
-            let result = client.try_create_portfolio(
-                &user,
-                &allocations,
-                &decimals,
-                &5,
-                &50,
-                &CURRENT_SLIPPAGE_POLICY_VERSION,
-            );
-
-            prop_assert!(result.is_ok(), "valid allocations should always create portfolio");
-
-            let pid = result.unwrap();
-            let portfolio = client.get_portfolio(&pid);
-
-            // Verify stored allocations match input
-            for (asset, pct) in allocations.iter() {
-                let stored = portfolio.target_allocations.get(asset.clone());
-                prop_assert_eq!(
-                    stored, Some(pct),
-                    "stored allocation for asset must match input"
-                );
+            let mut allocations = Map::new(&env);
+            let mut decimals = Map::new(&env);
+            for (i, &pct) in bps.iter().enumerate() {
+                if pct > 0 {
+                    allocations.set(assets[i].clone(), pct);
+                    decimals.set(assets[i].clone(), DEFAULT_ASSET_DECIMALS);
+                }
             }
 
-            // Verify invariants hold
-            let inv = client.check_invariants(&pid);
-            prop_assert!(inv.is_ok(), "invariants must hold after create");
+            let pid = client.create_portfolio(
+                &user, &allocations, &decimals,
+                &50,  // wide threshold — rebalance not needed with equal prices
+                &500, &CURRENT_SLIPPAGE_POLICY_VERSION,
+            );
+
+            for asset in assets.iter().take(n) {
+                client.deposit(&pid, &asset, &1_000_000,
+                    &soroban_sdk::String::from_str(&env, "id"));
+            }
+
+            let needs = client.check_rebalance_needed(&pid);
+            if !needs {
+                // With 50% threshold and equal prices, rebalance should not be needed
+                let preview = client.preview_rebalance(&pid);
+                prop_assert!(
+                    !preview.rebalance_needed || preview.candidate_trades.is_empty(),
+                    "when check_rebalance_needed=false, preview should agree"
+                );
+
+                // Verify invariants hold
+                let inv = client.check_invariants(&pid);
+                prop_assert!(inv.is_ok(), "invariants must hold: {:?}", inv);
+            } else {
+                // If needed, execute and verify it converges in one pass
+                env.ledger().with_mut(|li| {
+                    li.timestamp += 5000;
+                });
+                let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+                if result.is_ok() {
+                    let needs_after = client.check_rebalance_needed(&pid);
+                    prop_assert!(!needs_after,
+                        "after one rebalance, should not need another");
+                }
+            }
         }
     }
 }

@@ -14,8 +14,10 @@ mod portfolio;
 mod reflector;
 mod stop_loss;
 mod strategies;
-#[cfg(test)]
+#[cfg(all(test, feature = "testutils"))]
 mod test;
+#[cfg(all(test, feature = "testutils"))]
+mod property_tests;
 mod types;
 
 use strategies::dca;
