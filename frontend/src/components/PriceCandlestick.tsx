@@ -12,7 +12,7 @@
  * - Fully accessible: role="img", aria-label, keyboard-navigable event markers
  */
 
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
     ComposedChart,
     Bar,
@@ -226,8 +226,22 @@ const PriceCandlestick: React.FC<PriceCandlestickProps> = ({
     onRebalanceClick,
 }) => {
     const { isDark } = useTheme()
-    const [interval, setInterval] = useState<CandlestickInterval>('1D')
+    const [interval, setInterval] = useState<CandlestickInterval>(() => {
+        try {
+            const saved = sessionStorage.getItem('priceCandlestickInterval')
+            if (saved && (['1H', '4H', '1D', '1W'] as CandlestickInterval[]).includes(saved as CandlestickInterval)) {
+                return saved as CandlestickInterval
+            }
+        } catch { /* ignore */ }
+        return '1D'
+    })
     const [activeRebalance, setActiveRebalance] = useState<RebalanceEvent | null>(null)
+
+    useEffect(() => {
+        try {
+            sessionStorage.setItem('priceCandlestickInterval', interval)
+        } catch { /* ignore */ }
+    }, [interval])
 
     const { data: chartData, isLoading, isError, refetch } = usePriceCandlestick(asset, interval)
     const { data: historyResult } = useRebalanceHistory(portfolioId, 1, 100)
