@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Keyboard, X } from 'lucide-react'
-
-interface Shortcut {
-  key: string
-  description: string
-  action: () => void
-}
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Keyboard, X, Settings } from 'lucide-react'
+import KeybindingSettings from './KeybindingSettings'
+import {
+  ACTION_ORDER,
+  SHORTCUT_LABELS,
+  useKeybindings,
+  type ShortcutAction,
+} from '../hooks/useKeybindings'
 
 interface ShortcutsProps {
   onNewPortfolio?: () => void
@@ -14,19 +15,27 @@ interface ShortcutsProps {
   onNavigatePortfolios?: (direction: 'next' | 'prev') => void
 }
 
-const STORAGE_KEY = 'shortcuts-dismissed'
-
-const shortcuts: { key: string; label: string; description: string }[] = [
-  { key: '?', label: '?', description: 'Open keyboard shortcuts' },
-  { key: 'n', label: 'N', description: 'Create new portfolio' },
-  { key: 'r', label: 'R', description: 'Execute rebalance' },
-  { key: ',', label: ',', description: 'Open settings' },
-  { key: ']', label: ']', description: 'Next portfolio' },
-  { key: '[', label: '[', description: 'Previous portfolio' },
-]
+/** Maps a ShortcutAction to the callback it should invoke. */
+function buildActionMap(props: ShortcutsProps): Partial<Record<ShortcutAction, () => void>> {
+  return {
+    newPortfolio: props.onNewPortfolio ? () => props.onNewPortfolio!() : undefined,
+    executeRebalance: props.onExecuteRebalance ? () => props.onExecuteRebalance!() : undefined,
+    openSettings: props.onOpenSettings ? () => props.onOpenSettings!() : undefined,
+    nextPortfolio: props.onNavigatePortfolios ? () => props.onNavigatePortfolios!('next') : undefined,
+    prevPortfolio: props.onNavigatePortfolios ? () => props.onNavigatePortfolios!('prev') : undefined,
+  }
+}
 
 function Shortcuts({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios }: ShortcutsProps) {
   const [open, setOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const { bindings, updateBinding, resetBindings } = useKeybindings()
+
+  const actionMap = useMemo(
+    () => buildActionMap({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios }),
+    [onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios],
+  )
 
   const isInputFocused = useCallback(() => {
     const tag = document.activeElement?.tagName
@@ -35,48 +44,39 @@ function Shortcuts({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavig
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isInputFocused()) return
+      // Don't process shortcuts while remapping
+      if (settingsOpen) return
+
+      if (isInputFocused()) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+
+      // Check for the "open shortcuts" key first (it toggles the panel)
+      if (e.key.toLowerCase() === bindings.openShortcuts.toLowerCase()) {
         e.preventDefault()
         setOpen((prev) => !prev)
         return
       }
 
+      // When the panel is open, don't fire other shortcuts
       if (open) return
 
-      if (isInputFocused()) return
-
-      if (e.ctrlKey || e.metaKey || e.altKey) return
-
-      switch (e.key) {
-        case 'n':
-        case 'N':
-          e.preventDefault()
-          onNewPortfolio?.()
-          break
-        case 'r':
-        case 'R':
-          e.preventDefault()
-          onExecuteRebalance?.()
-          break
-        case ',':
-          e.preventDefault()
-          onOpenSettings?.()
-          break
-        case ']':
-          e.preventDefault()
-          onNavigatePortfolios?.('next')
-          break
-        case '[':
-          e.preventDefault()
-          onNavigatePortfolios?.('prev')
-          break
+      // Data-driven dispatch: find the action whose bound key matches
+      for (const action of ACTION_ORDER) {
+        if (action === 'openShortcuts') continue
+        if (e.key.toLowerCase() === bindings[action].toLowerCase()) {
+          const handler = actionMap[action]
+          if (handler) {
+            e.preventDefault()
+            handler()
+          }
+          return
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, isInputFocused, onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavigatePortfolios])
+  }, [open, settingsOpen, isInputFocused, bindings, actionMap])
 
   useEffect(() => {
     if (!open) return
@@ -129,34 +129,50 @@ function Shortcuts({ onNewPortfolio, onExecuteRebalance, onOpenSettings, onNavig
 
             <div className="px-5 py-4">
               <ul className="space-y-2">
-                {shortcuts.map((shortcut) => (
+                {ACTION_ORDER.map((action) => (
                   <li
-                    key={shortcut.key}
+                    key={action}
                     className="flex items-center justify-between py-1.5"
                   >
                     <span className="text-sm text-gray-700 dark:text-gray-300">
-                      {shortcut.description}
+                      {SHORTCUT_LABELS[action]}
                     </span>
                     <kbd className="ml-4 inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-gray-300 bg-gray-50 px-2 py-0.5 text-xs font-mono font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                      {shortcut.label}
+                      {bindings[action]}
                     </kbd>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className="border-t border-gray-200 px-5 py-3 dark:border-gray-700">
+            <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3 dark:border-gray-700">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Shortcuts are disabled when typing in text fields. Press{' '}
+                Press{' '}
                 <kbd className="inline-flex items-center rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 text-xs font-mono dark:border-gray-600 dark:bg-gray-800">
                   Esc
                 </kbd>{' '}
-                to close this panel.
+                to close.
               </p>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Customize
+              </button>
             </div>
           </div>
         </div>
       ) : null}
+
+      <KeybindingSettings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        bindings={bindings}
+        updateBinding={updateBinding}
+        resetBindings={resetBindings}
+      />
     </>
   )
 }
