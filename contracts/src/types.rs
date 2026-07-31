@@ -227,13 +227,6 @@ pub struct FeeConfig {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CircuitBreakerConfig {
-    pub spike_threshold_bps: u32,
-    pub window_seconds: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpgradeEvent {
     pub from_hash: BytesN<32>,
     pub to_hash: BytesN<32>,
@@ -259,9 +252,9 @@ pub enum DataKey {
     NavHistory(u64),
     StopLoss(u64, Address),
     CircuitBreakerConfig,
-    /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
     PortfolioV2(u64),
-
+    QueuedFeeConfig,
+    QueuedUpgrade,
 }
 
 #[contracttype]
@@ -308,6 +301,8 @@ pub enum Error {
     InvalidAllocationSum = 28,
 
     BatchTooLarge = 29,
+    InvalidOracleAddress = 30,
+    TimelockNotElapsed = 31,
 }
 
 #[contracttype]
@@ -322,9 +317,20 @@ pub struct BatchRebalanceResult {
 pub enum BatchRebalanceResultStatus {
     Success,
     Failed(Error),
+}
 
-    InvalidOracleAddress = 29,
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedFeeConfig {
+    pub config: FeeConfig,
+    pub execute_after: u64,
+}
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub execute_after: u64,
 }
 
 #[contracttype]
