@@ -48,7 +48,12 @@ import { NetworkSwitchModal } from './components/NetworkSwitchModal'
 
 function App() {
     const queryClient = useQueryClient()
-    const [currentView, setCurrentView] = useState('landing')
+    const [currentView, setCurrentView] = useState(() => {
+        if (typeof window !== 'undefined' && window.location.pathname === '/visual-test-components') {
+            return 'visual-test-components'
+        }
+        return 'landing'
+    })
     const [publicKey, setPublicKey] = useState<string | null>(null)
     const [pendingConsentPublicKey, setPendingConsentPublicKey] = useState<string | null>(null)
     const [legalDoc, setLegalDoc] = useState<LegalDocType | null>(null)
@@ -537,6 +542,10 @@ function App() {
                         onNavigate={handleNavigate}
                         onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
                     />
+                </ErrorBoundary>
+            ) : currentView === 'visual-test-components' ? (
+                <ErrorBoundary fallbackTitle="Visual Tests">
+                    <VisualTestComponents />
                 </ErrorBoundary>
             ) : null}
         </div>
