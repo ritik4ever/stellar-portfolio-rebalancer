@@ -130,6 +130,17 @@ impl PortfolioRebalancer {
     ) -> Result<u64, Error> {
         user.require_auth();
 
+        let max_portfolios = Self::get_max_portfolios_per_user(env.clone());
+        let user_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(user.clone()))
+            .unwrap_or(0);
+
+        if user_count >= max_portfolios {
+            return Err(Error::TooManyPortfolios);
+        }
+
         if !portfolio::validate_allocations(&target_allocations) {
             return Err(Error::InvalidAllocation);
         }

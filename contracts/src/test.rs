@@ -4020,3 +4020,43 @@ fn test_create_portfolio_with_strategy_custom() {
     assert_eq!(portfolio.strategy, StrategyType::Custom);
     assert_eq!(portfolio.strategy_config.min_interval_seconds, 43200);
 }
+
+#[test]
+fn test_max_portfolios_per_user_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 100);
+
+    // Default limit is MAX_PORTFOLIOS_PER_USER (10). Create 10 portfolios successfully.
+    for _ in 0..10 {
+        let res = client.try_create_portfolio(&user, &allocations, &5, &50);
+        assert!(res.is_ok());
+    }
+
+    // The 11th creation attempt for the same user must fail with Error::TooManyPortfolios
+    let res = client.try_create_portfolio(&user, &allocations, &5, &50);
+    assert_eq!(res, Err(Ok(Error::TooManyPortfolios)));
+
+    // Another user should still be able to create a portfolio
+    let other_user = Address::generate(&env);
+    let other_res = client.try_create_portfolio(&other_user, &allocations, &5, &50);
+    assert!(other_res.is_ok());
+
+    // Admin updates the cap to 20 without redeployment
+    client.set_max_portfolios_per_user(&20);
+    assert_eq!(client.get_max_portfolios_per_user(), 20);
+
+    // The 11th portfolio creation for the original user should now succeed
+    let res_after_update = client.try_create_portfolio(&user, &allocations, &5, &50);
+    assert!(res_after_update.is_ok());
+}
