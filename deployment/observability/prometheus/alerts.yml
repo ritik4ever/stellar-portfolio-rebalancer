@@ -60,10 +60,22 @@ groups:
         for: 5m
         labels:
           severity: critical
+          subsystem: api-gateway
           service: websocket
         annotations:
           summary: Backend WebSocket handshake is failing
-          description: The external WebSocket probe is unable to complete a handshake to the backend.
+          description: The synthetic WebSocket probe cannot complete an RFC 6455 opening handshake against the backend. Real-time portfolio and risk pushes are not reaching connected clients. Inhibited when BackendDown is already firing.
+
+      - alert: WebSocketProbeStalled
+        expr: absent(probe_success{job="portfolio-websocket", instance="http://backend:3001/"})
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: api-gateway
+          service: websocket
+        annotations:
+          summary: Synthetic WebSocket probe is not reporting
+          description: Prometheus has no probe_success sample for the WebSocket endpoint, so availability is currently unmonitored. Check that the blackbox-exporter container is running and reachable.
 
       - alert: Elevated5xxRate
         expr: sum(rate(stellar_portfolio_http_requests_total{status_code=~"5.."}[5m])) / clamp_min(sum(rate(stellar_portfolio_http_requests_total[5m])), 1) > 0.05
@@ -109,6 +121,18 @@ groups:
         annotations:
           summary: Failed rebalance jobs detected
           description: The rebalance queue has failed jobs that need investigation. Cross-check the matching Sentry release and environment before investigating the worker.
+
+      - alert: RebalanceQueueBacklog
+        expr: stellar_portfolio_queue_jobs{queue="rebalance", state="waiting"} > 50
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: portfolio-engine
+          service: queue
+          runbook: https://github.com/anupam7984/stellar-portfolio-rebalancer/blob/main/docs/OPERATIONS.md#queue-operations-monitoring
+        annotations:
+          summary: Rebalance queue backlog exceeds threshold
+          description: The rebalance queue has accumulated {{ $value }} waiting jobs for more than 10 minutes. This indicates workers may be stuck or scaled down. Check the queue-operations dashboard and worker logs. See runbook for resolution steps.
 
   - name: queue-operations
     interval: 30s

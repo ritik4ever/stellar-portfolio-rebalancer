@@ -10,6 +10,24 @@ For comprehensive queue monitoring, dashboard guidance, and operational workflow
 - **Health Check:** `node scripts/queue-health-check.mjs` — programmatic queue health validation for CI/CD pipelines and operational scripts
 - **Workflows & Runbooks:** See [QUEUE_OPERATIONS_WORKFLOW.md](QUEUE_OPERATIONS_WORKFLOW.md) for scenario-based troubleshooting, pre-deployment validation, and incident response procedures
 
+### Rebalance Queue Backlog Alert
+
+The `RebalanceQueueBacklog` alert fires when the rebalance queue accumulates more than 50 waiting jobs for 10+ minutes. This typically indicates:
+
+- Workers are stuck or have crashed
+- Worker processes are scaled down relative to job arrival rate
+- Redis connectivity issues preventing job processing
+
+**Resolution steps:**
+
+1. Check worker process status: `docker compose logs backend-worker` or equivalent
+2. Verify Redis connectivity: `redis-cli ping` should return `PONG`
+3. Check the queue-operations Grafana dashboard for worker lag metrics
+4. If workers are healthy but backlog persists, consider scaling worker processes
+5. Review recent deployments that may have introduced performance regressions
+
+The alert clears automatically once the backlog drains below the threshold.
+
 ## Redis and queues
 
 - **BullMQ** drives scheduled work: portfolio checks, rebalance jobs, analytics snapshots, and idempotency key cleanup.
@@ -181,6 +199,141 @@ The backend supports a dual-secret validation window so access tokens signed wit
 - Tokens signed with `JWT_PREVIOUS_SECRET` validate only while `Date.now() <= JWT_PREVIOUS_SECRET_GRACE_UNTIL`.
 - After grace expiry, old-secret tokens are rejected with `401`.
 
+## Database and Redis credential rotation (AWS Secrets Manager)
+
+The deployment infrastructure uses AWS Secrets Manager automatic rotation for both RDS PostgreSQL database master credentials (`manage_master_user_password = true`) and Redis ElastiCache AUTH tokens. By default, secrets are configured in Terraform to rotate automatically every 30 days (`secret_rotation_days = 30`).
+
+### Dynamic credential resolution & rotation tolerance
+
+The backend service uses `CredentialManager` (`backend/src/config/credentialManager.ts`) to read database and Redis credentials dynamically from AWS Secrets Manager or environment variables rather than caching static credentials indefinitely.
+
+When a scheduled or manual rotation occurs:
+- **Database (`backend/src/db/client.ts`):** If a PostgreSQL connection or query fails with an authentication error (such as error code `28P01` or `password authentication failed`), `query()` detects the rotation event, automatically invokes `refreshDbPool()` to clear cached credentials and recreate the connection pool, and retries the query without failing the request.
+- **Redis (`backend/src/queue/connection.ts`):** Redis clients and BullMQ workers resolve connection options dynamically via `getRedisUrl()`. When an authentication error occurs (`NOAUTH`, `WRONGPASS`), `refreshRedisCredentials()` is invoked to re-read the rotated token and reconnect automatically.
+
+Backend services continue operating without manual intervention across rotation events.
+
+### Runbook: Verifying successful rotation
+
+#### 1. Check AWS Secrets Manager rotation status
+Use the AWS CLI to confirm that automatic rotation is enabled and check the last rotated timestamp:
+```bash
+# Verify RDS database secret rotation status
+aws secretsmanager describe-secret --secret-id <db_secret_arn> \
+  --query '{RotationEnabled:RotationEnabled,LastRotatedDate:LastRotatedDate,RotationRules:RotationRules}'
+
+# Verify Redis AUTH token secret rotation status
+aws secretsmanager describe-secret --secret-id <redis_secret_arn> \
+  --query '{RotationEnabled:RotationEnabled,LastRotatedDate:LastRotatedDate,RotationRules:RotationRules}'
+```
+
+#### 2. Perform an on-demand rotation test (Drill)
+To verify rotation without waiting for the scheduled interval:
+```bash
+# Trigger immediate rotation for RDS database credentials
+aws secretsmanager rotate-secret --secret-id <db_secret_arn>
+
+# Trigger immediate rotation for Redis AUTH token
+aws secretsmanager rotate-secret --secret-id <redis_secret_arn>
+```
+
+#### 3. Verify zero-downtime backend tolerance
+Inspect backend application logs for automatic credential refresh events:
+```bash
+# Check logs for automatic DB pool refresh after password change
+docker compose logs --tail=100 backend | grep -E "DB-POOL.*Refreshing|QUEUE.*Refreshing|CREDENTIALS"
+```
+Expected log entries:
+- `[DB-POOL] Password authentication or connection failed — possible secret rotation event detected. Refreshing credentials and DB pool...`
+- `[DB-POOL] Refreshing database credentials and resetting connection pool to tolerate rotation...`
+- `[QUEUE] Refreshing Redis credentials to tolerate rotation...`
+
+#### 4. Verify rotation status via administrative API
+Query the backend administrative endpoints to verify the credential manager state:
+```bash
+# Inspect current credential status and lastRefreshed timestamps
+curl -X GET https://<backend_host>/api/ops/credentials/status \
+  -H "X-Public-Key: <admin_public_key>" \
+  -H "X-Message: <timestamp>" \
+  -H "X-Signature: <signature>"
+
+# Manually trigger a proactive credential reload across DB and Redis pools
+curl -X POST https://<backend_host>/api/ops/credentials/refresh \
+  -H "X-Public-Key: <admin_public_key>" \
+  -H "X-Message: <timestamp>" \
+  -H "X-Signature: <signature>"
+```
+The response confirms `refreshed: true` for both database and redis subsystems.
+
+#### 5. Verify direct database and Redis connectivity with rotated credentials
+Retrieve the rotated secret value from Secrets Manager and test connectivity:
+```bash
+# Get current DB secret and connect via psql
+SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id <db_secret_arn> --query SecretString --output text)
+DB_PASS=$(echo $SECRET_JSON | jq -r .password)
+DB_HOST=$(echo $SECRET_JSON | jq -r .host)
+PGPASSWORD=$DB_PASS psql -h $DB_HOST -U dbadmin -d stellar_portfolio -c "SELECT 1;"
+
+# Get current Redis AUTH token and test via redis-cli
+REDIS_TOKEN=$(aws secretsmanager get-secret-value --secret-id <redis_secret_arn> --query SecretString --output text | jq -r .auth_token)
+redis-cli -h <redis_endpoint> -p 6379 -a "$REDIS_TOKEN" PING
+```
+
+### Runbook: Rollback procedure if needed
+
+If an automatic rotation fails or causes persistent authentication failures, follow these steps to roll back to the previous credential version:
+
+#### 1. Identify a failed rotation event
+Check AWS CloudWatch Logs or AWS Secrets Manager console for error messages on the rotation Lambda function, or monitor backend alerts for persistent `503 Service Unavailable` or database authentication loops.
+
+#### 2. Identify the previous secret version in AWS Secrets Manager
+List version IDs for the secret to find the stage labeled `AWSPREVIOUS`:
+```bash
+aws secretsmanager list-secret-version-ids --secret-id <secret_arn>
+```
+
+#### 3. Roll back the secret version stage
+Move the `AWSCURRENT` staging label back to the previous version ID:
+```bash
+aws secretsmanager update-secret-version-stage --secret-id <secret_arn> \
+  --version-stage AWSCURRENT \
+  --move-to-version-id <previous-version-id>
+```
+
+#### 4. Revert RDS or ElastiCache password if out-of-sync
+If AWS Secrets Manager is reverted but the underlying RDS or ElastiCache instance was already modified:
+```bash
+# Retrieve the restored password from AWSCURRENT
+REVERTED_PASS=$(aws secretsmanager get-secret-value --secret-id <db_secret_arn> --query SecretString --output text | jq -r .password)
+
+# Apply the reverted password directly to the RDS instance
+aws rds modify-db-instance \
+  --db-instance-identifier <db_instance_identifier> \
+  --master-user-password "$REVERTED_PASS" \
+  --apply-immediately
+
+# For ElastiCache Redis replication group
+REVERTED_TOKEN=$(aws secretsmanager get-secret-value --secret-id <redis_secret_arn> --query SecretString --output text | jq -r .auth_token)
+aws elasticache modify-replication-group \
+  --replication-group-id <redis_cluster_id> \
+  --auth-token "$REVERTED_TOKEN" \
+  --auth-token-update-strategy SET \
+  --apply-immediately
+```
+
+#### 5. Force immediate credential reload on backend instances
+Once the secret is reverted, invoke the administrative refresh endpoint so all backend tasks immediately re-read the reverted credentials without waiting for cache expiration:
+```bash
+curl -X POST https://<backend_host>/api/ops/credentials/refresh \
+  -H "X-Public-Key: <admin_public_key>" \
+  -H "X-Message: <timestamp>" \
+  -H "X-Signature: <signature>"
+```
+Or force a rolling restart of the ECS service:
+```bash
+aws ecs update-service --cluster <ecs_cluster_name> --service <ecs_service_name> --force-new-deployment
+```
+
 ## Database Backups and Restores
 
 The application supports two database backends: SQLite (for development) and PostgreSQL (for production). Both have automated backup and restore capabilities.
@@ -330,6 +483,129 @@ Add backup verification to your CI pipeline:
 ## Disaster recovery
 
 For detailed, step-by-step procedures to handle incident response, outages, containment, rollbacks, database restoration, and validation across the smart contract, backend, and frontend stacks, refer to the [Disaster Recovery Runbook](DISASTER_RECOVERY.md).
+
+## Circuit-breaker manual-reset runbook
+
+The `RiskManagementService` maintains an in-memory circuit breaker for every tracked asset (`XLM`, `BTC`, `ETH`, `USDC`, and any assets added via the admin API). A breaker **trips** when an asset's tick-over-tick price change exceeds **20 %** (the `CIRCUIT_BREAKER_THRESHOLD`). While tripped, `shouldAllowRebalance()` returns `allowed: false` with reason code `CIRCUIT_BREAKER_ACTIVE`, blocking all automatic and manual rebalance operations for any portfolio that holds the affected asset.
+
+Tripped breakers auto-recover after **5 minutes** (`CIRCUIT_BREAKER_COOLDOWN`). The steps below are for situations where you need to reset before that window expires, or where you need to confirm the system is healthy after an incident.
+
+### 1. Diagnose – confirm the breaker is tripped
+
+**Public status endpoint (no auth):**
+
+```bash
+curl -s https://<API_HOST>/api/system/status | jq '.data.riskManagement'
+```
+
+A tripped breaker looks like:
+
+```json
+{
+  "circuitBreakers": {
+    "BTC": {
+      "isTriggered": true,
+      "triggerReason": "22.3% price movement",
+      "cooldownUntil": 1722080760000,
+      "triggeredAssets": ["BTC"]
+    }
+  },
+  "enabled": true,
+  "alertsActive": true
+}
+```
+
+`isTriggered: true` with a `cooldownUntil` value in the future confirms the breaker is active. Convert the Unix millisecond timestamp to determine how much cooldown remains:
+
+```bash
+node -e "console.log(new Date(1722080760000).toISOString())"
+```
+
+**Per-portfolio risk check:**
+
+```bash
+curl -s https://<API_HOST>/api/risk/check/<PORTFOLIO_ID> | jq '{allowed, reason, reasonCode}'
+```
+
+If the response is `"reasonCode": "CIRCUIT_BREAKER_ACTIVE"`, rebalancing is blocked for that portfolio.
+
+**Per-portfolio detailed circuit-breaker status:**
+
+```bash
+curl -s https://<API_HOST>/api/risk/metrics/<PORTFOLIO_ID> | jq '.data.circuitBreakers'
+```
+
+This returns the per-asset breaker map, including `triggerReason` and the precise `cooldownUntil` timestamp.
+
+---
+
+### 2. Decide – reset manually or wait?
+
+| Situation | Recommended action |
+|-----------|-------------------|
+| Cooldown expires in < 3 minutes | **Wait.** Auto-recovery will fire; no operator action needed. |
+| Flash-crash or data anomaly confirmed as false alarm | **Reset manually.** Prices have stabilised and the trigger was a bad tick or feed glitch. |
+| Market still highly volatile (> 15 % EWMA vol) | **Wait or investigate further.** Resetting into continued volatility will likely re-trip the breaker immediately. |
+| Cooldown has expired but `isTriggered` is still `true` in status | Call `GET /api/system/status` again — `getCircuitBreakerStatus()` performs the expiry check lazily on each read. If the flag does not clear, restart the API process (see Safe shutdown and restart below). |
+| Incident requires immediate production rebalancing | Follow the manual-reset steps below, then monitor `/api/risk/check/:portfolioId` continuously after the reset. |
+
+---
+
+### 3. Perform the manual reset
+
+The admin endpoint accepts an `X-Admin-Key` header (value of the `ADMIN_API_KEY` environment variable) and optionally a specific asset to reset. Omitting `asset` resets **all** tripped breakers.
+
+**Reset a single asset (e.g. BTC):**
+
+```bash
+curl -X POST https://<API_HOST>/api/admin/circuit-breaker/reset \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: <ADMIN_API_KEY>" \
+  -d '{"asset": "BTC"}'
+```
+
+**Reset all assets at once:**
+
+```bash
+curl -X POST https://<API_HOST>/api/admin/circuit-breaker/reset \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: <ADMIN_API_KEY>" \
+  -d '{}'
+```
+
+Expected success response (`200 OK`):
+
+```json
+{
+  "success": true,
+  "data": {
+    "reset": ["BTC"],
+    "message": "Circuit breaker(s) reset successfully"
+  }
+}
+```
+
+> **Note:** The `RiskManagementService` instance is in-process and in-memory. If the API runs as multiple instances behind a load balancer, send the reset request to **every instance** (or use a sticky session / internal broadcast mechanism). After any process restart the breaker state is cleared automatically.
+
+---
+
+### 4. Post-reset confirmation checklist
+
+Run through the following checks after performing a reset to confirm the system has returned to normal operation:
+
+- [ ] **Breaker cleared** – `GET /api/system/status` returns `alertsActive: false` and `isTriggered: false` for the affected asset(s).
+- [ ] **Risk check passes** – `GET /api/risk/check/<PORTFOLIO_ID>` returns `"reasonCode": "CIRCUIT_BREAKER_ACTIVE"` no longer; `allowed: true` (assuming no other blocks are active).
+- [ ] **Price feed is live** – `GET /api/system/status` shows `"priceFeeds": true` under `services`. Stale or absent prices will re-trip the breaker on the next price tick if volatility is still high.
+- [ ] **Auto-rebalancer running** – `GET /api/system/status` → `autoRebalancer.status.isRunning: true`. If the auto-rebalancer paused due to the circuit-breaker event, restart it:
+  ```bash
+  curl -X POST https://<API_HOST>/api/auto-rebalancer/start \
+    -H "X-Admin-Key: <ADMIN_API_KEY>"
+  ```
+- [ ] **No repeat trips** – Monitor `GET /api/system/status` for 5–10 minutes after the reset. If the breaker re-trips immediately, the underlying market condition has not stabilised; **do not keep resetting manually** — investigate the price feed or wait for conditions to calm.
+- [ ] **Notification delivered** – If circuit-breaker notifications are enabled (`event_circuit_breaker` preference), confirm users received the event-cleared or rebalancing-resumed notification (check `GET /api/notifications` for recent entries).
+- [ ] **Audit log entry** – Confirm the admin action is reflected in application logs (search for `circuit-breaker reset` at `INFO` level).
+
+---
 
 ## Related docs
 
