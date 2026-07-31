@@ -7,7 +7,59 @@ import { browserPriceService, type BrowserPriceCacheEntry } from '../services/br
 import { NotificationTest } from './NotificationTest'
 import type { ContractCapabilityReport } from '../lib/contractCapabilities'
 
+// Export for testing
+export { computeCapabilityDiff }
+
 const DRAWER_UNLOCK_KEY = 'developer-drawer-unlocked'
+const CAPABILITY_SNAPSHOT_KEY = 'contract-capability-snapshot'
+
+type CapabilityDiffType = 'added' | 'removed' | 'unchanged'
+
+interface CapabilityDiff {
+    method: string
+    type: CapabilityDiffType
+}
+
+function computeCapabilityDiff(
+    current: ContractCapabilityReport,
+    previous: ContractCapabilityReport | null
+): CapabilityDiff[] {
+    if (!previous) {
+        return current.availableMethods.map((method) => ({
+            method,
+            type: 'unchanged' as CapabilityDiffType,
+        }))
+    }
+
+    const currentMethods = new Set(current.availableMethods)
+    const previousMethods = new Set(previous.availableMethods)
+
+    const diffs: CapabilityDiff[] = []
+
+    // Check for added methods
+    for (const method of current.availableMethods) {
+        if (!previousMethods.has(method)) {
+            diffs.push({ method, type: 'added' })
+        } else {
+            diffs.push({ method, type: 'unchanged' })
+        }
+    }
+
+    // Check for removed methods
+    for (const method of previous.availableMethods) {
+        if (!currentMethods.has(method)) {
+            diffs.push({ method, type: 'removed' })
+        }
+    }
+
+    return diffs.sort((a, b) => {
+        const typeOrder = { added: 0, removed: 1, unchanged: 2 }
+        if (typeOrder[a.type] !== typeOrder[b.type]) {
+            return typeOrder[a.type] - typeOrder[b.type]
+        }
+        return a.method.localeCompare(b.method)
+    })
+}
 
 export function isDeveloperDrawerUnlocked(): boolean {
     if (typeof window === 'undefined') return false
@@ -39,6 +91,8 @@ const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey, contractCa
     const [cacheError, setCacheError] = useState<string | null>(null)
     const [browserPriceTestRunning, setBrowserPriceTestRunning] = useState(false)
     const [browserPriceTestResult, setBrowserPriceTestResult] = useState<string | null>(null)
+    const [previousCapabilities, setPreviousCapabilities] = useState<ContractCapabilityReport | null>(null)
+    const [showDiff, setShowDiff] = useState(false)
     const debugConfig = getFrontendDebugConfig()
 
     const refreshCacheInspector = useCallback(async () => {
@@ -77,6 +131,31 @@ const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey, contractCa
             void refreshCacheInspector()
         }
     }, [open, refreshCacheInspector])
+
+    // Load previous capability snapshot from localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            const stored = localStorage.getItem(CAPABILITY_SNAPSHOT_KEY)
+            if (stored) {
+                setPreviousCapabilities(JSON.parse(stored))
+            }
+        } catch (error) {
+            console.error('Failed to load capability snapshot:', error)
+        }
+    }, [])
+
+    // Save current capability snapshot to localStorage when it changes
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        if (contractCapabilities) {
+            try {
+                localStorage.setItem(CAPABILITY_SNAPSHOT_KEY, JSON.stringify(contractCapabilities))
+            } catch (error) {
+                console.error('Failed to save capability snapshot:', error)
+            }
+        }
+    }, [contractCapabilities])
 
     const runBrowserPriceTest = async () => {
         setBrowserPriceTestRunning(true)
@@ -235,9 +314,20 @@ const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey, contractCa
 
                         {contractCapabilities ? (
                             <section>
-                                <h3 className="mb-2 font-medium text-gray-900 dark:text-white">
-                                    Contract capabilities
-                                </h3>
+                                <div className="mb-2 flex items-center justify-between">
+                                    <h3 className="font-medium text-gray-900 dark:text-white">
+                                        Contract capabilities
+                                    </h3>
+                                    {previousCapabilities && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowDiff((value) => !value)}
+                                            className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                        >
+                                            {showDiff ? 'Hide diff' : 'Show diff'}
+                                        </button>
+                                    )}
+                                </div>
                                 <p className="text-gray-700 dark:text-gray-300">
                                     {contractCapabilities.title}
                                 </p>
@@ -247,6 +337,27 @@ const DeveloperDrawer: React.FC<DeveloperDrawerProps> = ({ publicKey, contractCa
                                     schema v{contractCapabilities.expectedSchemaVersion} ·{' '}
                                     {contractCapabilities.availableMethods.length} method(s)
                                 </p>
+                                {showDiff && previousCapabilities ? (
+                                    <div className="mt-3 space-y-1">
+                                        {computeCapabilityDiff(contractCapabilities, previousCapabilities).map((diff) => (
+                                            <div
+                                                key={diff.method}
+                                                className={`flex items-center gap-2 rounded px-2 py-1 ${
+                                                    diff.type === 'added'
+                                                        ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                        : diff.type === 'removed'
+                                                        ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                                        : 'bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                                                }`}
+                                            >
+                                                {diff.type === 'added' && <Plus className="h-3 w-3" />}
+                                                {diff.type === 'removed' && <Minus className="h-3 w-3" />}
+                                                {diff.type === 'unchanged' && <span className="h-3 w-3" />}
+                                                <span className="text-xs">{diff.method}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : null}
                             </section>
                         ) : null}
 

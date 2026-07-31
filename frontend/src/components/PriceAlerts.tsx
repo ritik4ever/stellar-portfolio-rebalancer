@@ -1,13 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Trash2, Edit2, Bell, Mail, Link, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, Edit2, Bell, Mail, Link, AlertTriangle, CheckCircle2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-interface PriceAlert {
-  id: string
+interface PriceCondition {
   asset: string
   upperThreshold?: number
   lowerThreshold?: number
+}
+
+interface PriceAlert {
+  id: string
+  conditions: PriceCondition[]
+  logic: 'AND' | 'OR'
   alertType: 'email' | 'webhook'
   webhookUrl?: string
   email?: string
@@ -21,19 +26,39 @@ interface PriceAlertsProps {
 
 const DEFAULT_ASSETS = ['XLM', 'USDC', 'BTC', 'ETH']
 
+function formatConditionSummary(condition: PriceCondition, logic?: 'AND' | 'OR', isFirst?: boolean): string {
+  const parts: string[] = []
+  if (condition.upperThreshold !== undefined) {
+    parts.push(`${condition.asset} < $${condition.upperThreshold.toLocaleString()}`)
+  }
+  if (condition.lowerThreshold !== undefined) {
+    parts.push(`${condition.asset} > $${condition.lowerThreshold.toLocaleString()}`)
+  }
+  if (parts.length === 1 && logic && !isFirst) {
+    return `${logic === 'AND' ? 'AND' : 'OR'} ${parts[0]}`
+  }
+  return parts.join(' AND ')
+}
+
+function formatAlertSummary(alert: PriceAlert): string {
+  if (alert.conditions.length === 0) return 'No conditions'
+  const parts = alert.conditions.map((c, i) => formatConditionSummary(c, alert.logic, i === 0))
+  if (alert.conditions.length === 1) return parts[0]
+  return parts.join(` ${alert.logic === 'AND' ? 'AND' : 'OR'} `)
+}
+
 const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
   const { t } = useTranslation()
   const [alerts, setAlerts] = useState<PriceAlert[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingAlert, setEditingAlert] = useState<PriceAlert | null>(null)
-  const [formData, setFormData] = useState({
-    asset: 'XLM',
-    upperThreshold: '',
-    lowerThreshold: '',
-    alertType: 'email' as 'email' | 'webhook',
-    webhookUrl: '',
-    email: ''
-  })
+  const [formConditions, setFormConditions] = useState<PriceCondition[]>([
+    { asset: 'XLM', upperThreshold: undefined, lowerThreshold: undefined }
+  ])
+  const [formLogic, setFormLogic] = useState<'AND' | 'OR'>('AND')
+  const [formAlertType, setFormAlertType] = useState<'email' | 'webhook'>('email')
+  const [formWebhookUrl, setFormWebhookUrl] = useState('')
+  const [formEmail, setFormEmail] = useState('')
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({
     XLM: 0.354,
     USDC: 1.0,
@@ -41,17 +66,31 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
     ETH: 4200
   })
 
-  // Load alerts from localStorage on mount
   useEffect(() => {
     if (publicKey) {
       const saved = localStorage.getItem(`priceAlerts_${publicKey}`)
       if (saved) {
-        setAlerts(JSON.parse(saved))
+        try {
+          const parsed = JSON.parse(saved)
+          const migrated = parsed.map((a: any) => {
+            if (a.conditions) return a as PriceAlert
+            return {
+              id: a.id,
+              conditions: [{ asset: a.asset, upperThreshold: a.upperThreshold, lowerThreshold: a.lowerThreshold }],
+              logic: 'AND' as const,
+              alertType: a.alertType,
+              webhookUrl: a.webhookUrl,
+              email: a.email,
+              active: a.active,
+              createdAt: a.createdAt
+            }
+          })
+          setAlerts(migrated)
+        } catch { /* ignore corrupt data */ }
       }
     }
   }, [publicKey])
 
-  // Save alerts to localStorage whenever they change
   useEffect(() => {
     if (publicKey) {
       localStorage.setItem(`priceAlerts_${publicKey}`, JSON.stringify(alerts))
@@ -59,22 +98,26 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
   }, [alerts, publicKey])
 
   const validateForm = () => {
-    const upper = parseFloat(formData.upperThreshold)
-    const lower = parseFloat(formData.lowerThreshold)
-
-    if (formData.upperThreshold && (isNaN(upper) || upper <= 0)) {
-      return { valid: false, error: t('priceAlerts.validation.positivePrice') }
+    if (formConditions.length === 0) {
+      return { valid: false, error: 'At least one condition is required' }
     }
-    if (formData.lowerThreshold && (isNaN(lower) || lower <= 0)) {
-      return { valid: false, error: t('priceAlerts.validation.positivePrice') }
+    for (const cond of formConditions) {
+      const upper = cond.upperThreshold
+      const lower = cond.lowerThreshold
+      if (upper !== undefined && (!Number.isFinite(upper) || upper <= 0)) {
+        return { valid: false, error: 'Upper thresholds must be positive numbers' }
+      }
+      if (lower !== undefined && (!Number.isFinite(lower) || lower <= 0)) {
+        return { valid: false, error: 'Lower thresholds must be positive numbers' }
+      }
+      if (upper !== undefined && lower !== undefined && upper <= lower) {
+        return { valid: false, error: 'Upper threshold must be greater than lower threshold for each condition' }
+      }
     }
-    if (upper && lower && upper <= lower) {
-      return { valid: false, error: 'Upper threshold must be greater than lower threshold' }
-    }
-    if (formData.alertType === 'webhook' && !formData.webhookUrl) {
+    if (formAlertType === 'webhook' && !formWebhookUrl) {
       return { valid: false, error: t('priceAlerts.validation.validUrl') }
     }
-    if (formData.alertType === 'email' && !formData.email) {
+    if (formAlertType === 'email' && !formEmail) {
       return { valid: false, error: 'Please enter an email address' }
     }
     return { valid: true, error: null }
@@ -90,12 +133,15 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
 
     const alertData: PriceAlert = {
       id: editingAlert?.id || `alert_${Date.now()}`,
-      asset: formData.asset,
-      upperThreshold: formData.upperThreshold ? parseFloat(formData.upperThreshold) : undefined,
-      lowerThreshold: formData.lowerThreshold ? parseFloat(formData.lowerThreshold) : undefined,
-      alertType: formData.alertType,
-      webhookUrl: formData.alertType === 'webhook' ? formData.webhookUrl : undefined,
-      email: formData.alertType === 'email' ? formData.email : undefined,
+      conditions: formConditions.map(c => ({
+        asset: c.asset,
+        upperThreshold: c.upperThreshold,
+        lowerThreshold: c.lowerThreshold,
+      })),
+      logic: formLogic,
+      alertType: formAlertType,
+      webhookUrl: formAlertType === 'webhook' ? formWebhookUrl : undefined,
+      email: formAlertType === 'email' ? formEmail : undefined,
       active: true,
       createdAt: editingAlert?.createdAt || Date.now()
     }
@@ -109,29 +155,39 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
     resetForm()
   }
 
+  const addCondition = () => {
+    setFormConditions(prev => [...prev, { asset: 'XLM', upperThreshold: undefined, lowerThreshold: undefined }])
+  }
+
+  const removeCondition = (index: number) => {
+    setFormConditions(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const updateCondition = (index: number, field: keyof PriceCondition, value: any) => {
+    setFormConditions(prev => prev.map((c, i) => {
+      if (i !== index) return c
+      const updated = { ...c, [field]: value }
+      return updated
+    }))
+  }
+
   const resetForm = () => {
-    setFormData({
-      asset: 'XLM',
-      upperThreshold: '',
-      lowerThreshold: '',
-      alertType: 'email',
-      webhookUrl: '',
-      email: ''
-    })
+    setFormConditions([{ asset: 'XLM', upperThreshold: undefined, lowerThreshold: undefined }])
+    setFormLogic('AND')
+    setFormAlertType('email')
+    setFormWebhookUrl('')
+    setFormEmail('')
     setShowForm(false)
     setEditingAlert(null)
   }
 
   const handleEdit = (alert: PriceAlert) => {
     setEditingAlert(alert)
-    setFormData({
-      asset: alert.asset,
-      upperThreshold: alert.upperThreshold?.toString() || '',
-      lowerThreshold: alert.lowerThreshold?.toString() || '',
-      alertType: alert.alertType,
-      webhookUrl: alert.webhookUrl || '',
-      email: alert.email || ''
-    })
+    setFormConditions(alert.conditions.map(c => ({ ...c })))
+    setFormLogic(alert.logic)
+    setFormAlertType(alert.alertType)
+    setFormWebhookUrl(alert.webhookUrl || '')
+    setFormEmail(alert.email || '')
     setShowForm(true)
   }
 
@@ -145,17 +201,24 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
     setAlerts(prev => prev.map(a => a.id === id ? { ...a, active: !a.active } : a))
   }
 
-  const getDistanceFromThreshold = (alert: PriceAlert) => {
-    const currentPrice = currentPrices[alert.asset] || 0
-    if (alert.upperThreshold) {
-      const distance = ((alert.upperThreshold - currentPrice) / currentPrice) * 100
-      return { type: 'upper', distance: distance.toFixed(2) }
+  const getNearestDistance = (alert: PriceAlert) => {
+    let nearest: { type: string; distance: string } | null = null
+    for (const cond of alert.conditions) {
+      const currentPrice = currentPrices[cond.asset] || 0
+      if (cond.upperThreshold) {
+        const dist = ((cond.upperThreshold - currentPrice) / currentPrice) * 100
+        if (!nearest || Math.abs(dist) < Math.abs(parseFloat(nearest.distance))) {
+          nearest = { type: `${cond.asset} upper`, distance: dist.toFixed(2) }
+        }
+      }
+      if (cond.lowerThreshold) {
+        const dist = ((currentPrice - cond.lowerThreshold) / currentPrice) * 100
+        if (!nearest || Math.abs(dist) < Math.abs(parseFloat(nearest.distance))) {
+          nearest = { type: `${cond.asset} lower`, distance: dist.toFixed(2) }
+        }
+      }
     }
-    if (alert.lowerThreshold) {
-      const distance = ((currentPrice - alert.lowerThreshold) / currentPrice) * 100
-      return { type: 'lower', distance: distance.toFixed(2) }
-    }
-    return null
+    return nearest
   }
 
   if (!publicKey) {
@@ -198,22 +261,96 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
             className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
           >
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {t('priceAlerts.asset')}
-                  </label>
-                  <select
-                    value={formData.asset}
-                    onChange={(e) => setFormData({ ...formData, asset: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Condition logic
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormLogic('AND')}
+                    className={`flex-1 px-3 py-2 rounded-lg border transition-colors text-sm ${
+                      formLogic === 'AND'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'
+                    }`}
                   >
-                    {DEFAULT_ASSETS.map(asset => (
-                      <option key={asset} value={asset}>{asset}</option>
-                    ))}
-                  </select>
+                    AND (all conditions)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormLogic('OR')}
+                    className={`flex-1 px-3 py-2 rounded-lg border transition-colors text-sm ${
+                      formLogic === 'OR'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    OR (any condition)
+                  </button>
                 </div>
+              </div>
 
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Conditions
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addCondition}
+                    className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add condition
+                  </button>
+                </div>
+                {formConditions.map((cond, idx) => (
+                  <div key={idx} className="flex items-start gap-2 p-3 bg-gray-50 dark:bg-gray-900/30 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <select
+                        value={cond.asset}
+                        onChange={(e) => updateCondition(idx, 'asset', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                      >
+                        {DEFAULT_ASSETS.map(asset => (
+                          <option key={asset} value={asset}>{asset}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        step="0.000001"
+                        value={cond.upperThreshold ?? ''}
+                        onChange={(e) => updateCondition(idx, 'upperThreshold', e.target.value ? parseFloat(e.target.value) : undefined)}
+                        placeholder="Upper (optional)"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={cond.lowerThreshold ?? ''}
+                          onChange={(e) => updateCondition(idx, 'lowerThreshold', e.target.value ? parseFloat(e.target.value) : undefined)}
+                          placeholder="Lower (optional)"
+                          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                        />
+                        {formConditions.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeCondition(idx)}
+                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                            aria-label="Remove condition"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     {t('priceAlerts.alertType')}
@@ -221,9 +358,9 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, alertType: 'email' })}
+                      onClick={() => setFormAlertType('email')}
                       className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-                        formData.alertType === 'email'
+                        formAlertType === 'email'
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                           : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'
                       }`}
@@ -233,9 +370,9 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, alertType: 'webhook' })}
+                      onClick={() => setFormAlertType('webhook')}
                       className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-                        formData.alertType === 'webhook'
+                        formAlertType === 'webhook'
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                           : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'
                       }`}
@@ -245,65 +382,37 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
                     </button>
                   </div>
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {t('priceAlerts.upperThreshold')}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    value={formData.upperThreshold}
-                    onChange={(e) => setFormData({ ...formData, upperThreshold: e.target.value })}
-                    placeholder="Optional"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {t('priceAlerts.lowerThreshold')}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    value={formData.lowerThreshold}
-                    onChange={(e) => setFormData({ ...formData, lowerThreshold: e.target.value })}
-                    placeholder="Optional"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </div>
-
-                {formData.alertType === 'email' && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      placeholder="your@email.com"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    />
-                  </div>
-                )}
-
-                {formData.alertType === 'webhook' && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      {t('priceAlerts.webhookUrl')}
-                    </label>
-                    <input
-                      type="url"
-                      value={formData.webhookUrl}
-                      onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
-                      placeholder="https://your-webhook-url.com"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    />
-                  </div>
-                )}
               </div>
+
+              {formAlertType === 'email' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder="your@email.com"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+              )}
+
+              {formAlertType === 'webhook' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    {t('priceAlerts.webhookUrl')}
+                  </label>
+                  <input
+                    type="url"
+                    value={formWebhookUrl}
+                    onChange={(e) => setFormWebhookUrl(e.target.value)}
+                    placeholder="https://your-webhook-url.com"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+              )}
 
               <div className="flex justify-end gap-2">
                 <button
@@ -334,7 +443,7 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
           </div>
         ) : (
           alerts.map((alert) => {
-            const distance = getDistanceFromThreshold(alert)
+            const distance = getNearestDistance(alert)
             return (
               <motion.div
                 key={alert.id}
@@ -349,7 +458,6 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="font-semibold text-gray-900 dark:text-white">{alert.asset}</span>
                       {alert.active ? (
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
                       ) : (
@@ -363,14 +471,12 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
                     </div>
 
                     <div className="space-y-1 text-sm">
-                      {alert.upperThreshold && (
-                        <div className="text-gray-600 dark:text-gray-400">
-                          Upper: ${alert.upperThreshold.toLocaleString()}
-                        </div>
-                      )}
-                      {alert.lowerThreshold && (
-                        <div className="text-gray-600 dark:text-gray-400">
-                          Lower: ${alert.lowerThreshold.toLocaleString()}
+                      <div className="text-gray-700 dark:text-gray-300 font-medium">
+                        {formatAlertSummary(alert)}
+                      </div>
+                      {alert.conditions.length > 1 && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          Combined with <span className="font-semibold uppercase">{alert.logic}</span> logic
                         </div>
                       )}
                       {distance && (
@@ -379,7 +485,9 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
                         </div>
                       )}
                       <div className="text-xs text-gray-500 dark:text-gray-500">
-                        {t('priceAlerts.currentPrice')}: ${currentPrices[alert.asset]?.toLocaleString() || 'N/A'}
+                        {t('priceAlerts.currentPrice')}: {alert.conditions.map(c => c.asset).filter((v, i, a) => a.indexOf(v) === i).map(asset =>
+                          `${asset} $${currentPrices[asset]?.toLocaleString() || 'N/A'}`
+                        ).join(', ')}
                       </div>
                     </div>
                   </div>

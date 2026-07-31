@@ -1,6 +1,6 @@
-import { Archive, ArrowLeft, Save, Trash2 } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Toast } from "../components/ui/Toast";
+import { Archive, ArrowLeft, Save, Trash2, Snowflake } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { useToast } from "../context/ToastContext";
 
 interface AllocationSettings {
   minAllocation: number;
@@ -92,13 +92,12 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     stopLossPercentage: 15,
   });
 
-  // Toast state
-  const [toast, setToast] = useState<{
-    title: string;
-    description: string;
-    tone: "success" | "error";
-  } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Asset freeze state
+  const defaultAssets = ['XLM', 'USDC', 'BTC', 'ETH'];
+  const [frozenAssets, setFrozenAssets] = useState<string[]>([]);
+  const [savedFrozenAssets, setSavedFrozenAssets] = useState<string[]>([]);
+
+  const { showToast } = useToast();
 
   // Check if any section has unsaved changes
   const hasUnsavedChanges =
@@ -108,7 +107,8 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       JSON.stringify(savedRebalancingSettings) ||
     JSON.stringify(notificationSettings) !==
       JSON.stringify(savedNotificationSettings) ||
-    JSON.stringify(riskSettings) !== JSON.stringify(savedRiskSettings);
+    JSON.stringify(riskSettings) !== JSON.stringify(savedRiskSettings) ||
+    JSON.stringify(frozenAssets) !== JSON.stringify(savedFrozenAssets);
 
   // Warn before browser-level navigation
   useEffect(() => {
@@ -134,14 +134,11 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     [hasUnsavedChanges, onNavigate],
   );
 
-  // Show toast notification
-  const showToast = useCallback(
+  const notify = useCallback(
     (title: string, description: string, tone: "success" | "error") => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      setToast({ title, description, tone });
-      toastTimer.current = setTimeout(() => setToast(null), 3000);
+      showToast({ title, description, tone });
     },
-    [],
+    [showToast],
   );
 
   // Save individual sections
@@ -150,13 +147,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedAllocationSettings(allocationSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Allocation settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save allocation settings", "error");
+      notify("Save failed", "Could not save allocation settings", "error");
     }
   };
 
@@ -164,13 +161,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedRebalancingSettings(rebalancingSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Rebalancing settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save rebalancing settings", "error");
+      notify("Save failed", "Could not save rebalancing settings", "error");
     }
   };
 
@@ -178,13 +175,29 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedNotificationSettings(notificationSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Notification settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save notification settings", "error");
+      notify("Save failed", "Could not save notification settings", "error");
+    }
+  };
+
+  const toggleFrozenAsset = (asset: string) => {
+    setFrozenAssets((prev) =>
+      prev.includes(asset) ? prev.filter((a) => a !== asset) : [...prev, asset]
+    );
+  };
+
+  const saveAssetFreezeSettings = async () => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setSavedFrozenAssets(frozenAssets);
+      notify("Settings saved", "Asset freeze settings have been updated", "success");
+    } catch (error) {
+      notify("Save failed", "Could not save asset freeze settings", "error");
     }
   };
 
@@ -192,13 +205,13 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSavedRiskSettings(riskSettings);
-      showToast(
+      notify(
         "Settings saved",
         "Risk management settings have been updated",
         "success",
       );
     } catch (error) {
-      showToast("Save failed", "Could not save risk settings", "error");
+      notify("Save failed", "Could not save risk settings", "error");
     }
   };
 
@@ -209,7 +222,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
         "Are you sure you want to archive this portfolio? This action can be undone.",
       )
     ) {
-      showToast(
+      notify(
         "Portfolio archived",
         "Your portfolio has been archived",
         "success",
@@ -230,7 +243,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
           'This will permanently delete your portfolio and all associated data. Type "DELETE" to confirm.',
         )
       ) {
-        showToast(
+        notify(
           "Portfolio deleted",
           "Your portfolio has been permanently deleted",
           "success",
@@ -239,14 +252,6 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       }
     }
   };
-
-  // Cleanup toast timer
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    },
-    [],
-  );
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -587,6 +592,84 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
             </div>
           </section>
 
+          {/* Assets Section with Freeze Toggle */}
+          <section className="rounded-xl bg-white p-6 shadow-sm dark:bg-gray-800">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                Assets
+              </h2>
+              <button
+                type="button"
+                onClick={saveAssetFreezeSettings}
+                disabled={JSON.stringify(frozenAssets) === JSON.stringify(savedFrozenAssets)}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              >
+                <Save className="h-4 w-4" aria-hidden />
+                Save
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              Freeze individual assets to exclude them from rebalancing actions. Frozen assets are visually distinguished and will be skipped during rebalance.
+            </p>
+            <div className="space-y-2">
+              {defaultAssets.map((asset) => {
+                const isFrozen = frozenAssets.includes(asset);
+                return (
+                  <div
+                    key={asset}
+                    data-testid={`asset-row-${asset}`}
+                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                      isFrozen
+                        ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20'
+                        : 'border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
+                        asset === 'XLM' ? 'bg-blue-500' : 'bg-purple-500'
+                      }`}>
+                        {asset.slice(0, 2)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 dark:text-white text-sm">{asset}</span>
+                          {isFrozen && (
+                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
+                              <Snowflake className="w-3 h-3" />
+                              Frozen
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleFrozenAsset(asset)}
+                      data-testid={`freeze-toggle-${asset}`}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                        isFrozen ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                      role="switch"
+                      aria-checked={isFrozen}
+                      aria-label={`${isFrozen ? 'Unfreeze' : 'Freeze'} ${asset}`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          isFrozen ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {frozenAssets.length > 0 && (
+              <div className="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                {frozenAssets.length} asset{frozenAssets.length > 1 ? 's' : ''} frozen. Rebalancing will skip frozen assets.
+              </div>
+            )}
+          </section>
+
           {/* Risk Management Section */}
           <section className="rounded-xl bg-white p-6 shadow-sm dark:bg-gray-800">
             <div className="mb-4 flex items-center justify-between">
@@ -762,16 +845,6 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
           </section>
         </div>
 
-        {/* Toast notification */}
-        {toast && (
-          <div className="fixed bottom-4 right-4 z-50">
-            <Toast
-              title={toast.title}
-              description={toast.description}
-              tone={toast.tone}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

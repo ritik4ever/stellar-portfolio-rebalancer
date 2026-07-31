@@ -51,13 +51,18 @@ portfolioImportRouter.post('/portfolio/import', async (req: Request, res: Respon
       return fail(res, 400, 'VALIDATION_ERROR', 'userAddress is required')
     }
 
+    const slippageTolerance = Number(req.body?.slippageTolerance ?? req.body?.slippageTolerancePercent ?? 1)
+    const strategy = typeof req.body?.strategy === 'string' ? req.body.strategy : 'threshold'
+    const strategyConfig = (req.body?.strategyConfig && typeof req.body.strategyConfig === 'object') ? req.body.strategyConfig : {}
+    const threshold = Number(req.body?.threshold ?? 5)
+
     const portfolioId = await stellarService.createPortfolio(
       userAddress,
       parsedAllocations,
-      5,
-      1,
-      'threshold',
-      {},
+      Number.isFinite(threshold) ? threshold : 5,
+      Number.isFinite(slippageTolerance) ? slippageTolerance : 1,
+      strategy,
+      strategyConfig,
       typeof req.body?.name === 'string' ? req.body.name : undefined,
       typeof req.body?.description === 'string' ? req.body.description : undefined
     )
@@ -65,7 +70,8 @@ portfolioImportRouter.post('/portfolio/import', async (req: Request, res: Respon
     return ok(res, { portfolioId, status: 'created' }, { status: 201 })
   } catch (error) {
     logger.error('[ERROR] Bulk portfolio import failed', { error })
-    return fail(res, 500, 'INTERNAL_ERROR', 'Bulk import failed')
+    const msg = process.env.NODE_ENV === 'test' ? (error instanceof Error ? error.message : String(error)) : 'Bulk import failed'
+    return fail(res, 500, 'INTERNAL_ERROR', msg)
   }
 })
 
