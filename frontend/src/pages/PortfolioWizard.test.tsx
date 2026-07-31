@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   render,
   screen,
@@ -10,6 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import PortfolioWizard from './PortfolioWizard';
 import { api } from '../config/api';
+import { clearWizardDraft, saveWizardDraft, loadWizardDraft } from '../utils/wizardDraft';
 
 // Mock framer-motion to simplify DOM structure
 vi.mock('framer-motion', () => ({
@@ -58,6 +59,20 @@ vi.mock('../utils/walletManager', () => ({
   },
 }));
 
+// In-memory draft storage to avoid broken localStorage in jsdom
+const mockDraft = { current: null as any };
+vi.mock('../utils/wizardDraft', () => ({
+  saveWizardDraft: vi.fn((draft: any) => {
+    mockDraft.current = draft;
+  }),
+  loadWizardDraft: vi.fn(() => {
+    return mockDraft.current;
+  }),
+  clearWizardDraft: vi.fn(() => {
+    mockDraft.current = null;
+  }),
+}));
+
 function renderWizard(publicKey: string | null = 'GBTEST...') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -75,6 +90,7 @@ describe('PortfolioWizard Page', () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    mockDraft.current = null;
   });
 
   it('renders Step 1 with template options and allow moving to Step 2', async () => {
@@ -192,5 +208,43 @@ describe('PortfolioWizard Page', () => {
     // Verify 80% is preserved
     const restoredInput = screen.getByPlaceholderText('0');
     expect(restoredInput).toHaveValue(80);
+  });
+
+  it('restores wizard draft after simulated page reload', async () => {
+    cleanup();
+    vi.clearAllMocks();
+    mockDraft.current = null;
+
+    // Simulate completing step 2 and saving a draft
+    saveWizardDraft({
+      step: 2,
+      selectedTemplateId: 'custom',
+      allocations: [{ asset: 'XLM', percentage: 60 }],
+      threshold: 5,
+      cooldown: 24,
+      autoRebalance: true,
+      savedAt: new Date().toISOString(),
+    });
+    expect(mockDraft.current).not.toBeNull();
+
+    // Mount wizard - should detect the saved draft and show resume prompt
+    const { onNavigate } = renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Resume where you left off/i)).toBeInTheDocument();
+    });
+
+    // Click resume
+    fireEvent.click(screen.getByRole('button', { name: /resume draft/i }));
+
+    // Should be on step 2 with allocation preserved
+    await waitFor(() => {
+      expect(screen.getByText('Step 2: Add Assets & Allocations')).toBeInTheDocument();
+    });
+    const restoredInput = screen.getByPlaceholderText('0');
+    expect(restoredInput).toHaveValue(60);
+
+    // Clean up draft
+    clearWizardDraft();
   });
 });

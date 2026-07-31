@@ -67,10 +67,17 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
 
 ### `PGPASSWORD` / `DATABASE_URL`
 
-1. Rotate the password via your Postgres provider (RDS, Neon, Supabase, etc.) or with `ALTER USER`.
-2. Update `PGPASSWORD` (or the password segment of `DATABASE_URL`) in your secrets manager.
-3. Restart the backend — the connection pool re-establishes with the new credential.
-4. Drop or disable the old credential.
+1. When using AWS Secrets Manager automatic rotation (`secret_rotation_days`), RDS master and application credentials rotate on a scheduled basis.
+2. For manual rotations, rotate the password via your Postgres provider (RDS, Neon, Supabase, etc.) or with `ALTER USER`, and update the value in your secrets manager.
+3. The backend `CredentialManager` reads credentials dynamically and automatically refreshes the connection pool across rotation events without manual intervention.
+4. Drop or disable the old credential after verification.
+5. For step-by-step verification and rollback instructions, see [OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager](OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager).
+
+### `REDIS_URL` / `REDIS_AUTH_TOKEN`
+
+1. Rotate the AUTH token via AWS Secrets Manager or your Redis/ElastiCache provider (`secret_rotation_days`).
+2. The backend dynamically re-reads `REDIS_AUTH_TOKEN` (or AWS Secrets Manager secret) and refreshes Redis client connections automatically across rotation events without manual intervention.
+3. For step-by-step verification and rollback instructions, see [OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager](OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager).
 
 ### `WEBHOOK_SIGNING_SECRET`
 

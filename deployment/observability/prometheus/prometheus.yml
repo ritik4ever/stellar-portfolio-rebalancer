@@ -38,7 +38,13 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
+  # Synthetic uptime probe for the WebSocket endpoint. The backend upgrades any
+  # non-/ws/portfolio/ path onto the robust broadcast socket, so the root URL is
+  # the externally reachable WS entrypoint. Probed on its own 30s interval rather
+  # than the 15s global default to keep handshake churn on the socket low.
   - job_name: portfolio-websocket
+    scrape_interval: 30s
+    scrape_timeout: 15s
     metrics_path: /probe
     params:
       module: [websocket]
