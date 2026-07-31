@@ -19,6 +19,8 @@ mod stop_loss;
 mod strategies;
 #[cfg(all(test, feature = "testutils"))]
 mod test;
+#[cfg(all(test, feature = "testutils"))]
+mod property_tests;
 mod types;
 
 pub use oracle::*;
@@ -854,8 +856,7 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::EmergencyStop)
             .unwrap_or(false);
-        let portfolio: PortfolioOption = if let Some(p) = env
-            .storage()
+        let portfolio: PortfolioOption = if let Some(p) =        env.storage()
             .persistent()
             .get(&DataKey::PortfolioV2(portfolio_id))
         {
