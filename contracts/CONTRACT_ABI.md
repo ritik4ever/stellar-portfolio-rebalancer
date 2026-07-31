@@ -383,3 +383,17 @@ Each proptest run logs the random seed used. To reproduce a specific failure:
 ```bash
 PROPTEST_SEED=<hex-seed> cargo test --features testutils property_
 ```
+
+## Property-Based Tests (`contracts/src/property_tests.rs`)
+
+The contract includes property-based tests using [`proptest`](https://docs.rs/proptest) with **10,000 random inputs per property**.
+
+| # | Property | Cases |
+|---|----------|-------|
+| 1 | Valid allocations (sum=10000) always accepted | 10,000 |
+| 2 | Invalid allocations (sum!=10000) rejected | 10,000 |
+| 3 | Deposit+withdraw roundtrip preserves balance | 10,000 |
+| 4 | Drift and current_pct in [0,10000] range | 10,000 |
+| 5 | Rebalance idempotent when no drift | 10,000 |
+
+Run: `cargo test --features testutils property_`
