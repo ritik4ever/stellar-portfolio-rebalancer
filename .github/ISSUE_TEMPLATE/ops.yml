@@ -1,0 +1,24 @@
+name: Operations
+description: Report operational or infrastructure issues
+title: "[OPS] "
+labels: ["devops"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What operational issue occurred?
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What was affected?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps Taken
+      description: What troubleshooting has been done?
