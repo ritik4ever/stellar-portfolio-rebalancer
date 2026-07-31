@@ -46,8 +46,9 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
         const search = req.query.search as string || ''
         const limit = parseInt(req.query.limit as string) || 20
         const offset = parseInt(req.query.offset as string) || 0
+        const includeArchived = req.query.include_archived === 'true'
 
-        const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset)
+        const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset, includeArchived)
         return ok(res, { portfolios, limit, offset })
     } catch (error) {
         logger.error('[ERROR] Search portfolios failed', { error: getErrorObject(error) })
@@ -344,6 +345,66 @@ portfoliosRouter.get('/portfolio/:id/share', async (req: Request, res: Response)
 })
 
 // ================================
+// ARCHIVE / RESTORE ROUTES
+// ================================
+
+portfoliosRouter.delete('/portfolio/:id', ...protectedWriteLimiter, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only archive your own portfolio')
+        }
+
+        if (portfolio.archivedAt) {
+            return fail(res, 400, 'ALREADY_ARCHIVED', 'Portfolio is already archived')
+        }
+
+        const archived = await portfolioStorage.archivePortfolio(portfolioId)
+        if (!archived) return fail(res, 500, 'INTERNAL_ERROR', 'Failed to archive portfolio')
+
+        logger.info('[ARCHIVE] Portfolio archived', { portfolioId })
+        return ok(res, { portfolioId, status: 'archived', archivedAt: new Date().toISOString() })
+    } catch (error) {
+        logger.error('[ERROR] Archive portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/:id/restore', ...protectedWriteLimiter, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only restore your own portfolio')
+        }
+
+        if (!portfolio.archivedAt) {
+            return fail(res, 400, 'NOT_ARCHIVED', 'Portfolio is not archived')
+        }
+
+        const restored = await portfolioStorage.restorePortfolio(portfolioId)
+        if (!restored) return fail(res, 500, 'INTERNAL_ERROR', 'Failed to restore portfolio')
+
+        logger.info('[RESTORE] Portfolio restored', { portfolioId })
+        return ok(res, { portfolioId, status: 'restored' })
+    } catch (error) {
+        logger.error('[ERROR] Restore portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
 // DRAFT PORTFOLIO ROUTES
 // ================================
 
@@ -559,7 +620,8 @@ portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Resp
             }
         }
 
-        const list = await portfolioStorage.getUserPortfolios(address)
+        const includeArchived = req.query.include_archived === 'true'
+        const list = await portfolioStorage.getUserPortfolios(address, includeArchived)
 
         return ok(res, { portfolios: list })
     } catch (error) {

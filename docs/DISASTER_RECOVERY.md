@@ -232,9 +232,28 @@ If a regional outage is detected:
 
 ## 6. Rollback Procedures
 
-### 6.1 Smart Contract Rollback
-Soroban smart contracts are immutable. There is no built-in on-chain upgrade method. 
-If a critical contract bug requires a rollback:
+### 4.1 Smart Contract Rollback
+The contract exposes an `upgrade()` entrypoint that calls
+`update_current_contract_wasm` to swap the on-chain WASM blob. This allows
+reverting to a previous code version without deploying a new contract ID.
+
+**When rollback is safe:** if the upgrade was a plain WASM swap and no
+storage-migration hook mutated persistent entries, you can point the contract
+back to the previous WASM hash:
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source <STELLAR_SECRET_KEY> \
+  --network <STELLAR_NETWORK> \
+  -- upgrade \
+  --new_wasm_hash $PREVIOUS_WASM_HASH
+```
+
+**When rollback requires a new contract:** if `migrate_storage` transformed
+storage entries during the upgrade, the old WASM cannot deserialize the
+migrated data. In that case:
+
 1.  **Deploy Corrected Contract**: Build and deploy a corrected version of the contract to obtain a new Contract ID:
     ```bash
     cd contracts
@@ -244,10 +263,21 @@ If a critical contract bug requires a rollback:
       --source <STELLAR_SECRET_KEY> \
       --network <STELLAR_NETWORK>
     ```
-2.  **Update Environment Configurations**: Update the new contract ID in the backend and frontend `.env` configurations:
+2.  **Assess state loss**: Deploying a fresh contract starts with empty
+    persistent storage. All on-chain state — portfolio records, balances,
+    fee configuration, DCA configurations, and NAV history — is **not**
+    transferred. Before proceeding:
+    - Export portfolio records and target allocations from the old contract
+      via event replay or indexer data so users can re-create them.
+    - Inform users they must re-deposit funds into the new contract, since
+      asset balances held by the old contract are not migrated.
+    - Activate the emergency stop on the old contract to prevent further
+      deposits into the abandoned instance.
+3.  **Update Environment Configurations**: Update the new contract ID in the backend and frontend `.env` configurations:
     *   Backend env: `STELLAR_CONTRACT_ADDRESS` (or alias `CONTRACT_ADDRESS`)
     *   Frontend env: `VITE_CONTRACT_ADDRESS`
-3.  **Redeploy Services**: Redeploy backend and frontend services using the updated configurations.
+4.  **Redeploy Services**: Redeploy backend and frontend services using the updated configurations.
+5.  **Validate**: Create a test portfolio, execute a full deposit/withdraw/rebalance cycle, and confirm the indexer is syncing events from the new contract.
 
 ### 6.2 Backend Rollback
 If a buggy backend release was deployed:

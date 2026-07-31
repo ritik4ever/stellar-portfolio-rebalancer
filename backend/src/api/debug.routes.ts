@@ -51,11 +51,10 @@ debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdm
     }
 })
 
-debugRouter.get('/debug/coingecko-test', blockDebugInProduction, async (req: Request, res: Response) => {
+debugRouter.get('/debug/coingecko-test', blockDebugInProduction, requireAdmin, async (req: Request, res: Response) => {
     try {
         const apiKey = process.env.COINGECKO_API_KEY
 
-        // Test direct API call
         const testUrl = apiKey ?
             'https://pro-api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd' :
             'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd'
@@ -75,20 +74,16 @@ debugRouter.get('/debug/coingecko-test', blockDebugInProduction, async (req: Req
         const data = await fetchResponse.json()
 
         const response = {
-            apiKeySet: !!apiKey,
-            testUrl,
             responseStatus: fetchResponse.status,
             responseData: data
         }
         return ok(res, redactObject(response))
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error), {
-            stack: error instanceof Error ? error.stack : String(error)
-        })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, async (req: Request, res: Response) => {
+debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, requireAdmin, async (req: Request, res: Response) => {
     try {
         logger.info('[DEBUG] Clearing cache and forcing fresh prices...')
 
@@ -112,7 +107,7 @@ debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, async (req:
     }
 })
 
-debugRouter.get('/debug/reflector-test', blockDebugInProduction, async (req: Request, res: Response) => {
+debugRouter.get('/debug/reflector-test', blockDebugInProduction, requireAdmin, async (req: Request, res: Response) => {
     try {
         logger.info('[DEBUG] Testing reflector service...')
 
@@ -133,15 +128,12 @@ debugRouter.get('/debug/reflector-test', blockDebugInProduction, async (req: Req
     }
 })
 
-debugRouter.get('/debug/env', blockDebugInProduction, async (req: Request, res: Response) => {
+debugRouter.get('/debug/env', blockDebugInProduction, requireAdmin, async (req: Request, res: Response) => {
     try {
         const response = {
             environment: global.process.env.NODE_ENV,
-            apiKeySet: !!global.process.env.COINGECKO_API_KEY,
             autoRebalancerEnabled: !!autoRebalancer,
-            autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false,
-            enableAutoRebalancer: global.process.env.ENABLE_AUTO_REBALANCER,
-            port: global.process.env.PORT
+            autoRebalancerRunning: autoRebalancer ? autoRebalancer.getStatus().isRunning : false
         }
         return ok(res, redactObject(response))
     } catch (error) {
@@ -149,7 +141,7 @@ debugRouter.get('/debug/env', blockDebugInProduction, async (req: Request, res: 
     }
 })
 
-debugRouter.get('/debug/auto-rebalancer-test', blockDebugInProduction, async (req: Request, res: Response) => {
+debugRouter.get('/debug/auto-rebalancer-test', blockDebugInProduction, requireAdmin, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized', {
