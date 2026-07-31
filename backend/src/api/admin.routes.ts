@@ -7,7 +7,6 @@ import { getErrorMessage } from '../utils/helpers.js'
 
 export const adminRouter = Router()
 
-// Predefined safe queries for EXPLAIN ANALYZE
 const PREDEFINED_QUERIES: Record<string, string> = {
   'get_all_portfolios': 'SELECT * FROM portfolios ORDER BY created_at DESC',
   'get_portfolio_count': 'SELECT COUNT(*) as cnt FROM portfolios',
@@ -21,28 +20,14 @@ const PREDEFINED_QUERIES: Record<string, string> = {
   'get_portfolio_drafts': 'SELECT * FROM portfolio_drafts WHERE user_address = ?'
 }
 
-/**
- * POST /api/v1/admin/db/explain
- * 
- * Accepts a named query identifier and returns EXPLAIN ANALYZE output.
- * Restricted to admin only.
- * Only predefined queries are allowed to prevent SQL injection.
- * 
- * Request body:
- * {
- *   "queryId": "get_all_portfolios",
- *   "params": [] // Optional parameters for parameterized queries
- * }
- * 
- * Response:
- * {
- *   "queryId": "get_all_portfolios",
- *   "explainPlan": "...",
- *   "executionTimeMs": 1.23,
- *   "estimatedRows": 100,
- *   "actualRows": 95
- * }
- */
+function logAdminAction(actor: string, action: string, target: string | null, before?: unknown, after?: unknown): void {
+  try {
+    databaseService.recordAdminAuditEntry(actor, action, target, before ?? null, after ?? null)
+  } catch (err) {
+    logger.warn('[ADMIN] Failed to record audit entry', { error: getErrorMessage(err), action, target })
+  }
+}
+
 adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { queryId, params = [] } = req.body
@@ -56,19 +41,18 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
       return fail(res, 400, 'VALIDATION_ERROR', `Unknown query identifier: ${queryId}. Available queries: ${Object.keys(PREDEFINED_QUERIES).join(', ')}`)
     }
 
-    // Validate params is an array
     if (!Array.isArray(params)) {
       return fail(res, 400, 'VALIDATION_ERROR', 'params must be an array')
     }
 
-    logger.info('[ADMIN] EXPLAIN ANALYZE requested', { queryId, adminPublicKey: req.adminPublicKey })
+    const actor = req.adminPublicKey ?? 'unknown'
+    logger.info('[ADMIN] EXPLAIN ANALYZE requested', { queryId, adminPublicKey: actor })
 
     const db = (databaseService as any).db
     if (!db) {
       return fail(res, 500, 'INTERNAL_ERROR', 'Database connection not available')
     }
 
-    // First, run EXPLAIN ANALYZE on the query
     const explainQuery = `EXPLAIN ANALYZE ${query}`
     const explainStart = Date.now()
     
@@ -76,20 +60,19 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
       const explainResult = db.prepare(explainQuery).all(...params)
       const explainTimeMs = Date.now() - explainStart
 
-      // Parse the EXPLAIN ANALYZE output to extract estimated vs actual row counts
       const explainPlan = explainResult.map((row: any) => row.detail || JSON.stringify(row)).join('\n')
       
-      // Extract estimated and actual rows from the plan
       const estimatedRowsMatch = explainPlan.match(/rows=(\d+)/)
       const actualRowsMatch = explainPlan.match(/actual rows=(\d+)/)
       
       const estimatedRows = estimatedRowsMatch ? parseInt(estimatedRowsMatch[1], 10) : null
       const actualRows = actualRowsMatch ? parseInt(actualRowsMatch[1], 10) : null
 
-      // Also run the actual query to get the real row count
       const queryStart = Date.now()
       const actualResult = db.prepare(query).all(...params)
       const queryTimeMs = Date.now() - queryStart
+
+      logAdminAction(actor, 'db_explain', queryId, null, { rowCount: actualResult.length })
 
       return ok(res, {
         queryId,
@@ -111,21 +94,33 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
   }
 })
 
-/**
- * GET /api/v1/admin/db/queries
- * 
- * Returns the list of available predefined query identifiers.
- * Restricted to admin only.
- */
-adminRouter.get('/db/queries', requireAdmin, async (_req: Request, res: Response) => {
+adminRouter.get('/db/queries', requireAdmin, async (req: Request, res: Response) => {
   try {
     const queries = Object.keys(PREDEFINED_QUERIES).map(key => ({
       id: key,
       query: PREDEFINED_QUERIES[key]
     }))
+    logAdminAction(req.adminPublicKey ?? 'unknown', 'list_queries', null)
     return ok(res, { queries })
   } catch (error) {
     logger.error('[ADMIN] Failed to list queries', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+})
+
+adminRouter.get('/audit-log', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const actor = typeof req.query.actor === 'string' ? req.query.actor : undefined
+    const action = typeof req.query.action === 'string' ? req.query.action : undefined
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0
+
+    const result = databaseService.queryAdminAuditLog({ actor, action, startDate, endDate, limit, offset })
+    return ok(res, result)
+  } catch (error) {
+    logger.error('[ADMIN] Failed to query audit log', { error: getErrorMessage(error) })
     return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
   }
 })

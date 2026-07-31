@@ -3,7 +3,8 @@ import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import {
     riskManagementService,
-    rebalanceHistoryService
+    rebalanceHistoryService,
+    buildDependencyHealthSummary
 } from '../services/serviceContainer.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
@@ -100,6 +101,17 @@ opsRouter.get('/health', async (_req: Request, res: Response) => {
         timestamp: checkedAt,
         dependencies: deps
     })
+})
+
+opsRouter.get('/health/summary', async (_req: Request, res: Response) => {
+    try {
+        const summary = await buildDependencyHealthSummary()
+        const statusCode = summary.status === 'healthy' ? 200 : 503
+        return res.status(statusCode).json(summary)
+    } catch (error) {
+        logger.error('[HEALTH] Failed to build dependency health summary', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
 })
 
 opsRouter.get('/strategies', (_req: Request, res: Response) => {
