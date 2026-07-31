@@ -10,6 +10,7 @@ use soroban_sdk::token::Client as TokenClient;
 mod circuit_breaker;
 mod events;
 mod nav;
+mod oracle;
 mod portfolio;
 mod reflector;
 mod stop_loss;
@@ -18,8 +19,8 @@ mod strategies;
 mod test;
 mod types;
 
+pub use oracle::*;
 use strategies::dca;
-
 pub use reflector::*;
 pub use types::*;
 pub use events::emit_dca_executed;
@@ -467,6 +468,27 @@ impl PortfolioRebalancer {
             .persistent()
             .get(&DataKey::Steward(portfolio_id))
             .unwrap_or(portfolio.user)
+    }
+
+    pub fn set_coingecko_address(env: Env, address: Address) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CoinGeckoAddress, &address);
+    }
+
+    pub fn set_oracle_config(env: Env, config: OracleConfig) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleConfig, &config);
+    }
+
+    pub fn get_oracle_config(env: Env) -> OracleConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleConfig)
+            .unwrap_or(OracleConfig::default())
     }
 
     pub fn version(_env: Env) -> u32 {
