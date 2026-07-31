@@ -16,9 +16,9 @@ export type BulkImportValidationError = {
   code: string
   message: string
   errors: BulkImportRowError[]
-  // meta fields are helpful for frontend UX
   totalRows: number
   validRows: number
+  truncatedErrors?: number
 }
 
 export type ParsedBulkImportResult = {
@@ -27,6 +27,7 @@ export type ParsedBulkImportResult = {
 }
 
 const MAX_ASSETS = 10
+const MAX_REPORTED_ERRORS = 100
 
 function normalizeAssetCode(input: string): string {
   return input.trim().toUpperCase()
@@ -45,6 +46,13 @@ export function parseJsonPayload(payload: unknown): { rows: AllocationInputRow[]
   if (payload && typeof payload === 'object') {
     const obj: any = payload
     if (Array.isArray(obj.allocations)) return { rows: obj.allocations as AllocationInputRow[] }
+    if (obj.allocations && typeof obj.allocations === 'object' && !Array.isArray(obj.allocations)) {
+      const rows: AllocationInputRow[] = Object.entries(obj.allocations).map(([symbol, pct]) => ({
+        asset: symbol,
+        allocation_pct: Number(pct),
+      }))
+      return { rows }
+    }
   }
 
   return { rows: [], formatError: 'JSON payload must be an array of {asset, allocation_pct} or an object with allocations: [...]' }
@@ -260,12 +268,19 @@ export async function validateAndBuildAllocations(params: {
   }
 
   if (errors.length > 0) {
+    const truncatedCount = errors.length > MAX_REPORTED_ERRORS ? errors.length - MAX_REPORTED_ERRORS : 0
+    const cappedErrors = errors.length > MAX_REPORTED_ERRORS
+      ? [...errors.slice(0, MAX_REPORTED_ERRORS), { row: 0, field: 'summary', message: `+${truncatedCount} more errors` }]
+      : errors
     return {
       code: 'VALIDATION_ERROR',
-      message: 'Bulk import validation failed',
-      errors,
+      message: truncatedCount > 0
+        ? `Bulk import validation failed (${truncatedCount} additional errors not shown)`
+        : 'Bulk import validation failed',
+      errors: cappedErrors,
       totalRows: rows.length,
       validRows: rows.length - errors.length,
+      truncatedErrors: truncatedCount > 0 ? truncatedCount : undefined,
     }
   }
 

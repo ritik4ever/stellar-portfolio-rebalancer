@@ -1,10 +1,24 @@
 import { Dec } from '../utils/decimal.js'
 import type { Portfolio, PricesMap, RebalanceStrategyType, RebalanceStrategyConfig } from '../types/index.js'
+import { logger } from '../utils/logger.js'
 
 export interface RebalanceStrategyContext {
     portfolio: Portfolio
     prices: PricesMap
     now?: number
+}
+
+export interface CrossCheckResult {
+    backendDecision: boolean
+    onChainDecision: boolean
+    agreement: boolean
+    finalDecision: boolean
+    warning?: string
+}
+
+export interface CrossCheckConfig {
+    requireAgreement: boolean
+    alertOnDisagreement: boolean
 }
 
 /**
@@ -25,6 +39,8 @@ export function shouldRebalanceByStrategy(context: RebalanceStrategyContext): bo
             return volatilityStrategy(portfolio, prices, config, now)
         case 'custom':
             return customStrategy(portfolio, prices, config, now)
+        case 'dca':
+            return dcaStrategy(portfolio, config, now)
         default:
             return thresholdStrategy(portfolio, prices)
     }
@@ -87,9 +103,67 @@ function customStrategy(
     return thresholdStrategy(portfolio, prices)
 }
 
+function dcaStrategy(
+    portfolio: Portfolio,
+    config: RebalanceStrategyConfig,
+    now: number
+): boolean {
+    const intervalDays = config.dcaIntervalDays ?? config.intervalDays ?? 7
+    const lastMs = new Date(portfolio.lastRebalance).getTime()
+    const intervalMs = intervalDays * 24 * 60 * 60 * 1000
+    return now - lastMs >= intervalMs
+}
+
 export const REBALANCE_STRATEGIES: { value: RebalanceStrategyType; label: string; description: string }[] = [
     { value: 'threshold', label: 'Threshold-based', description: 'Rebalance when allocation drift exceeds the configured threshold (%).' },
     { value: 'periodic', label: 'Periodic (time-based)', description: 'Rebalance on a fixed schedule (e.g. every 7 or 30 days).' },
     { value: 'volatility', label: 'Volatility-based', description: 'Rebalance when market volatility exceeds a percentage threshold.' },
     { value: 'custom', label: 'Custom rules', description: 'User-defined: minimum days between rebalances plus threshold check.' },
+    { value: 'dca', label: 'Dollar Cost Averaging', description: 'Execute scheduled buys at fixed intervals regardless of market conditions.' },
 ]
+
+export async function crossCheckRebalanceDecision(
+    context: RebalanceStrategyContext,
+    onChainCheck: () => Promise<boolean>,
+    config: CrossCheckConfig = { requireAgreement: false, alertOnDisagreement: true }
+): Promise<CrossCheckResult> {
+    const backendDecision = shouldRebalanceByStrategy(context)
+    
+    let onChainDecision: boolean
+    try {
+        onChainDecision = await onChainCheck()
+    } catch (error) {
+        logger.error('[CrossCheck] On-chain check failed, falling back to backend decision', {
+            portfolioId: context.portfolio.id,
+            error: error instanceof Error ? error.message : String(error),
+        })
+        return {
+            backendDecision,
+            onChainDecision: backendDecision,
+            agreement: true,
+            finalDecision: backendDecision,
+            warning: 'On-chain check failed, using backend decision',
+        }
+    }
+
+    const agreement = backendDecision === onChainDecision
+
+    if (!agreement && config.alertOnDisagreement) {
+        logger.warn('[CrossCheck] Backend and on-chain rebalance decisions disagree', {
+            portfolioId: context.portfolio.id,
+            backendDecision,
+            onChainDecision,
+            strategy: context.portfolio.strategy ?? 'threshold',
+        })
+    }
+
+    const finalDecision = config.requireAgreement ? (agreement && backendDecision) : backendDecision
+
+    return {
+        backendDecision,
+        onChainDecision,
+        agreement,
+        finalDecision,
+        warning: !agreement ? 'Backend and on-chain decisions disagree' : undefined,
+    }
+}
