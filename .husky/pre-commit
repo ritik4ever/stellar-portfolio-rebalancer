@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Optional pre-commit hooks for lint, test, and format quick checks
+# Uncomment the checks you want:
+
+# Lint staged files
+# npx lint-staged
+
+# Run frontend type check
+# npm --prefix frontend run typecheck --if-present
+
+# Run backend type check
+# npm --prefix backend run typecheck --if-present
+
+# Quick format check
+# npx prettier --check "**/*.{ts,tsx,js,jsx,json,md}"

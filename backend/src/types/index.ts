@@ -67,6 +67,8 @@ export interface Portfolio {
     lastRebalance: string
     version: number
     archivedAt?: string
+    /** ISO timestamp until which scheduled rebalancing is paused due to a CVaR/VaR breach. */
+    riskPausedUntil?: string
 }
 
 export type RebalanceTrigger = 'auto' | 'manual' | 'system'
@@ -82,7 +84,7 @@ export type RebalanceReasonCode =
     | 'OTHER'
 
 // Rebalance strategy types
-export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom' | 'dca'
 
 export interface RebalanceStrategyConfig {
     type?: RebalanceStrategyType
@@ -91,6 +93,8 @@ export interface RebalanceStrategyConfig {
     intervalDays?: number
     volatilityThresholdPct?: number
     minDaysBetweenRebalance?: number
+    dcaAmount?: number
+    dcaIntervalDays?: number
 }
 
 export interface UIAllocation {

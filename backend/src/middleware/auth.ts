@@ -2,15 +2,18 @@ import { Request, Response, NextFunction } from 'express'
 import { Keypair } from '@stellar/stellar-sdk'
 import { fail } from '../utils/apiResponse.js'
 
-const ADMIN_KEYS = (process.env.ADMIN_PUBLIC_KEYS || '')
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean)
+function getAdminKeys(): string[] {
+    return (process.env.ADMIN_PUBLIC_KEYS || '')
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean)
+}
 
 const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-    if (ADMIN_KEYS.length === 0) {
+    const adminKeys = getAdminKeys()
+    if (adminKeys.length === 0) {
         fail(res, 503, 'SERVICE_UNAVAILABLE', 'Admin auth not configured')
         return
     }
@@ -38,7 +41,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
         fail(res, 403, 'FORBIDDEN', 'Invalid public key or signature')
         return
     }
-    if (!ADMIN_KEYS.includes(pub)) {
+    if (!adminKeys.includes(pub)) {
         fail(res, 403, 'FORBIDDEN', 'Forbidden')
         return
     }
