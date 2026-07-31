@@ -26,6 +26,10 @@ variable "db_secret_arn" {
   type = string
 }
 
+variable "redis_secret_arn" {
+  type = string
+}
+
 variable "db_host" {
   type = string
 }

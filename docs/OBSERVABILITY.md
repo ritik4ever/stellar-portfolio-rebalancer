@@ -23,6 +23,31 @@ The current deployment probes:
 
 The blackbox configuration is stored in `deployment/observability/blackbox/blackbox.yml`, and Prometheus scrape jobs are defined in `deployment/observability/prometheus/prometheus.yml`.
 
+### Synthetic WebSocket probe
+
+WebSocket availability is measured directly rather than inferred from HTTP metrics. The `websocket` module in `blackbox.yml` issues a real RFC 6455 opening handshake — `Connection: Upgrade`, `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and a fixed `Sec-WebSocket-Key` — and only records success when the server:
+
+1. answers with status `101 Switching Protocols`,
+2. echoes an `Upgrade: websocket` response header, and
+3. returns the `Sec-WebSocket-Accept` digest derived from the probe's key.
+
+Checking the accept digest matters because a `101` alone only proves something in front of the backend agreed to switch protocols. The digest is `SHA1(key + RFC 6455 GUID)` base64-encoded, so a correct value proves the peer that answered is a real WebSocket server that read the probe's key — not a proxy or load balancer echoing a status line.
+
+The probe target is the backend root URL. `backend/src/index.ts` routes every upgrade request that is not under `/ws/portfolio/` onto the robust broadcast socket, so the root URL is the externally reachable WS entrypoint and needs no authentication to complete a handshake.
+
+The `portfolio-websocket` scrape job runs the probe every 30s with a 15s timeout — its own interval rather than the 15s global default, to keep handshake churn on the socket low while still detecting an outage inside one alert evaluation window.
+
+Failures feed the existing Prometheus/Alertmanager pipeline through two rules in `prometheus/alerts.yml`:
+
+| Alert | Fires when | Severity | Route |
+| --- | --- | --- | --- |
+| `WebSocketHandshakeFailed` | `probe_success == 0` for 5m | critical | pages on-call, suppressed while `BackendDown` is firing |
+| `WebSocketProbeStalled` | no `probe_success` sample for 10m | warning | non-paging warnings channel |
+
+`WebSocketProbeStalled` covers the blind spot where the exporter itself is down: without it, a missing probe looks identical to a healthy one.
+
+To probe a deployed environment, add its public WS origin to the `portfolio-websocket` job targets. Use the `http://` or `https://` scheme (not `ws://`) — the blackbox HTTP prober performs the upgrade over an ordinary HTTP request.
+
 ## Backend
 
 Backend observability is enabled with environment variables in [backend/.env.example](C:\Users\HP\Documents\students\drips\stellar-portfolio-rebalancer\backend.env.example).
@@ -119,6 +144,7 @@ Prometheus alerts are preconfigured for:
 - backend metrics endpoint down
 - backend readiness failures
 - frontend uptime failures
+- WebSocket handshake failures and a stalled WebSocket probe
 - elevated backend 5xx rate
 - failed rebalance queue jobs
 - stale Reflector price rows observed in the last 15 minutes
@@ -132,7 +158,41 @@ The backend exports dedicated price-quality metrics:
 - `stellar_portfolio_reflector_stale_prices_total`
 - `stellar_portfolio_reflector_fallback_usage_total`
 
-Alertmanager ships alerts to `http://host.docker.internal:5001/alerts` by default. Replace that receiver with your Slack, PagerDuty, Opsgenie, or webhook destination before production rollout.
+Alertmanager ships non-critical alerts to `http://host.docker.internal:5001/alerts` by default. Replace those receivers with your Slack or webhook destination before production rollout. Critical alerts page the on-call engineer instead — see below.
+
+## On-Call Escalation Policy
+
+Alert routing lives in `deployment/observability/alertmanager/alertmanager.yml`. Severity decides the channel, and only `critical` wakes a human:
+
+| Severity | Receiver | Channel | Group wait | Re-notify |
+| --- | --- | --- | --- | --- |
+| `critical` | `oncall-pagerduty` | PagerDuty (or Opsgenie) page | 10s | 1h |
+| `warning` | `slack-warnings` | Slack, no paging | 30s | 12h |
+| `info` | `diagnostic-logs` | Log sink, no paging | 1m | 24h |
+
+### Choosing a vendor
+
+Both a PagerDuty and an Opsgenie receiver are defined. The `severity: critical` route points at `oncall-pagerduty`; switch vendors by changing that route's `receiver` to `oncall-opsgenie`. **Route to one vendor only** — pointing at both would page the on-call engineer twice for every incident.
+
+Credentials are read from files mounted read-only at `/etc/alertmanager/secrets`, backed by `deployment/observability/alertmanager/oncall-secrets/` on the host. See the README in that directory for the file names and setup command; the key files themselves are git-ignored. Without a key file, critical alerts fail to deliver and Alertmanager logs a notification error.
+
+### Avoiding duplicate pages
+
+Three mechanisms keep one incident to one page:
+
+1. **Coarse grouping.** The critical route groups by `subsystem` + `service` rather than `alertname`, so several rules tripping on the same outage land in one notification.
+2. **Stable deduplication identity.** Alertmanager derives the PagerDuty `dedup_key` from that group key, and the Opsgenie receiver pins `alias` to `stellar-portfolio-<subsystem>-<service>`. Repeat evaluations update the open incident instead of opening a new one, and the resolved notification closes it.
+3. **Inhibition rules.** A firing `critical` alert suppresses `warning` and `info` alerts for the same `subsystem` + `service`. `BackendDown` additionally suppresses the blackbox probe alerts that depend on the backend (`BackendReadinessFailed`, `BackendApiRootFailed`, `ApiDocsProbeFailed`, `WebSocketHandshakeFailed`), since the process being down is their root cause.
+
+### Escalation path
+
+1. **0–10s** — a critical alert fires; Alertmanager holds it for `group_wait` to collect related alerts into the same page.
+2. **10s** — the page reaches the primary on-call engineer. The payload carries `alertname`, `subsystem`, `service`, the firing-alert count, and a link back to this document.
+3. **Acknowledge and triage.** Cross-check the matching Sentry release and environment tags first — that narrows the search to the exact build that produced the failure. See [TRIAGE.md](TRIAGE.md).
+4. **1h unacknowledged** — Alertmanager re-notifies (`repeat_interval: 1h`). Configure secondary-responder escalation in the PagerDuty/Opsgenie escalation policy itself, not here; Alertmanager only delivers the page.
+5. **Resolution.** Alertmanager sends a resolve notification (`send_resolved: true`) and the incident closes automatically when the underlying alert stops firing.
+
+Adding a new critical alert requires `severity: critical` plus `subsystem` and `service` labels. Without those two labels the alert still pages, but it groups on its own and cannot be inhibited by a related root-cause alert.
 
 ### Queue Operations Dashboard
 
