@@ -60,6 +60,14 @@ cd backend && npm run dev
 cd frontend && npm run dev
 ```
 
+Before trusting a new backend environment or deployment, run the startup sweep:
+
+```bash
+cd backend && npm run startup:self-test
+```
+
+It validates config, database, queues, and provider connectivity using the same backend entrypoint without starting the HTTP server.
+
 ### Docker Compose
 
 You can also run the stack using Docker Compose:
@@ -83,9 +91,50 @@ If you want the backend to talk to the PostgreSQL and Redis services in `full-st
 - **Monitor**: View real-time portfolio status and drift
 - **Rebalance**: Manual or automatic rebalancing based on your settings
 
+## Local Reflector Oracle Mock (Offline Dev)
+
+When developing locally or offline without access to live market feeds, `docker-compose up` runs a lightweight local **Reflector Oracle Mock** container alongside backend services.
+
+### Running with Docker Compose
+```bash
+docker compose -f deployment/docker-compose.yml up -d
+```
+
+### Overriding Mock Prices for Testing Scenarios
+You can configure or dynamically push custom asset prices to simulate market conditions like volatility spikes:
+
+#### Initial Configuration via Env
+Set initial prices in environment variables before launching:
+```bash
+MOCK_PRICE_XLM=0.50 MOCK_PRICE_BTC=150000 ENABLE_RANDOMIZATION=true docker compose -f deployment/docker-compose.yml up -d
+```
+
+#### Dynamic Price Override (HTTP POST)
+To simulate a volatility spike or test specific rebalance drift thresholds while services are running:
+```bash
+# Override specific asset prices
+curl -X POST http://localhost:8080/prices \
+  -H "Content-Type: application/json" \
+  -d '{"prices": {"XLM": 0.85, "BTC": 150000, "ETH": 2500}}'
+
+# Toggle price randomization
+curl -X POST http://localhost:8080/config \
+  -H "Content-Type: application/json" \
+  -d '{"enableRandomization": true}'
+```
+
 ## Architecture
 
 - **Smart Contracts**: Soroban contracts for portfolio management
 - **Backend**: Node.js API with real-time monitoring
 - **Frontend**: React with TypeScript and Tailwind CSS
 - **Oracle**: Reflector price feeds for accurate pricing
+
+## Realtime WebSocket Protocol
+
+- Clients open a WebSocket connection to the configured `WEBSOCKET_URL` with `userId` in the query string.
+- The backend sends a `CONNECTION_ACK` message with protocol version, heartbeat interval, and reconnect policy.
+- Clients must send a `SUBSCRIBE` request to confirm they are ready to receive live updates.
+- The backend responds with `SUBSCRIBED`, including `heartbeatIntervalMs` and `reconnectPolicy`.
+- The server emits `HEARTBEAT` events regularly so both sides agree on liveness and reconnect expectations.
+

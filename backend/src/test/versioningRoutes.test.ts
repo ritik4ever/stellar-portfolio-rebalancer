@@ -1,12 +1,27 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import express, { type Express } from 'express'
 import request from 'supertest'
+
+vi.mock('../queue/connection.js', () => ({
+    isRedisAvailable: vi.fn().mockResolvedValue(true),
+    isRedisConnected: vi.fn().mockReturnValue(true),
+}))
+
+vi.mock('../services/reflector.js', () => ({
+    ReflectorService: vi.fn().mockImplementation(function(this: any) {
+        this.testApiConnectivity = vi.fn().mockResolvedValue({ success: true })
+        this.getCurrentPrices = vi.fn().mockResolvedValue({ XLM: 0.12, USDC: 1.0 })
+        return this
+    })
+}))
+
 import { v1Router } from '../api/v1Router.js'
 import { legacyApiDeprecation } from '../middleware/legacyApiDeprecation.js'
 
 let app: Express
 
 beforeAll(() => {
+    delete process.env.STELLAR_HORIZON_URL
     app = express()
     app.use(express.json())
     app.use('/api/v1', v1Router)

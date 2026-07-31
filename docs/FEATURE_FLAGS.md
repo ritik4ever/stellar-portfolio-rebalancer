@@ -13,6 +13,7 @@ Single reference for backend and frontend switches that change runtime behavior.
 | `ENABLE_DEMO_DB_SEED` | follows `DEMO_MODE` | follows `DEMO_MODE` | Seed demo rows when DB is empty (`databaseService`). |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | `false` | `false` | Allow unauthenticated listing of user portfolios in demo contexts. |
 | `ENABLE_DEBUG_ROUTES` | `false` | `false` | Mount `/api/v1/debug/*` (and legacy `/api/debug/*`). Keep off in shared/staging unless you trust the network. |
+| `ENABLE_ISSUER_METADATA` | `true` | `true` | When true, resolves and caches issuer metadata (e.g. org_name, org_url) from the home domain's stellar.toml. |
 
 **Indexer / contract alignment**
 
@@ -30,6 +31,17 @@ Public copies of the main booleans are exposed on `GET /api/v1/system/status` un
 | `VITE_DEMO_MODE` | Present in `.env.example`; not all UI paths read it (some demo state is local). |
 | `VITE_ENABLE_API_DEBUG_LOGS` | Verbose API logging via `frontend/src/utils/debug.ts`. |
 | `API_CONFIG.USE_BROWSER_PRICES` | **Code flag** in `frontend/src/config/api.ts` (currently `true`): GET `/prices` uses `browserPriceService` in the browser instead of the backend envelope. |
+
+## Planned Flags (Not Yet Implemented)
+
+The following flags do not exist in code yet — no environment variable is currently read for them. They are documented here ahead of implementation so the naming and rollout plan are agreed before the toggles are wired up. Update this section (move entries into [Backend](#backend-node--api)) once each flag lands in `backend/src/config/featureFlags.ts`.
+
+| Planned variable | Default (non‑prod) | Default (production) | Effect once implemented |
+|----------|-------------------|----------------------|--------|
+| `ENABLE_DCA_STRATEGY` | `false` | `false` | Would gate DCA (dollar-cost averaging) rebalance strategy support described conceptually in [`docs/REBALANCING_STRATEGIES.md`](REBALANCING_STRATEGIES.md). No DCA strategy code exists yet — the flag is a placeholder for the eventual rollout. |
+| `ENABLE_BULK_IMPORT` | `true` | `false` | Would gate the portfolio bulk import endpoint (`POST /api/v1/portfolio/import`, implemented in `backend/src/api/portfolioImportRoutes.ts` / `backend/src/services/portfolioImportService.ts`). Today this endpoint is **always enabled** and reads no feature flag; this entry documents the intended flag name for adding a kill switch. |
+
+**Local toggling (once implemented):** set the variable in `backend/.env` (or `config/feature-flags.staging.json` via `FEATURE_FLAGS_FILE`, see [File-Based Overrides](#file-based-overrides-staging--local)) the same way as any other backend boolean flag, then restart the backend.
 
 ## Safe combinations
 
@@ -53,7 +65,28 @@ Public copies of the main booleans are exposed on `GET /api/v1/system/status` un
 - **Contributor debugging:** `ENABLE_DEBUG_ROUTES=true` locally, hit `/api/v1/debug/force-fresh-prices` (still requires the debug gate middleware).
 - **Demo kiosk:** `DEMO_MODE=true`, `ENABLE_DEMO_DB_SEED=true`, `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO=false` unless you understand the data exposure.
 
+## File-Based Overrides (Staging / Local)
+
+To support repeatable combinations of feature flags in staging or local environments without managing a large number of environment variables, you can use a file-based override path.
+
+- **Variable:** `FEATURE_FLAGS_FILE`
+- **Description:** Path to a local JSON file containing feature flag overrides (relative to the process working directory).
+- **Behavior:** If specified, the JSON file is loaded at startup (and cached for subsequent request evaluations). Any boolean keys in the file matching feature flag names (either in camelCase like `demoMode` or UPPER_SNAKE_CASE like `DEMO_MODE`) will override the environment variable settings and their defaults.
+
+### Example JSON file (`config/feature-flags.staging.json`)
+
+```json
+{
+  "demoMode": false,
+  "ALLOW_FALLBACK_PRICES": true,
+  "ENABLE_DEBUG_ROUTES": true
+}
+```
+
+If the file contains invalid JSON or cannot be read, the server will log an error and throw an exception during startup, preventing improper execution.
+
 ## See also
 
 - `docs/CONTRACT_EVENTS.md` — contract event topics and schema version.
 - `backend/.env.example` and `frontend/.env.example` — full lists with placeholders.
+

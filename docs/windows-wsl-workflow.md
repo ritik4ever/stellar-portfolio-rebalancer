@@ -23,14 +23,14 @@ git config --global core.eol lf
 
 ## 3. Node.js Version Management
 
-Install Node.js 18+ inside WSL using `nvm` (Node Version Manager):
+Install Node.js 20.19.0+ inside WSL using `nvm` (Node Version Manager):
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 # Restart your terminal or source ~/.bashrc
-nvm install 18
-nvm use 18
-nvm alias default 18
+nvm install 20.19.0
+nvm use 20.19.0
+nvm alias default 20.19.0
 ```
 
 ## 4. Rust + Soroban Installation
@@ -74,7 +74,19 @@ dos2unix script.sh
 ```
 
 ### Permission Issues
-If you get `EACCES` errors with npm or node, **do not** use `sudo npm`. Instead, ensure your project is in your WSL home directory (`~/`) and check ownership:
+When developing in WSL, you might encounter these top 3 common permission issues:
+
+**1. `EACCES` errors with global npm packages:**
+If you get `EACCES` errors when running `npm install -g`, **do not** use `sudo npm`. Instead, use `nvm` (as installed in step 3) which configures your npm directories correctly within your home folder.
+
+**2. Git "dubious ownership" errors:**
+If you see errors about "dubious ownership in repository", ensure you have cloned the repository in the WSL file system (`~/`) and not on the Windows side (`/mnt/c/`). If you must keep it there, you can bypass it with:
+```bash
+git config --global --add safe.directory '*'
+```
+
+**3. Cross-OS File System Permissions / Performance:**
+Avoid editing files on `/mnt/c/` directly from WSL, or using Windows tools to edit files directly inside the hidden `\\wsl$\` network share unless you use the VS Code WSL extension. Keeping files in your WSL home directory (`~/stellar-portfolio-rebalancer`) and fixing ownership often resolves persistent permission denied errors:
 ```bash
 sudo chown -R $USER:$USER ~/stellar-portfolio-rebalancer
 ```

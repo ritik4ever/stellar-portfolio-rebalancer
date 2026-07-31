@@ -15,6 +15,11 @@ describe('AssetCard', () => {
     })
 
     describe('Price formatting', () => {
+        it('renders skeleton while loading', () => {
+            render(<AssetCard isLoading={true} />)
+            expect(screen.getByTestId('asset-card-skeleton')).toBeInTheDocument()
+        })
+
         it('formats $0.00 correctly', () => {
             render(<AssetCard asset={mockAsset} price={{ price: 0, change: 5 }} />)
             expect(screen.getByTestId('price-value')).toHaveTextContent('$0.00')
@@ -68,6 +73,19 @@ describe('AssetCard', () => {
             render(<AssetCard asset={mockAsset} price={undefined} />)
             expect(screen.getByTestId('price-value')).toHaveTextContent('N/A')
             expect(screen.getByTestId('drift-value')).toHaveTextContent('N/A')
+        })
+    })
+
+    describe('Partial fallback and source labels', () => {
+        it('shows fallback source label when price source is fallback', () => {
+            render(<AssetCard asset={mockAsset} price={{ price: 0.5, change: -1, source: 'fallback_browser' }} />)
+            expect(screen.getByText('Fallback price')).toBeTruthy()
+            expect(screen.getByTestId('price-value')).toHaveTextContent('$0.50')
+        })
+
+        it('shows cached price label when price is served from cache', () => {
+            render(<AssetCard asset={mockAsset} price={{ price: 0.5, change: -1, source: 'coingecko_browser', servedFromCache: true }} />)
+            expect(screen.getByText('Cached price')).toBeTruthy()
         })
     })
 })

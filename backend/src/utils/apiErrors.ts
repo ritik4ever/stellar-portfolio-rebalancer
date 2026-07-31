@@ -43,6 +43,9 @@ export const mapUnknownError = (error: unknown): ApiError => {
     if (error instanceof ApiError) return error
 
     if (error instanceof Error) {
+        if ('statusCode' in error && (error as { statusCode: number }).statusCode === 503) {
+            return serviceUnavailable(error.message || 'Service temporarily unavailable')
+        }
         return internalError(error.message || 'Internal server error')
     }
 

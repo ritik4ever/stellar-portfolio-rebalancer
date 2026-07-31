@@ -1,4 +1,17 @@
-export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
+/**
+ * Wallet adapter implementations for Stellar Portfolio Rebalancer.
+ * 
+ * Supported wallets: Freighter, Rabet, xBull, Mock (E2E)
+ * 
+ * For user-facing troubleshooting, see: docs/WALLET_TROUBLESHOOTING.md
+ * For error codes and their meanings, see the "Error codes reference" table in that doc.
+ * 
+ * When adding a new wallet:
+ * 1. Implement the WalletAdapter interface
+ * 2. Add to walletAdapters array
+ * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
+ */
+
 
 export interface WalletAdapter {
     readonly name: string
@@ -8,6 +21,7 @@ export interface WalletAdapter {
     isConnected(): Promise<boolean>
     disconnect(): Promise<void>
     signTransaction(xdr: string, network?: string): Promise<string>
+    switchNetwork?(network: string): Promise<void>
 }
 
 export class WalletError extends Error {
@@ -39,6 +53,10 @@ function normalizeError(error: unknown, walletType: WalletType): WalletError {
 
     if (msg.includes('timeout') || msg.includes('timed out')) {
         return new WalletError('Connection timed out. Please try again', 'TIMEOUT', walletType)
+    }
+
+    if (msg.includes('popup') || msg.includes('blocked')) {
+        return new WalletError('Popup was blocked by your browser. Please allow popups for this site and try again.', 'POPUP_BLOCKED', walletType)
     }
 
     return new WalletError(err.message || 'Wallet connection failed', 'UNKNOWN_ERROR', walletType)
@@ -198,6 +216,42 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
+
+    }
+
+    async connect(): Promise<string> {
+        if (!this.isAvailable()) {
+
+            if (!result?.publicKey) {
+                throw new Error('No public key returned')
+            }
+            return result.publicKey
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+
+    async isConnected(): Promise<boolean> {
+        if (!this.isAvailable()) return false
+        try {
+
+        } catch {
+            return false
+        }
+    }
+
+    async disconnect(): Promise<void> {
+    }
+
+    async signTransaction(xdr: string, network?: string): Promise<string> {
+        if (!this.isAvailable()) {
+
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+}
+
 export class MockAdapter implements WalletAdapter {
     readonly name = 'Mock Wallet (Test)'
     readonly type: WalletType = 'mock'
@@ -233,7 +287,8 @@ export class MockAdapter implements WalletAdapter {
 export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
-    new XBullAdapter()
+    new XBullAdapter(),
+
 ]
 
 // Add the mock adapter if we're in E2E mode

@@ -68,7 +68,7 @@ function walkFiles(dir, output = []) {
 }
 
 function collectBackendEnvKeys() {
-  const files = walkFiles(BACKEND_SRC_PATH).filter(file => !file.includes('/test/'))
+  const files = walkFiles(BACKEND_SRC_PATH).filter(file => !file.replace(/\\/g, '/').includes('/test/'))
   const keys = new Set()
   const processEnvRegex = /process\.env\.([A-Z0-9_]+)/g
 

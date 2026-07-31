@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 import { Server as RpcServer } from '@stellar/stellar-sdk/rpc'
+=======
+import { Horizon, Contract } from '@stellar/stellar-sdk'
+const { Server } = Horizon
+>>>>>>> origin/main
 import { validateStartupConfigOrThrow } from '../config/startupConfig.js'
 import { logger } from '../utils/logger.js'
 
