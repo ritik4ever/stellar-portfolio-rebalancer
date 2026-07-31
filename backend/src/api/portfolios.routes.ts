@@ -20,9 +20,9 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema } from './validation.js'
+import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
 import type { Portfolio } from '../types/index.js'
-import { portfolioImportRouter } from './portfolioImportRoutes.js'
 
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
@@ -39,9 +39,6 @@ function mapRebalanceOptions(body: any): ExecuteRebalanceOptions {
 }
 
 export const portfoliosRouter = Router()
-
-// Mount bulk import routes
-portfoliosRouter.use(portfolioImportRouter)
 
 
 portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
@@ -61,6 +58,55 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
+
+/**
+ * Dashboard summary for every portfolio belonging to one address.
+ *
+ * A dashboard listing N portfolios previously needed N calls to
+ * `GET /portfolio/:id`, each of which resolves prices independently. This
+ * serves the same listing from one database read plus one price lookup,
+ * regardless of how many portfolios come back. Prices come from
+ * `getCurrentPrices()`, which is already backed by the Redis and in-process
+ * oracle caches, so the endpoint does no oracle round trip on a warm cache.
+ */
+portfoliosRouter.get('/portfolios/summary', validateQuery(portfolioSummaryQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const userAddress = req.query.userAddress as string
+
+        // Ownership rules mirror GET /user/:address/portfolios: when auth is on,
+        // an address's portfolios are only visible to that address.
+        const authConfig = getAuthConfig()
+        const allowPublicInDemo =
+            authConfig.enabled &&
+            featureFlags.demoMode &&
+            featureFlags.allowPublicUserPortfoliosInDemo
+
+        if (authConfig.enabled && !allowPublicInDemo) {
+            let nextCalled = false
+            requireJwt(req, res, () => { nextCalled = true })
+            if (!nextCalled) return
+
+            if (req.user?.address !== userAddress) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
+            }
+        }
+
+        const portfolios = await portfolioStorage.getUserPortfolios(userAddress)
+
+        // An unknown address resolves to an empty list without touching the
+        // price feed at all.
+        if (portfolios.length === 0) {
+            return ok(res, { portfolios: [] })
+        }
+
+        const prices = await reflectorService.getCurrentPrices()
+
+        return ok(res, { portfolios: buildPortfolioSummaries(portfolios, prices) })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio summaries failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
 
 portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), async (req: Request, res: Response) => {
     try {

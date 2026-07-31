@@ -1,7 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { Shield, Share2, Clock, User } from 'lucide-react'
 import { api, ENDPOINTS } from '../config/api'
+
+function setMetaTags(tags: Record<string, string>) {
+  for (const [property, content] of Object.entries(tags)) {
+    let el = document.querySelector(`meta[property="${property}"]`)
+    if (!el) {
+      el = document.createElement('meta')
+      el.setAttribute('property', property)
+      document.head.appendChild(el)
+    }
+    el.setAttribute('content', content)
+  }
+}
+
+function removeMetaTags(properties: string[]) {
+  for (const property of properties) {
+    const el = document.querySelector(`meta[property="${property}"]`)
+    if (el) el.remove()
+  }
+}
 
 interface PublicPortfolioData {
   portfolio: {
@@ -26,6 +45,7 @@ function PublicPortfolio({ hash }: PublicPortfolioProps) {
   const [data, setData] = useState<PublicPortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const metaInjected = useRef(false)
 
   useEffect(() => {
     const fetchSharedPortfolio = async () => {
@@ -46,6 +66,26 @@ function PublicPortfolio({ hash }: PublicPortfolioProps) {
     }
     fetchSharedPortfolio()
   }, [hash])
+
+  useEffect(() => {
+    if (!data || metaInjected.current) return
+    metaInjected.current = true
+    const totalValue = data.portfolio.totalValue?.toLocaleString() || '0'
+    const assetCount = Object.keys(data.portfolio.allocations || {}).length
+    document.title = `Portfolio Snapshot — ${totalValue} | Stellar Portfolio Rebalancer`
+    setMetaTags({
+      'og:title': `Portfolio Snapshot — $${totalValue}`,
+      'og:description': `Shared portfolio with ${assetCount} asset${assetCount !== 1 ? 's' : ''}. Total value: $${totalValue}.`,
+      'og:url': window.location.href,
+      'og:type': 'website',
+      'og:site_name': 'Stellar Portfolio Rebalancer',
+    })
+    return () => {
+      metaInjected.current = false
+      document.title = 'Stellar Portfolio Rebalancer'
+      removeMetaTags(['og:title', 'og:description', 'og:url', 'og:type', 'og:site_name'])
+    }
+  }, [data])
 
   if (loading) {
     return (

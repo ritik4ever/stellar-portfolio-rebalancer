@@ -1,34 +1,59 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, within } from '@testing-library/react'
 import BackendCapabilitiesBanner from './BackendCapabilitiesBanner'
 import type { CapabilityNotice } from '../hooks/useReadinessReport'
 
+vi.mock('../hooks/queries/useReadinessQuery', () => ({
+    useReadinessQuery: vi.fn(),
+}))
+
+import { useReadinessQuery } from '../hooks/queries/useReadinessQuery'
+
 afterEach(cleanup)
 
-const defaultProps = { loadError: false, loading: false, belowRealtimeBar: false }
+const mockQuery = useReadinessQuery as unknown as ReturnType<typeof vi.fn>
+
+function mockReturn(overrides: Partial<ReturnType<typeof useReadinessQuery>> = {}) {
+    mockQuery.mockReturnValue({
+        notices: [],
+        loadError: false,
+        loading: false,
+        report: null,
+        refresh: vi.fn(),
+        ...overrides,
+    })
+}
 
 function notice(id: string, kind: CapabilityNotice['kind'] = 'disabled', text = 'Some issue.'): CapabilityNotice {
     return { id, kind, text }
 }
 
 describe('BackendCapabilitiesBanner', () => {
+    afterEach(() => {
+        mockQuery.mockReset()
+    })
+
     it('renders nothing when no notices and no error', () => {
-        const { container } = render(<BackendCapabilitiesBanner {...defaultProps} notices={[]} />)
+        mockReturn()
+        const { container } = render(<BackendCapabilitiesBanner />)
         expect(container.firstChild).toBeNull()
     })
 
     it('renders load-error message when loadError is true and no notices', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} loadError notices={[]} />)
+        mockReturn({ loadError: true, notices: [] })
+        render(<BackendCapabilitiesBanner />)
         expect(screen.getByRole('status')).toHaveTextContent(/could not load backend service status/i)
     })
 
     it('renders notice text', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('database', 'limited', 'DB is down.')]} />)
+        mockReturn({ notices: [notice('database', 'limited', 'DB is down.')] })
+        render(<BackendCapabilitiesBanner />)
         expect(screen.getByText(/DB is down\./)).toBeInTheDocument()
     })
 
     it('attaches a doc link for database notice', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('database', 'limited')]} />)
+        mockReturn({ notices: [notice('database', 'limited')] })
+        render(<BackendCapabilitiesBanner />)
         const link = screen.getByRole('link', { name: /database setup/i })
         expect(link).toHaveAttribute('href', expect.stringContaining('#database-setup'))
         expect(link).toHaveAttribute('target', '_blank')
@@ -36,48 +61,73 @@ describe('BackendCapabilitiesBanner', () => {
     })
 
     it('attaches a doc link for queue-workers notice', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('queue-workers')]} />)
+        mockReturn({ notices: [notice('queue-workers')] })
+        render(<BackendCapabilitiesBanner />)
         const link = screen.getByRole('link', { name: /redis \/ worker setup/i })
         expect(link).toHaveAttribute('href', expect.stringContaining('CONTRIBUTING'))
     })
 
     it('attaches a doc link for indexer notice', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('indexer')]} />)
+        mockReturn({ notices: [notice('indexer')] })
+        render(<BackendCapabilitiesBanner />)
         const link = screen.getByRole('link', { name: /environment setup/i })
         expect(link).toHaveAttribute('href', expect.stringContaining('ENVIRONMENT'))
     })
 
     it('attaches a doc link for auto-rebalancer notice', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('auto-rebalancer')]} />)
+        mockReturn({ notices: [notice('auto-rebalancer')] })
+        render(<BackendCapabilitiesBanner />)
         const link = screen.getByRole('link', { name: /environment setup/i })
         expect(link).toBeInTheDocument()
     })
 
     it('renders multiple notices each with their own link', () => {
         const notices = [notice('database', 'limited'), notice('queue-workers')]
-        const { container } = render(<BackendCapabilitiesBanner {...defaultProps} notices={notices} />)
+        mockReturn({ notices })
+        const { container } = render(<BackendCapabilitiesBanner />)
         const banner = container.querySelector('[role="status"]')!
         expect(within(banner as HTMLElement).getByRole('link', { name: /database setup/i })).toBeInTheDocument()
         expect(within(banner as HTMLElement).getByRole('link', { name: /redis \/ worker setup/i })).toBeInTheDocument()
     })
 
     it('applies top-14 class when belowRealtimeBar is true', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('database', 'limited')]} belowRealtimeBar />)
+        mockReturn({ notices: [notice('database', 'limited')] })
+        render(<BackendCapabilitiesBanner belowRealtimeBar />)
         expect(screen.getByRole('status').className).toContain('top-14')
     })
 
     it('applies top-0 class when belowRealtimeBar is false', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('database', 'limited')]} />)
+        mockReturn({ notices: [notice('database', 'limited')] })
+        render(<BackendCapabilitiesBanner />)
         expect(screen.getByRole('status').className).toContain('top-0')
     })
 
     it('uses amber styling when any notice is limited', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('database', 'limited')]} />)
+        mockReturn({ notices: [notice('database', 'limited')] })
+        render(<BackendCapabilitiesBanner />)
         expect(screen.getByRole('status').className).toContain('amber')
     })
 
     it('uses slate styling when all notices are disabled', () => {
-        render(<BackendCapabilitiesBanner {...defaultProps} notices={[notice('queue-workers', 'disabled')]} />)
+        mockReturn({ notices: [notice('queue-workers', 'disabled')] })
+        render(<BackendCapabilitiesBanner />)
         expect(screen.getByRole('status').className).not.toContain('amber')
+    })
+
+    it('updates banner after a simulated capability change on subsequent poll', () => {
+        mockReturn({ notices: [notice('database', 'limited', 'Initial issue.')] })
+        const { unmount } = render(<BackendCapabilitiesBanner />)
+        expect(screen.getByText(/Initial issue\./)).toBeInTheDocument()
+        unmount()
+
+        mockQuery.mockReturnValue({
+            notices: [notice('database', 'limited', 'Updated issue.')],
+            loadError: false,
+            loading: false,
+            report: null,
+            refresh: vi.fn(),
+        })
+        render(<BackendCapabilitiesBanner />)
+        expect(screen.getByText(/Updated issue\./)).toBeInTheDocument()
     })
 })
