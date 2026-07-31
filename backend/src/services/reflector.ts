@@ -357,9 +357,11 @@ export class ReflectorService {
             prices?: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
         } | Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
 
-        const rows: Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }> = ('prices' in payload && payload.prices)
-            ? payload.prices
-            : payload
+        const rows = (
+            payload && typeof payload === 'object' && 'prices' in payload && payload.prices && typeof payload.prices === 'object'
+                ? payload.prices
+                : (payload && typeof payload === 'object' ? payload : {})
+        ) as Record<string, { price: string | number | bigint; timestamp: number; decimals?: number; change?: number; volume?: number }>
 
         const out: PricesMap = {}
         let staleCount = 0

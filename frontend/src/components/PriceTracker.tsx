@@ -277,12 +277,13 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
                     )}
                 </div>
                 {assets.map((asset) => {
-                    const data = prices[asset]
+                    const assetKey = typeof asset === 'string' ? asset : String(asset)
+                    const data = prices[assetKey]
                     if (!data) return null
 
                     return (
-                        <div key={asset} className="flex items-center space-x-1">
-                            <span className="text-sm font-medium">{asset}</span>
+                        <div key={assetKey} className="flex items-center space-x-1">
+                            <span className="text-sm font-medium">{assetKey}</span>
                             <span className="text-sm">
                                 ${data.price < 1 ? data.price.toFixed(6) : data.price.toLocaleString()}
                             </span>
@@ -392,21 +393,22 @@ const PriceTracker: React.FC<PriceTrackerProps> = ({ compact = false }) => {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {assets.map((asset) => {
-                    const data = prices[asset]
+                    const assetKey = typeof asset === 'string' ? asset : String(asset)
+                    const data = prices[assetKey]
                     if (!data)
                         return (
-                            <div key={asset} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                                <div className="text-sm text-gray-500 dark:text-gray-400">Loading {asset}...</div>
+                            <div key={assetKey} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                <div className="text-sm text-gray-500 dark:text-gray-400">Loading {assetKey}...</div>
                             </div>
                         )
 
                     return (
                         <div
-                            key={asset}
+                            key={assetKey}
                             className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                         >
                             <div className="flex items-center justify-between mb-2">
-                                <span className="font-medium text-gray-900 dark:text-white">{asset}</span>
+                                <span className="font-medium text-gray-900 dark:text-white">{assetKey}</span>
                                 <div className={`px-2 py-1 rounded text-xs ${sourceBadgeClass(data.source)}`}>
                                     {sourceBadgeLabel(data.source)}
                                 </div>

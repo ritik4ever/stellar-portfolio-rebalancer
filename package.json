@@ -28,6 +28,8 @@
     "changelog:preview": "conventional-changelog -p conventionalcommits",
     "validate:env-examples": "node scripts/validate-env-examples.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
+    "secrets:scan": "node scripts/hooks/secrets-scan.mjs",
+    "secrets:scan:ci": "node scripts/hooks/secrets-scan.mjs --ci",
     "quick:pre-commit": "node scripts/run-local-checks.mjs pre-commit",
     "quick:pre-push": "node scripts/run-local-checks.mjs pre-push",
     "observability:up": "bash scripts/bootstrap-observability.sh",

@@ -77,6 +77,26 @@ async function sleep(ms: number) {
 /**
  * Attempts to probe Redis with a bounded exponential backoff.
  */
+<<<<<<< HEAD
+export async function isRedisAvailable(): Promise<boolean> {
+  try {
+    // Dynamic import so the module loads even if ioredis isn't installed
+    const { Redis } = await import("ioredis");
+    const probe = new Redis(REDIS_URL, {
+      lazyConnect: true,
+      connectTimeout: 3000,
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      retryStrategy: () => null,
+    });
+    probe.on("error", () => {});
+    await probe.connect();
+    await probe.ping();
+    await probe.quit();
+    return true;
+  } catch {
+    return false;
+=======
 async function probeRedisWithRetry(config: StartupConfig): Promise<boolean> {
   let delay = config.queueStartupInitialDelayMs;
 
@@ -96,6 +116,7 @@ async function probeRedisWithRetry(config: StartupConfig): Promise<boolean> {
 
     await sleep(delay);
     delay = Math.min(delay * 2, config.queueStartupMaxDelayMs);
+>>>>>>> origin/main
   }
 
   return false;

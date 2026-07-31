@@ -623,6 +623,7 @@ This sets `core.hooksPath` to `scripts/hooks` for your local clone only.
 
 The pre-commit hook runs:
 
+- `npm run secrets:scan` (see "Secrets scanning" below)
 - `npm run validate:env-examples`
 - backend `npm run lint` when configured
 - frontend `npm run lint` when configured
@@ -638,6 +639,36 @@ The pre-push hook runs:
 - root `npm run format` when configured
 
 Missing optional scripts are reported as skips. Any configured command that exits non-zero blocks the commit or push with the failing command visible in terminal output.
+
+### Secrets scanning
+
+The pre-commit hook runs [gitleaks](https://github.com/gitleaks/gitleaks) against your **staged changes** to catch API keys, tokens, and Stellar secret seeds before they're committed. Config and allowlist live in [`.gitleaks.toml`](../.gitleaks.toml); the scan itself is `scripts/hooks/secrets-scan.mjs`.
+
+**Install gitleaks** so the local check actually blocks bad commits (otherwise it warns and lets the commit through — see below):
+
+```bash
+# macOS
+brew install gitleaks
+
+# Linux / other — download a release binary
+# https://github.com/gitleaks/gitleaks/releases
+
+# No local install? The hook falls back to Docker automatically if you have
+# it installed, using the zricethezav/gitleaks image.
+```
+
+Run it manually at any time:
+
+```bash
+npm run secrets:scan        # staged changes only, same as the pre-commit hook
+npm run secrets:scan:ci     # full working tree, same as CI
+```
+
+**False positives.** If gitleaks flags a test fixture or example key that isn't a real secret, add a narrowly-scoped entry to the `[allowlist]` in `.gitleaks.toml` — a path glob for a fixtures directory, or a regex for a documented placeholder convention (e.g. `YOUR_ADMIN_ADDRESS`). Include a one-line comment explaining why it's safe. Do not add broad allowlist entries (e.g. allowlisting an entire rule ID or a whole `src/` tree) — keep entries as narrow as the false positive requires so the scan stays useful.
+
+**Bypassing the hook.** If you must commit past a finding you've confirmed is safe and haven't had time to allowlist yet, use `git commit --no-verify` and say why in the commit body. This only skips the *local* check — [`.github/workflows/secrets-scan.yml`](../.github/workflows/secrets-scan.yml) re-runs the same scan against the full PR diff in CI using the same `.gitleaks.toml`, so a bypassed local hook does not get a real secret merged. If CI catches something you believe is a false positive, fix the allowlist and push again rather than re-running with `--no-verify` on a shared branch.
+
+If neither gitleaks nor Docker is available locally, the hook prints a warning and lets the commit through rather than blocking your workflow entirely — CI is the check of record and always runs the scan regardless of what's installed on your machine.
 
 ---
 

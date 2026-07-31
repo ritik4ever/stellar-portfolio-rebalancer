@@ -233,6 +233,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         if (publicKey) return
         setResettingDemo(true)
         try {
+<<<<<<< HEAD
+            // Reset to default demo state
+            // Clear any cached demo data and force refresh
+=======
+>>>>>>> origin/main
             await queryClient.invalidateQueries({ queryKey: portfolioKeys.all })
             await queryClient.invalidateQueries({ queryKey: priceKeys.all })
             await new Promise(resolve => setTimeout(resolve, 500))

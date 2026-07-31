@@ -27,7 +27,10 @@ import {
   Zap,
   RefreshCw,
 } from "lucide-react";
+<<<<<<< HEAD
+=======
 
+>>>>>>> origin/main
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 import { percentageToBps } from "../utils/calculations";
@@ -36,12 +39,15 @@ import BulkPortfolioImport from "./BulkPortfolioImport";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+<<<<<<< HEAD
+=======
 
 
 interface AssetOption {
   value: string
   label: string
 }
+>>>>>>> origin/main
 
 interface PortfolioSetupProps {
   onNavigate: (view: string) => void
@@ -53,12 +59,15 @@ interface Allocation {
   percentage: number
 }
 
+<<<<<<< HEAD
+=======
 const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
   { value: 'XLM', label: 'XLM (Stellar Lumens)' },
   { value: 'USDC', label: 'USDC (USD Coin)' },
   { value: 'BTC', label: 'BTC (Bitcoin)' },
   { value: 'ETH', label: 'ETH (Ethereum)' },
 ]
+>>>>>>> origin/main
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
@@ -184,6 +193,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [entryMode, setEntryMode] = useState<'manual' | 'bulk'>('manual');
 
 
+<<<<<<< HEAD
+  // NEW: Use enhanced assets query
+  const { data: assets = [] } = useAssets()
+=======
+>>>>>>> origin/main
 
   useEffect(() => {
     if (!draftPromptResolved) return
@@ -1398,9 +1412,14 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
               {/* Create Portfolio Button */}
               <button
+<<<<<<< HEAD
+                onClick={createPortfolio}
+                disabled={hasAnyFieldError || !isValidTotal || createPortfolioMutation.isPending}
+=======
                 type="button"
                 onClick={createPortfolio}
 
+>>>>>>> origin/main
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (

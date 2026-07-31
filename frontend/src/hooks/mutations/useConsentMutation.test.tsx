@@ -59,11 +59,9 @@ describe('useRecordConsentMutation', () => {
                 }) as Promise<any>,
         )
 
-        const { result } = renderHook(() => useRecordConsentMutation(userId), {
+        renderHook(() => useRecordConsentMutation(userId), {
             wrapper: withClient(qc),
         })
-
-
 
         // onMutate is async (awaits cancelQueries) so wait for optimistic data to appear
         await waitFor(() => {
@@ -83,10 +81,9 @@ describe('useRecordConsentMutation', () => {
         qc.setQueryData(consentKeys.status(userId), { accepted: false })
         vi.spyOn(api, 'post').mockRejectedValue(new Error('network down'))
 
-        const { result } = renderHook(() => useRecordConsentMutation(userId), {
+        renderHook(() => useRecordConsentMutation(userId), {
             wrapper: withClient(qc),
         })
-
 
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
     })
@@ -133,10 +130,9 @@ describe('useRevokeConsentMutation', () => {
         qc.setQueryData(consentKeys.status(userId), { accepted: true })
         vi.spyOn(api, 'delete').mockRejectedValue(new Error('delete failed'))
 
-        const { result } = renderHook(() => useRevokeConsentMutation(userId), {
+        renderHook(() => useRevokeConsentMutation(userId), {
             wrapper: withClient(qc),
         })
-
 
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: true })
     })
