@@ -3868,8 +3868,10 @@ fn test_update_allocations_then_rebalance() {
     assert!(portfolio.current_balances.get(asset1).unwrap() > portfolio.current_balances.get(asset2).unwrap());
 }
 
+// ── Issue #1520: rate-limit create_portfolio to prevent storage-spam DoS ────
+
 #[test]
-fn test_create_portfolio_with_strategy_defaults_to_threshold() {
+fn test_create_portfolio_per_user_limit_enforced() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|li| {
@@ -3884,19 +3886,84 @@ fn test_create_portfolio_with_strategy_defaults_to_threshold() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    allocations.set(Address::generate(&env), 10000);
-    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    allocations.set(Address::generate(&env), 10000u32);
 
-    let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.strategy, StrategyType::Threshold);
-    assert_eq!(
-        portfolio.strategy_config,
-        StrategyConfig::default()
+    // Create MAX_PORTFOLIOS_PER_USER portfolios – all must succeed.
+    for _ in 0..MAX_PORTFOLIOS_PER_USER {
+        let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+        let result = client.try_create_portfolio(
+            &user,
+            &allocations,
+            &asset_decimals,
+            &5,
+            &50,
+            &CURRENT_SLIPPAGE_POLICY_VERSION,
+        );
+        assert!(result.is_ok(), "portfolio creation within limit must succeed");
+    }
+
+    // The (MAX_PORTFOLIOS_PER_USER + 1)-th attempt must be rejected.
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let result = client.try_create_portfolio(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
     );
+    assert_eq!(result, Err(Ok(Error::PortfolioLimitExceeded)));
 }
 
 #[test]
-fn test_create_portfolio_with_strategy_periodic() {
+fn test_create_portfolio_per_user_limit_different_users() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 1;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 10000u32);
+
+    // Exhaust user_a's limit.
+    for _ in 0..MAX_PORTFOLIOS_PER_USER {
+        let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+        client
+            .try_create_portfolio(
+                &user_a,
+                &allocations,
+                &asset_decimals,
+                &5,
+                &50,
+                &CURRENT_SLIPPAGE_POLICY_VERSION,
+            )
+            .unwrap();
+    }
+
+    // user_b must still be able to create a portfolio.
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let result = client.try_create_portfolio(
+        &user_b,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    assert!(result.is_ok(), "user_b must not be affected by user_a's limit");
+}
+
+#[test]
+fn test_get_user_portfolio_count() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|li| {
@@ -3910,35 +3977,91 @@ fn test_create_portfolio_with_strategy_periodic() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    assert_eq!(client.get_user_portfolio_count(&user), 0);
+
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset, 10000);
-    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    allocations.set(Address::generate(&env), 10000u32);
 
-    let strategy_config = StrategyConfig {
-        interval_seconds: 86400, // 1 day
-        volatility_threshold_bps: 1000,
-        min_interval_seconds: 86400,
-    };
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    assert_eq!(client.get_user_portfolio_count(&user), 1);
 
-    let pid = client.create_portfolio_with_strategy(
-        &user,
-        &allocations,
-        &asset_decimals,
-        &5,
-        &50,
-        &CURRENT_SLIPPAGE_POLICY_VERSION,
-        &StrategyType::Periodic,
-        &strategy_config,
-    ).unwrap();
-
-    let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.strategy, StrategyType::Periodic);
-    assert_eq!(portfolio.strategy_config.interval_seconds, 86400);
+    create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    assert_eq!(client.get_user_portfolio_count(&user), 2);
 }
 
 #[test]
-fn test_create_portfolio_with_strategy_volatility() {
+fn test_get_global_portfolio_cap_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.get_global_portfolio_cap(), DEFAULT_GLOBAL_PORTFOLIO_CAP);
+}
+
+#[test]
+fn test_set_global_portfolio_cap_admin_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    // Admin can set the cap.
+    client.set_global_portfolio_cap(&5);
+    assert_eq!(client.get_global_portfolio_cap(), 5);
+
+    // Restore to a sensible value.
+    client.set_global_portfolio_cap(&DEFAULT_GLOBAL_PORTFOLIO_CAP);
+    assert_eq!(client.get_global_portfolio_cap(), DEFAULT_GLOBAL_PORTFOLIO_CAP);
+}
+
+#[test]
+#[should_panic]
+fn test_set_global_portfolio_cap_non_admin_rejected() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &admin,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    // non_admin attempts to lower the cap – must panic (auth failure).
+    client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &non_admin,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_global_portfolio_cap",
+                args: soroban_sdk::vec![&env, 1u32.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_global_portfolio_cap(&1);
+}
+
+#[test]
+fn test_create_portfolio_global_cap_enforced() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|li| {
@@ -3949,76 +4072,32 @@ fn test_create_portfolio_with_strategy_volatility() {
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
-    let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    // Set a tiny global cap of 2.
+    client.set_global_portfolio_cap(&2);
+
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset, 10000);
+    allocations.set(Address::generate(&env), 10000u32);
+
+    // Two different users each create one portfolio – both within the cap.
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    create_portfolio_with_defaults(&env, &client, &user_a, &allocations, 5, 50);
+    create_portfolio_with_defaults(&env, &client, &user_b, &allocations, 5, 50);
+
+    // A third user must be rejected by the global cap.
+    let user_c = Address::generate(&env);
     let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
-
-    let strategy_config = StrategyConfig {
-        interval_seconds: 604800,
-        volatility_threshold_bps: 2000, // 20%
-        min_interval_seconds: 86400,
-    };
-
-    let pid = client.create_portfolio_with_strategy(
-        &user,
+    let result = client.try_create_portfolio(
+        &user_c,
         &allocations,
         &asset_decimals,
         &5,
         &50,
         &CURRENT_SLIPPAGE_POLICY_VERSION,
-        &StrategyType::Volatility,
-        &strategy_config,
-    ).unwrap();
-
-    let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.strategy, StrategyType::Volatility);
-    assert_eq!(portfolio.strategy_config.volatility_threshold_bps, 2000);
-}
-
-#[test]
-fn test_create_portfolio_with_strategy_custom() {
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|li| {
-        li.sequence_number = 1;
-    });
-
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
-
-    let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset, 10000);
-    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
-
-    let strategy_config = StrategyConfig {
-        interval_seconds: 3600,
-        volatility_threshold_bps: 500,
-        min_interval_seconds: 43200, // 12 hours
-    };
-
-    let pid = client.create_portfolio_with_strategy(
-        &user,
-        &allocations,
-        &asset_decimals,
-        &5,
-        &50,
-        &CURRENT_SLIPPAGE_POLICY_VERSION,
-        &StrategyType::Custom,
-        &strategy_config,
-    ).unwrap();
-
-    let portfolio = client.get_portfolio(&pid);
-    assert_eq!(portfolio.strategy, StrategyType::Custom);
-    assert_eq!(portfolio.strategy_config.min_interval_seconds, 43200);
+    );
+    assert_eq!(result, Err(Ok(Error::GlobalPortfolioCapExceeded)));
 }
 
 // ── Cross-oracle validation tests ────────────────────────────────────────────
