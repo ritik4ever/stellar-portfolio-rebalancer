@@ -7,6 +7,8 @@ use soroban_sdk::{
 };
 use soroban_sdk::token::Client as TokenClient;
 
+#[path = "strategies/dca.rs"]
+mod dca;
 mod circuit_breaker;
 mod events;
 mod nav;
