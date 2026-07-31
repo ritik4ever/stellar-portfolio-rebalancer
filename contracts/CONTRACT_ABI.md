@@ -343,3 +343,43 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - Struct with `price: i128` and `timestamp: u64`.
 
 For call builders and generated client bindings, use Soroban CLI/SDK tooling against the compiled WASM artifact.
+
+## Property-Based Tests (`contracts/src/property_tests.rs`)
+
+The contract includes a comprehensive property-based test suite using the
+[`proptest`](https://docs.rs/proptest) crate. These tests verify invariant
+properties across **10 000 random input combinations** each.
+
+### Properties Tested
+
+| # | Property | Description | Cases |
+|---|----------|-------------|-------|
+| 1 | **Allocation sum invariance** | Target allocations always sum to exactly `ALLOCATION_DENOMINATOR` (10 000 bps). Creating a portfolio with valid allocations always succeeds. | 10 000 |
+| 2 | **Drift range** | Current allocation percentage and drift are always in `[0, 10000]` range. Portfolio valuation fields are within valid bounds. | 10 000 |
+| 3 | **Rebalance idempotency** | When no rebalance is needed (drift within threshold), the portfolio state is stable — executing a rebalance does not change state. If rebalance IS needed, one execution brings portfolio into a stable state requiring no further rebalance. | 10 000 |
+| 4 | **Deposit-withdraw roundtrip** | Depositing an amount and immediately withdrawing the same amount restores the original user balance. Internal portfolio balance returns to zero. | 10 000 |
+| 5 | **Random allocation validity** | Any randomly generated allocation that sums to 10 000 bps and has 2–10 assets is accepted. Stored allocations match input exactly, and portfolio invariants hold. | 10 000 |
+
+### Running Property Tests
+
+```bash
+# Run all property tests (50 000 total cases, ~3–5 minutes)
+cd contracts
+make test-property
+
+# Or directly:
+cargo test --features testutils property_ -- --nocapture
+```
+
+### CI Integration
+
+The property test suite runs in CI as part of the contract test pipeline.
+Test reports are uploaded as CI artifacts for regression analysis.
+
+### Random Seed Reproducibility
+
+Each proptest run logs the random seed used. To reproduce a specific failure:
+
+```bash
+PROPTEST_SEED=<hex-seed> cargo test --features testutils property_
+```
