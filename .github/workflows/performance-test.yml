@@ -28,9 +28,15 @@ jobs:
     timeout-minutes: 15
 
     services:
-      sqlite:
-        image: noop
-        # SQLite runs embedded, no service needed
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -39,7 +45,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.19.0'
+          node-version-file: '.nvmrc'
           cache: 'npm'
           cache-dependency-path: 'backend/package-lock.json'
 

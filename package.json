@@ -46,13 +46,14 @@
     "clean:all": "rm -rf backend/dist frontend/dist contracts/target node_modules backend/node_modules frontend/node_modules"
   },
   "devDependencies": {
+    "@commitlint/config-conventional": "^19.0.0",
     "concurrently": "^10.0.4",
     "conventional-changelog-cli": "^5.0.0",
     "jsdom": "^29.1.1",
     "vitest": "^4.1.10"
   },
   "engines": {
-    "node": ">=20.19.0",
+    "node": ">=20.0.0",
     "npm": ">=10.0.0"
   },
   "repository": {

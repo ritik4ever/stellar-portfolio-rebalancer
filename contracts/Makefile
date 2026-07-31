@@ -43,17 +43,48 @@ hash:
 		fi; \
 	fi
 
-# Run tests
+# Run unit tests (requires --features testutils to include contract unit tests;
+# testutils is opt-in to avoid an ed25519-dalek 3.0.0 incompatibility)
 test:
-	cargo test
+	cargo test --features testutils
+
+# Build the mock reflector contract for testnet integration tests
+build-mock-reflector:
+	cd mock-reflector && cargo build --target wasm32-unknown-unknown --release --target-dir ../target
+
+# Build both contracts for testnet integration
+build-testnet:
+	cargo build --target wasm32-unknown-unknown --release
+	cd mock-reflector && cargo build --target wasm32-unknown-unknown --release --target-dir ../target
+
+# Run testnet integration tests (requires STELLAR_TESTNET_SECRET_KEY env var)
+# First builds contracts, then runs only the testnet integration test suite
+testnet-integration: build-testnet
+	@if [ -z "$(STELLAR_TESTNET_SECRET_KEY)" ]; then \
+		echo "Error: STELLAR_TESTNET_SECRET_KEY must be set for testnet tests"; \
+		exit 1; \
+	fi
+	cargo test --features integration testnet_ -- --nocapture --test-threads=1
+
+# Run only the on-chain testnet tests (skipping mock integration tests)
+testnet-only: build-testnet
+	@if [ -z "$(STELLAR_TESTNET_SECRET_KEY)" ]; then \
+		echo "Error: STELLAR_TESTNET_SECRET_KEY must be set for testnet tests"; \
+		exit 1; \
+	fi
+	cargo test --features integration testnet_ -- --nocapture --test-threads=1
+
+# Run local mock-based integration tests (no network required)
+test-integration:
+	cargo test --features integration integration_ -- --nocapture
 
 # Run gas/cost benchmarks
 bench:
-	cargo test benchmark_
+	cargo test --features testutils benchmark_
 
 # Run benchmarks and emit JSON output for CI diffing
 bench-json:
-	cargo test benchmark_ -- --nocapture 2>/dev/null | \
+	cargo test --features testutils benchmark_ -- --nocapture 2>/dev/null | \
 	awk '/^BENCHMARK_RESULT\|/ {split($$0, a, "|"); printf "{\"benchmark\":\"%s\",\"cpu\":%s,\"baseline_cpu\":%s,\"mem\":%s,\"baseline_mem\":%s}\n", a[2], a[3], a[4], a[5], a[6]}' | \
 	jq -s '.' > bench_results.json 2>/dev/null || \
 	cargo test benchmark_ -- --nocapture 2>/dev/null | \
@@ -180,16 +211,21 @@ snapshot-diff:
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  build           - Build the contract"
-	@echo "  build-optimized - Build with optimization"
-	@echo "  test            - Run tests"
-	@echo "  bench           - Run gas benchmark tests"
-	@echo "  clean           - Clean build artifacts"
-	@echo "  deploy-testnet  - Deploy to Stellar testnet"
-	@echo "  deploy-mainnet  - Deploy to Stellar mainnet (with confirmation)"
-	@echo "  init-contract   - Initialize deployed contract"
-	@echo "  install-tools   - Install required tools"
-	@echo "  setup-testnet   - Prepare local Soroban testnet tooling/profile"
+	@echo "  build              - Build the contract"
+	@echo "  build-optimized    - Build with optimization"
+	@echo "  build-mock-reflector - Build mock reflector for testnet tests"
+	@echo "  build-testnet      - Build both contracts for testnet integration"
+	@echo "  test               - Run unit tests (requires --features testutils)"
+	@echo "  test-integration   - Run local mock-based integration tests"
+	@echo "  testnet-integration - Run testnet integration tests (needs STELLAR_TESTNET_SECRET_KEY)"
+	@echo "  testnet-only       - Run only on-chain testnet tests"
+	@echo "  bench              - Run gas benchmark tests"
+	@echo "  clean              - Clean build artifacts"
+	@echo "  deploy-testnet     - Deploy to Stellar testnet"
+	@echo "  deploy-mainnet     - Deploy to Stellar mainnet (with confirmation)"
+	@echo "  init-contract      - Initialize deployed contract"
+	@echo "  install-tools      - Install required tools"
+	@echo "  setup-testnet      - Prepare local Soroban testnet tooling/profile"
 
 # Contract release checklist
 release-checklist:

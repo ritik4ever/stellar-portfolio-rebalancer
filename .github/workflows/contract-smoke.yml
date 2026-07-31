@@ -30,16 +30,29 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Ensure testnet secret exists
+        # Fork PRs and PRs from contributors without `secrets.STELLAR_TESTNET_SECRET_KEY`
+        # cannot deploy to testnet (GitHub strips secrets for non-trusted contexts).
+        # The build, audit, and benchmark steps still run so the contract code is
+        # verified on every PR; the testnet deploy step below is gated on the secret.
         run: |
-          if [ -z "${STELLAR_SECRET_KEY}" ]; then
-            echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
-            exit 1
+          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
+            echo "::warning::STELLAR_TESTNET_SECRET_KEY not available in this run context (fork PR or maintenance run); skipping on-chain deploy step."
+            echo "HAS_TESTNET_SECRET=false" >> "$GITHUB_ENV"
+          else
+            echo "HAS_TESTNET_SECRET=true" >> "$GITHUB_ENV"
           fi
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Setup Rust (pinned to 1.88)
+        # Pin to 1.88 — MSRV of transitive deps (darling, serde_with, time).
+        # ed25519-dalek is pinned to 2.x in Cargo.toml for soroban-env-host compat.
+        # Also install stable for CLI tools (soroban-cli, cargo-deny) that may need
+        # a newer compiler than the project's pinned MSRV.
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default 1.88.0
+          rustup target add wasm32-unknown-unknown
+
 
       - name: Cache Cargo and Soroban
         uses: actions/cache@v4
@@ -54,16 +67,18 @@ jobs:
             contract-smoke-${{ runner.os }}-
 
       - name: Install Soroban CLI
-        run: cargo install --locked soroban-cli
+        # Use stable Rust for CLI tools — the project's rust-toolchain.toml
+        # pins to 1.88.0 which may be below soroban-cli's MSRV.
+        run: rustup run stable cargo install --locked soroban-cli
 
       - name: Install cargo-deny
-        run: cargo install --locked cargo-deny
+        run: rustup run stable cargo install --locked cargo-deny
 
       - name: Audit Rust dependencies
         working-directory: ./contracts
-        run: |
-          cargo generate-lockfile
-          cargo deny check
+        # Cargo.lock is committed for reproducible builds; cargo-deny
+        # can read it directly without regenerating from Cargo.toml.
+        run: cargo deny check
 
       - name: Build contract wasm
         working-directory: ./contracts
@@ -72,8 +87,15 @@ jobs:
       - name: Run benchmarks
         working-directory: ./contracts
         if: github.event_name == 'pull_request'
+        # Benchmarks need the testutils feature for ledger/env manipulation.
+        # cargo test failures (compilation or test assertion) propagate;
+        # only skip summary generation when no BENCHMARK_RESULT lines exist.
         run: |
-          cargo test benchmark_ -- --nocapture > bench_output.txt || true
+          cargo test --locked --features testutils benchmark_ -- --nocapture > bench_output.txt
+          if ! grep -q 'BENCHMARK_RESULT|' bench_output.txt; then
+            echo "No BENCHMARK_RESULT lines found; skipping summary generation."
+            exit 0
+          fi
           python3 -c '
           import json
           lines = [line.strip() for line in open("bench_output.txt") if "BENCHMARK_RESULT|" in line]
@@ -110,6 +132,7 @@ jobs:
 
       - name: Deploy and initialize on testnet
         working-directory: ./contracts
+        if: env.HAS_TESTNET_SECRET == 'true'
         run: |
           soroban network add testnet --global \
             --rpc-url "${SOROBAN_RPC_URL}" \

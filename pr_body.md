@@ -1,79 +1,132 @@
-Closes #995
+## Description
 
-## Summary
+This PR adds a **complete testnet integration testing infrastructure** for the Stellar Portfolio Rebalancer smart contract, including a **mock reflector oracle contract**, a **real on-chain test suite**, and a **nightly CI workflow**. It fixes #964.
 
-Implements a paginated, filterable **rebalance history endpoint** at `GET /portfolio/:id/rebalance-history` that returns past rebalance outcomes for a given portfolio, including failed rebalances with error reasons.
+### Motivation
 
----
+Prior to this PR, the contract test suite was limited to local/mock-based integration tests using `soroban-sdk/testutils`. While these tests provide fast feedback, they cannot catch issues that only surface when interacting with real testnet infrastructure:
 
-## What was added
+- Transaction ordering and ledger timing edge cases
+- Soroban CLI behavior mismatches between `testutils` and real RPC
+- Event emission and storage persistence across ledger boundaries
+- Fee dynamics and resource (CPU/memory) limit behavior
+- Emergency stop / circuit breaker interactions with real tx sequencing
 
-### New endpoint: `GET /portfolio/:id/rebalance-history`
+### What's Included
 
-Returns a paginated list of past rebalances for a portfolio. Each record includes:
+#### 1. Mock Reflector Oracle Contract (`contracts/mock-reflector/`)
 
-| Field | Description |
-|-------|-------------|
-| `timestamp` | ISO-8601 datetime of the rebalance |
-| `trigger` | Raw trigger description |
-| `triggerType` | Normalized: `manual`, `auto`, or `circuit_breaker` |
-| `assetsTrades` | Number of asset trades executed |
-| `totalFeeXlm` | Total gas fee in XLM (null if unavailable) |
-| `totalFeeUsd` | Total gas fee in USD (null if unavailable) |
-| `totalSlippageBps` | Total slippage in basis points (null if unavailable) |
-| `status` | `success`, `partial`, or `failed` |
-| `errorReason` | Error description for failed rebalances (null otherwise) |
+A minimal Soroban contract that implements the same interface as a real Reflector oracle, returning **fixed prices of 100.00 USD** with the current ledger timestamp. This allows testnet integration tests to run deterministically without depending on a real oracle deployment.
 
-### Query Parameters (Filters)
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `from` | ISO-8601 string | Lower-bound timestamp filter (inclusive) |
-| `to` | ISO-8601 string | Upper-bound timestamp filter (inclusive) |
-| `trigger_type` | `manual` \| `auto` \| `circuit_breaker` | Filter by trigger type |
-| `status` | `success` \| `partial` \| `failed` | Filter by rebalance outcome |
-| `page` | integer (default: 1) | Page number |
-| `page_size` | integer (default: 50, max: 500) | Records per page |
-| `sort` | `asc` \| `desc` (default: desc) | Sort order by timestamp |
-
-### Response Shape
-
-```json
-{
-  "data": {
-    "history": [ /* PortfolioRebalanceHistoryItem[] */ ],
-    "pagination": {
-      "page": 1,
-      "pageSize": 50,
-      "total": 127,
-      "totalPages": 3
-    },
-    "filters": {
-      "from": null,
-      "to": null,
-      "trigger_type": null,
-      "status": null
-    }
-  }
-}
+```text
+contracts/mock-reflector/
+├── Cargo.toml          # Contract manifest with soroban-sdk 21.0.0
+└── src/
+    └── lib.rs          # MockReflector: base(), assets(), decimals(), lastprice(), twap()
 ```
 
-### Acceptance Criteria
+**Key design decisions:**
+- Uses the current ledger timestamp for prices so they never appear stale
+- Returns 14-decimal precision matching `REFLECTOR_PRICE_DECIMALS`
+- Imports `Asset` and `PriceData` types from the main `portfolio-rebalancer` crate
+- Compiled as a separate WASM binary and deployed alongside the rebalancer on testnet
 
-- ✅ All rebalance outcomes recorded and returned (success, partial, failed)
-- ✅ Failed rebalances include `errorReason` field with the failure description
-- ✅ Response time monitoring: queries exceeding 200ms are logged as warnings
-- ✅ Paginated with `page`, `page_size`, `total`, `totalPages`
-- ✅ Filterable by `from`, `to`, `trigger_type`, `status`
+#### 2. Testnet Integration Test Suite (`contracts/tests/testnet_integration.rs`)
 
----
+A comprehensive test file with **5 test cases** covering the full contract lifecycle on real Stellar testnet:
 
-## Files Changed
+| # | Test | Description |
+|---|------|-------------|
+| 1 | `testnet_full_rebalance_lifecycle` | Deploy → initialize → create → deposit → rebalance → verify state & events |
+| 2 | `testnet_fractional_three_way_allocations` | Three-way 33.33/33.33/33.34% allocations with drift preview |
+| 3 | `testnet_emergency_stop_flow` | Emergency stop blocks rebalance → re-enable → rebalance succeeds |
+| 4 | `testnet_config_and_capability_views` | config_view, capability_summary, version endpoints |
+| 5 | `testnet_fee_config_flow` | Default fee config → set fee config → verify configuration |
 
-### New files
-- `backend/src/test/rebalanceHistory.routes.test.ts` — Unit tests covering: 404 for missing portfolio, default pagination, filter passthrough, failed event error reasons, and totalPages calculation.
+**Test infrastructure features:**
+- CLI helper functions: `soroban()`, `contract_invoke()`, `contract_simulate()`, `deploy_contract()`
+- Transaction hash logging for observability
+- Contract event querying and verification
+- `TestnetFixture` pattern for one-time deployment shared within each test
+- Single-threaded execution (`--test-threads=1`) to avoid nonce conflicts
+- Requires `STELLAR_TESTNET_SECRET_KEY` environment variable (a funded testnet account)
 
-### Modified files
-- `backend/src/api/portfolios.routes.ts` — Added `GET /portfolio/:id/rebalance-history` route
-- `backend/src/api/validation.ts` — Added `portfolioRebalanceHistoryQuerySchema` with Zod validation for all query parameters
-- `backend/src/db/rebalanceHistoryDb.ts` — Added `dbGetPortfolioRebalanceHistory()` — parameterised SQL query with dynamic WHERE clause construction, COUNT for total, and status/trigger mapping
+#### 3. CI Workflow Changes (`.github/workflows/integration-tests.yml`)
+
+**New triggers:**
+- `schedule` — Nightly run at 4:00 AM UTC to catch regressions against live testnet
+- `workflow_dispatch` — Manual trigger for ad-hoc testnet integration runs
+
+**Job separation:**
+- `integration-tests` job (always runs on PRs/pushes): runs **mock-based integration tests only** (`cargo test integration_`), skipping testnet tests to avoid consuming testnet resources on every PR
+- `testnet-integration` job (nightly + manual only): deploys both contracts to testnet, runs the full on-chain test suite with a 30-minute timeout
+
+**Key details:**
+- Separate Cargo cache key that includes `contracts/mock-reflector/Cargo.lock`
+- Soroban CLI installed via `cargo install --locked soroban-cli`
+- Builds both contracts via `make build-testnet`
+- Posts a summary step to the workflow run with network info and trigger method
+- Guard check ensures `STELLAR_TESTNET_SECRET_KEY` secret exists before proceeding
+
+#### 4. Makefile Additions (`contracts/Makefile`)
+
+| Target | Description |
+|--------|-------------|
+| `build-mock-reflector` | Build the mock reflector contract to WASM |
+| `build-testnet` | Build both the rebalancer and mock reflector |
+| `testnet-integration` | Build + run testnet tests (requires `STELLAR_TESTNET_SECRET_KEY`) |
+| `testnet-only` | Run only on-chain testnet tests (build then test) |
+| `test-integration` | Run local mock-based integration tests (no network) |
+| `help` | Updated with all new targets |
+
+### How to Run Locally
+
+```bash
+# 1. Set up your testnet account
+export STELLAR_TESTNET_SECRET_KEY="S..."
+
+# 2. Build both contracts
+cd contracts
+make build-testnet
+
+# 3. Run testnet integration tests
+make testnet-integration
+
+# Or run only the mock-based tests (no network required)
+make test-integration
+```
+
+### File Change Summary
+
+This PR modifies files across CI workflows, contracts, frontend, and repository configuration. For a complete list, see the diff tab.
+
+## Type of Change
+
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [x] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [x] DevOps / CI / Documentation update
+
+## 📖 API Changes & Breaking Changes Checklist
+
+- [x] No API changes — contract interface remains the same
+- [x] No breaking changes to existing functionality
+- [x] Mock reflector is a separate contract, does not modify the rebalancer
+
+## Checklist
+
+- [x] My code follows the style guidelines of this project
+- [x] I have performed a self-review of my own code
+- [x] I have commented my code, particularly in hard-to-understand areas
+- [x] I have made corresponding changes to the documentation (Makefile help)
+- [x] My changes generate no new warnings
+- [x] **This PR links to an issue:** Fixes #964
+- [x] I have added tests that prove my fix is effective or that my feature works
+- [x] New and existing unit tests pass locally with my changes
+
+### Future Considerations
+
+- Add a **health check** step that verifies the testnet account balance is sufficient before running tests
+- Add **performance benchmarks** that measure contract resource usage differences between mock and real testnet
+- Consider adding a **mainnet staging** test suite using a dedicated low-value mainnet account for pre-deployment validation
+- Add **failure injection tests** (e.g., insufficient balance, expired ledger entries)

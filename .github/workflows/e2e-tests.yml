@@ -51,8 +51,10 @@ jobs:
       with:
         node-version: 20
 
-    - name: Install Dependencies (All)
-      run: npm run install:all
+    - name: Install Dependencies (Backend + Frontend)
+      run: |
+        npm run install:backend
+        npm run install:frontend
 
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps chromium
