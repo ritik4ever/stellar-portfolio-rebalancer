@@ -127,7 +127,10 @@ logs
 
 # Rust/Cargo
 target/
+# Cargo.lock is committed for the contracts crate to ensure reproducible
+# builds, especially with pinned ed25519-dalek to avoid version conflicts.
 Cargo.lock
+!contracts/Cargo.lock
 **/*.rs.bk
 
 # Soroban
