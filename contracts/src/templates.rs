@@ -58,6 +58,8 @@ fn validate_template_size(env: &Env, allocations: &Map<Address, u32>) -> Result<
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
         },
         global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+        strategy: StrategyType::default(),
+        strategy_config: StrategyConfig::default(),
     };
 
     crate::portfolio::validate_portfolio_storage_footprint(env, 0, &synthetic_portfolio)?;

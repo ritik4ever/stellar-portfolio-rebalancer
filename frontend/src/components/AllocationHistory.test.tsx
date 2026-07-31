@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import AllocationHistory from "./AllocationHistory";
+import AllocationHistory, { computeAllocationDiff } from "./AllocationHistory";
 
 const queryMocks = vi.hoisted(() => ({
   usePortfolioAnalytics: vi.fn(),
@@ -247,5 +247,135 @@ describe("AllocationHistory", () => {
 
     render(<AllocationHistory portfolioId="pf-123" />);
     expect(screen.getByTestId("reference-line")).toBeDefined();
+  });
+
+  describe("computeAllocationDiff", () => {
+    it("correctly identifies allocation increases", () => {
+      const fromSnapshot = {
+        timestamp: "2025-01-01T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35, BTC: 25 },
+      };
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 45, USDC: 35, BTC: 20 },
+      };
+      const allAssets = ["XLM", "USDC", "BTC"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs).toHaveLength(3);
+      expect(diffs.find((d) => d.asset === "XLM")?.type).toBe("increase");
+      expect(diffs.find((d) => d.asset === "XLM")?.change).toBe(5);
+      expect(diffs.find((d) => d.asset === "BTC")?.type).toBe("decrease");
+      expect(diffs.find((d) => d.asset === "BTC")?.change).toBe(-5);
+      expect(diffs.find((d) => d.asset === "USDC")?.type).toBe("unchanged");
+    });
+
+    it("correctly identifies added assets", () => {
+      const fromSnapshot = {
+        timestamp: "2025-01-01T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35 },
+      };
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35, BTC: 25 },
+      };
+      const allAssets = ["XLM", "USDC", "BTC"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs).toHaveLength(3);
+      expect(diffs.find((d) => d.asset === "BTC")?.type).toBe("added");
+      expect(diffs.find((d) => d.asset === "BTC")?.fromValue).toBe(0);
+      expect(diffs.find((d) => d.asset === "BTC")?.toValue).toBe(25);
+    });
+
+    it("correctly identifies removed assets", () => {
+      const fromSnapshot = {
+        timestamp: "2025-01-01T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35, BTC: 25 },
+      };
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35 },
+      };
+      const allAssets = ["XLM", "USDC", "BTC"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs).toHaveLength(3);
+      expect(diffs.find((d) => d.asset === "BTC")?.type).toBe("removed");
+      expect(diffs.find((d) => d.asset === "BTC")?.fromValue).toBe(25);
+      expect(diffs.find((d) => d.asset === "BTC")?.toValue).toBe(0);
+    });
+
+    it("handles mixed changes correctly", () => {
+      const fromSnapshot = {
+        timestamp: "2025-01-01T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35, BTC: 25 },
+      };
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 50, USDC: 30, ETH: 20 },
+      };
+      const allAssets = ["XLM", "USDC", "BTC", "ETH"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs).toHaveLength(4);
+      expect(diffs.find((d) => d.asset === "XLM")?.type).toBe("increase");
+      expect(diffs.find((d) => d.asset === "USDC")?.type).toBe("decrease");
+      expect(diffs.find((d) => d.asset === "BTC")?.type).toBe("removed");
+      expect(diffs.find((d) => d.asset === "ETH")?.type).toBe("added");
+    });
+
+    it("sorts diffs by absolute change magnitude", () => {
+      const fromSnapshot = {
+        timestamp: "2025-01-01T00:00:00Z",
+        allocations: { XLM: 40, USDC: 35, BTC: 25 },
+      };
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 50, USDC: 30, BTC: 20 },
+      };
+      const allAssets = ["XLM", "USDC", "BTC"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs[0].asset).toBe("XLM"); // +10
+      expect(diffs[1].asset).toBe("BTC"); // -5
+      expect(diffs[2].asset).toBe("USDC"); // -5
+    });
+
+    it("handles empty allocations", () => {
+      const fromSnapshot = {
+        timestamp: "2025-01-01T00:00:00Z",
+        allocations: {},
+      };
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 50, USDC: 50 },
+      };
+      const allAssets = ["XLM", "USDC"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs).toHaveLength(2);
+      expect(diffs.every((d) => d.type === "added")).toBe(true);
+    });
+
+    it("handles null snapshots", () => {
+      const fromSnapshot = null;
+      const toSnapshot = {
+        timestamp: "2025-01-02T00:00:00Z",
+        allocations: { XLM: 50, USDC: 50 },
+      };
+      const allAssets = ["XLM", "USDC"];
+
+      const diffs = computeAllocationDiff(fromSnapshot, toSnapshot, allAssets);
+
+      expect(diffs).toHaveLength(2);
+      expect(diffs.every((d) => d.type === "added")).toBe(true);
+    });
   });
 });

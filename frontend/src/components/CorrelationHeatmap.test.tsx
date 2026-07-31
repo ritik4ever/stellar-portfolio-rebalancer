@@ -1,6 +1,7 @@
 import React from 'react'
-import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, afterEach } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CorrelationHeatmap, { correlationColor } from './CorrelationHeatmap'
 
 const assets = ['XLM', 'BTC', 'ETH']
@@ -23,9 +24,19 @@ const matrices = {
   ],
 }
 
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+})
+
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return React.createElement(QueryClientProvider, { client: queryClient }, children)
+}
+
+afterEach(cleanup)
+
 describe('CorrelationHeatmap', () => {
   it('renders diagonal cells as 1.0', () => {
-    render(<CorrelationHeatmap assets={assets} correlations={matrices} />)
+    render(<CorrelationHeatmap assets={assets} correlations={matrices} />, { wrapper: Wrapper })
 
     expect(screen.getByTestId('correlation-cell-0-0')).toHaveTextContent('1.0')
     expect(screen.getByTestId('correlation-cell-1-1')).toHaveTextContent('1.0')
@@ -39,7 +50,7 @@ describe('CorrelationHeatmap', () => {
   })
 
   it('shows exact coefficient and pair names in the tooltip', async () => {
-    render(<CorrelationHeatmap assets={assets} correlations={matrices} />)
+    render(<CorrelationHeatmap assets={assets} correlations={matrices} />, { wrapper: Wrapper })
 
     fireEvent.mouseEnter(screen.getByTestId('correlation-cell-0-1'))
 
@@ -47,7 +58,7 @@ describe('CorrelationHeatmap', () => {
   })
 
   it('switches matrices when the time range changes', () => {
-    render(<CorrelationHeatmap assets={assets} correlations={matrices} />)
+    render(<CorrelationHeatmap assets={assets} correlations={matrices} />, { wrapper: Wrapper })
 
     expect(screen.getByTestId('correlation-cell-0-1')).toHaveTextContent('-0.50')
 
@@ -64,9 +75,18 @@ describe('CorrelationHeatmap', () => {
       manyAssets.map((__, columnIndex) => (rowIndex === columnIndex ? 1 : 0.1)),
     )
 
-    render(<CorrelationHeatmap assets={manyAssets} correlations={{ '30D': matrix }} />)
+    render(<CorrelationHeatmap assets={manyAssets} correlations={{ '30D': matrix }} />, { wrapper: Wrapper })
 
     expect(screen.getAllByRole('gridcell')).toHaveLength(100)
     expect(screen.queryByText('A11')).not.toBeInTheDocument()
+  })
+
+  it('opens a drill-down modal when a cell is clicked with correct asset pair context', async () => {
+    render(<CorrelationHeatmap assets={assets} correlations={matrices} />, { wrapper: Wrapper })
+
+    fireEvent.click(screen.getByTestId('correlation-cell-0-1'))
+
+    expect(screen.getByText(/correlation detail/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /correlation detail/i })).toBeInTheDocument()
   })
 })

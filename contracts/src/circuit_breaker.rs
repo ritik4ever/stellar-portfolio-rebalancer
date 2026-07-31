@@ -9,7 +9,11 @@ pub fn check_volatility(
     current_prices: &Map<Address, i128>,
 ) -> Result<(), Error> {
     for (asset, current_price) in current_prices.iter() {
-        let records = (config.window_seconds / 60).max(1) as u32;
+        if config.window_seconds < 60 {
+            return Err(Error::InvalidThreshold);
+        }
+        
+        let records = (config.window_seconds / 60) as u32;
         
         if let Some(historical_price) = client.twap(&crate::reflector::Asset::Stellar(asset.clone()), &records) {
             if historical_price > 0 {
