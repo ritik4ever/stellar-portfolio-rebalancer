@@ -216,42 +216,6 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
-
-    }
-
-    async connect(): Promise<string> {
-        if (!this.isAvailable()) {
-
-            if (!result?.publicKey) {
-                throw new Error('No public key returned')
-            }
-            return result.publicKey
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
-
-    async isConnected(): Promise<boolean> {
-        if (!this.isAvailable()) return false
-        try {
-
-        } catch {
-            return false
-        }
-    }
-
-    async disconnect(): Promise<void> {
-    }
-
-    async signTransaction(xdr: string, network?: string): Promise<string> {
-        if (!this.isAvailable()) {
-
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
-}
-
 export class MockAdapter implements WalletAdapter {
     readonly name = 'Mock Wallet (Test)'
     readonly type: WalletType = 'mock'
