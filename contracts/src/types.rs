@@ -250,6 +250,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    CoinGeckoAddress,
+    OracleConfig,
     StopLoss(u64, Address),
     CircuitBreakerConfig,
     /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
