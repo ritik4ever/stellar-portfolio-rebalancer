@@ -125,7 +125,6 @@ debugRouter.get('/debug/reflector-test', blockDebugInProduction, async (req: Req
             environment: {
                 nodeEnv: global.process.env.NODE_ENV,
                 apiKeySet: !!global.process.env.COINGECKO_API_KEY,
-                apiKeyLength: global.process.env.COINGECKO_API_KEY?.length || 0
             }
         }
         return ok(res, redactObject(response))

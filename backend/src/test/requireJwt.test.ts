@@ -71,8 +71,7 @@ describe('requireJwt middleware', () => {
     it('accepts valid token with clock skew when token is slightly ahead', async () => {
         vi.stubEnv('JWT_CLOCK_SKEW_SEC', '15')
         const token = jwt.sign({ sub: 'GSKEW123', type: 'access' }, CURRENT_SECRET, { expiresIn: '15m' })
-        vi.useRealTimers()
-        vi.setSystemTime(new Date(Date.now() + 20 * 1000))
+        vi.setSystemTime(new Date(Date.now() - 10 * 1000))
         const app = createApp()
 
         const res = await request(app)

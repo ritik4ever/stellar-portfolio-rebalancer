@@ -1,74 +1,240 @@
-# Security Audit: Idempotency Key Handling
+# Security Audit — stellar-portfolio-rebalancer
 
-## Issue: #1522 — Threat-Model Idempotency Key Handling
-
-### Date: 2026-07-27
-### Category: Security (Backend)
-### Area: `backend/src/services/idempotencyRedisStore.ts`
+This document records security findings identified during internal and external audits of the
+`stellar-portfolio-rebalancer` smart contract. Each entry includes a description, impact
+assessment, reproduction steps, recommended remediation, and current status.
 
 ---
 
-## Summary
+## Findings Index
 
-Idempotency keys were stored globally without user scoping in both Redis and SQLite, creating cross-user collision and cache-poisoning risks. This has been remediated by scoping idempotency keys to the authenticated user in all storage layers.
-
----
-
-## Findings
-
-### F1: Idempotency Keys Not Scoped to User (HIGH)
-
-**File:** `backend/src/middleware/idempotency.ts`  
-**Storage:** `backend/src/services/idempotencyRedisStore.ts`, `backend/src/db/idempotencyDb.ts`
-
-**Description:**  
-Idempotency keys were stored using a global namespace (`idempotency:${key}` in Redis, `key` as PRIMARY KEY in SQLite). The idempotency key value provided by the client was the sole lookup key, with no association to the authenticated user. This meant any user could reuse or guess another user's idempotency key.
-
-**Risk:**  
-- **Cross-user key collision:** Two users using the same idempotency key value would interfere with each other's cached responses.  
-- **Cache probing:** A malicious client could iterate through idempotency key values to attempt retrieval of other users' cached responses.  
-- **Request forgery:** A user could submit a known idempotency key (originally used by another user for a different request) and, depending on timing and payload differences, cause a 409 Conflict or receive a stale response belonging to another user.
-
-**Severity:** HIGH — enables cross-user data leakage and request interference.
-
-**Remediation:**  
-Idempotency keys are now scoped to the authenticated user by prefixing the storage key with the user identity (`${requestUser}:${key}`). This ensures:
-- Each user's idempotency key namespace is isolated
-- Cross-user key collisions are impossible at the storage layer
-- A malicious client cannot probe or access another user's cached responses using idempotency keys
-
-**Applied in:** `backend/src/middleware/idempotency.ts` — scoped key computation at line 29.
-
-### F2: Idempotency Key Predictability (MEDIUM)
-
-**File:** `backend/src/middleware/idempotency.ts`
-
-**Description:**  
-Idempotency keys are client-provided via the `Idempotency-Key` header. The server does not generate or validate the entropy/format of these keys. If a client uses predictable keys (e.g., sequential IDs, timestamps), a malicious actor could feasibly guess other users' keys.
-
-**Risk:**  
-Medium — mitigated by F1 (user scoping), but predictable keys remain a concern for users sharing the same key-namespace accidentally.
-
-**Remediation:**  
-- User scoping (F1) reduces this risk significantly since each user's keyspace is isolated.  
-- **Recommendation:** Consider generating high-entropy idempotency keys server-side (e.g., UUID v4) for endpoints that handle sensitive operations, and deprecate client-provided keys for those endpoints.
+| ID | Title | Severity | Status |
+|----|-------|----------|--------|
+| [SPR-001](#spr-001) | `get_fee_config` default `fee_recipient` falls back to the contract's own address | **High** | Open — fix tracked in #1519 |
 
 ---
 
-## Remediation Status
+## SPR-001
 
-| Finding | Severity | Status | PR |
-|---------|----------|--------|----|
-| F1: Cross-user key collision | HIGH | Remediated — keys now scoped to user | #1522 |
-| F2: Key predictability | MEDIUM | Mitigated by F1; server-side key generation recommended | Future |
+**Title:** `get_fee_config` default `fee_recipient` falls back to the contract's own address
+
+**Severity:** High
+
+**Status:** Open — remediation required (tracked in issue #1519)
+
+**Reported:** 2026-07-27
+
+**Affected file:** `contracts/src/lib.rs`
+
+**Affected function:** `get_fee_config` (line ~404), `execute_rebalance_internal`
 
 ---
 
-## Changes Made
+### Description
 
-1. **`backend/src/middleware/idempotency.ts`**: Added `scopedKey` computation (`${requestUser}:${key}`) and used it for all Redis and DB storage/lookup operations. Raw `key` is still used in response headers and logging.
+`get_fee_config` returns an in-memory default `FeeConfig` when no fee configuration has been
+stored in contract storage. The default value hardcodes `fee_recipient` to
+`env.current_contract_address()` — the contract's own address:
 
-2. **`backend/src/test/idempotency.test.ts`**:
-   - Updated cross-user test from "rejects same idempotency key when replayed by a different user" to "allows same idempotency key value for different users" (correct behavior with user scoping).
-   - Updated DB lookup assertions to use scoped keys where middleware-scope storage is involved.
-   - Updated expiry/cleanup test to store with scoped key prefix.
+```rust
+// contracts/src/lib.rs
+pub fn get_fee_config(env: Env) -> FeeConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::FeeConfig)
+        .unwrap_or(FeeConfig {
+            platform_name: String::from_str(&env, ""),
+            fee_bps: 0,
+            fee_recipient: env.current_contract_address(), // ← self-referential default
+            enabled: false,
+        })
+}
+```
+
+`initialize` does not write a `FeeConfig` entry to storage, so this fallback is active on
+every freshly deployed contract until `set_fee_config` is explicitly called.
+
+`execute_rebalance_internal` calls `get_fee_config` and, when `fee_config.enabled` is `true`
+and `fee_bps > 0`, executes a token transfer directly to `fee_config.fee_recipient`:
+
+```rust
+if fee_amount > 0 {
+    let token_client = token::Client::new(env, &asset);
+    token_client.transfer(
+        &env.current_contract_address(),
+        &fee_config.fee_recipient, // could be the contract itself
+        &fee_amount,
+    );
+}
+```
+
+There is **no `fee_withdraw`, `admin_sweep`, or any other mechanism** in the codebase that
+allows recovery of tokens held at the contract's own address. Any fees sent there are
+permanently stranded.
+
+---
+
+### Attack / Misconfiguration Scenario
+
+The default `enabled: false` and `fee_bps: 0` prevent fee collection in the out-of-the-box
+state, so the vulnerability does not trigger automatically. However, the unsafe default
+creates a critical trap under the following conditions:
+
+1. **Operator misconfiguration:** An admin enables fee collection via `set_fee_config` but a
+   future contract upgrade or storage reset clears the stored `FeeConfig`. Rebalances
+   subsequently execute against the fallback default. If the new default is consumed with
+   `enabled: true` in any refactor, fees flow to the contract address immediately.
+
+2. **Unsafe fallback as a code smell:** The contract currently guards execution with
+   `enabled: false` in the default, but this is a fragile, implicit safeguard. Any future
+   developer who changes the default `enabled` field to `true` (e.g., to simplify
+   platform-level fee activation) will silently strand every fee collected until the
+   misconfiguration is caught.
+
+3. **Storage manipulation / upgrade path risk:** If a contract upgrade initialises storage
+   differently, or if a migration script inadvertently clears `DataKey::FeeConfig`, the
+   unsafe self-recipient default becomes live with no warning.
+
+4. **No recovery path:** Because Soroban contracts cannot arbitrarily transfer tokens they
+   hold without an explicit withdrawal function, and no such function exists, stranded fees
+   are unrecoverable without a contract upgrade.
+
+---
+
+### Impact
+
+| Dimension | Assessment |
+|-----------|-----------|
+| **Funds at risk** | Yes — any fee-denominated token amount sent to the contract address is permanently unrecoverable without an upgrade |
+| **Requires admin action to trigger** | Yes — `enabled: false` in the default prevents automatic triggering today |
+| **Exploitable by external actor** | No — fee collection only runs inside `execute_rebalance_internal`, which requires steward auth |
+| **Scope of affected deployments** | All deployments where `set_fee_config` has not been called before fee collection is enabled |
+| **Recoverability** | None without a contract upgrade that adds a sweep function |
+
+---
+
+### Recommended Remediation
+
+Two complementary fixes are required. Both should be delivered together.
+
+#### Fix 1 — Remove the unsafe default recipient (required)
+
+Replace the self-referential fallback in `get_fee_config` with a value that cannot silently
+route funds anywhere. The safest approach is to make the absence of a stored config
+unambiguously "fees disabled" at the type level:
+
+**Option A — Panic on access when not configured (strictest):**
+
+```rust
+pub fn get_fee_config(env: Env) -> FeeConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::FeeConfig)
+        .expect("FeeConfig not initialised; call set_fee_config before enabling fees")
+}
+```
+
+**Option B — Return a disabled sentinel with no recipient (recommended):**
+
+Introduce an `Option<Address>` for `fee_recipient`, or use a dedicated
+`fee_config_is_set: bool` flag in storage, so that the execution path can detect
+"not configured" and skip fee collection entirely without relying on `enabled: false` in a
+fallback struct:
+
+```rust
+pub fn get_fee_config(env: Env) -> Option<FeeConfig> {
+    env.storage().instance().get(&DataKey::FeeConfig)
+}
+```
+
+In `execute_rebalance_internal`:
+
+```rust
+let fee_config = Self::get_fee_config(env.clone());
+let effective_fee_bps = match &fee_config {
+    Some(c) if c.enabled => c.fee_bps,
+    _ => 0,
+};
+```
+
+This eliminates the unsafe default entirely. Fee collection is off unless a `FeeConfig` is
+explicitly stored.
+
+#### Fix 2 — Add an admin fee sweep / withdrawal function (defence in depth)
+
+Even with Fix 1 applied, add a recovery path so that any tokens inadvertently sent to the
+contract address can be retrieved:
+
+```rust
+pub fn admin_sweep_token(env: Env, token: Address, amount: i128, destination: Address) {
+    require_admin(&env);
+    let token_client = token::Client::new(&env, &token);
+    token_client.transfer(&env.current_contract_address(), &destination, &amount);
+    env.events().publish(
+        (Symbol::new(&env, "admin_sweep"),),
+        (token, amount, destination, env.ledger().timestamp()),
+    );
+}
+```
+
+This function should require admin auth, emit an auditable event, and be callable only when
+the contract is not in emergency stop — or alternatively, only when emergency stop is active,
+depending on the operator's threat model.
+
+#### Fix 3 — Require explicit fee recipient in `initialize` (optional hardening)
+
+Add `fee_recipient: Option<Address>` to `initialize` so that deployments must declare an
+intent at construction time:
+
+```rust
+pub fn initialize(
+    env: Env,
+    admin: Address,
+    reflector_address: Address,
+    fee_recipient: Option<Address>,
+) -> Result<(), Error> {
+    // ... existing init logic ...
+    if let Some(recipient) = fee_recipient {
+        env.storage().instance().set(&DataKey::FeeConfig, &FeeConfig {
+            platform_name: String::from_str(&env, ""),
+            fee_bps: 0,
+            fee_recipient: recipient,
+            enabled: false,
+        });
+    }
+    Ok(())
+}
+```
+
+This is backward-compatible (recipient is optional) and makes the deployment checklist
+explicit rather than relying on operators running `set_fee_config` post-deploy.
+
+---
+
+### Verification
+
+After applying the fix:
+
+1. Deploy a fresh contract without calling `set_fee_config`.
+2. Call `execute_rebalance` with a non-zero fee configuration via direct storage inspection.
+3. Confirm no fee transfer occurs (or the function returns an error / skips fee collection).
+4. Call `set_fee_config` with `enabled: true`, a valid `fee_bps`, and an explicit external
+   `fee_recipient`.
+5. Call `execute_rebalance` and confirm the fee is routed to the external recipient, not the
+   contract address.
+6. Add a unit test asserting `get_fee_config` with no stored value returns `None` (or
+   equivalent sentinel) rather than a self-referential struct.
+
+---
+
+### References
+
+- Issue: [#1519 — Security audit: set_fee_config default recipient defaults to contract's own address](../../issues/1519)
+- Affected code: [`contracts/src/lib.rs` — `get_fee_config`](../contracts/src/lib.rs)
+- Affected code: [`contracts/src/lib.rs` — `execute_rebalance_internal`](../contracts/src/lib.rs)
+- Soroban token interface: https://developers.stellar.org/docs/smart-contracts/tokens
+
+---
+
+*Last updated: 2026-07-27*
+*Audited by: Kiro (automated security review, issue #1519)*

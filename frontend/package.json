@@ -16,7 +16,9 @@
     "test:e2e:visual": "playwright test --project=visual-regression",
     "test:e2e:visual-update": "playwright test --project=visual-regression --update-snapshots",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "lint:i18n": "node scripts/audit-i18n.js",
+    "lint": "npm run lint:i18n"
   },
   "dependencies": {
     "@sentry/react": "^9.14.0",
@@ -31,12 +33,14 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-i18next": "^13.5.0",
+    "react-router-dom": "^7.18.2",
     "recharts": "^2.8.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.1",
     "@chromatic-com/storybook": "^5.2.1",
+    "@oxc-resolver/binding-win32-x64-msvc": "^11.24.2",
     "@playwright/test": "^1.58.2",
     "@storybook/addon-a11y": "^10.4.6",
     "@storybook/addon-docs": "^10.4.6",
