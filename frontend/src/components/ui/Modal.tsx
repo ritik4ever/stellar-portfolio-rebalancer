@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useId } from 'react'
 
 export interface ModalProps {
   open: boolean
@@ -13,6 +13,8 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
   const modalRef = useRef<HTMLDivElement>(null)
   const previousActiveElementRef = useRef<HTMLElement | null>(null)
   const onCloseRef = useRef(onClose)
+  const titleId = useId()
+  const descriptionId = useId()
 
   // Keep the onClose ref up to date
   useEffect(() => {
@@ -33,11 +35,11 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
 
     const getFocusableElements = (): HTMLElement[] => {
       const focusableSelectors = [
-        'button',
+        'button:not([disabled])',
         '[href]',
-        'input',
-        'select',
-        'textarea',
+        'input:not([disabled])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
         '[tabindex]:not([tabindex="-1"])'
       ]
       return Array.from(modal.querySelectorAll<HTMLElement>(focusableSelectors.join(',')))
@@ -93,12 +95,12 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
         className="relative w-full max-w-md rounded-xl bg-white dark:bg-gray-800 p-6 shadow-xl"
         role="dialog"
         aria-modal="true"
-        aria-labelledby={title ? 'modal-title' : undefined}
-        aria-describedby={description ? 'modal-description' : undefined}
+        aria-labelledby={title ? titleId : undefined}
+        aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
       >
-        {title && <h2 id="modal-title" className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>}
-        {description && <p id="modal-description" className="mt-1 text-sm text-gray-600 dark:text-gray-400">{description}</p>}
+        {title && <h2 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>}
+        {description && <p id={descriptionId} className="mt-1 text-sm text-gray-600 dark:text-gray-400">{description}</p>}
         <div className="mt-4">{children}</div>
         {footer && <div className="mt-6 flex justify-end gap-3">{footer}</div>}
       </div>

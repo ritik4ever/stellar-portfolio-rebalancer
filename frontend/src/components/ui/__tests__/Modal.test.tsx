@@ -80,8 +80,8 @@ describe('Modal', () => {
     // Press Tab - focus should cycle to first focusable element
     fireEvent.keyDown(document, { key: 'Tab' })
 
-    // Focus should be on the first focusable element (input or first button)
-    expect(document.activeElement).not.toBe(submitButton)
+    // Focus should be on the first focusable element (input)
+    expect(document.activeElement).toBe(input)
   })
 
   it('should trap focus within modal when Shift+Tab is pressed on first focusable element', () => {
@@ -106,8 +106,9 @@ describe('Modal', () => {
     // Press Shift+Tab - focus should cycle to last focusable element
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
 
-    // Focus should be on the last focusable element
-    expect(document.activeElement).not.toBe(input)
+    // Focus should be on the last focusable element (Submit button)
+    const submitButton = buttons[buttons.length - 1]
+    expect(document.activeElement).toBe(submitButton)
   })
 
   it('should restore focus to trigger element when modal closes', () => {
@@ -141,8 +142,11 @@ describe('Modal', () => {
     )
 
     const modal = screen.getByRole('dialog')
+    const titleElement = screen.getByText('Test Modal')
+    const descriptionElement = screen.getByText('Test description')
+
     expect(modal).toHaveAttribute('aria-modal', 'true')
-    expect(modal).toHaveAttribute('aria-labelledby', 'modal-title')
-    expect(modal).toHaveAttribute('aria-describedby', 'modal-description')
+    expect(modal).toHaveAttribute('aria-labelledby', titleElement.id)
+    expect(modal).toHaveAttribute('aria-describedby', descriptionElement.id)
   })
 })
