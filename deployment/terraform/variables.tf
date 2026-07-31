@@ -52,14 +52,20 @@ variable "ecs_task_memory" {
   }
 }
 
-variable "secret_rotation_days" {
-  description = "Number of days between automatic scheduled rotations of database and redis credentials"
-  type        = number
-  default     = 30
+variable "ecs_min_capacity" {
+  description = "Minimum number of ECS tasks"
+  type        = map(number)
+  default = {
+    staging    = 1
+    production = 2
+  }
 }
 
-variable "secret_rotation_lambda_arn" {
-  description = "ARN of the Lambda function that rotates secrets (optional when using AWS managed rotation)"
-  type        = string
-  default     = null
+variable "ecs_max_capacity" {
+  description = "Maximum number of ECS tasks"
+  type        = map(number)
+  default = {
+    staging    = 3
+    production = 10
+  }
 }

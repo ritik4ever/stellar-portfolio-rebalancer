@@ -43,6 +43,14 @@ hash:
 		fi; \
 	fi
 
+# Run integration tests
+test-integration:
+	cargo test --features integration -- --nocapture
+
+# Run testnet-specific integration tests
+test-testnet:
+	cargo test --features integration --test testnet_integration -- --nocapture
+
 # Run tests
 test:
 	cargo test

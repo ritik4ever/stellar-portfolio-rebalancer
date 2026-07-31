@@ -4020,6 +4020,7 @@ fn test_create_portfolio_with_strategy_custom() {
     assert_eq!(portfolio.strategy, StrategyType::Custom);
     assert_eq!(portfolio.strategy_config.min_interval_seconds, 43200);
 }
+
 // ── Cross-oracle validation tests ────────────────────────────────────────────
 
 mod coingecko_deviating {
