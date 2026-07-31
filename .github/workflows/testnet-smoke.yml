@@ -22,7 +22,7 @@ on:
       - 'scripts/testnet-smoke.sh'
 
 concurrency:
-  group: testnet-smoke-${{ github.ref }}
+  group: testnet-smoke
   cancel-in-progress: true
 
 permissions:
@@ -35,7 +35,6 @@ jobs:
     timeout-minutes: 25
 
     env:
-      STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_SECRET_KEY }}
       SOROBAN_RPC_URL: ${{ inputs.testnet_rpc_url || 'https://soroban-testnet.stellar.org' }}
       SOROBAN_NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015'
       SOROBAN_NETWORK: testnet
@@ -43,9 +42,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # ── Pre-flight: validate secrets ────────────────────────────────────
       - name: Ensure testnet secret is available
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_SECRET_KEY }}
         run: |
           if [ -z "${STELLAR_SECRET_KEY}" ]; then
             echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
@@ -59,13 +62,12 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo and Soroban
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.soroban
             contracts/target
           key: testnet-smoke-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
           restore-keys: |
@@ -81,12 +83,14 @@ jobs:
 
       # ── Configure Soroban network and identity ──────────────────────────
       - name: Configure Soroban testnet profile
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_SECRET_KEY }}
         run: |
           soroban network add testnet --global \
             --rpc-url "${SOROBAN_RPC_URL}" \
-            --network-passphrase "${SOROBAN_NETWORK_PASSPHRASE}" || true
+            --network-passphrase "${SOROBAN_NETWORK_PASSPHRASE}"
 
-          soroban keys add "${SOROBAN_IDENTITY}" --global --secret-key "${STELLAR_SECRET_KEY}" || true
+          soroban keys add "${SOROBAN_IDENTITY}" --global --secret-key "${STELLAR_SECRET_KEY}"
 
           echo "ADMIN_ADDRESS=$(soroban keys address ${SOROBAN_IDENTITY} --global)" >> "${GITHUB_ENV}"
 
@@ -137,22 +141,35 @@ jobs:
       # ── Deployment summary ──────────────────────────────────────────────
       - name: Post deployment summary
         if: always()
+        env:
+          CONTRACT_ID: ${{ env.CONTRACT_ID }}
+          SOROBAN_RPC_URL: ${{ env.SOROBAN_RPC_URL }}
+          ADMIN_ADDRESS: ${{ env.ADMIN_ADDRESS }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           {
             echo "## Testnet Smoke Test Results"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| **Contract ID** | \`${{ env.CONTRACT_ID }}\` |"
+            printf '| **Contract ID** | `%s` |\n' "$CONTRACT_ID"
             echo "| **Network** | Soroban Testnet |"
-            echo "| **RPC URL** | \`${{ env.SOROBAN_RPC_URL }}\` |"
-            echo "| **Deployer** | \`${{ env.ADMIN_ADDRESS }}\` |"
-            echo "| **Smoke Suite** | ${{ job.status == 'success' && '✅ Passed' || '❌ Failed' }} |"
-            echo "| **Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            printf '| **RPC URL** | `%s` |\n' "$SOROBAN_RPC_URL"
+            printf '| **Deployer** | `%s` |\n' "$ADMIN_ADDRESS"
+            if [ "$JOB_STATUS" = "success" ]; then
+              printf '| **Smoke Suite** | ✅ Passed |\n'
+            else
+              printf '| **Smoke Suite** | ❌ Failed |\n'
+            fi
+            printf '| **Run** | [%s](%s/%s/actions/runs/%s) |\n' "$RUN_ID" "$SERVER_URL" "$REPOSITORY" "$RUN_ID"
             echo ""
-            echo "> Triggered by: ${{ github.event_name }}"
-            if [ "${{ github.event_name }}" = "schedule" ]; then
-              echo "> ⏰ Scheduled run — check for testnet-breaking regressions"
+            printf '> Triggered by: %s\n' "$EVENT_NAME"
+            if [ "$EVENT_NAME" = "schedule" ]; then
+              printf '> ⏰ Scheduled run — check for testnet-breaking regressions\n'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
