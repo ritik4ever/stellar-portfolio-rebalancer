@@ -163,8 +163,6 @@ export const API_CONFIG = {
         ASSETS: `${API_RESOURCE_ROOT}/assets`,
         RISK_METRICS: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/metrics/${portfolioId}`,
         RISK_CHECK: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/check/${portfolioId}`,
-        RISK_CIRCUIT_BREAKER_RESET: (asset: string) => `${API_RESOURCE_ROOT}/risk/circuit-breakers/${asset}/reset`,
-        ADMIN_DB_QUERIES: '/api/admin/db/queries',
         NOTIFICATIONS_PREFERENCES: `${API_RESOURCE_ROOT}/notifications/preferences`,
         NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
         NOTIFICATIONS_UNSUBSCRIBE: (userId: string, reason?: string) => {

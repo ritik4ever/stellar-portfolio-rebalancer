@@ -42,7 +42,6 @@ import Compare from './pages/Compare'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
-import AdminOps from './pages/AdminOps'
 
 function App() {
     const queryClient = useQueryClient()
@@ -349,7 +348,7 @@ function App() {
                     {appCopy.checkingApiConfig}
                 </span>
             ) : null}
-            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} onNavigateToAdminOps={() => handleNavigate('admin-ops')} />
+            <DeveloperDrawer publicKey={publicKey} contractCapabilities={contractCapabilities} />
             <Shortcuts
                 onNewPortfolio={() => handleNavigate('setup')}
                 onOpenSettings={() => {
@@ -517,10 +516,6 @@ function App() {
                         onNavigate={handleNavigate}
                         onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
                     />
-                </ErrorBoundary>
-            ) : currentView === 'admin-ops' ? (
-                <ErrorBoundary fallbackTitle="Admin Operations">
-                    <AdminOps />
                 </ErrorBoundary>
             ) : null}
         </div>

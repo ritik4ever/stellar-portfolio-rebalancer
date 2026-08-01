@@ -106,14 +106,6 @@ export class WalletManager {
         return this.currentAdapter.signTransaction(xdr, network)
     }
 
-    async signMessage(message: string, network?: string): Promise<string> {
-        if (!this.currentAdapter) {
-            throw new WalletError('No wallet connected', 'NOT_CONNECTED')
-        }
-
-        return this.currentAdapter.signMessage(message, network)
-    }
-
     getAvailableWallets() {
         return getAvailableAdapters()
     }

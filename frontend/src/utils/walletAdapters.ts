@@ -21,7 +21,6 @@ export interface WalletAdapter {
     isConnected(): Promise<boolean>
     disconnect(): Promise<void>
     signTransaction(xdr: string, network?: string): Promise<string>
-    signMessage(message: string, network?: string): Promise<string>
 }
 
 export class WalletError extends Error {
@@ -113,22 +112,6 @@ export class FreighterAdapter implements WalletAdapter {
             throw normalizeError(error, this.type)
         }
     }
-
-    async signMessage(message: string, _network?: string): Promise<string> {
-        if (!this.isAvailable()) {
-            throw new WalletError('Freighter wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
-        }
-
-        try {
-            const result = await window.freighter!.signMessage(message, { network: 'TESTNET' })
-            if (!result?.signedMessage) {
-                throw new Error('No signed message returned')
-            }
-            return result.signedMessage
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
 }
 
 export class RabetAdapter implements WalletAdapter {
@@ -182,22 +165,6 @@ export class RabetAdapter implements WalletAdapter {
             throw normalizeError(error, this.type)
         }
     }
-
-    async signMessage(message: string, _network?: string): Promise<string> {
-        if (!this.isAvailable()) {
-            throw new WalletError('Rabet wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
-        }
-
-        try {
-            const result = await window.rabet!.sign(message)
-            if (!result?.signedXDR) {
-                throw new Error('No signed message returned')
-            }
-            return result.signedXDR
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
 }
 
 export class XBullAdapter implements WalletAdapter {
@@ -238,26 +205,10 @@ export class XBullAdapter implements WalletAdapter {
 
         try {
             const result = await window.xBull!.signTransaction(xdr)
-            if (!result?.signedTxXdr) {
+            if (!result?.signedXDR) {
                 throw new Error('No signed transaction returned')
             }
-            return result.signedTxXdr
-        } catch (error) {
-            throw normalizeError(error, this.type)
-        }
-    }
-
-    async signMessage(message: string, _network?: string): Promise<string> {
-        if (!this.isAvailable()) {
-            throw new WalletError('xBull wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
-        }
-
-        try {
-            const result = await window.xBull!.signMessage(message)
-            if (!result?.signature) {
-                throw new Error('No signed message returned')
-            }
-            return result.signature
+            return result.signedXDR
         } catch (error) {
             throw normalizeError(error, this.type)
         }
@@ -293,17 +244,6 @@ export class MockAdapter implements WalletAdapter {
         // Return a dummy signed XDR payload. For true integration tests,
         // we might actually sign with a testnet secret key here.
         return xdr; 
-    }
-
-    async signMessage(message: string): Promise<string> {
-        // Return a dummy base64-encoded signature for testing.
-        const encoder = new TextEncoder()
-        const data = encoder.encode(message)
-        let binary = ''
-        for (let i = 0; i < data.length; i++) {
-            binary += String.fromCharCode(data[i])
-        }
-        return btoa(binary)
     }
 }
 
