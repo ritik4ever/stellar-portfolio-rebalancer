@@ -324,13 +324,135 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
     })
 
-    describe('DELETE /api/portfolio/:id - Delete portfolio', () => {
-        it('DELETE endpoint is not currently implemented', async () => {
+    describe('DELETE /api/portfolio/:id - Archive portfolio (soft delete)', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
             const res = await request(app)
-                .delete('/api/portfolio/some-id')
-                .expect((res) => {
-                    expect([404, 405, 401, 403]).toContain(res.status)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
                 })
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+        })
+
+        it('archives portfolio and returns success', async () => {
+            const res = await request(app)
+                .delete(`/api/portfolio/${portfolioId}`)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.status).toBe('archived')
+            expect(res.body.data.archivedAt).toBeDefined()
+        })
+
+        it('returns 400 if portfolio already archived', async () => {
+            await request(app).delete(`/api/portfolio/${portfolioId}`).expect(200)
+            const res = await request(app)
+                .delete(`/api/portfolio/${portfolioId}`)
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('ALREADY_ARCHIVED')
+        })
+
+        it('archived portfolio excluded from default list', async () => {
+            await request(app).delete(`/api/portfolio/${portfolioId}`).expect(200)
+
+            const listRes = await request(app)
+                .get(`/api/user/${OWNER_ADDRESS}/portfolios`)
+                .expect(200)
+
+            const ids = listRes.body.data.portfolios.map((p: any) => p.id)
+            expect(ids).not.toContain(portfolioId)
+        })
+
+        it('archived portfolio included when include_archived=true', async () => {
+            await request(app).delete(`/api/portfolio/${portfolioId}`).expect(200)
+
+            const listRes = await request(app)
+                .get(`/api/user/${OWNER_ADDRESS}/portfolios?include_archived=true`)
+                .expect(200)
+
+            const ids = listRes.body.data.portfolios.map((p: any) => p.id)
+            expect(ids).toContain(portfolioId)
+        })
+
+        it('portfolio record still accessible by direct ID after archive', async () => {
+            await request(app).delete(`/api/portfolio/${portfolioId}`).expect(200)
+
+            const res = await request(app)
+                .get(`/api/portfolio/${portfolioId}`)
+                .expect((r: any) => expect([200, 201]).toContain(r.status))
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.portfolio).toBeDefined()
+        })
+    })
+
+    describe('POST /api/portfolio/:id/restore - Restore archived portfolio', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 60, USDC: 40 },
+                    threshold: 5
+                })
+            if (res.body.success) {
+                portfolioId = res.body.data.portfolioId
+            }
+            await request(app).delete(`/api/portfolio/${portfolioId}`).expect(200)
+        })
+
+        it('restores portfolio and returns success', async () => {
+            const res = await request(app)
+                .post(`/api/portfolio/${portfolioId}/restore`)
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.status).toBe('restored')
+        })
+
+        it('portfolio appears in default list after restore', async () => {
+            await request(app)
+                .post(`/api/portfolio/${portfolioId}/restore`)
+                .expect(200)
+
+            const listRes = await request(app)
+                .get(`/api/user/${OWNER_ADDRESS}/portfolios`)
+                .expect(200)
+
+            const ids = listRes.body.data.portfolios.map((p: any) => p.id)
+            expect(ids).toContain(portfolioId)
+        })
+
+        it('returns 400 if portfolio is not archived', async () => {
+            await request(app)
+                .post(`/api/portfolio/${portfolioId}/restore`)
+                .expect(200)
+
+            const res = await request(app)
+                .post(`/api/portfolio/${portfolioId}/restore`)
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('NOT_ARCHIVED')
+        })
+
+        it('returns 404 for non-existent portfolio', async () => {
+            const res = await request(app)
+                .post('/api/portfolio/non-existent-id/restore')
+                .expect(404)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('NOT_FOUND')
         })
     })
 

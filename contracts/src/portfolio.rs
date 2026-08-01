@@ -44,7 +44,7 @@ pub fn calculate_portfolio_value(
             .get(asset.clone())
             .unwrap_or(DEFAULT_ASSET_DECIMALS);
         if let Some(price_data) =
-            reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
+            crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
             total_value += balance_to_value(balance, price_data.price);
         }
@@ -120,7 +120,7 @@ pub fn build_rebalance_preview(
     let mut current_prices = Map::new(env);
     for (asset, _) in portfolio.target_allocations.iter() {
         if let Some(price_data) =
-            reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
             if price_data.is_stale(current_time, 3600) {
                 skipped_assets.push_back(asset.clone());

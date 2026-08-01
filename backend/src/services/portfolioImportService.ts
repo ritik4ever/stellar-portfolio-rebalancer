@@ -46,6 +46,13 @@ export function parseJsonPayload(payload: unknown): { rows: AllocationInputRow[]
   if (payload && typeof payload === 'object') {
     const obj: any = payload
     if (Array.isArray(obj.allocations)) return { rows: obj.allocations as AllocationInputRow[] }
+    if (obj.allocations && typeof obj.allocations === 'object' && !Array.isArray(obj.allocations)) {
+      const rows: AllocationInputRow[] = Object.entries(obj.allocations).map(([symbol, pct]) => ({
+        asset: symbol,
+        allocation_pct: Number(pct),
+      }))
+      return { rows }
+    }
   }
 
   return { rows: [], formatError: 'JSON payload must be an array of {asset, allocation_pct} or an object with allocations: [...]' }
