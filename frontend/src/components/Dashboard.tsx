@@ -78,6 +78,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
     const { data: costSummary, isLoading: costSummaryLoading } = usePortfolioCostSummary(latestPortfolioId)
 
+    const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
     const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
         latestPortfolioId,
         showRebalanceConfirm,
