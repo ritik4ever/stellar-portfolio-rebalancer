@@ -21,7 +21,6 @@ export interface WalletAdapter {
     isConnected(): Promise<boolean>
     disconnect(): Promise<void>
     signTransaction(xdr: string, network?: string): Promise<string>
-    switchNetwork?(network: string): Promise<void>
 }
 
 export class WalletError extends Error {
