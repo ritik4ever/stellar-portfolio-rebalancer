@@ -15,7 +15,7 @@ Fixes # (issue)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 - [ ] DevOps / CI / Documentation update
 
-# 📖 API Changes & Breaking Changes Checklist
+# ≡ƒôû API Changes & Breaking Changes Checklist
 
 If your changes affect any HTTP route, request/response schema, database schema, or CLI/contract signature:
 
