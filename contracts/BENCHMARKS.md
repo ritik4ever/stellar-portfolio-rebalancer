@@ -25,6 +25,18 @@ The test suite tracks gas baselines for:
 
 If any benchmark exceeds its threshold, tests fail and CI will flag the regression.
 
+## WASM Artifact Size Benchmark
+
+Track byte-size impact for `portfolio_rebalancer.wasm` and the `wasm-opt -O3` output (`portfolio_rebalancer.optimized.wasm`).
+
+| Artifact | Build profile / toolchain | Size (bytes) | Size (KB) | Target |
+| --- | --- | ---: | ---: | --- |
+| Release WASM | `cargo build --target wasm32-unknown-unknown --release` (`opt-level="z"`, `lto=true`) | _fill per run_ | _fill per run_ | n/a |
+| Optimized WASM | `wasm-opt -O3` post-build output | _fill per run_ | _fill per run_ | `< 100 KB` |
+| Reduction | `(release - optimized) / release * 100` | n/a | n/a | _record % in PR_ |
+
+For pull requests that change contract code or build settings, include the measured **Reduction %** in the PR description to keep optimization deltas auditable.
+
 ## Running Benchmarks
 
 From `contracts/`:

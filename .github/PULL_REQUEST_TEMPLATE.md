@@ -34,3 +34,9 @@ If your changes affect any HTTP route, request/response schema, database schema,
 - [ ] **This PR links to an issue or provides a rationale for no issue**
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
+
+## Contract WASM Size (when `contracts/` changes)
+
+- Release WASM size (bytes):
+- Optimized WASM size (bytes):
+- Reduction (%):
