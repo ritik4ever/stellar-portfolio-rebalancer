@@ -11,7 +11,7 @@
  * 2. Add to walletAdapters array
  * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
  */
-export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
+
 
 export interface WalletAdapter {
     readonly name: string
@@ -215,6 +215,42 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
+
+    }
+
+    async connect(): Promise<string> {
+        if (!this.isAvailable()) {
+
+            if (!result?.publicKey) {
+                throw new Error('No public key returned')
+            }
+            return result.publicKey
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+
+    async isConnected(): Promise<boolean> {
+        if (!this.isAvailable()) return false
+        try {
+
+        } catch {
+            return false
+        }
+    }
+
+    async disconnect(): Promise<void> {
+    }
+
+    async signTransaction(xdr: string, network?: string): Promise<string> {
+        if (!this.isAvailable()) {
+
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+}
+
 export class MockAdapter implements WalletAdapter {
     readonly name = 'Mock Wallet (Test)'
     readonly type: WalletType = 'mock'
@@ -250,7 +286,8 @@ export class MockAdapter implements WalletAdapter {
 export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
-    new XBullAdapter()
+    new XBullAdapter(),
+
 ]
 
 // Add the mock adapter if we're in E2E mode

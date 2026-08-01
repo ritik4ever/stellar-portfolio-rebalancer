@@ -51,3 +51,21 @@ variable "ecs_task_memory" {
     production = 1024
   }
 }
+
+variable "ecs_min_capacity" {
+  description = "Minimum number of ECS tasks"
+  type        = map(number)
+  default = {
+    staging    = 1
+    production = 2
+  }
+}
+
+variable "ecs_max_capacity" {
+  description = "Maximum number of ECS tasks"
+  type        = map(number)
+  default = {
+    staging    = 3
+    production = 10
+  }
+}

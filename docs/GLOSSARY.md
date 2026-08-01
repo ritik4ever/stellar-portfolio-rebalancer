@@ -86,6 +86,34 @@ The frontend integrates with Stellar wallets such as Freighter and Rabet.
 - Wallets are used to authorize portfolio actions and sign transactions.
 - The UI uses the wallet session to call backend endpoints and contract interactions.
 
+### Custom strategy
+A user-defined rebalancing rule that enforces a **minimum number of days between rebalances** and only triggers when the drift-based threshold check would also fire. Configure with `minDaysBetweenRebalance` (0-365, default 1) in `strategyConfig` when creating a portfolio with `strategy: custom`.
+
+- Use case: reduce trading frequency while still reacting to drift.
+- See [Rebalancing Strategies](REBALANCING_STRATEGIES.md) for configuration details.
+- Backend implementation: `backend/src/services/rebalanceStrategy.ts`.
+
+### DCA (Dollar-Cost Averaging)
+**Dollar-Cost Averaging** is an investment technique where a fixed amount is invested at regular time intervals regardless of market price, reducing the impact of short-term volatility. In this project, the **periodic strategy** implements DCA-style rebalancing by triggering on a fixed schedule.
+
+- The contract supports a dedicated `dca_executed` event emitted by `contracts/src/events.rs`.
+- Related strategy: see [Periodic strategy](#periodic-strategy) and [Rebalancing Strategies](REBALANCING_STRATEGIES.md).
+- Contract module: `contracts/src/strategies/dca.rs`.
+
+### Periodic strategy
+A time-based rebalancing strategy that triggers on a **fixed schedule** (e.g. every 7 or 30 days), regardless of allocation drift. Configure with `intervalDays` (1-365, default 7) in `strategyConfig` when creating a portfolio with `strategy: periodic`.
+
+- Implements a DCA (Dollar-Cost Averaging) approach to rebalancing.
+- See [Rebalancing Strategies](REBALANCING_STRATEGIES.md) for configuration details.
+- Backend implementation: `backend/src/services/rebalanceStrategy.ts`.
+
+### Volatility strategy
+A rebalancing strategy that triggers when **market volatility exceeds a configured threshold** (e.g. 24h price change >= 10%) or when allocation drift exceeds the portfolio's rebalance threshold. Configure with `volatilityThresholdPct` (default 10) in `strategyConfig` when creating a portfolio with `strategy: volatility`.
+
+- Combines volatility-based and drift-based triggers for more responsive rebalancing.
+- See [Rebalancing Strategies](REBALANCING_STRATEGIES.md) for configuration details.
+- Backend implementation: `backend/src/services/rebalanceStrategy.ts`.
+
 ## Example workflow
 
 Read this glossary, then follow these steps for a local contributor workflow:
