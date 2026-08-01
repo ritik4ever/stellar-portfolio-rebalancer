@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import OnboardingChecklist from './OnboardingChecklist'
@@ -26,12 +26,22 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 }
 
 beforeEach(() => {
-    try {
-        window.localStorage.clear()
-    } catch {
-        // localStorage not available in test environment
+    const store: Record<string, string> = {}
+    const mock = {
+        getItem: (key: string) => store[key] ?? null,
+        setItem: (key: string, value: string) => { store[key] = value },
+        clear: () => { Object.keys(store).forEach(k => delete store[k]) },
+        removeItem: (key: string) => { delete store[key] },
+        get length() { return Object.keys(store).length },
+        key: (i: number) => Object.keys(store)[i] ?? null,
     }
+    vi.stubGlobal('localStorage', mock)
     queryClient.clear()
+})
+
+afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
 })
 
 describe('OnboardingChecklist', () => {
@@ -134,5 +144,56 @@ describe('OnboardingChecklist', () => {
 
         await screen.findByRole('dialog', { name: /onboarding checklist/i }, { timeout: 2000 })
         expect(screen.getByText('0 of 5 steps completed')).toBeInTheDocument()
+    })
+
+    it('persists completed items across a simulated remount', async () => {
+        localStorage.setItem('onboarding-checklist-completed', JSON.stringify(['connect-wallet', 'create-portfolio']))
+
+        const { unmount } = render(
+            React.createElement(OnboardingChecklist, {
+                publicKey: null,
+                onNavigate: vi.fn(),
+            }),
+            { wrapper: Wrapper }
+        )
+
+        await screen.findByRole('dialog', { name: /onboarding checklist/i }, { timeout: 2000 })
+        expect(screen.getByText('2 of 5 steps completed')).toBeInTheDocument()
+        expect(screen.getByText('Connect Wallet').closest('button')!.className).toContain('bg-green-50')
+        expect(screen.getByText('Create Portfolio').closest('button')!.className).toContain('bg-green-50')
+
+        unmount()
+
+        render(
+            React.createElement(OnboardingChecklist, {
+                publicKey: null,
+                onNavigate: vi.fn(),
+            }),
+            { wrapper: Wrapper }
+        )
+
+        await screen.findByRole('dialog', { name: /onboarding checklist/i }, { timeout: 2000 })
+        expect(screen.getByText('2 of 5 steps completed')).toBeInTheDocument()
+    })
+
+    it('reset progress clears completed items', async () => {
+        const user = userEvent.setup()
+        localStorage.setItem('onboarding-checklist-completed', JSON.stringify(['connect-wallet', 'create-portfolio', 'set-allocations']))
+
+        render(
+            React.createElement(OnboardingChecklist, {
+                publicKey: null,
+                onNavigate: vi.fn(),
+            }),
+            { wrapper: Wrapper }
+        )
+
+        await screen.findByRole('dialog', { name: /onboarding checklist/i }, { timeout: 2000 })
+        expect(screen.getByText('3 of 5 steps completed')).toBeInTheDocument()
+
+        await user.click(screen.getByTitle('Reset onboarding progress'))
+
+        expect(screen.getByText('0 of 5 steps completed')).toBeInTheDocument()
+        expect(JSON.parse(localStorage.getItem('onboarding-checklist-completed') || '[]')).toEqual([])
     })
 })

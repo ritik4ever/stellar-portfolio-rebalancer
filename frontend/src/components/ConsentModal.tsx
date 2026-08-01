@@ -18,6 +18,8 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
     const [terms, setTerms] = useState(false)
     const [privacy, setPrivacy] = useState(false)
     const [cookies, setCookies] = useState(false)
+    const [analytics, setAnalytics] = useState(false)
+    const [marketing, setMarketing] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const recordConsent = useRecordConsentMutation(userId)
     const submitting = recordConsent.isPending
@@ -29,7 +31,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
         if (!allAccepted || submitting) return
         setError(null)
         try {
-            await recordConsent.mutateAsync()
+            await recordConsent.mutateAsync({ analytics, marketing })
             onAccept()
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to save consent. Please try again.')
@@ -102,8 +104,7 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                         <input
                             type="checkbox"
                             checked={cookies}
-                            onChange={(e) => setCookies(e.target.checked)}
-                            disabled={submitting}
+                            onChange={(e) => setCookies(e.target.checked)}                            disabled={submitting}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
@@ -119,6 +120,40 @@ const ConsentModal: React.FC<ConsentModalProps> = ({ userId, onAccept, onOpenLeg
                     </label>
                 </div>
 
+                <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-4">
+                    <p className="text-gray-500 dark:text-gray-500 text-xs">
+                        Optional: choose how we may use your data. These are not required to use the app.
+                    </p>
+
+                    <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={analytics}
+                            onChange={(e) => setAnalytics(e.target.checked)}
+                            disabled={submitting}
+                            data-testid="consent-analytics-toggle"
+                            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-700 dark:text-gray-300 text-sm">
+                            Allow analytics cookies (helps us understand usage patterns).
+                        </span>
+                    </label>
+
+                    <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={marketing}
+                            onChange={(e) => setMarketing(e.target.checked)}
+                            disabled={submitting}
+                            data-testid="consent-marketing-toggle"
+                            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-700 dark:text-gray-300 text-sm">
+                            Allow marketing communications (product updates, offers).
+                        </span>
+                    </label>
+                </div>
+                
                 {error && (
                     <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm flex items-center gap-2">
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />

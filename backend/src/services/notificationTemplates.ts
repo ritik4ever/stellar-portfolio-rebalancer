@@ -27,6 +27,16 @@ export interface RiskChangeData {
   portfolioId: string
   oldLevel: string
   newLevel: string
+  /** Optional: breach details when auto-pause was triggered by a CVaR/VaR threshold. */
+  autoPause?: {
+    reason: 'VAR_BREACH' | 'CVAR_BREACH'
+    /** Measured value as a percentage string e.g. "14.23%" */
+    measuredValue: string
+    /** Threshold as a percentage string e.g. "12.00%" */
+    threshold: string
+    /** ISO string of when the pause expires */
+    pausedUntil: string
+  }
 }
 
 export type NotificationTemplateData =
@@ -65,9 +75,21 @@ const templates: {
     message: (d) => `${d.asset} has ${d.direction} by ${d.priceChange}%.`,
   },
   riskChange: {
-    title: () => 'Portfolio Risk Level Changed',
-    message: (d) =>
-      `Your portfolio risk level changed from ${d.oldLevel} to ${d.newLevel}.`,
+    title: (d) => d.autoPause ? 'Rebalancing Auto-Paused: Risk Threshold Breached' : 'Portfolio Risk Level Changed',
+    message: (d) => {
+      if (d.autoPause) {
+        const metricLabel = d.autoPause.reason === 'VAR_BREACH' ? 'VaR(95)' : 'CVaR(95)'
+        const pauseDate = new Date(d.autoPause.pausedUntil).toLocaleString('en-US', { timeZoneName: 'short' })
+        return (
+          `Scheduled rebalancing for portfolio ${d.portfolioId} has been automatically paused because the ` +
+          `${metricLabel} limit was exceeded (measured: ${d.autoPause.measuredValue}, threshold: ${d.autoPause.threshold}). ` +
+          `Rebalancing is suspended until ${pauseDate}. ` +
+          `Risk level: ${d.oldLevel} → ${d.newLevel}. ` +
+          `Review your portfolio and market conditions before resuming.`
+        )
+      }
+      return `Your portfolio risk level changed from ${d.oldLevel} to ${d.newLevel}.`
+    },
   },
 }
 

@@ -109,4 +109,36 @@ describe('ThemeContext', () => {
         fireEvent.click(screen.getByRole('button', { name: 'cycle' }))
         expect(screen.getByTestId('preference')).toHaveTextContent('dark')
     })
+
+    it('cleans up media query listener on unmount', () => {
+        const before = matchMediaListeners.length
+        const { unmount } = render(
+            <ThemeProvider>
+                <ThemeProbe />
+            </ThemeProvider>,
+        )
+        // After mount there should be at least one listener for the system theme
+        expect(matchMediaListeners.length).toBeGreaterThan(before)
+
+        unmount()
+        // After unmount all listeners should have been removed
+        expect(matchMediaListeners.length).toBe(before)
+    })
+
+    it('stops responding to system theme changes after unmount', () => {
+        const { unmount } = render(
+            <ThemeProvider>
+                <ThemeProbe />
+            </ThemeProvider>,
+        )
+        unmount()
+
+        const prevListeners = matchMediaListeners.length
+        act(() => {
+            prefersDark = true
+            matchMediaListeners.forEach((handler) => handler())
+        })
+
+        expect(matchMediaListeners.length).toBe(prevListeners)
+    })
 })

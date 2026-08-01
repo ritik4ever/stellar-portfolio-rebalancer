@@ -1,0 +1,71 @@
+name: "Bug Report — Wallet Connection"
+description: Report a wallet connection or signature issue
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a wallet issue!
+  - type: input
+    id: wallet
+    attributes:
+      label: Wallet Type
+      description: Which wallet are you using?
+      placeholder: "Freighter / Lobstr / Other"
+    validations:
+      required: true
+  - type: input
+    id: wallet_version
+    attributes:
+      label: Wallet Version
+      description: Extension version (e.g., 5.2.0)
+      placeholder: "5.2.0"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Browser name and version
+      placeholder: "Chrome 124"
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network
+      options:
+        - Testnet
+        - Mainnet
+        - Custom
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps to trigger the issue
+      placeholder: "1. Go to... 2. Click... 3. See error..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console Logs
+      description: Any relevant browser console output
+      render: text
