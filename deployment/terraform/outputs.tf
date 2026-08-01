@@ -14,3 +14,8 @@ output "db_secret_arn" {
   value       = module.rds.db_secret_arn
   description = "ARN of the Secrets Manager secret containing RDS credentials"
 }
+
+output "redis_secret_arn" {
+  value       = module.elasticache.redis_secret_arn
+  description = "ARN of the Secrets Manager secret containing Redis AUTH token"
+}

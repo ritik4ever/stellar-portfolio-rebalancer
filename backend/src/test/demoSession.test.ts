@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock ioredis
-const { mockGet, mockSetex, mockDel, mockExpire, mockConnect } = vi.hoisted(() => ({
+const { mockGet, mockSetex, mockDel, mockExpire, mockConnect, mockOn } = vi.hoisted(() => ({
     mockGet: vi.fn(),
     mockSetex: vi.fn(),
     mockDel: vi.fn(),
     mockExpire: vi.fn(),
     mockConnect: vi.fn(),
+    mockOn: vi.fn(),
 }))
 
 vi.mock('ioredis', () => ({
@@ -16,11 +17,16 @@ vi.mock('ioredis', () => ({
         this.del = mockDel
         this.expire = mockExpire
         this.connect = mockConnect
+        this.on = mockOn
         return this
     }),
 }))
 
-vi.mock('../queue/connection.js', () => ({ REDIS_URL: 'redis://localhost:6379' }))
+vi.mock('../queue/connection.js', () => ({
+    REDIS_URL: 'redis://localhost:6379',
+    getRedisUrl: () => 'redis://localhost:6379',
+    refreshRedisCredentials: vi.fn(),
+}))
 
 // Re-import after mocks
 const { getDemoSession, saveDemoSession, deleteDemoSession, touchDemoSession } = await import('../demo/demoSessionStore.js')

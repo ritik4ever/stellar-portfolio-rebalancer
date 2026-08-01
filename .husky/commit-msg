@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Enforce commit message conventions
+# Requires @commitlint/cli and @commitlint/config-conventional
+# npx commitlint --edit "$1"

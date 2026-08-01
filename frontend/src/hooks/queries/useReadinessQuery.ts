@@ -55,16 +55,18 @@ async function fetchReadinessReport(): Promise<ReadinessReport | null> {
 }
 
 const POLL_MS = 45_000
+const HIDDEN_POLL_MS = POLL_MS * 4
 
 /**
  * React Query version of useReadinessReport.
  * Replaces manual setInterval polling with TanStack Query refetchInterval.
+ * Polling frequency adapts based on tab visibility (backoff when hidden).
  */
 export function useReadinessQuery() {
     const { data: report, isLoading: loading, isError: loadError, refetch: refresh } = useQuery({
         queryKey: readinessKeys.all,
         queryFn: fetchReadinessReport,
-        refetchInterval: POLL_MS,
+        refetchInterval: () => document.visibilityState === 'visible' ? POLL_MS : HIDDEN_POLL_MS,
         refetchOnWindowFocus: true,
         staleTime: POLL_MS - 5000,
     })
