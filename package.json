@@ -40,6 +40,12 @@
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
 
+    "sbom": "bash scripts/sbom/generate-all.sh",
+    "sbom:contracts": "bash scripts/sbom/generate-contracts-sbom.sh",
+    "sbom:backend": "bash scripts/sbom/generate-backend-sbom.sh",
+    "sbom:frontend": "bash scripts/sbom/generate-frontend-sbom.sh",
+    "sbom:install": "bash scripts/sbom/install-tools.sh",
+
     "test:chaos": "node scripts/chaos/kill-backend-mid-rebalance.mjs",
 
     "clean": "npm run clean:all",

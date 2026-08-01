@@ -62,7 +62,7 @@ jobs:
             contract-deploy-${{ runner.os }}-
 
       - name: Install Soroban CLI
-        run: cargo install --locked soroban-cli
+        run: cargo install --locked soroban-cli --version 25.2.0
 
       - name: Validate deployment inputs
         run: |

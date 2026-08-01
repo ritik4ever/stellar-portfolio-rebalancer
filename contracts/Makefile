@@ -144,6 +144,13 @@ install-tools:
 		rustup target add wasm32-unknown-unknown; \
 	fi
 
+# SBOM generation
+sbom:
+	@bash ../scripts/sbom/generate-contracts-sbom.sh
+
+install-sbom-tools:
+	@bash ../scripts/sbom/install-tools.sh --rust-only
+
 # Local Soroban testnet bootstrap for fresh clones
 setup-testnet:
 	@echo "Setting up local Soroban testnet prerequisites..."

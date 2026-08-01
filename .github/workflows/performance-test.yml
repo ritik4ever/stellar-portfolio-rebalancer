@@ -27,11 +27,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    services:
-      sqlite:
-        image: noop
-        # SQLite runs embedded, no service needed
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

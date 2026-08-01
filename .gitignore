@@ -238,3 +238,14 @@ backend/test_results.txt
 frontend/tsc-output.txt
 
 *storybook.log
+
+# Generated SBOM artifacts (per-build). The directory's tracked placeholder
+# `security/sbom/.gitkeep` keeps the directory present in fresh clones; the
+# generated SBOM JSON contents themselves are reproducible per build and are
+# emitted as GitHub workflow artifacts named `sbom-{frontend,backend,contracts}`.
+# The two-line re-include pattern below is the standard way to ignore a
+# directory's *contents* while still keeping one tracker file.
+# (Without it, `/security/sbom/` (trailing slash) would also ignore the
+# .gitkeep placeholder, breaking the "dir is intentionally tracked" signal.)
+/security/sbom/*
+!/security/sbom/.gitkeep
