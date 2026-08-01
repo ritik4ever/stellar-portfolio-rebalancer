@@ -16,6 +16,7 @@ export interface PortfolioRow {
     version: number
     strategy?: string
     strategy_config?: Record<string, unknown>
+    archived_at?: Date
 }
 
 function rowToPortfolio(r: PortfolioRow) {
@@ -33,7 +34,8 @@ function rowToPortfolio(r: PortfolioRow) {
         lastRebalance: r.last_rebalance.toISOString(),
         version: r.version ?? 1,
         strategy: (r.strategy as import('../types/index.js').RebalanceStrategyType) || 'threshold',
-        strategyConfig: r.strategy_config || undefined
+        strategyConfig: r.strategy_config || undefined,
+        archivedAt: r.archived_at ? r.archived_at.toISOString() : undefined
     }
 }
 
@@ -66,17 +68,36 @@ export async function dbGetPortfolio(id: string) {
     return row ? rowToPortfolio(row) : undefined
 }
 
-export async function dbGetUserPortfolios(userAddress: string) {
-    const result = await query<PortfolioRow>(
-        'SELECT * FROM portfolios WHERE user_address = $1 ORDER BY created_at ASC',
-        [userAddress]
-    )
+export async function dbGetUserPortfolios(userAddress: string, includeArchived = false) {
+    const sql = includeArchived
+        ? 'SELECT * FROM portfolios WHERE user_address = $1 ORDER BY created_at ASC'
+        : 'SELECT * FROM portfolios WHERE user_address = $1 AND archived_at IS NULL ORDER BY created_at ASC'
+    const result = await query<PortfolioRow>(sql, [userAddress])
     return result.rows.map(rowToPortfolio)
 }
 
-export async function dbGetAllPortfolios() {
-    const result = await query<PortfolioRow>('SELECT * FROM portfolios ORDER BY created_at ASC')
+export async function dbGetAllPortfolios(includeArchived = false) {
+    const sql = includeArchived
+        ? 'SELECT * FROM portfolios ORDER BY created_at ASC'
+        : 'SELECT * FROM portfolios WHERE archived_at IS NULL ORDER BY created_at ASC'
+    const result = await query<PortfolioRow>(sql)
     return result.rows.map(rowToPortfolio)
+}
+
+export async function dbArchivePortfolio(id: string): Promise<boolean> {
+    const result = await query(
+        'UPDATE portfolios SET archived_at = NOW() WHERE id = $1 AND archived_at IS NULL',
+        [id]
+    )
+    return (result.rowCount ?? 0) > 0
+}
+
+export async function dbRestorePortfolio(id: string): Promise<boolean> {
+    const result = await query(
+        'UPDATE portfolios SET archived_at = NULL WHERE id = $1',
+        [id]
+    )
+    return (result.rowCount ?? 0) > 0
 }
 
 /**
@@ -185,10 +206,11 @@ export async function dbDeletePortfolio(id: string) {
     return (result.rowCount ?? 0) > 0
 }
 
-export async function dbSearchPortfolios(searchQuery: string, limit: number, offset: number) {
+export async function dbSearchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false) {
+    const archivedFilter = includeArchived ? '' : ' AND archived_at IS NULL'
     if (!searchQuery) {
         const result = await query<PortfolioRow>(
-            'SELECT * FROM portfolios ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+            `SELECT * FROM portfolios WHERE 1=1${archivedFilter} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
             [limit, offset]
         )
         return result.rows.map(rowToPortfolio)
@@ -196,7 +218,7 @@ export async function dbSearchPortfolios(searchQuery: string, limit: number, off
 
     const result = await query<PortfolioRow>(
         `SELECT * FROM portfolios 
-         WHERE search_vector @@ plainto_tsquery('english', $1)
+         WHERE search_vector @@ plainto_tsquery('english', $1)${archivedFilter}
          ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC, created_at DESC
          LIMIT $2 OFFSET $3`,
         [searchQuery, limit, offset]

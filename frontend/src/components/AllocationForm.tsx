@@ -1,5 +1,10 @@
 import { useCallback, useMemo } from 'react'
 import { AlertCircle, Plus, Trash2 } from 'lucide-react'
+import {
+    type ContractCapabilityReport,
+    canUpdateAllocations,
+    blockedWriteFallback,
+} from '../lib/contractCapabilities'
 
 interface Allocation {
     asset: string
@@ -10,6 +15,7 @@ interface AllocationFormProps {
     allocations: Allocation[]
     onChange: (allocations: Allocation[]) => void
     disabled?: boolean
+    contractCapabilityReport?: ContractCapabilityReport | null
 }
 
 const AVAILABLE_ASSETS = ['XLM', 'USDC', 'BTC', 'ETH', 'SOL', 'ADA', 'DOT', 'ATOM']
@@ -20,7 +26,7 @@ function getAllocationError(percentage: number): string | null {
     return null
 }
 
-export default function AllocationForm({ allocations, onChange, disabled }: AllocationFormProps) {
+export default function AllocationForm({ allocations, onChange, disabled, contractCapabilityReport }: AllocationFormProps) {
     const totalPercentage = useMemo(
         () => allocations.reduce((sum, a) => sum + a.percentage, 0),
         [allocations],
@@ -60,10 +66,19 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
         onChange(updated)
     }, [allocations, onChange])
 
-    const canSubmit = isValidTotal && !hasAnyFieldError && !disabled
+    const capabilitiesLoaded = contractCapabilityReport !== undefined
+    const allocationsSupported = capabilitiesLoaded
+        ? canUpdateAllocations(contractCapabilityReport)
+        : true
+    const fallbackMessage = capabilitiesLoaded
+        ? blockedWriteFallback(contractCapabilityReport, 'update_allocations')
+        : null
+
+    const isFormDisabled = disabled || !allocationsSupported
+    const canSubmit = isValidTotal && !hasAnyFieldError && !isFormDisabled
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-4" title={!allocationsSupported ? (fallbackMessage || 'Action not supported') : undefined}>
             <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                     Asset Allocations
@@ -71,7 +86,7 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                 <button
                     type="button"
                     onClick={addAllocation}
-                    disabled={unusedAssets.length === 0 || disabled}
+                    disabled={unusedAssets.length === 0 || isFormDisabled}
                     className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-600"
                 >
                     <Plus className="h-4 w-4" />
@@ -88,7 +103,7 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                 <select
                                     value={allocation.asset}
                                     onChange={(e) => updateAllocation(index, 'asset', e.target.value)}
-                                    disabled={disabled}
+                                    disabled={isFormDisabled}
                                     className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                                 >
                                     {AVAILABLE_ASSETS.map((asset) => (
@@ -106,7 +121,7 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                     step="0.01"
                                     value={allocation.percentage}
                                     onChange={(e) => updateAllocation(index, 'percentage', parseFloat(e.target.value))}
-                                    disabled={disabled}
+                                    disabled={isFormDisabled}
                                     aria-label={`${allocation.asset} allocation percentage`}
                                     className="w-full accent-blue-600"
                                 />
@@ -119,7 +134,7 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                     step="0.01"
                                     value={allocation.percentage}
                                     onChange={(e) => updateAllocation(index, 'percentage', Number.isFinite(Number.parseFloat(e.target.value)) ? Number(Number.parseFloat(e.target.value).toFixed(2)) : 0)}
-                                    disabled={disabled}
+                                    disabled={isFormDisabled}
                                     aria-invalid={!!fieldError}
                                     aria-describedby={fieldError ? `alloc-error-${index}` : undefined}
                                     className={`w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:border-transparent ${
@@ -136,7 +151,7 @@ export default function AllocationForm({ allocations, onChange, disabled }: Allo
                                 <button
                                     type="button"
                                     onClick={() => removeAllocation(index)}
-                                    disabled={disabled}
+                                    disabled={isFormDisabled}
                                     aria-label={`Remove ${allocation.asset} allocation`}
                                     className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30"
                                 >

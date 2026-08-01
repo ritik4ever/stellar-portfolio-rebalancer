@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { ThemeProvider, bootstrapThemeBeforeHydration } from './context/ThemeContext'
 import { RealtimeConnectionProvider } from './context/RealtimeConnectionContext'
+import { ToastProvider } from './context/ToastContext'
 import { QueryProvider } from './providers/QueryProvider'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { initializeObservability } from './observability'
@@ -20,7 +21,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <QueryProvider>
                 <ThemeProvider>
                     <RealtimeConnectionProvider>
-                        <App />
+                        <ToastProvider>
+                            <App />
+                        </ToastProvider>
                     </RealtimeConnectionProvider>
                 </ThemeProvider>
             </QueryProvider>

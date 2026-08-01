@@ -16,14 +16,15 @@ type ConsentMutationContext = {
 
 export function useRecordConsentMutation(userId: string) {
     const queryClient = useQueryClient()
-
     return useMutation({
-        mutationFn: () =>
+        mutationFn: (variables?: { analytics?: boolean; marketing?: boolean }) =>
             api.post(ENDPOINTS.CONSENT_RECORD, {
                 userId,
                 terms: true,
                 privacy: true,
                 cookies: true,
+                analytics: variables?.analytics ?? false,
+                marketing: variables?.marketing ?? false,
             }),
         onMutate: async (): Promise<ConsentMutationContext> => {
             await queryClient.cancelQueries({ queryKey: consentKeys.status(userId) })

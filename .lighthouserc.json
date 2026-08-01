@@ -14,6 +14,10 @@
               {
                 "resourceType": "script",
                 "budget": 300
+              },
+              {
+                "resourceType": "total",
+                "budget": 650
               }
             ],
             "timings": [
@@ -22,8 +26,8 @@
                 "budget": 2500
               },
               {
-                "metric": "first-input-delay",
-                "budget": 100
+                "metric": "total-blocking-time",
+                "budget": 200
               },
               {
                 "metric": "cumulative-layout-shift",
@@ -42,10 +46,10 @@
             "maxNumericValue": 2500
           }
         ],
-        "max-potential-fid": [
+        "total-blocking-time": [
           "error",
           {
-            "maxNumericValue": 100
+            "maxNumericValue": 200
           }
         ],
         "cumulative-layout-shift": [
@@ -58,7 +62,8 @@
       }
     },
     "upload": {
-      "target": "temporary-public-storage"
+      "target": "filesystem",
+      "outputDir": "./lighthouse-results"
     }
   }
 }

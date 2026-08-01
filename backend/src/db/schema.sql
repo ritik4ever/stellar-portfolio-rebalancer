@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS notification_logs (
 CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_notification_logs_created_at ON notification_logs(created_at DESC);
 
+ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_portfolios_archived_at ON portfolios(archived_at) WHERE archived_at IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS portfolio_drafts (
     id VARCHAR(64) PRIMARY KEY,
     user_address VARCHAR(256) NOT NULL,
