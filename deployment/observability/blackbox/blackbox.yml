@@ -7,6 +7,9 @@ modules:
       method: GET
       preferred_ip_protocol: ip4
 
+  # Synthetic WebSocket probe. Sends a real RFC 6455 opening handshake and only
+  # reports success when the server completes the protocol switch, so a plain
+  # HTTP response from a partially-started backend still counts as a failure.
   websocket:
     prober: http
     timeout: 10s
@@ -19,4 +22,9 @@ modules:
         Sec-WebSocket-Version: "13"
         Sec-WebSocket-Key: "x3JJHMbDL1EzLkh9GBhXDw=="
       valid_status_codes: [101]
+      fail_if_header_not_matches:
+        - header: Upgrade
+          regexp: (?i)websocket
+        - header: Sec-WebSocket-Accept
+          regexp: HSmrc0sMlYUkAGmm5OPpG2HaGWk=
       preferred_ip_protocol: ip4

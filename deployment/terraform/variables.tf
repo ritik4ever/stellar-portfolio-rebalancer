@@ -125,5 +125,20 @@ variable "blue_green_deployment_config" {
     deployment_ready_option = {
       action_on_timeout = "CONTINUE_DEPLOYMENT"
     }
+variable "ecs_min_capacity" {
+  description = "Minimum number of ECS tasks"
+  type        = map(number)
+  default = {
+    staging    = 1
+    production = 2
+  }
+}
+
+variable "ecs_max_capacity" {
+  description = "Maximum number of ECS tasks"
+  type        = map(number)
+  default = {
+    staging    = 3
+    production = 10
   }
 }

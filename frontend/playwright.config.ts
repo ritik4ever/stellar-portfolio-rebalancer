@@ -46,6 +46,7 @@ export default defineConfig({
         /dashboard\.spec\.ts/,
         /portfolio-create\.spec\.ts/,
         /rebalance-history\.spec\.ts/,
+        /components\.spec\.ts/,
       ],
       use: {
         ...devices['Desktop Chrome'],

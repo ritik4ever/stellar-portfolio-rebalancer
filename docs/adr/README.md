@@ -17,3 +17,4 @@ An Architecture Decision Record (ADR) is a document that captures an important a
 
 - [ADR 0001: Record Architecture Decisions](0001-record-architecture-decisions.md)
 - [ADR 0002: Reflector Oracle Selection](0002-reflector-oracle-selection.md)
+- [ADR 0004: Asset Custody / Token Transfer Model](0004-asset-custody-model.md)

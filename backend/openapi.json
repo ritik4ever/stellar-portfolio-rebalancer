@@ -974,6 +974,112 @@
         }
       }
     },
+    "/api/portfolios/summary": {
+      "get": {
+        "tags": [
+          "Portfolio"
+        ],
+        "summary": "Multi-portfolio dashboard summary",
+        "description": "Get a compact summary of every portfolio belonging to one address in a single request, instead of one call per portfolio. Prices are read once from the oracle cache and shared across every portfolio in the response. Returns an empty array when the address has no portfolios. When JWT auth is enabled, only the authenticated user (token subject) may summarise their own address.",
+        "parameters": [
+          {
+            "name": "userAddress",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stellar address whose portfolios are summarised."
+          }
+        ],
+        "security": [
+          {
+            "adminAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Portfolio summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "portfolios": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/PortfolioSummary"
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "ValidationError": {
+                    "$ref": "#/components/examples/ValidationError"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/portfolio/{id}/rebalance-plan": {
       "get": {
         "tags": [
@@ -994,177 +1100,6 @@
         "responses": {
           "200": {
             "description": "Plan data",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "portfolioId": {
-                          "type": "string"
-                        },
-                        "totalValue": {
-                          "type": "number"
-                        },
-                        "maxSlippagePercent": {
-                          "type": "number"
-                        },
-                        "estimatedSlippageBps": {
-                          "type": "integer"
-                        },
-                        "estimatedFees": {
-                          "type": "object",
-                          "properties": {
-                            "xlm": {
-                              "type": "number"
-                            },
-                            "usd": {
-                              "type": "number"
-                            },
-                            "perTradeXlm": {
-                              "type": "number"
-                            },
-                            "tradeCount": {
-                              "type": "integer"
-                            }
-                          }
-                        },
-                        "assets": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "asset": {
-                                "type": "string"
-                              },
-                              "action": {
-                                "type": "string",
-                                "enum": [
-                                  "buy",
-                                  "sell",
-                                  "hold"
-                                ]
-                              },
-                              "currentBalance": {
-                                "type": "number"
-                              },
-                              "currentValue": {
-                                "type": "number"
-                              },
-                              "currentAllocationPercent": {
-                                "type": "number"
-                              },
-                              "targetAllocationPercent": {
-                                "type": "number"
-                              },
-                              "targetValue": {
-                                "type": "number"
-                              },
-                              "driftPercent": {
-                                "type": "number"
-                              },
-                              "buyAmount": {
-                                "type": "number"
-                              },
-                              "sellAmount": {
-                                "type": "number"
-                              },
-                              "tradeValue": {
-                                "type": "number"
-                              },
-                              "projectedBalance": {
-                                "type": "number"
-                              },
-                              "projectedValue": {
-                                "type": "number"
-                              },
-                              "projectedAllocationPercent": {
-                                "type": "number"
-                              },
-                              "price": {
-                                "type": "number"
-                              }
-                            }
-                          }
-                        },
-                        "projectedAllocations": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": "number"
-                          }
-                        },
-                        "prices": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "$ref": "#/components/schemas/PriceData"
-                          }
-                        },
-                        "priceFeedMeta": {
-                          "type": "object"
-                        }
-                      }
-                    },
-                    "error": {
-                      "type": "object",
-                      "nullable": true
-                    },
-                    "timestamp": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Portfolio not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/portfolio/{id}/rebalance/dry-run": {
-      "post": {
-        "tags": [
-          "Portfolio"
-        ],
-        "summary": "Dry-run rebalance",
-        "description": "Return the full rebalance plan without executing trades. This dry-run performs no database writes and makes no contract call; use POST /api/portfolio/{id}/rebalance for live execution.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Dry-run plan data. The response data schema is identical to GET /api/portfolio/{id}/rebalance-plan.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1834,6 +1769,151 @@
           },
           "503": {
             "description": "Price feeds unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prices/ohlcv": {
+      "get": {
+        "tags": [
+          "Prices & market"
+        ],
+        "summary": "Get OHLCV candles",
+        "description": "Returns OHLCV (open, high, low, close) candles computed from stored price snapshots. Missing intervals are filled with the previous close. Results are cached for 10 minutes.",
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "XLM"
+            },
+            "description": "Asset symbol, e.g. XLM, BTC, ETH, USDC"
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "4h",
+                "1d"
+              ]
+            },
+            "description": "Candle interval"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Start of time range (ISO 8601)"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "End of time range (ISO 8601)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OHLCV candle array",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "asset": {
+                          "type": "string"
+                        },
+                        "interval": {
+                          "type": "string"
+                        },
+                        "candles": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "timestamp": {
+                                "type": "number",
+                                "description": "Unix ms of interval start"
+                              },
+                              "open": {
+                                "type": "number"
+                              },
+                              "high": {
+                                "type": "number"
+                              },
+                              "low": {
+                                "type": "number"
+                              },
+                              "close": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -2829,6 +2909,49 @@
       },
       "Portfolio": {
         "type": "object"
+      },
+      "PortfolioSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "total_value_usd",
+          "drift_status",
+          "last_rebalanced"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "portfolio-abc123"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null when the portfolio was never named.",
+            "example": "Core holdings"
+          },
+          "total_value_usd": {
+            "type": "number",
+            "description": "Current USD value of all holdings. An asset with no available price contributes zero.",
+            "example": 10000
+          },
+          "drift_status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warning",
+              "critical"
+            ],
+            "description": "Largest allocation drift measured against the portfolio's own rebalance threshold: critical past the threshold, warning from half the threshold up to it, otherwise ok.",
+            "example": "warning"
+          },
+          "last_rebalanced": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-01-02T00:00:00.000Z"
+          }
+        }
       },
       "PriceData": {
         "type": "object"
