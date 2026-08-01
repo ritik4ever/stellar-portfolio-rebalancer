@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { Sentry } from '../observability'
+import { walletManager } from '../utils/walletManager'
 
 interface Props {
     children: ReactNode
@@ -29,7 +31,25 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-        console.error('[ErrorBoundary] Caught error:', error, errorInfo.componentStack)
+        const route = typeof window !== 'undefined' ? window.location.pathname : undefined
+        let userId: string | undefined
+        try {
+            const pk = walletManager.getPublicKey()
+            if (pk) userId = pk
+        } catch {
+            // walletManager not available
+        }
+        Sentry.captureException(error, {
+            extra: {
+                componentStack: errorInfo.componentStack,
+                route,
+                userId,
+                section: this.props.fallbackTitle,
+            },
+            tags: {
+                errorBoundary: 'section',
+            },
+        })
     }
 
     private handleRetry = (): void => {

@@ -1,0 +1,117 @@
+name: Dependency Scan
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'contracts/Cargo.toml'
+      - 'contracts/Cargo.lock'
+  push:
+    branches:
+      - main
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'contracts/Cargo.toml'
+      - 'contracts/Cargo.lock'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ['.', 'backend', 'frontend']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.directory }}
+        run: npm ci --ignore-scripts
+
+      - name: Run npm audit
+        working-directory: ${{ matrix.directory }}
+        run: |
+          WAIVER_FILE="${GITHUB_WORKSPACE}/.github/audit-waivers.json"
+          EXCLUDE_ARGS=""
+          if [ -f "$WAIVER_FILE" ]; then
+            WAIVERS=$(jq -r '.npm[]?.id // empty' "$WAIVER_FILE" 2>/dev/null || true)
+            for waiver in $WAIVERS; do
+              EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude $waiver"
+            done
+          fi
+          echo "::group::npm audit output"
+          npm audit --audit-level=high $EXCLUDE_ARGS || {
+            echo "::endgroup::"
+            echo "::error::npm audit found high/critical vulnerabilities in ${{ matrix.directory }}"
+            echo "If this is an accepted risk, add the advisory ID to .github/audit-waivers.json"
+            echo "See docs/DEPENDENCY_AUDIT.md for the waiver process."
+            exit 1
+          }
+          echo "::endgroup::"
+          echo "No new high/critical vulnerabilities in ${{ matrix.directory }}"
+
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: contracts
+        run: |
+          WAIVER_FILE="${GITHUB_WORKSPACE}/.github/audit-waivers.json"
+          IGNORE_ARGS=""
+          if [ -f "$WAIVER_FILE" ]; then
+            WAIVERS=$(jq -r '.cargo[]?.id // empty' "$WAIVER_FILE" 2>/dev/null || true)
+            for waiver in $WAIVERS; do
+              IGNORE_ARGS="$IGNORE_ARGS --ignore $waiver"
+            done
+          fi
+          echo "::group::cargo audit output"
+          cargo audit $IGNORE_ARGS || {
+            echo "::endgroup::"
+            echo "::error::cargo audit found vulnerabilities in contracts/"
+            echo "If this is an accepted risk, add the advisory ID to .github/audit-waivers.json"
+            echo "See docs/DEPENDENCY_AUDIT.md for the waiver process."
+            exit 1
+          }
+          echo "::endgroup::"
+          echo "No known vulnerabilities in contracts crate"
+
+      - name: Notify on scheduled scan failure
+        if: failure() && github.event_name == 'schedule'
+        run: |
+          echo "::warning::Daily dependency scan found new vulnerabilities."
+          echo "Review the failing job and update waivers or fix dependencies."
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -s -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"Dependency Scan Failed\n*Repo*: ${{ github.repository }}\n*Link*: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              "${{ secrets.SLACK_WEBHOOK_URL }}" || true
+          fi

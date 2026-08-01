@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
+import React, { useState, useRef } from 'react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search, ChevronDown, ChevronUp, ExternalLink, Download, Share2, ImageIcon } from 'lucide-react'
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { formatShortDate, formatTime, formatNumber } from '../utils/localeFormat'
+import { downloadBlob } from '../utils/export'
 
 // Extended interface matching RebalanceHistory but adding txHash for the requirement
 interface RebalanceEvent {
@@ -50,6 +51,14 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
 
     const { data, isLoading, error } = useRebalanceHistory(portfolioId, 1, limit, '', '', triggerFilter, dateRangeFilter)
 
+    const timelineRef = useRef<HTMLDivElement>(null)
+    const [exporting, setExporting] = useState(false)
+
+    const [portfolioName] = useState(() => {
+        if (portfolioId && portfolioId !== 'demo') return portfolioId
+        return 'Demo Portfolio'
+    })
+
     const toggleRow = (id: string) => {
         setExpandedRows(prev => {
             const next = new Set(prev)
@@ -57,6 +66,112 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
             else next.add(id)
             return next
         })
+    }
+
+    const getDateRange = (): string => {
+        const items = history
+        if (items.length === 0) return 'No data'
+        const dates = items.map(e => new Date(e.timestamp).getTime()).filter(t => Number.isFinite(t))
+        if (dates.length === 0) return 'No data'
+        const min = new Date(Math.min(...dates))
+        const max = new Date(Math.max(...dates))
+        return `${formatShortDate(min.toISOString())} — ${formatShortDate(max.toISOString())}`
+    }
+
+    const exportAsImage = async (): Promise<Blob> => {
+        setExporting(true)
+        try {
+            const items = history
+            const dateRange = getDateRange()
+            const canvas = document.createElement('canvas')
+            const ctx = canvas.getContext('2d')!
+            const padding = 40
+            const headerHeight = 120
+            const rowHeight = 36
+            const canvasWidth = 800
+            const contentHeight = items.length * rowHeight
+            canvas.width = canvasWidth
+            canvas.height = headerHeight + contentHeight + padding * 2
+
+            ctx.fillStyle = '#ffffff'
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+            ctx.fillStyle = '#111827'
+            ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif'
+            ctx.fillText(`Portfolio: ${portfolioName}`, padding, padding + 28)
+
+            ctx.fillStyle = '#6b7280'
+            ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif'
+            ctx.fillText(`Date range: ${dateRange}`, padding, padding + 54)
+
+            ctx.fillStyle = '#9ca3af'
+            ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif'
+            ctx.fillText(`Generated ${new Date().toLocaleString()}`, padding, padding + 74)
+
+            ctx.strokeStyle = '#e5e7eb'
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.moveTo(padding, padding + 90)
+            ctx.lineTo(canvasWidth - padding, padding + 90)
+            ctx.stroke()
+
+            items.forEach((event, i) => {
+                const y = headerHeight + padding + i * rowHeight
+                const statusColor = event.status === 'completed' ? '#16a34a' : event.status === 'failed' ? '#dc2626' : '#ca8a04'
+                ctx.fillStyle = statusColor
+                ctx.beginPath()
+                ctx.arc(padding + 8, y + 8, 6, 0, Math.PI * 2)
+                ctx.fill()
+
+                ctx.fillStyle = '#374151'
+                ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif'
+                ctx.fillText(event.trigger, padding + 24, y + 13)
+
+                const dateStr = `${formatShortDate(event.timestamp)} ${formatTime(event.timestamp)}`
+                ctx.fillStyle = '#6b7280'
+                ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif'
+                const textWidth = ctx.measureText(dateStr).width
+                ctx.fillText(dateStr, canvasWidth - padding - textWidth, y + 13)
+            })
+
+            return new Promise<Blob>((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob)
+                    else reject(new Error('Failed to generate image'))
+                }, 'image/png')
+            })
+        } finally {
+            setExporting(false)
+        }
+    }
+
+    const handleExportImage = async () => {
+        try {
+            const blob = await exportAsImage()
+            downloadBlob(`rebalance_timeline_${portfolioName.replace(/[^a-zA-Z0-9]/g, '_')}.png`, blob)
+        } catch (err) {
+            console.error('Export failed:', err)
+        }
+    }
+
+    const handleShare = async () => {
+        try {
+            const blob = await exportAsImage()
+            const file = new File([blob], `rebalance_timeline_${portfolioName.replace(/[^a-zA-Z0-9]/g, '_')}.png`, { type: 'image/png' })
+            if (typeof navigator !== 'undefined' && navigator.share) {
+                try {
+                    if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file], title: `Rebalance Timeline - ${portfolioName}` })
+                        return
+                    }
+                } catch { /* fall through to download */ }
+            }
+            handleExportImage()
+        } catch (err) {
+            if (err instanceof Error && err.name !== 'AbortError') {
+                handleExportImage()
+            }
+        }
     }
 
     // Mock demo data matching RebalanceHistory.tsx if demo/null
@@ -126,13 +241,33 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
     }
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+        <div ref={timelineRef} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
             <header className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-700 pb-4">
                 <div>
                     <h2 className="text-xl font-bold text-gray-900 dark:text-white">Rebalance Timeline</h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400">View history of portfolio rebalances</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={handleExportImage}
+                        disabled={exporting || history.length === 0}
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                        title="Export as image"
+                    >
+                        <ImageIcon className="w-4 h-4" />
+                        Export
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleShare}
+                        disabled={exporting || history.length === 0}
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                        title={typeof navigator !== 'undefined' && navigator.share ? 'Share' : 'Download'}
+                    >
+                        <Share2 className="w-4 h-4" />
+                        Share
+                    </button>
                     <select 
                         className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
                         value={triggerFilter}

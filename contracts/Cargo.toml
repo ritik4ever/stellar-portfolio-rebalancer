@@ -7,10 +7,14 @@ edition = "2021"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-soroban-sdk = "21.0.0"
+# Force ed25519-dalek 2.x to prevent 3.0.0 conflict with testutils
+ed25519-dalek = "=2.2.0"
+soroban-sdk = "27.0.2"
 
 [dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+soroban-sdk = { version = "27.0.2", features = ["testutils"] }
+proptest = "1.4.0"
+ed25519-dalek = "2.2.0"
 
 [features]
 default = []

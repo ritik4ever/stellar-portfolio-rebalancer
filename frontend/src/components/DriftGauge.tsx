@@ -1,47 +1,21 @@
-/**
- * DriftGauge.tsx
- *
- * Circular gauge per asset showing current vs target allocation.
- *
- * Color bands:
- *   green  — |drift| < threshold * 0.5  (well within target)
- *   yellow — threshold * 0.5 ≤ |drift| < threshold  (approaching)
- *   red    — |drift| ≥ threshold  (exceeds threshold)
- *
- * Accessibility:
- *   - role="img" + aria-label on the SVG so screen readers announce the value
- *   - Drift percentage is rendered as visible text, not just color
- *   - Tooltip duplicates the numbers in text form
- */
-
-import React, { useMemo } from 'react'
-
-// ── types ──────────────────────────────────────────────────────────────────────
+import React, { useMemo, useState } from 'react'
 
 export interface DriftGaugeAsset {
-  /** Asset symbol, e.g. "XLM" */
   name: string
-  /** Target allocation, 0–100 */
   target: number
-  /** Current allocation, 0–100 */
   current: number
-  /** Rebalance threshold in percentage points (e.g. 5 = ±5%) */
   threshold: number
 }
 
 interface DriftGaugeProps {
   asset: DriftGaugeAsset
-  /** Diameter of the gauge in px. Default: 96 */
   size?: number
 }
 
 interface DriftGaugeGridProps {
   assets: DriftGaugeAsset[]
-  /** Label shown above the grid */
   title?: string
 }
-
-// ── color helpers ──────────────────────────────────────────────────────────────
 
 type DriftStatus = 'ok' | 'warning' | 'critical'
 
@@ -54,31 +28,25 @@ function getDriftStatus(drift: number, threshold: number): DriftStatus {
 
 const STATUS_COLORS: Record<DriftStatus, { stroke: string; text: string; bg: string; label: string }> = {
   ok: {
-    stroke: '#22c55e',   // green-500
+    stroke: '#22c55e',
     text: 'text-green-600 dark:text-green-400',
-    bg: '#dcfce7',       // green-100
+    bg: '#dcfce7',
     label: 'Within target',
   },
   warning: {
-    stroke: '#f59e0b',   // amber-500
+    stroke: '#f59e0b',
     text: 'text-amber-600 dark:text-amber-400',
-    bg: '#fef9c3',       // yellow-100
+    bg: '#fef9c3',
     label: 'Approaching threshold',
   },
   critical: {
-    stroke: '#ef4444',   // red-500
+    stroke: '#ef4444',
     text: 'text-red-600 dark:text-red-400',
-    bg: '#fee2e2',       // red-100
+    bg: '#fee2e2',
     label: 'Exceeds threshold',
   },
 }
 
-// ── SVG arc helpers ────────────────────────────────────────────────────────────
-
-/**
- * Returns an SVG arc path for a circle gauge.
- * Sweeps from -210° to +30° (240° total arc, open at the bottom).
- */
 function describeArc(
   cx: number,
   cy: number,
@@ -99,12 +67,9 @@ function describeArc(
   return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`
 }
 
-// The gauge arc spans 270° (from -135° to +135° relative to 12 o'clock)
 const ARC_START = -135
 const ARC_END = 135
-const ARC_SPAN = ARC_END - ARC_START // 270
-
-// ── DriftGauge (single asset) ─────────────────────────────────────────────────
+const ARC_SPAN = ARC_END - ARC_START
 
 export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
   const { name, target, current, threshold } = asset
@@ -118,15 +83,12 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
   const strokeWidth = Math.max(4, size * 0.08)
   const r = (size - strokeWidth * 2) / 2
 
-  // Track arc (full 270°)
   const trackPath = describeArc(cx, cy, r, ARC_START, ARC_END)
 
-  // Fill arc — clamp current to [0, 100], map to the 270° arc
   const clampedCurrent = Math.min(100, Math.max(0, current))
   const fillEndAngle = ARC_START + (clampedCurrent / 100) * ARC_SPAN
   const fillPath = describeArc(cx, cy, r, ARC_START, fillEndAngle)
 
-  // Target tick mark
   const targetAngle = ARC_START + (Math.min(100, Math.max(0, target)) / 100) * ARC_SPAN
   const tickInner = r - strokeWidth * 0.6
   const tickOuter = r + strokeWidth * 0.6
@@ -143,7 +105,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
   const driftLabel = `${drift >= 0 ? '+' : ''}${drift.toFixed(1)}%`
   const ariaLabel = `${name}: current ${current.toFixed(1)}%, target ${target.toFixed(1)}%, drift ${driftLabel}. Status: ${colors.label}.`
 
-  // Tooltip state
   const [showTooltip, setShowTooltip] = React.useState(false)
 
   const fontSize = Math.max(8, size * 0.13)
@@ -157,7 +118,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
       onFocus={() => setShowTooltip(true)}
       onBlur={() => setShowTooltip(false)}
     >
-      {/* SVG gauge */}
       <svg
         width={size}
         height={size}
@@ -168,7 +128,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
         tabIndex={0}
         className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
       >
-        {/* Track */}
         <path
           d={trackPath}
           fill="none"
@@ -178,7 +137,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
           className="text-gray-200 dark:text-gray-700"
         />
 
-        {/* Fill */}
         {clampedCurrent > 0 && (
           <path
             d={fillPath}
@@ -190,7 +148,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
           />
         )}
 
-        {/* Target tick */}
         <line
           x1={tickStart.x}
           y1={tickStart.y}
@@ -202,7 +159,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
           aria-hidden="true"
         />
 
-        {/* Center: asset name */}
         <text
           x={cx}
           y={cy - fontSize * 0.4}
@@ -216,7 +172,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
           {name}
         </text>
 
-        {/* Center: drift value — visible without relying on color */}
         <text
           x={cx}
           y={cy + fontSize * 1.2}
@@ -230,7 +185,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
         </text>
       </svg>
 
-      {/* Tooltip */}
       {showTooltip && (
         <div
           role="tooltip"
@@ -259,7 +213,6 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
         </div>
       )}
 
-      {/* Screen-reader-visible label below gauge (color-independent) */}
       <span
         className={`mt-1 text-xs font-medium ${colors.text}`}
         aria-hidden="true"
@@ -270,27 +223,77 @@ export const DriftGauge: React.FC<DriftGaugeProps> = ({ asset, size = 96 }) => {
   )
 }
 
-// ── DriftGaugeGrid (portfolio-level grid) ─────────────────────────────────────
-
 export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
   assets,
   title = 'Allocation Drift',
 }) => {
+  const [showBreakdown, setShowBreakdown] = useState(false)
+
   if (assets.length === 0) return null
+
+  const sortedAssets = useMemo(() => {
+    return [...assets].sort((a, b) => Math.abs(b.current - b.target) - Math.abs(a.current - a.target))
+  }, [assets])
+
+  const totalDrift = useMemo(() => {
+    return assets.reduce((sum, a) => sum + Math.abs(a.current - a.target), 0)
+  }, [assets])
 
   return (
     <section
       className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm"
       aria-labelledby="drift-gauge-heading"
     >
-      <h3
-        id="drift-gauge-heading"
-        className="text-sm font-semibold text-gray-900 dark:text-white mb-4"
+      <div
+        className="relative inline-block"
+        onMouseEnter={() => setShowBreakdown(true)}
+        onMouseLeave={() => setShowBreakdown(false)}
+        onFocus={() => setShowBreakdown(true)}
+        onBlur={() => setShowBreakdown(false)}
       >
-        {title}
-      </h3>
+        <h3
+          id="drift-gauge-heading"
+          className="text-sm font-semibold text-gray-900 dark:text-white mb-4 cursor-default"
+          tabIndex={0}
+        >
+          {title}
+        </h3>
 
-      {/* Legend */}
+        {showBreakdown && (
+          <div
+            role="tooltip"
+            className="absolute bottom-full mb-1 left-0 z-50 w-64 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-3 text-xs pointer-events-none"
+          >
+            <p className="font-semibold text-gray-900 dark:text-white mb-2">
+              Drift Breakdown
+            </p>
+            <div className="space-y-1.5">
+              {sortedAssets.map((a) => {
+                const drift = a.current - a.target
+                const absDrift = Math.abs(drift)
+                const status = getDriftStatus(drift, a.threshold)
+                const pctOfTotal = totalDrift > 0 ? ((absDrift / totalDrift) * 100).toFixed(0) : '0'
+                return (
+                  <div key={a.name} className="flex items-center justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">{a.name}</span>
+                    <span className={`font-medium ${STATUS_COLORS[status].text}`}>
+                      {drift >= 0 ? '+' : ''}{drift.toFixed(1)}%
+                      <span className="text-gray-400 dark:text-gray-500 ml-1">
+                        ({pctOfTotal}%)
+                      </span>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 flex justify-between text-gray-500 dark:text-gray-400">
+              <span>Total absolute drift</span>
+              <span className="font-medium text-gray-900 dark:text-white">{totalDrift.toFixed(1)}%</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-3 mb-4" aria-label="Color legend">
         {(Object.entries(STATUS_COLORS) as [DriftStatus, typeof STATUS_COLORS['ok']][]).map(
           ([, c]) => (
@@ -306,7 +309,6 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
         )}
       </div>
 
-      {/* Gauges */}
       <div
         className="flex flex-wrap gap-4 justify-start"
         role="list"
@@ -319,7 +321,6 @@ export const DriftGaugeGrid: React.FC<DriftGaugeGridProps> = ({
         ))}
       </div>
 
-      {/* Accessible summary for screen readers */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {assets.map((a) => {
           const drift = a.current - a.target

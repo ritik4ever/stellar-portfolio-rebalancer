@@ -6,6 +6,7 @@ export interface NetworkDetectionResult {
   mismatch: boolean
   checking: boolean
   error: string | null
+  pendingWalletNetwork?: StellarNetwork | null
 }
 
 const STELLAR_NETWORK_PASSPHRASES: Record<string, StellarNetwork> = {
@@ -78,6 +79,19 @@ export async function detectXbullNetwork(): Promise<StellarNetwork | null> {
   }
 }
 
+export async function detectHanaNetwork(): Promise<StellarNetwork | null> {
+  try {
+    if (typeof window === 'undefined' || !window.hana) return null
+    const network = await (window.hana as any).getNetwork()
+    if (typeof network === 'string') return network.toLowerCase() as StellarNetwork
+    if (network?.network) return network.network.toLowerCase() as StellarNetwork
+    if (network?.networkPassphrase) return parseStellarNetworkPassphrase(network.networkPassphrase)
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function detectWalletNetwork(walletType?: string): Promise<StellarNetwork | null> {
   if (walletType === 'freighter' || !walletType) {
     const freighter = await detectFreighterNetwork()
@@ -90,6 +104,10 @@ export async function detectWalletNetwork(walletType?: string): Promise<StellarN
   if (walletType === 'xbull' || !walletType) {
     const xbull = await detectXbullNetwork()
     if (xbull) return xbull
+  }
+  if (walletType === 'hana' || !walletType) {
+    const hana = await detectHanaNetwork()
+    if (hana) return hana
   }
   return null
 }

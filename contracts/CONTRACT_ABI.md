@@ -36,7 +36,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
 
-- **Purpose:** Creates a new user portfolio and emits a `("portfolio","created")` event.
+- **Purpose:** Creates a new user portfolio (with default `StrategyType::Threshold` strategy) and emits a `("portfolio","created")` event.
 - **Parameters:**
   - `user`: Portfolio owner; must authorize this call.
   - `target_allocations`: Target allocations per asset (`Address -> percentage`).
@@ -56,6 +56,15 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `user.require_auth()` succeeds.
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
+
+### `create_portfolio_with_strategy(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32, strategy: StrategyType, strategy_config: StrategyConfig) -> Result<u64, Error>`
+
+- **Purpose:** Creates a new user portfolio with an explicit rebalancing strategy and emits a `("portfolio","created")` event.
+- **Parameters:**
+  - Same as `create_portfolio` plus:
+  - `strategy`: `StrategyType` enum — `Threshold (0)`, `Periodic (1)`, `Volatility (2)`, or `Custom (3)`.
+  - `strategy_config`: `StrategyConfig` struct with fields `interval_seconds`, `volatility_threshold_bps`, `min_interval_seconds`.
+- **Returns:** Same as `create_portfolio`.
 
 #### Portfolio ID derivation (deterministic)
 
@@ -316,6 +325,16 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `total_value: i128`
   - `is_active: bool`
   - `pause_reason: PauseReason`
+  - `strategy: StrategyType` — rebalancing strategy (`Threshold`, `Periodic`, `Volatility`, `Custom`)
+  - `strategy_config: StrategyConfig` — per-strategy parameters
+- `StrategyType` (`contracts/src/types.rs`)
+  - Enum: `Threshold = 0`, `Periodic = 1`, `Volatility = 2`, `Custom = 3`
+  - Mirrors backend `RebalanceStrategyType` (excluding `dca`, which is handled separately)
+- `StrategyConfig` (`contracts/src/types.rs`)
+  - Struct: `interval_seconds: u64`, `volatility_threshold_bps: u32`, `min_interval_seconds: u64`
+  - Default: 7-day interval, 10% volatility threshold, 1-day minimum interval
+- `LegacyPortfolio` (`contracts/src/types.rs`)
+  - Pre-strategy schema Portfolio struct used for on-read migration of existing stored portfolios
 - `ContractCapabilitySummary` (`contracts/src/types.rs`)
   - Struct with `version: u32`, `schema_version: u32`, `capability_flags: u32`, `min_rebalance_threshold: u32`, `max_rebalance_threshold: u32`, `min_slippage_tolerance_bps: u32`, `max_slippage_tolerance_bps: u32`, `max_portfolio_assets: u32`.
 - `Asset` (`contracts/src/reflector.rs`)
@@ -324,3 +343,57 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - Struct with `price: i128` and `timestamp: u64`.
 
 For call builders and generated client bindings, use Soroban CLI/SDK tooling against the compiled WASM artifact.
+
+## Property-Based Tests (`contracts/src/property_tests.rs`)
+
+The contract includes a comprehensive property-based test suite using the
+[`proptest`](https://docs.rs/proptest) crate. These tests verify invariant
+properties across **10 000 random input combinations** each.
+
+### Properties Tested
+
+| # | Property | Description | Cases |
+|---|----------|-------------|-------|
+| 1 | **Allocation sum invariance** | Target allocations always sum to exactly `ALLOCATION_DENOMINATOR` (10 000 bps). Creating a portfolio with valid allocations always succeeds. | 10 000 |
+| 2 | **Drift range** | Current allocation percentage and drift are always in `[0, 10000]` range. Portfolio valuation fields are within valid bounds. | 10 000 |
+| 3 | **Rebalance idempotency** | When no rebalance is needed (drift within threshold), the portfolio state is stable — executing a rebalance does not change state. If rebalance IS needed, one execution brings portfolio into a stable state requiring no further rebalance. | 10 000 |
+| 4 | **Deposit-withdraw roundtrip** | Depositing an amount and immediately withdrawing the same amount restores the original user balance. Internal portfolio balance returns to zero. | 10 000 |
+| 5 | **Random allocation validity** | Any randomly generated allocation that sums to 10 000 bps and has 2–10 assets is accepted. Stored allocations match input exactly, and portfolio invariants hold. | 10 000 |
+
+### Running Property Tests
+
+```bash
+# Run all property tests (50 000 total cases, ~3–5 minutes)
+cd contracts
+make test-property
+
+# Or directly:
+cargo test --features testutils property_ -- --nocapture
+```
+
+### CI Integration
+
+The property test suite runs in CI as part of the contract test pipeline.
+Test reports are uploaded as CI artifacts for regression analysis.
+
+### Random Seed Reproducibility
+
+Each proptest run logs the random seed used. To reproduce a specific failure:
+
+```bash
+PROPTEST_SEED=<hex-seed> cargo test --features testutils property_
+```
+
+## Property-Based Tests (`contracts/src/property_tests.rs`)
+
+The contract includes property-based tests using [`proptest`](https://docs.rs/proptest) with **10,000 random inputs per property**.
+
+| # | Property | Cases |
+|---|----------|-------|
+| 1 | Valid allocations (sum=10000) always accepted | 10,000 |
+| 2 | Invalid allocations (sum!=10000) rejected | 10,000 |
+| 3 | Deposit+withdraw roundtrip preserves balance | 10,000 |
+| 4 | Drift and current_pct in [0,10000] range | 10,000 |
+| 5 | Rebalance idempotent when no drift | 10,000 |
+
+Run: `cargo test --features testutils property_`
