@@ -45,7 +45,7 @@ cargo cyclonedx \
     --format json \
     --override-filename contracts
 
-mv contracts.cdx.json "${OUT_FILE}"
+mv contracts.json "${OUT_FILE}"
 
 if [[ ! -s "${OUT_FILE}" ]]; then
     echo "[sbom] ::error:: generated SBOM file is missing or empty: ${OUT_FILE}" >&2
