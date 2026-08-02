@@ -48,4 +48,8 @@ jobs:
 
       - name: Run unit tests
         working-directory: ./contracts
-        run: cargo test -- --nocapture
+        # The contract test module is gated behind `#[cfg(all(test, feature =
+        # "testutils"))]`, so plain `cargo test` compiles zero tests. The
+        # `testutils` feature (mapping to `soroban-sdk/testutils`) is what makes
+        # the unit + property test suites actually run.
+        run: cargo test --features testutils -- --nocapture
