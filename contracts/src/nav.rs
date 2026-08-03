@@ -6,12 +6,20 @@ use crate::portfolio::calculate_portfolio_value;
 pub const MAX_NAV_SNAPSHOTS: u32 = 100;
 
 pub fn snapshot_nav(env: &Env, portfolio_id: u64) -> Result<NavSnapshot, Error> {
-    let portfolio_key = DataKey::Portfolio(portfolio_id);
-    let portfolio: Portfolio = env
+    // Portfolios are persisted under the V2 (strategy-aware) key; fall back to
+    // the legacy key for portfolios created by older contract versions.
+    let portfolio: Portfolio = if let Some(p) = env
         .storage()
         .persistent()
-        .get(&portfolio_key)
-        .ok_or(Error::PortfolioNotFound)?;
+        .get(&DataKey::PortfolioV2(portfolio_id))
+    {
+        p
+    } else {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Portfolio(portfolio_id))
+            .ok_or(Error::PortfolioNotFound)?
+    };
 
     let reflector_address = env
         .storage()
@@ -66,8 +74,11 @@ pub fn save_nav_snapshot(env: &Env, portfolio_id: u64, snapshot: &NavSnapshot) -
 }
 
 pub fn get_nav_history(env: &Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
-    let portfolio_key = DataKey::Portfolio(portfolio_id);
-    if !env.storage().persistent().has(&portfolio_key) {
+    // Portfolios are persisted under the V2 (strategy-aware) key; also accept
+    // the legacy key for portfolios created by older contract versions.
+    let has_v2 = env.storage().persistent().has(&DataKey::PortfolioV2(portfolio_id));
+    let has_legacy = env.storage().persistent().has(&DataKey::Portfolio(portfolio_id));
+    if !has_v2 && !has_legacy {
         return Err(Error::PortfolioNotFound);
     }
 

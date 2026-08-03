@@ -45,6 +45,11 @@ pub const DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 3600; // 1 hour
 pub const DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 300; // 3%
 pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
 
+/// Default contract-level max execution slippage per asset class (1%).
+pub const DEFAULT_ASSET_SLIPPAGE_BPS: u32 = 100; // 1%
+/// Maximum configurable contract-level max execution slippage per asset class (5%).
+pub const MAX_ASSET_SLIPPAGE_BPS: u32 = 500; // 5%
+
 /// Rebalancing strategy types, mirroring backend `RebalanceStrategyType`.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -256,6 +261,13 @@ pub enum DataKey {
     PortfolioV2(u64),
     QueuedFeeConfig,
     QueuedUpgrade,
+    /// Address of an optional secondary price source (CoinGecko) used by the
+    /// oracle price-validation layer.
+    CoinGeckoAddress,
+    /// Oracle validation configuration (deviation threshold, fallback behavior).
+    OracleConfig,
+    /// Contract-level max execution slippage (in basis points) for an asset class.
+    AssetSlippage(Address),
 }
 
 #[contracttype]
@@ -304,6 +316,8 @@ pub enum Error {
     BatchTooLarge = 29,
     InvalidOracleAddress = 30,
     TimelockNotElapsed = 31,
+    InvalidSlippageLimit = 32,
+    InvalidPrice = 33,
 }
 
 #[contracttype]
@@ -311,6 +325,43 @@ pub enum Error {
 pub struct BatchRebalanceResult {
     pub portfolio_id: u64,
     pub result: BatchRebalanceResultStatus,
+}
+
+// The `#[contracterror]` derive does not emit `SorobanArbitrary` impls, but
+// `#[contracttype]` types that embed `Error` (e.g. `BatchRebalanceResultStatus`)
+// require it when the `testutils` feature is active. Implement it manually,
+// mapping an arbitrary `u32` contract error code onto the matching variant.
+// Gate on the package `testutils` feature (NOT `cfg(test)`): the macros emit
+// `SorobanArbitrary` code whenever `soroban-sdk/testutils` is enabled, which
+// only happens here via this package's `testutils` feature (see Cargo.toml).
+#[cfg(feature = "testutils")]
+impl soroban_sdk::testutils::arbitrary::SorobanArbitrary for Error {
+    type Prototype = u32;
+}
+
+#[cfg(feature = "testutils")]
+impl soroban_sdk::TryFromVal<soroban_sdk::Env, u32> for Error {
+    type Error = soroban_sdk::ConversionError;
+
+    fn try_from_val(
+        _env: &soroban_sdk::Env,
+        val: &u32,
+    ) -> Result<Self, soroban_sdk::ConversionError> {
+        Self::try_from(soroban_sdk::Error::from_contract_error(*val))
+            .map_err(|_| soroban_sdk::ConversionError)
+    }
+}
+
+// The `#[contracttype]` derive builds the ScVec representation of tuple
+// variants (e.g. `BatchRebalanceResultStatus::Failed(Error)`) by converting
+// each payload element to an `ScVal` (`ScVec: TryFrom<(ScSymbol, &Error)>`).
+// The `#[contracterror]` macro does not emit a `From<&Error> for ScVal`
+// conversion, so provide one for the testutils-gated arbitrary code.
+#[cfg(feature = "testutils")]
+impl From<&Error> for soroban_sdk::xdr::ScVal {
+    fn from(error: &Error) -> Self {
+        soroban_sdk::xdr::ScVal::U32(*error as u32)
+    }
 }
 
 #[contracttype]

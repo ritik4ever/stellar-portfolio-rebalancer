@@ -12,7 +12,7 @@ pub fn configure_dca(
     amount: i128,
     interval: u64,
 ) -> Result<(), Error> {
-    let portfolio = super::PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
+    let portfolio = PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
 
     let steward = env
         .storage()
@@ -55,7 +55,7 @@ pub fn configure_dca(
 /// The configured amount is divided according to the portfolio's target
 /// allocations. This operation does not update the last rebalance timestamp.
 pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
-    let mut portfolio = super::PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
+    let mut portfolio = PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
 
     let mut config: DCAConfig = match env
         .storage()
@@ -80,13 +80,6 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         return Err(Error::PortfolioPaused);
     }
 
-    // Get the invoker (steward or user) for event emission
-    let invoker = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Steward(portfolio_id))
-        .unwrap_or(portfolio.user.clone());
-
     // Assume USDC is represented by an asset address that exists in target allocations.
     // The DCA amount is split according to target allocation percentages.
     // For each asset, increase balance by proportional amount.
@@ -98,7 +91,7 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
             let current: i128 = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
             portfolio
                 .current_balances
-                .set(asset, current_balance + amount_to_invest);
+                .set(asset, current + to_invest);
         }
     }
 
@@ -132,6 +125,6 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         .set(&DataKey::DCAConfig(portfolio_id), &config);
 
     // Emit event
-    portfolio::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_ts);
+    portfolio::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_timestamp);
     Ok(())
 }

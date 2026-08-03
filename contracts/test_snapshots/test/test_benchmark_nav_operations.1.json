@@ -1,0 +1,3803 @@
+{
+  "generators": {
+    "address": 5,
+    "nonce": 0,
+    "mux_id": 0
+  },
+  "auth": [
+    [],
+    [],
+    [],
+    [],
+    [
+      [
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAL7NV",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG",
+              "function_name": "set_admin",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG",
+              "function_name": "mint",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "i128": "1000000000"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "create_portfolio",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                      },
+                      "val": {
+                        "u32": 10000
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    }
+                  ]
+                },
+                {
+                  "u32": 5
+                },
+                {
+                  "u32": 50
+                },
+                {
+                  "u32": 1
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "deposit",
+              "args": [
+                {
+                  "u64": "1"
+                },
+                {
+                  "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                },
+                {
+                  "i128": "1000000000"
+                },
+                {
+                  "string": "init"
+                }
+              ]
+            }
+          },
+          "sub_invocations": [
+            {
+              "function": {
+                "contract_fn": {
+                  "contract_address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG",
+                  "function_name": "transfer",
+                  "args": [
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                    },
+                    {
+                      "i128": "1000000000"
+                    }
+                  ]
+                }
+              },
+              "sub_invocations": []
+            }
+          ]
+        }
+      ]
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
+  ],
+  "ledger": {
+    "protocol_version": 27,
+    "sequence_number": 500,
+    "timestamp": 50000,
+    "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "base_reserve": 0,
+    "min_persistent_entry_ttl": 4096,
+    "min_temp_entry_ttl": 16,
+    "max_entry_ttl": 6312000,
+    "ledger_entries": [
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "account": {
+              "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAL7NV",
+              "balance": "0",
+              "seq_num": "0",
+              "num_sub_entries": 0,
+              "inflation_dest": null,
+              "flags": 0,
+              "home_domain": "",
+              "thresholds": "01010101",
+              "signers": [],
+              "ext": "v0"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": null
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAL7NV",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "801925984706572462"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "NavHistory"
+                  },
+                  {
+                    "u64": "1"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "vec": [
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "0"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 10
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10000"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 11
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10001"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 12
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10002"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 13
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10003"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 14
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10004"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 15
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10005"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 16
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10006"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 17
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10007"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 18
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10008"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 19
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10009"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 20
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10010"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 21
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10011"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 22
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10012"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 23
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10013"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 24
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10014"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 25
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10015"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 26
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10016"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 27
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10017"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 28
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10018"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 29
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10019"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 30
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10020"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 31
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10021"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 32
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10022"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 33
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10023"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 34
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10024"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 35
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10025"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 36
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10026"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 37
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10027"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 38
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10028"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 39
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10029"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 40
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10030"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 41
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10031"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 42
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10032"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 43
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10033"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 44
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10034"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 45
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10035"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 46
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10036"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 47
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10037"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 48
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10038"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 49
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10039"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 50
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10040"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 51
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10041"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 52
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10042"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 53
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10043"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 54
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10044"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 55
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10045"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 56
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10046"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 57
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10047"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 58
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10048"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 59
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10049"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 60
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10050"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 61
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10051"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 62
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10052"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 63
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10053"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 64
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10054"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 65
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10055"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 66
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10056"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 67
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10057"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 68
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10058"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 69
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10059"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 70
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10060"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 71
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10061"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 72
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10062"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 73
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10063"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 74
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10064"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 75
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10065"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 76
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10066"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 77
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10067"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 78
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10068"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 79
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10069"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 80
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10070"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 81
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10071"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 82
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10072"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 83
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10073"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 84
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10074"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 85
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10075"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 86
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10076"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 87
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10077"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 88
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10078"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 89
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10079"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 90
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10080"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 91
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10081"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 92
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10082"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 93
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10083"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 94
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10084"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 95
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10085"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 96
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10086"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 97
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10087"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 98
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10088"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 99
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10089"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 100
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10090"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 101
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10091"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 102
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10092"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 103
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10093"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 104
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10094"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 105
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10095"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 106
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10096"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 107
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "10097"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "sequence"
+                        },
+                        "val": {
+                          "u32": 500
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "50000"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "usd_nav"
+                        },
+                        "val": {
+                          "i128": "100000000000"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "NextPortfolioId"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u64": "2"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "PortfolioV2"
+                  },
+                  {
+                    "u64": "1"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "asset_decimals"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                          },
+                          "val": {
+                            "u32": 7
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "circuit_breaker_config"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "spike_threshold_bps"
+                          },
+                          "val": {
+                            "u32": 100
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "window_seconds"
+                          },
+                          "val": {
+                            "u64": "3600"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "current_balances"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                          },
+                          "val": {
+                            "i128": "1000000000"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "global_max_slippage_bps"
+                    },
+                    "val": {
+                      "u32": 300
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "is_active"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "last_rebalance"
+                    },
+                    "val": {
+                      "u64": "0"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "pause_reason"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "rebalance_threshold"
+                    },
+                    "val": {
+                      "u32": 5
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "slippage_policy_version"
+                    },
+                    "val": {
+                      "u32": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "slippage_tolerance"
+                    },
+                    "val": {
+                      "u32": 50
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "strategy"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "strategy_config"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "interval_seconds"
+                          },
+                          "val": {
+                            "u64": "604800"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "min_interval_seconds"
+                          },
+                          "val": {
+                            "u64": "86400"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "volatility_threshold_bps"
+                          },
+                          "val": {
+                            "u32": 1000
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "target_allocations"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                          },
+                          "val": {
+                            "u32": 10000
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_value"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "user"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": "ledger_key_contract_instance",
+              "durability": "persistent",
+              "val": {
+                "contract_instance": {
+                  "executable": {
+                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  "storage": [
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Admin"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "EmergencyStop"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Initialized"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "LastTimestamp"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "ReflectorAddress"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": "ledger_key_contract_instance",
+              "durability": "persistent",
+              "val": {
+                "contract_instance": {
+                  "executable": {
+                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  "storage": null
+                }
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "5541220902715666415"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "1033654523790656264"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "4837995959683129791"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Balance"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "amount"
+                    },
+                    "val": {
+                      "i128": "1000000000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "authorized"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "clawback"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Balance"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "amount"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "authorized"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "clawback"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG",
+              "key": "ledger_key_contract_instance",
+              "durability": "persistent",
+              "val": {
+                "contract_instance": {
+                  "executable": "stellar_asset",
+                  "storage": [
+                    {
+                      "key": {
+                        "symbol": "METADATA"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "decimal"
+                            },
+                            "val": {
+                              "u32": 7
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "name"
+                            },
+                            "val": {
+                              "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAL7NV"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "symbol"
+                            },
+                            "val": {
+                              "string": "aaa"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Admin"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "AssetInfo"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "AlphaNum4"
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "asset_code"
+                                },
+                                "val": {
+                                  "string": "aaa\\0"
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "issuer"
+                                },
+                                "val": {
+                                  "bytes": "0000000000000000000000000000000000000000000000000000000000000005"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 120960
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_code": {
+              "ext": "v0",
+              "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "code": ""
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      }
+    ]
+  },
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "portfolio"
+              },
+              {
+                "symbol": "nav_snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": "1"
+                },
+                {
+                  "i128": "100000000000"
+                },
+                {
+                  "u32": 500
+                },
+                {
+                  "u64": "50000"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
+}

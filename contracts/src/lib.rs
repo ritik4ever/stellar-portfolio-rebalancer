@@ -7,14 +7,13 @@ use soroban_sdk::{
 };
 use soroban_sdk::token::Client as TokenClient;
 
-#[path = "strategies/dca.rs"]
-mod dca;
 mod circuit_breaker;
 mod events;
 mod nav;
 mod oracle;
 mod portfolio;
 mod reflector;
+mod slippage;
 mod stop_loss;
 mod strategies;
 #[cfg(all(test, feature = "testutils"))]
@@ -936,6 +935,21 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
+    /// Set the contract-level max execution slippage limit (in basis points)
+    /// for an asset class. Admin-only. Values above [`MAX_ASSET_SLIPPAGE_BPS`]
+    /// (500 bps / 5%) are rejected with [`Error::InvalidSlippageLimit`].
+    pub fn set_asset_slippage(env: Env, asset: Address, bps: u32) -> Result<(), Error> {
+        require_admin(&env);
+        slippage::set_asset_slippage(&env, &asset, bps)
+    }
+
+    /// Return the contract-level max execution slippage limit (in basis
+    /// points) for an asset class. Falls back to [`DEFAULT_ASSET_SLIPPAGE_BPS`]
+    /// (100 bps / 1%) when no explicit limit has been configured.
+    pub fn get_asset_slippage(env: Env, asset: Address) -> u32 {
+        slippage::get_asset_slippage(&env, &asset)
+    }
+
     pub fn get_portfolio_value_usd(
         env: Env,
         portfolio_id: u64,
@@ -1117,7 +1131,6 @@ impl PortfolioRebalancer {
         } else {
             0
         };
-        let fee_recipient = fee_config.fee_recipient.clone();
 
         let mut has_actual_balances = false;
         for (_, _) in actual_balances.iter() {
@@ -1167,6 +1180,15 @@ impl PortfolioRebalancer {
                             return Err(Error::SlippageExceeded);
                         }
                         
+                        // Contract-level per-asset slippage guard (#962): derive the
+                        // effective DEX execution price from the reported balances and
+                        // enforce the admin-configurable asset-class limit (default 1%,
+                        // max 5%). `actual_price = expected_price * actual_balance /
+                        // expected_balance` keeps the measured deviation identical to the
+                        // balance-based `slippage_bps` above, so the portfolio-level and
+                        // contract-level checks stay consistent.
+                        let actual_price = (price * actual_balance) / expected_balance;
+                        slippage::check_execution_slippage(env, &asset, price, actual_price)?;
                         // Accumulate for global slippage check
                         total_slippage_bps += slippage_bps;
                     }
@@ -1192,14 +1214,8 @@ impl PortfolioRebalancer {
             let token_client = TokenClient::new(env, &asset);
             if amount > 0 {
                 token_client.transfer(&steward, &contract_address, &abs_amount);
-                if fee_amount > 0 {
-                    token_client.transfer(&contract_address, &fee_recipient, &fee_amount);
-                }
             } else if amount < 0 {
                 token_client.transfer(&contract_address, &steward, &abs_amount);
-                if fee_amount > 0 {
-                    token_client.transfer(&contract_address, &fee_recipient, &fee_amount);
-                }
             }
 
             let current = portfolio.current_balances.get(asset.clone()).unwrap_or(0);

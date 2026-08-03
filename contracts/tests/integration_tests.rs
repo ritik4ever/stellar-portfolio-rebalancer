@@ -6,14 +6,13 @@ use portfolio_rebalancer::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token::TokenClient,
+    token::{StellarAssetClient, TokenClient},
     Address, Env, Map, String, Vec,
 };
 
 fn create_token_and_mint(env: &Env, admin: &Address, to: &Address, amount: i128) -> Address {
     let token_id = env.register_stellar_asset_contract(admin.clone());
-    let token = TokenClient::new(env, &token_id);
-    token.mint(to, &amount);
+    StellarAssetClient::new(env, &token_id).mint(to, &amount);
     token_id
 }
 
@@ -219,12 +218,12 @@ fn integration_rebalance_rejects_corrupted_allocations() {
         let mut portfolio: Portfolio = env
             .storage()
             .persistent()
-            .get(&DataKey::Portfolio(pid))
+            .get(&DataKey::PortfolioV2(pid))
             .unwrap();
         portfolio.target_allocations.set(asset.clone(), 9500);
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(pid), &portfolio);
+            .set(&DataKey::PortfolioV2(pid), &portfolio);
     });
 
     env.ledger().with_mut(|li| {
@@ -472,12 +471,12 @@ fn integration_failed_rebalance_leaves_state_unchanged() {
         let mut portfolio: Portfolio = env
             .storage()
             .persistent()
-            .get(&DataKey::Portfolio(pid))
+            .get(&DataKey::PortfolioV2(pid))
             .unwrap();
         portfolio.target_allocations.set(asset.clone(), 5000);
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(pid), &portfolio);
+            .set(&DataKey::PortfolioV2(pid), &portfolio);
     });
 
     env.ledger().with_mut(|li| {

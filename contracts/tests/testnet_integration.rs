@@ -1,11 +1,12 @@
 #![cfg(feature = "integration")]
 
 use portfolio_rebalancer::{Error, PauseReason, PortfolioRebalancer, PortfolioRebalancerClient, CURRENT_SLIPPAGE_POLICY_VERSION, DEFAULT_ASSET_DECIMALS};
-use soroban_sdk::{testutils::{Address as _, Ledger}, token::TokenClient, Address, Env, Map, String};
+use soroban_sdk::{testutils::{Address as _, Ledger}, token::{StellarAssetClient, TokenClient}, Address, Env, Map, String};
 
 fn create_token_and_mint(env: &Env, admin: &Address, to: &Address, amount: i128) -> Address {
     let token_id = env.register_stellar_asset_contract(admin.clone());
-    let token = TokenClient::new(env, &token_id); token.mint(to, &amount); token_id
+    StellarAssetClient::new(env, &token_id).mint(to, &amount);
+    token_id
 }
 
 mod testnet_reflector {
