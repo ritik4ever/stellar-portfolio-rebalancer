@@ -124,6 +124,7 @@ export const API_CONFIG = {
     ENDPOINTS: {
         HEALTH: '/health',
         READINESS: '/readiness',
+        READINESS_HISTORY: '/readiness/history',
         ROOT: '/',
         /** Versionless auth namespace (matches backend `app.use('/api/auth', authRouter)`) */
 import { browserPriceService } from '../services/browserPriceService'

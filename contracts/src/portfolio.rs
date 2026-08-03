@@ -44,7 +44,7 @@ pub fn calculate_portfolio_value(
             .get(asset.clone())
             .unwrap_or(DEFAULT_ASSET_DECIMALS);
         if let Some(price_data) =
-            reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset))
+            crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
             total_value += balance_to_value(balance, price_data.price);
         }
@@ -115,7 +115,7 @@ pub fn build_rebalance_preview(
     let mut current_prices = Map::new(env);
     for (asset, _) in portfolio.target_allocations.iter() {
         if let Some(price_data) =
-            reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
             if price_data.is_stale(current_time, 3600) {
                 skipped_assets.push_back(asset.clone());
@@ -300,6 +300,16 @@ pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, time
             Symbol::new(env, "cooldown_override"),
         ),
         (portfolio_id, admin, timestamp),
+    );
+}
+
+pub fn emit_dca_executed(env: &Env, portfolio_id: u64, amount: i128, purchases: Map<Address, i128>, timestamp: u64) {
+    env.events().publish(
+        (
+            symbol_short!("portfolio"),
+            Symbol::new(env, "dca_executed"),
+        ),
+        (portfolio_id, amount, purchases, timestamp),
     );
 }
 

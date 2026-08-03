@@ -58,15 +58,17 @@ export interface Portfolio {
     allocations: Record<string, number>
     threshold: number
     slippageTolerancePercent?: number
-    slippageTolerance?: number        // Add this for backward compatibility
-    strategy?: RebalanceStrategyType   // Add this
-    strategyConfig?: RebalanceStrategyConfig  // Add this
+    slippageTolerance?: number
+    strategy?: RebalanceStrategyType
+    strategyConfig?: RebalanceStrategyConfig
     balances: Record<string, number>
     totalValue: number
     createdAt: string
     lastRebalance: string
     version: number
     costBasis?: Record<string, number>
+    /** ISO timestamp until which scheduled rebalancing is paused due to a CVaR/VaR breach. */
+    riskPausedUntil?: string
 }
 
 export type RebalanceTrigger = 'auto' | 'manual' | 'system'
@@ -82,7 +84,7 @@ export type RebalanceReasonCode =
     | 'OTHER'
 
 // Rebalance strategy types
-export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom' | 'dca'
 
 export interface RebalanceStrategyConfig {
     type?: RebalanceStrategyType
@@ -91,6 +93,8 @@ export interface RebalanceStrategyConfig {
     intervalDays?: number
     volatilityThresholdPct?: number
     minDaysBetweenRebalance?: number
+    dcaAmount?: number
+    dcaIntervalDays?: number
 }
 
 export interface UIAllocation {

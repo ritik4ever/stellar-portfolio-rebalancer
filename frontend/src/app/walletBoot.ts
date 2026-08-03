@@ -187,7 +187,7 @@ export async function runBootDiagnostics(
             status: hasWallets ? 'passed' : 'failed',
             message: hasWallets
                 ? 'Stellar wallet detected'
-                : 'No Stellar wallet extension found. Install Freighter, Rabet, or xBull.',
+                : 'No Stellar wallet extension found. Install Freighter, Rabet, xBull, or Hana.',
         })
     } catch {
         checks.push({
