@@ -57,16 +57,24 @@ jobs:
           npm audit --audit-level=high --json > "$AUDIT_JSON" 2>/dev/null || true
 
           # Build jq filter to exclude waived advisory IDs
-          EXCLUDE_FILTER="."
+          EXCLUDE_IDS="[]"
           if [ -f "$WAIVER_FILE" ]; then
             WAIVERS=$(jq -r '.npm[]?.id // empty' "$WAIVER_FILE" 2>/dev/null || true)
             for waiver in $WAIVERS; do
-              EXCLUDE_FILTER="$EXCLUDE_FILTER | del(.vulnerabilities | to_entries[] | select(.value.via[]? | select(type == \"object\" and .url == \"https://github.com/advisories/$waiver\")))"
+              EXCLUDE_IDS=$(echo "$EXCLUDE_IDS" | jq --arg id "$waiver" '. + [$id]')
             done
           fi
 
           echo "::group::npm audit output"
-          FILTERED=$(jq "$EXCLUDE_FILTER" "$AUDIT_JSON")
+          FILTERED=$(jq --argjson exclude "$EXCLUDE_IDS" '
+            .vulnerabilities |= with_entries(
+              select(
+                [.value.via[]? | if type == "object" then .url else . end] | map(
+                  ltrimstr("https://github.com/advisories/")
+                ) | . - $exclude | length > 0
+              )
+            )
+          ' "$AUDIT_JSON")
           HIGH_COUNT=$(echo "$FILTERED" | jq '[.vulnerabilities | to_entries[] | select(.value.severity == "high" or .value.severity == "critical")] | length')
           if [ "$HIGH_COUNT" -gt 0 ]; then
             echo "$FILTERED" | jq -r '.vulnerabilities | to_entries[] | select(.value.severity == "high" or .value.severity == "critical") | "\(.key): \(.value.severity)"'
