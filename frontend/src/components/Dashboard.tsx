@@ -16,6 +16,7 @@ import PriceTracker from './PriceTracker'
 
 import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
+import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
 import { buildPortfolioCloneDraft, savePortfolioCloneDraft, loadPortfolioCloneDraft, clearPortfolioCloneDraft } from '../utils/portfolioCloneDraft'
@@ -185,6 +186,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
             queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
         ])
     }, [queryClient])
 
@@ -991,17 +993,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
-import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
-
-...
-    const refreshData = useCallback(async () => {
-        await Promise.all([
-            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
-            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
-            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
-        ])
-    }, [queryClient])
-...
                             <PriceTracker />
                         </div>
                     </div>
