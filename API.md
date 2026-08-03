@@ -487,6 +487,8 @@ available price contributes zero to `total_value_usd` rather than being assumed.
 
 - **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%. Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}** — Get portfolio by ID.
+- **GET /api/portfolios** — List all portfolios (optional query parameter: `userAddress`).
+- **POST /api/portfolio/{id}/clone** — Clone an existing portfolio (optional body: `{ name }`). Supports `Idempotency-Key`.
 - **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address. When JWT auth is enabled, the token subject must match `:address` (otherwise `403`). In demo mode, public-by-address listing is allowed only when `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is enabled.
 - **GET /api/portfolios/summary** — Dashboard summary of every portfolio for one address in a single request (query: `userAddress`, required). Returns `id`, `name`, `total_value_usd`, `drift_status` (`ok`/`warning`/`critical`), and `last_rebalanced` per portfolio; empty array for an unknown address. Prices are read once from the oracle cache for the whole response. Same ownership rules as `GET /api/user/{address}/portfolios`.
 - **GET /api/portfolio/{id}/rebalance-plan** — Get full read-only rebalance plan (per-asset buy/sell amounts, estimated fees, estimated slippage, projected allocations, prices).

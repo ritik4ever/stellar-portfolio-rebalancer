@@ -11,6 +11,7 @@ import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
+import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema } from './validation.js'
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
@@ -626,6 +627,64 @@ portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Resp
         return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
+    try {
+        const address = (req.query.userAddress || req.query.address) as string | undefined
+        let list: Portfolio[] = []
+        if (address) {
+            list = await portfolioStorage.getUserPortfolios(address)
+        } else {
+            list = await portfolioStorage.getAllPortfolios()
+        }
+        return ok(res, { portfolios: list })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolios list failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const parsed = clonePortfolioSchema.safeParse(req.body ?? {})
+        if (!parsed.success) {
+            const first = parsed.error.issues[0]
+            return fail(res, 400, 'VALIDATION_ERROR', first?.message ?? 'Validation failed')
+        }
+
+        const original = await portfolioStorage.getPortfolio(portfolioId)
+        if (!original) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled) {
+            let nextCalled = false
+            requireJwt(req, res, () => { nextCalled = true })
+            if (!nextCalled) return
+
+            if (req.user?.address !== original.userAddress) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only clone your own portfolio')
+            }
+        }
+
+        const cloneName = parsed.data.name
+        const clone = await portfolioStorage.clonePortfolio(portfolioId, cloneName)
+        if (!clone) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const mode = featureFlags.demoMode ? 'demo' : 'onchain'
+        return ok(res, {
+            portfolioId: clone.id,
+            portfolio: clone,
+            status: 'created',
+            mode
+        }, { status: 201 })
+    } catch (error) {
+        logger.error('[ERROR] Clone portfolio failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
