@@ -12,6 +12,7 @@ describe('AllocationForm', () => {
     const fullyCapableReport: ContractCapabilityReport = {
         severity: 'ok',
         title: 'OK',
+        message: 'All capabilities available',
         writesEnabled: true,
         expectedSchemaVersion: 1,
         availableMethods: ['update_allocations'],
@@ -20,6 +21,7 @@ describe('AllocationForm', () => {
     const uncapableReport: ContractCapabilityReport = {
         severity: 'warning',
         title: 'Warning',
+        message: 'Missing capabilities',
         writesEnabled: true,
         expectedSchemaVersion: 1,
         availableMethods: [], // Missing update_allocations

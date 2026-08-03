@@ -38,6 +38,7 @@ import {
 } from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
+import VisualTestComponents from './pages/VisualTestComponents'
 import PortfolioWizard from './pages/PortfolioWizard'
 import Compare from './pages/Compare'
 import Shortcuts from './components/Shortcuts'
