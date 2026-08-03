@@ -216,7 +216,7 @@ fn integration_rebalance_rejects_corrupted_allocations() {
     });
 
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
-    assert_eq!(result, Err(Ok(Error::InvalidAllocationSum)));
+    assert_eq!(result, Err(Error::InvalidAllocationSum));
 }
 
 // ── Portfolio value USD view (#862) ────────────────────────────────────
@@ -319,7 +319,7 @@ fn integration_emergency_stop_blocks_rebalance() {
     });
 
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
-    assert_eq!(result, Err(Ok(Error::EmergencyStop)));
+    assert_eq!(result, Err(Error::EmergencyStop));
 
     client.set_emergency_stop(&false);
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
