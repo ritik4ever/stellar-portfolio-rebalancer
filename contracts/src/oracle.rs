@@ -59,7 +59,7 @@ pub fn get_validated_price(
 
     let cg_client = CoinGeckoClient::new(env, &cg_addr);
     let cg_price = match cg_client.try_price(&asset) {
-        Ok(Some(p)) => p,
+        Ok(Ok(Some(p))) => p,
         _ => return Some(price_data),
     };
 
