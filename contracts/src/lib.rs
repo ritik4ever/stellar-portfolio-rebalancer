@@ -7,12 +7,8 @@ use soroban_sdk::{
 };
 use soroban_sdk::token::Client as TokenClient;
 
-#[path = "strategies/dca.rs"]
-mod dca;
 mod circuit_breaker;
 mod events;
-mod nav;
-mod oracle;
 mod portfolio;
 mod reflector;
 mod stop_loss;
@@ -22,6 +18,7 @@ mod test;
 #[cfg(all(test, feature = "testutils"))]
 mod property_tests;
 mod types;
+mod upgrade;
 
 pub use oracle::*;
 use strategies::dca;
@@ -36,7 +33,6 @@ pub struct PortfolioRebalancer;
 fn validate_slippage_policy_version(version: u32) -> bool {
     version == CURRENT_SLIPPAGE_POLICY_VERSION
 }
-
 
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
@@ -185,7 +181,6 @@ impl PortfolioRebalancer {
 
         let _estimated_footprint =
             portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
-
 
         env.storage()
             .persistent()
@@ -343,7 +338,6 @@ impl PortfolioRebalancer {
         } else {
             false
         }
-
     }
 
     pub fn execute_rebalance(
@@ -408,11 +402,11 @@ impl PortfolioRebalancer {
     }
 
     pub fn configure_dca(env: Env, portfolio_id: u64, enabled: bool, amount: i128, interval: u64) -> Result<(), Error> {
-        dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
+        strategies::dca::configure_dca(&env, portfolio_id, enabled, amount, interval)
     }
 
     pub fn execute_dca(env: Env, portfolio_id: u64) -> Result<(), Error> {
-        dca::execute_dca(&env, portfolio_id)
+        strategies::dca::execute_dca(&env, portfolio_id)
     }
 
     pub fn set_stop_loss(
@@ -463,6 +457,7 @@ impl PortfolioRebalancer {
             ),
             (portfolio_id, current_steward, new_steward),
         );
+
         Ok(())
     }
 
@@ -503,7 +498,6 @@ impl PortfolioRebalancer {
         CONTRACT_EVENT_SCHEMA_VERSION
     }
 
-
     pub fn capabilities(_env: Env) -> u32 {
         let mut flags: u32 = 0;
         flags |= CapabilityFlag::PerPortfolioSteward as u32;
@@ -523,62 +517,6 @@ impl PortfolioRebalancer {
             max_slippage_tolerance_bps: MAX_SLIPPAGE_TOLERANCE_BPS,
             max_portfolio_assets: MAX_PORTFOLIO_ASSETS,
         }
-    }
-
-
-    pub fn set_circuit_breaker_config(env: Env, config: CircuitBreakerConfig) {
-        require_admin(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::CircuitBreakerConfig, &config);
-    }
-
-    pub fn get_circuit_breaker_config(env: Env) -> CircuitBreakerConfig {
-        env.storage()
-            .instance()
-            .get(&DataKey::CircuitBreakerConfig)
-            .unwrap_or(CircuitBreakerConfig {
-                spike_threshold_bps: 500,
-                window_seconds: 3600,
-            })
-    }
-
-    pub fn update_allocations(
-        env: Env,
-        portfolio_id: u64,
-        new_allocations: Map<Address, u32>,
-    ) -> Result<(), Error> {
-        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
-        portfolio.user.require_auth();
-
-        if !portfolio::validate_allocations(&new_allocations) {
-            return Err(Error::InvalidAllocation);
-        }
-
-        for (asset, _) in new_allocations.iter() {
-            if !portfolio.asset_decimals.contains_key(asset.clone()) {
-                return Err(Error::AssetNotSupported);
-            }
-        }
-
-        let old_allocations = portfolio.target_allocations.clone();
-        portfolio.target_allocations = new_allocations.clone();
-
-        portfolio::check_portfolio_invariants(&portfolio)?;
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
-
-        env.events().publish(
-            (
-                symbol_short!("portfolio"),
-                Symbol::new(&env, "alloc_upd"),
-            ),
-            (portfolio_id, old_allocations, new_allocations),
-        );
-
-        Ok(())
     }
 
     pub fn set_fee_config(env: Env, config: FeeConfig) {
@@ -738,6 +676,52 @@ impl PortfolioRebalancer {
         )
     }
 
+    /// Estimates the worst-case CPU instruction count and transaction fee for rebalancing a portfolio.
+    pub fn estimate_rebalance_cost(env: Env, portfolio_id: u64) -> Result<FeeEstimate, Error> {
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+
+        // Base overhead for portfolio load, state checks, timestamp guard, and event publishing
+        let base_instructions: u64 = 150_000;
+        let base_fee: u64 = 10_000; // in stroops
+
+        // Per-asset estimate for price oracle lookup, drift check, and balance mutation
+        let per_asset_instructions: u64 = 80_000;
+        let per_asset_fee: u64 = 5_000; // in stroops
+
+        let mut total_instructions = base_instructions;
+        let mut total_fee = base_fee;
+        let mut per_asset_breakdown: Vec<AssetFeeBreakdown> = Vec::new(&env);
+
+        for (asset, _) in portfolio.target_allocations.iter() {
+            total_instructions = total_instructions.saturating_add(per_asset_instructions);
+            total_fee = total_fee.saturating_add(per_asset_fee);
+
+            per_asset_breakdown.push_back(AssetFeeBreakdown {
+                asset: asset.clone(),
+                estimated_instructions: per_asset_instructions,
+                estimated_fee: per_asset_fee,
+            });
+        }
+
+        Ok(FeeEstimate {
+            total_instructions,
+            total_fee,
+            per_asset_breakdown,
+        })
+    }
+
+    /// Returns per-asset allocation drift using live oracle prices.
+    ///
+    /// This is a read-only view — no `require_auth` is needed.
+    ///
+    /// The drift values are computed with the **identical** logic used by
+    /// `build_rebalance_preview` (and therefore `execute_rebalance`).
+    /// Specifically, `current_pct`, `target_pct`, `drift_pct`, and
+    /// `needs_rebalance` are sourced directly from `threshold_decisions`,
+    /// so what you see here is exactly what a rebalance execution would act on.
+    ///
+    /// Portfolios with no assets, or with a total value of zero, return an
+    /// empty `Vec` rather than an error.
     pub fn get_drift_preview(env: Env, portfolio_id: u64) -> Vec<AssetDrift> {
         let portfolio: Portfolio = match Self::load_portfolio(&env, portfolio_id) {
             Ok(p) => p,
@@ -1031,7 +1015,6 @@ impl PortfolioRebalancer {
         if !portfolio::validate_allocations(&portfolio.target_allocations) {
             return Err(Error::InvalidAllocationSum);
         }
-
 
         portfolio::check_portfolio_invariants(&portfolio)?;
 

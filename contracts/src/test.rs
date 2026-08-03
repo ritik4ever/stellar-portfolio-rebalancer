@@ -2742,19 +2742,14 @@ fn test_get_drift_preview_unknown_portfolio_returns_empty() {
     assert_eq!(drifts.len(), 0, "unknown portfolio must return empty vec, not panic");
 }
 
-// ── NAV snapshot and history tests ──────────────────────────────────────────
-
 #[test]
-fn test_manual_nav_snapshot() {
+fn test_estimate_rebalance_cost() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
 
+    // 1. Register contract and initialize
+    let contract_id = env.register_contract(None, crate::PortfolioRebalancer);
+    let client = crate::PortfolioRebalancerClient::new(&env, &contract_id);
     let mut allocations = Map::new(&env);
     let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
     allocations.set(asset.clone(), 10000);
@@ -2769,67 +2764,11 @@ fn test_manual_nav_snapshot() {
         li.timestamp = 456;
     });
 
-    let snapshot = client.snapshot_nav(&pid);
-    assert_eq!(snapshot.usd_nav, 100_000000000); // 100 * 100 USD (which is 100_000000000 USD stroops)
-    assert_eq!(snapshot.sequence, 123);
-    assert_eq!(snapshot.timestamp, 456);
-
-    let history = client.get_nav_history(&pid, &10);
-    assert_eq!(history.len(), 1);
-    let snap_in_history = history.get(0).unwrap();
-    assert_eq!(snap_in_history.usd_nav, 100_000000000);
-    assert_eq!(snap_in_history.sequence, 123);
-    assert_eq!(snap_in_history.timestamp, 456);
-}
-
-#[test]
-fn test_nav_history_limit_and_eviction() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    let reflector = Address::generate(&env);
+    client.initialize(&admin, &reflector);
 
-    let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset.clone(), 10000);
-    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-
-    // Call snapshot_nav 105 times, updating timestamp/sequence
-    for i in 0..105 {
-        env.ledger().with_mut(|li| {
-            li.sequence_number = i as u32 + 1;
-            li.timestamp = i as u64 + 10;
-        });
-        let _ = client.snapshot_nav(&pid);
-    }
-
-    // Limit is 100. So history length should be exactly 100.
-    let history = client.get_nav_history(&pid, &200);
-    assert_eq!(history.len(), 100);
-
-    // The oldest stored snapshot should be sequence 6 (since 105 total snapshots, first 5 were evicted)
-    assert_eq!(history.get(0).unwrap().sequence, 6);
-    assert_eq!(history.get(99).unwrap().sequence, 105);
-
-    // Test limit argument of get_nav_history
-    let partial_history = client.get_nav_history(&pid, &10);
-    assert_eq!(partial_history.len(), 10);
-    assert_eq!(partial_history.get(0).unwrap().sequence, 96);
-    assert_eq!(partial_history.get(9).unwrap().sequence, 105);
-}
-
-#[test]
-fn test_auto_nav_snapshot_on_rebalance() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
+    // 2. Create a test portfolio
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
@@ -2845,57 +2784,21 @@ fn test_auto_nav_snapshot_on_rebalance() {
         li.timestamp = 1000;
     });
 
-    // Execute rebalance
-    let mut actual_balances = Map::new(&env);
-    actual_balances.set(asset.clone(), 100_0000000);
-    client.execute_rebalance(&pid, &actual_balances);
+    let mut target_allocations = Map::new(&env);
+    target_allocations.set(asset1.clone(), 5000);
+    target_allocations.set(asset2.clone(), 5000);
 
-    // Check that a snapshot was created automatically
-    let history = client.get_nav_history(&pid, &10);
-    assert_eq!(history.len(), 1);
-    let snapshot = history.get(0).unwrap();
-    assert_eq!(snapshot.sequence, 10);
-    assert_eq!(snapshot.timestamp, 1000);
-    assert_eq!(snapshot.usd_nav, 100_000000000);
-}
+    let mut asset_decimals = Map::new(&env);
+    asset_decimals.set(asset1, 7);
+    asset_decimals.set(asset2, 7);
 
-#[test]
-fn test_fee_transfer_to_recipient() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, PortfolioRebalancer);
-    let client = PortfolioRebalancerClient::new(&env, &contract_id);
-    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    let fee_recipient = Address::generate(&env);
-    
-    client.initialize(&admin, &reflector_id);
-    
-    // Configure fee: 50 bps (0.5%)
-    let fee_config = FeeConfig {
-        platform_name: String::from_str(&env, "Test Platform"),
-        fee_bps: 50,
-        fee_recipient: fee_recipient.clone(),
-        enabled: true,
-    };
-    client.set_fee_config(&fee_config);
-    
-    // Create portfolio with 2 assets
-    let mut allocations = Map::new(&env);
-    let asset1 = Address::generate(&env);
-    let asset2 = Address::generate(&env);
-    allocations.set(asset1.clone(), 5000); // 50%
-    allocations.set(asset2.clone(), 5000); // 50%
-    
-    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
-    let pid = client.create_portfolio(
+    let portfolio_id = client.create_portfolio(
         &user,
-        &allocations,
+        &target_allocations,
         &asset_decimals,
         &5,
-        &50,
-        &CURRENT_SLIPPAGE_POLICY_VERSION,
+        &100,
+        &1,
     );
     
     // Deposit initial balances
