@@ -316,3 +316,60 @@ pub fn emit_dca_executed(env: &Env, portfolio_id: u64, amount: i128, purchases: 
 pub fn validate_slippage_policy_version(version: u32) -> bool {
     version == CURRENT_SLIPPAGE_POLICY_VERSION
 }
+
+pub fn push_rebalance_history(
+    env: &Env,
+    portfolio_id: u64,
+    timestamp: u64,
+    trades_executed: u64,
+    fee_paid: i128,
+) {
+    let key = DataKey::RebalanceHistory(portfolio_id);
+    let mut history: RebalanceHistory = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(RebalanceHistory {
+            records: Vec::new(env),
+            capacity: DEFAULT_REBALANCE_HISTORY_CAPACITY,
+        });
+
+    if history.records.len() >= history.capacity as u32 {
+        history.records.pop_front();
+    }
+
+    history.records.push_back(RebalanceRecord {
+        timestamp,
+        trades_executed,
+        fee_paid,
+    });
+
+    env.storage().persistent().set(&key, &history);
+}
+
+pub fn get_rebalance_history(env: &Env, portfolio_id: u64) -> Vec<RebalanceRecord> {
+    let key = DataKey::RebalanceHistory(portfolio_id);
+    match env.storage().persistent().get(&key) {
+        Some(history) => history.records,
+        None => Vec::new(env),
+    }
+}
+
+pub fn register_portfolio_for_user(env: &Env, user: &Address, portfolio_id: u64) {
+    let key = DataKey::PortfolioByUser(user.clone());
+    let mut ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(Vec::new(env));
+    ids.push_back(portfolio_id);
+    env.storage().persistent().set(&key, &ids);
+}
+
+pub fn list_portfolios_by_user(env: &Env, user: Address) -> Vec<u64> {
+    let key = DataKey::PortfolioByUser(user);
+    match env.storage().persistent().get(&key) {
+        Some(ids) => ids,
+        None => Vec::new(env),
+    }
+}

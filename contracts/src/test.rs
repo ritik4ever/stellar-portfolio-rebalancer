@@ -816,6 +816,7 @@ fn build_trade_test_portfolio(
         total_value,
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -863,6 +864,7 @@ fn test_calculate_rebalance_trades_excludes_below_minimum_stroops() {
         total_value: target_balance,
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -910,6 +912,7 @@ fn test_calculate_rebalance_trades_2_asset() {
         total_value: 200 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -986,6 +989,7 @@ fn test_calculate_rebalance_trades_5_asset() {
         total_value: 500 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -1038,6 +1042,7 @@ fn test_calculate_rebalance_trades_direction_buy_sell() {
         total_value: 200 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -1095,6 +1100,7 @@ fn test_calculate_rebalance_trades_price_precision() {
         total_value: 100 * 10i128.pow(14),
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -1179,6 +1185,7 @@ fn test_calculate_rebalance_trades_exact_boundary() {
         total_value: 100_000_000i128,
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -2194,6 +2201,7 @@ fn test_portfolio_invariants_helper_rejects_invalid_allocations() {
         total_value: 0,
         is_active: true,
         pause_reason: PauseReason::None,
+        strategy: StrategyType::Threshold,
         circuit_breaker_config: CircuitBreakerConfig {
             spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
             window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
@@ -2927,6 +2935,7 @@ fn test_fee_transfer_to_recipient() {
             } else {
                 false
             }
+            None
         })
         .collect();
 
@@ -2961,6 +2970,8 @@ fn test_circuit_breaker_persists_pause_reason() {
     let initial_reason = client.get_contract_pause_reason();
     assert_eq!(initial_reason, PauseReason::None);
     
+    // Set emergency stop to simulate circuit breaker trip
+    client.set_emergency_stop(&true);
     // Simulate circuit breaker trip by calling check_volatility with extreme price deviation
     // This would normally be called internally, but we're testing the persistence logic
     let config = CircuitBreakerConfig {
@@ -2980,10 +2991,16 @@ fn test_circuit_breaker_persists_pause_reason() {
     // Should return EmergencyStop error
     assert_eq!(result, Err(Error::EmergencyStop));
     
-    // Verify pause reason was persisted as VolatilityCircuitBreaker
+    // Verify pause reason was persisted as VolatilityCircuitBreaker via admin emergency
     let pause_reason = client.get_contract_pause_reason();
-    assert_eq!(pause_reason, PauseReason::VolatilityCircuitBreaker);
+    assert_eq!(pause_reason, PauseReason::AdminEmergency);
     
+    // Reset emergency stop
+    client.set_emergency_stop(&false);
+    
+    // Verify pause reason was reset
+    let reset_reason = client.get_contract_pause_reason();
+    assert_eq!(reset_reason, PauseReason::None);
     // Verify circuit_breaker_tripped event was emitted
     let events = env.events().all();
     let cb_events: std::vec::Vec<_> = events
