@@ -1,6 +1,15 @@
 {
   "$schema": "Dependency audit waivers. Advisories listed here are accepted risks.",
   "_docs": "See docs/DEPENDENCY_AUDIT.md for the waiver process.",
-  "npm": [],
+  "npm": [
+    {
+      "id": "GHSA-qwww-vcr4-c8h2",
+      "reason": "react-router CSRF bypass in RSC mode — app does not use RSC, pre-existing dependency"
+    },
+    {
+      "id": "GHSA-5qjj-4xww-7phc",
+      "reason": "valibot record() flatten issue — used only by storybook addon, pre-existing dependency"
+    }
+  ],
   "cargo": []
 }
