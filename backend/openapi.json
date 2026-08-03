@@ -869,6 +869,184 @@
         }
       }
     },
+    "/api/portfolios": {
+      "get": {
+        "tags": [
+          "Portfolio"
+        ],
+        "summary": "List all portfolios",
+        "description": "Get all portfolios, optionally filtered by user address query parameter.",
+        "parameters": [
+          {
+            "name": "userAddress",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of portfolios",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "portfolios": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Portfolio"
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio/{id}/clone": {
+      "post": {
+        "tags": [
+          "Portfolio"
+        ],
+        "summary": "Clone portfolio",
+        "description": "Create a new portfolio cloning the allocations, threshold, and strategy of an existing portfolio.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Optional new name for cloned portfolio"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Portfolio cloned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "portfolioId": {
+                          "type": "string"
+                        },
+                        "portfolio": {
+                          "$ref": "#/components/schemas/Portfolio"
+                        },
+                        "status": {
+                          "type": "string",
+                          "example": "created"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "demo",
+                            "onchain"
+                          ]
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Portfolio not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/user/{address}/portfolios": {
       "get": {
         "tags": [

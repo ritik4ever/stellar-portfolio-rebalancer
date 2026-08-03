@@ -823,6 +823,8 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
     })
 
+    describe('POST /api/v1/portfolio/:id/clone & GET /api/v1/portfolios', () => {
+        let originalPortfolioId: string
     describe('GET /api/portfolio/:id/history - paginated rebalance history', () => {
         let portfolioId: string
 
@@ -831,6 +833,64 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
                 .post('/api/portfolio')
                 .send({
                     userAddress: OWNER_ADDRESS,
+                    allocations: { XLM: 70, USDC: 30 },
+                    threshold: 4
+                })
+
+            expect(res.body.success).toBe(true)
+            originalPortfolioId = res.body.data.portfolioId
+        })
+
+        it('clones portfolio with identical allocations, threshold, and new ID', async () => {
+            const cloneRes = await request(app)
+                .post(`/api/portfolio/${originalPortfolioId}/clone`)
+                .send({ name: 'My Cloned Portfolio' })
+                .expect(201)
+
+            expect(cloneRes.body.success).toBe(true)
+            const clonedData = cloneRes.body.data
+            expect(clonedData.portfolioId).toBeDefined()
+            expect(clonedData.portfolioId).not.toBe(originalPortfolioId)
+
+            const cloned = clonedData.portfolio
+            expect(cloned.id).toBe(clonedData.portfolioId)
+            expect(cloned.userAddress).toBe(OWNER_ADDRESS)
+            expect(cloned.name).toBe('My Cloned Portfolio')
+            expect(cloned.allocations).toEqual({ XLM: 70, USDC: 30 })
+            expect(cloned.threshold).toBe(4)
+
+            // Verify original portfolio is unaffected
+            const origRes = await request(app)
+                .get(`/api/portfolio/${originalPortfolioId}`)
+                .expect(200)
+            expect(origRes.body.data.portfolio.id).toBe(originalPortfolioId)
+            expect(origRes.body.data.portfolio.threshold).toBe(4)
+
+            // Verify clone appears in GET /portfolios list
+            const listRes = await request(app)
+                .get('/api/portfolios')
+                .expect(200)
+
+            expect(listRes.body.success).toBe(true)
+            const portfoliosList = listRes.body.data.portfolios
+            expect(Array.isArray(portfoliosList)).toBe(true)
+            const foundClone = portfoliosList.find((p: any) => p.id === clonedData.portfolioId)
+            expect(foundClone).toBeDefined()
+            expect(foundClone.name).toBe('My Cloned Portfolio')
+            expect(foundClone.allocations).toEqual({ XLM: 70, USDC: 30 })
+        })
+
+        it('returns 404 for cloning non-existent portfolio', async () => {
+            const res = await request(app)
+                .post('/api/portfolio/non-existent-id/clone')
+                .send({ name: 'Invalid Clone' })
+                .expect(404)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error?.code).toBe('NOT_FOUND')
+        })
+    })
+})
                     allocations: { XLM: 60, USDC: 40 },
                     threshold: 5
                 })
