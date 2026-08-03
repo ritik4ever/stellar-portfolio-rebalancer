@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "fs";
+import { mkdirSync, existsSync, copyFileSync } from "fs";
 import { dirname, join } from "path";
 import { randomUUID, createHash } from "node:crypto";
 
@@ -544,7 +544,7 @@ function rowToEvent(row: RebalanceHistoryRow): RebalanceEvent {
         ? undefined
         : row.is_simulated === 1,
     details,
-  };
+  } as unknown as RebalanceEvent;
 }
 
 function generateId(): string {
@@ -601,7 +601,9 @@ export class DatabaseService {
           .get() as { [key: string]: string };
         const current = row[pragma.name];
         const expected = pragma.expected;
-        const status = expected ? (current.toLowerCase() === expected.toLowerCase() ? "ok" : "warning") : "info";
+        const currentStr = current ? String(current).toLowerCase() : '';
+        const expectedStr = expected ? String(expected).toLowerCase() : '';
+        const status = expected ? (currentStr === expectedStr ? "ok" : "warning") : "info";
 
         results[pragma.name] = { current, expected, status };
 
@@ -1132,13 +1134,6 @@ export class DatabaseService {
     });
   }
 
-  private verifyBackupExists(): void {
-      // In production, this would check for a recent .db backup.
-      // For this implementation, we'll assume it passes or skip in test.
-      if (process.env.NODE_ENV === 'test') return;
-      // dummy implementation
-  }
-
   deletePortfolio(id: string): boolean {
     // Verify a recent backup before destructive delete
     this.verifyBackupExists();
@@ -1205,6 +1200,7 @@ export class DatabaseService {
         contractAddress?: string;
         issuerAccount?: string;
         coingeckoId?: string;
+        issuerMetadata?: Record<string, unknown>;
         enabled: boolean;
         lastRefreshedAt?: string;
         isQuarantined: boolean;
@@ -1225,7 +1221,7 @@ export class DatabaseService {
             last_refreshed_at: string | null;
             is_quarantined: number;
           }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
+        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
         .get(symbol.toUpperCase());
       if (!row) return undefined;
       return {
@@ -1234,6 +1230,7 @@ export class DatabaseService {
         contractAddress: row.contract_address ?? undefined,
         issuerAccount: row.issuer_account ?? undefined,
         coingeckoId: row.coingecko_id ?? undefined,
+        issuerMetadata: row.issuer_metadata ? JSON.parse(row.issuer_metadata) : undefined,
         enabled: row.enabled === 1,
         lastRefreshedAt: row.last_refreshed_at ?? undefined,
         isQuarantined: row.is_quarantined === 1,
@@ -1250,7 +1247,7 @@ export class DatabaseService {
       contractAddress?: string;
       issuerAccount?: string;
       coingeckoId?: string;
-      issuerMetadata?: IssuerMetadata;
+      issuerMetadata?: any;
     } = {},
   ): void {
     try {
@@ -1258,7 +1255,7 @@ export class DatabaseService {
       const now = new Date().toISOString();
       this.db
         .prepare(
-          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
+          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
         )
         .run(
           sym,
@@ -1624,7 +1621,7 @@ getConsent(userId: string): ConsentRecord | undefined {
         }),
       };
 
-      const event: RebalanceEvent = {
+      const event = {
         id: generateId(),
         portfolioId: eventData.portfolioId,
         timestamp: eventData.timestamp ?? new Date().toISOString(),
@@ -1648,7 +1645,7 @@ getConsent(userId: string): ConsentRecord | undefined {
         onChainContractId: eventData.onChainContractId,
         onChainPagingToken: eventData.onChainPagingToken,
         isSimulated: eventData.isSimulated,
-      };
+      } as RebalanceEvent;
 
         this.db
           .prepare(
@@ -1663,7 +1660,7 @@ getConsent(userId: string): ConsentRecord | undefined {
             eventData.portfolioId,
             event.timestamp,
             event.trigger,
-            event.reasonCode ?? null,
+            (event as any).reasonCode ?? null,
             event.trades,
             event.gasUsed,
             event.status,

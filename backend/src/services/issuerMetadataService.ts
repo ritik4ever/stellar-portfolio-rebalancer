@@ -39,11 +39,11 @@ export async function fetchIssuerMetadata(domain: string): Promise<IssuerMetadat
   const toml = await StellarToml.Resolver.resolve(domain);
   // Select fields we care about – extend as needed.
   const metadata: IssuerMetadata = {
-    org_name: toml?.ORG_NAME,
-    org_url: toml?.ORG_URL,
-    org_logo: toml?.ORG_LOGO,
-    org_description: toml?.ORG_DESCRIPTION,
-    version: toml?.VERSION,
+    org_name: toml?.ORG_NAME as string | undefined,
+    org_url: toml?.ORG_URL as string | undefined,
+    org_logo: toml?.ORG_LOGO as string | undefined,
+    org_description: toml?.ORG_DESCRIPTION as string | undefined,
+    version: toml?.VERSION as string | undefined,
     // Additional optional fields can be added here.
   };
 

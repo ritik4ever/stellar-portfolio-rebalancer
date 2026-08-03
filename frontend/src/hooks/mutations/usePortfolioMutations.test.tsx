@@ -55,7 +55,7 @@ describe('usePortfolioMutations', () => {
         })
 
         await act(async () => {
-            await result.current.mutateAsync()
+            await result.current.mutateAsync(undefined)
         })
 
         await waitFor(() => {

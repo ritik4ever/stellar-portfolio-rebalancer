@@ -235,6 +235,26 @@ pub struct UpgradeEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringDeposit {
+    pub amount: i128,
+    pub asset: Address,
+    pub interval_seconds: u64,
+    pub last_executed: u64,
+    pub owner: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringDepositExecutedEvent {
+    pub portfolio_id: u64,
+    pub amount: i128,
+    pub asset: Address,
+    pub timestamp: u64,
+    pub rebalance_triggered: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
     ReflectorAddress,
@@ -248,6 +268,7 @@ pub enum DataKey {
     UpgradeAuthority,
     WasmHash,
     LastTimestamp,
+    RecurringDeposit(u64),
     DCAConfig(u64),
     NavHistory(u64),
     StopLoss(u64, Address),
@@ -300,6 +321,9 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
+    RecurringDepositNotConfigured = 29,
+    RecurringDepositTooSoon = 30,
+    InvalidInterval = 31,
 
     BatchTooLarge = 29,
     InvalidOracleAddress = 30,
@@ -402,4 +426,11 @@ pub struct NavSnapshot {
     pub usd_nav: i128,
     pub sequence: u32,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub spike_threshold_bps: u32,
+    pub window_seconds: u64,
 }

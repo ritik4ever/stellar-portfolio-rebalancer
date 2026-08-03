@@ -257,15 +257,6 @@ describe('rateLimitMonitor', () => {
             vi.useFakeTimers()
             vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
 
-            // Create a new instance that WILL set up the interval (not in test env)
-            const { RateLimitMonitor } = await import('../services/rateLimitMonitor.js')
-            const originalEnv = process.env.NODE_ENV
-            process.env.NODE_ENV = 'not-test'
-
-            // We need to re-import to get a fresh instance with interval
-            // Since rateLimitMonitor is a singleton, we test reset indirectly
-            // by checking that the interval logic works
-
             // Record some throttles
             const req = makeReq()
             rateLimitMonitor.recordThrottle(req, 'api')
@@ -274,8 +265,7 @@ describe('rateLimitMonitor', () => {
             expect(rateLimitMonitor.getMetrics().throttledRequests).toBe(1)
             expect(rateLimitMonitor.getMetrics().totalRequests).toBe(1)
 
-            // Restore env
-            process.env.NODE_ENV = originalEnv
+            // Restore timers
             vi.useRealTimers()
         })
 

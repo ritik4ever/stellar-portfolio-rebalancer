@@ -78,5 +78,3 @@ export const AllocationSlider: React.FC<AllocationSliderProps> = ({
   )
 }
 
-</parameter>
-</write_to_file>

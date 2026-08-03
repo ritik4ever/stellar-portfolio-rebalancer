@@ -3,7 +3,7 @@
  * Served at /api-docs via Swagger UI.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const spec: Record<string, any> = {
+const spec: any = {
     openapi: '3.1.0',
     info: {
         title: 'Stellar Portfolio Rebalancer API',
@@ -80,6 +80,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '405': { description: 'Method not allowed' },
                 },
             },
         },
@@ -121,6 +122,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '405': { description: 'Method not allowed' },
                 },
             },
         },
@@ -203,8 +205,11 @@ const spec: Record<string, any> = {
                 security: [{ adminAuth: [] }],
                 responses: {
                     '200': { description: 'Sync result', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '401': { description: 'Unauthorized' },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Admin auth not configured', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -321,6 +326,7 @@ const spec: Record<string, any> = {
                                     allocations: {
                                         type: 'object',
                                         additionalProperties: { type: 'number' },
+                                        minProperties: 1,
                                         description: 'Target weights per asset (e.g. { "XLM": 40, "BTC": 30, "USDC": 30 }), must sum to 100',
                                     },
                                     threshold: { type: 'number', minimum: 1, maximum: 50, description: 'Rebalance threshold %' },
@@ -513,6 +519,7 @@ const spec: Record<string, any> = {
                     '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -693,38 +700,6 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
-                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                },
-            },
-        },
-        '/api/portfolio/{id}/rebalance/dry-run': {
-            post: {
-                tags: ['Portfolio'],
-                summary: 'Dry-run rebalance',
-                description: 'Preview likely rebalance outcome (estimated trades, skipped assets, guardrails) without executing trades or writing rebalance history.',
-                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-                requestBody: {
-                    content: {
-                        'application/json': {
-                            schema: {
-                                type: 'object',
-                                properties: {
-                                    options: {
-                                        type: 'object',
-                                        properties: {
-                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                responses: {
-                    '200': { description: 'Dry-run preview', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
@@ -1077,6 +1052,7 @@ const spec: Record<string, any> = {
                         },
                     },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Service unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1088,8 +1064,11 @@ const spec: Record<string, any> = {
                 security: [{ adminAuth: [] }],
                 responses: {
                     '200': { description: 'Started', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '401': { description: 'Unauthorized' },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Admin auth not configured', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1101,8 +1080,11 @@ const spec: Record<string, any> = {
                 security: [{ adminAuth: [] }],
                 responses: {
                     '200': { description: 'Stopped', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '401': { description: 'Unauthorized' },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Admin auth not configured', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1114,8 +1096,11 @@ const spec: Record<string, any> = {
                 security: [{ adminAuth: [] }],
                 responses: {
                     '200': { description: 'Check completed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '401': { description: 'Unauthorized' },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Admin auth not configured', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1145,9 +1130,12 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Dry-run result', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '401': { description: 'Unauthorized' },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Admin auth not configured', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1163,8 +1151,11 @@ const spec: Record<string, any> = {
                 security: [{ adminAuth: [] }],
                 responses: {
                     '200': { description: 'History list', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '401': { description: 'Unauthorized' },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Admin auth not configured', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1230,6 +1221,8 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Preferences saved', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -1243,6 +1236,8 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Preferences or null', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -1256,6 +1251,8 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Unsubscribed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '405': { description: 'Method not allowed' },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -1439,7 +1436,7 @@ const spec: Record<string, any> = {
                 },
             },
         },
-    },
-};
+    }
+}
 
 export default spec;

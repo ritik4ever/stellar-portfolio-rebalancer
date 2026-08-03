@@ -40,7 +40,7 @@ describe('useRecordConsentMutation', () => {
         })
 
         await act(async () => {
-            await result.current.mutateAsync()
+            await result.current.mutateAsync({})
         })
 
         expect(spy).toHaveBeenCalledWith({ queryKey: consentKeys.status(userId) })
@@ -63,7 +63,9 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-
+        act(() => {
+            result.current.mutate({})
+        })
 
         // onMutate is async (awaits cancelQueries) so wait for optimistic data to appear
         await waitFor(() => {
@@ -87,6 +89,9 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
+        await act(async () => {
+            try { await result.current.mutateAsync({}) } catch { /* expected */ }
+        })
 
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: false })
     })
@@ -112,7 +117,7 @@ describe('useRecordConsentMutation', () => {
         })
 
         await act(async () => {
-            await result.current.mutateAsync()
+            await result.current.mutateAsync({})
         })
         unsubscribe()
 
@@ -137,6 +142,9 @@ describe('useRevokeConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
+        await act(async () => {
+            try { await result.current.mutateAsync() } catch { /* expected */ }
+        })
 
         expect(qc.getQueryData(consentKeys.status(userId))).toEqual({ accepted: true })
     })

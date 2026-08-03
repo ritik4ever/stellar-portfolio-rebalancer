@@ -8,10 +8,10 @@ const VisualTestComponents: React.FC = () => {
             <section id="drift-gauge-test">
                 <h2 className="text-2xl font-bold mb-4">Drift Gauge</h2>
                 <div className="flex flex-wrap gap-4">
-                    <DriftGauge asset={{ id: '1', symbol: 'XLM', weight: 40, drift: 2.5, threshold: 5 }} size={96} />
-                    <DriftGauge asset={{ id: '2', symbol: 'BTC', weight: 30, drift: 6.8, threshold: 5 }} size={96} />
-                    <DriftGauge asset={{ id: '3', symbol: 'ETH', weight: 30, drift: -4.2, threshold: 5 }} size={96} />
-                    <DriftGauge asset={{ id: '4', symbol: 'USDC', weight: 0, drift: 0, threshold: 5 }} size={96} />
+                    <DriftGauge asset={{ name: 'XLM', target: 40, current: 42.5, threshold: 5 }} size={96} />
+                    <DriftGauge asset={{ name: 'BTC', target: 30, current: 36.8, threshold: 5 }} size={96} />
+                    <DriftGauge asset={{ name: 'ETH', target: 30, current: 25.8, threshold: 5 }} size={96} />
+                    <DriftGauge asset={{ name: 'USDC', target: 0, current: 0, threshold: 5 }} size={96} />
                 </div>
             </section>
             

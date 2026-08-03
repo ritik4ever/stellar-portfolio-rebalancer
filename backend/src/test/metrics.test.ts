@@ -72,10 +72,10 @@ describe('metrics endpoint protection', () => {
 
     it('allows localhost IP in production when in allowlist', () => {
         const config = {
-            nodeEnv: 'production' as const,
+            nodeEnv: 'production',
             metricsAllowlist: ['127.0.0.1', '::1'],
             port: 3001,
-            stellarNetwork: 'testnet' as const,
+            stellarNetwork: 'testnet',
             stellarHorizonUrl: 'https://horizon-testnet.stellar.org',
             stellarContractAddress: 'CA3Q2S3Q4J3Q2S3Q4J3Q2S3Q4J3Q2S3Q4J3Q2S3Q4',
             autoRebalancerEnabled: false,
@@ -119,7 +119,7 @@ describe('metrics endpoint protection', () => {
 
     it('blocks external IPs in production without allowlist match', () => {
         const config = {
-            nodeEnv: 'production' as const,
+            nodeEnv: 'production',
             metricsAllowlist: ['10.0.0.0/8'],
         }
 
@@ -136,7 +136,7 @@ describe('metrics endpoint protection', () => {
 
     it('allows listed subnet IPs in production', () => {
         const config = {
-            nodeEnv: 'production' as const,
+            nodeEnv: 'production',
             metricsAllowlist: ['203.0.113.'],
         }
 

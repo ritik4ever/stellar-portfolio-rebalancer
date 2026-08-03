@@ -32,9 +32,9 @@ export function initTracing(): void {
     }),
     traceExporter: exporter,
     instrumentations: [
-      new HttpInstrumentation({
+      new HttpInstrumentation(({
         ignoreIncomingPaths: ["/health", "/ready", "/readiness", "/metrics"],
-      }),
+      }) as unknown as ConstructorParameters<typeof HttpInstrumentation>[0]),
       new ExpressInstrumentation(),
     ],
     spanProcessors: [],

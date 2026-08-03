@@ -11,6 +11,20 @@ let app: Express
 let testDbPath: string
 const envBackup: NodeJS.ProcessEnv = { ...process.env }
 
+const redirectApp = express()
+redirectApp.use(express.json())
+redirectApp.use('/api', legacyApiDeprecation)
+
+redirectApp.get('/api/v1/portfolios', (_req, res) => {
+    res.status(200).json({ ok: true })
+})
+redirectApp.post('/api/v1/portfolios', (req, res) => {
+    res.status(200).json({ body: req.body })
+})
+redirectApp.use('/api/*', (_req, res) => {
+    res.status(404).json({ code: 'NOT_FOUND' })
+})
+
 beforeAll(async () => {
     const testDir = join(tmpdir(), `stellar-deprecation-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
     mkdirSync(testDir, { recursive: true })

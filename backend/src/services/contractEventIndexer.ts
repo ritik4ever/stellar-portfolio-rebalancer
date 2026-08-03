@@ -1,4 +1,5 @@
 import { Address, SorobanRpc, scValToNative } from "@stellar/stellar-sdk";
+import { createHash } from "node:crypto";
 import { databaseService, type IndexerCursorState } from "./databaseService.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -186,10 +187,10 @@ export class ContractEventIndexerService {
   }
 
   resetCursor(fromLedger?: number): void {
-    const resetState = databaseService.resetContractEventIndexerState(
+    const resetState = (databaseService as any).resetContractEventIndexerState(
       fromLedger,
       INDEXER_STATE_NAME,
-    );
+    ) as IndexerCursorState;
     this.status.cursor = resetState.cursor;
     this.status.latestLedger = resetState.latestLedger;
     this.status.lastSuccessfulRunAt = resetState.lastSuccessfulSyncAt;
@@ -398,7 +399,7 @@ export class ContractEventIndexerService {
       this.status.lastFailedRunAt = now;
       this.status.lastError = message;
       this.consecutiveFailures++;
-      this.pushRecentError(`[${now}] ${message}`);
+      this.recentErrors.push(`[${now}] ${message}`);
       this.persistCursorState({
         lastFailedSyncAt: now,
         lastError: message,
@@ -417,7 +418,7 @@ export class ContractEventIndexerService {
 
   private loadPersistedState(): IndexerCursorState {
     try {
-      return databaseService.getContractEventIndexerState(INDEXER_STATE_NAME);
+      return (databaseService as any).getContractEventIndexerState(INDEXER_STATE_NAME) as IndexerCursorState;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("[CHAIN-INDEXER] Failed to read persisted cursor state", {
@@ -430,10 +431,10 @@ export class ContractEventIndexerService {
   private persistCursorState(
     state: Partial<Omit<IndexerCursorState, "name">>,
   ): void {
-    const persisted = databaseService.saveContractEventIndexerState(
+    const persisted = (databaseService as any).saveContractEventIndexerState(
       state,
       INDEXER_STATE_NAME,
-    );
+    ) as IndexerCursorState;
     this.status.cursor = persisted.cursor;
     this.status.latestLedger = persisted.latestLedger;
     this.status.lastSuccessfulRunAt = persisted.lastSuccessfulSyncAt;
@@ -569,137 +570,6 @@ export class ContractEventIndexerService {
         }
 
         return { ingested: result.ingested, validation }
-    }
-
-    async syncOnce(): Promise<{ ingested: number; latestLedger?: number }> {
-        if (!this.isEnabled()) return { ingested: 0 }
-        if (this.isSyncing) return { ingested: 0, latestLedger: this.status.latestLedger }
-
-        const schemaCheck = checkContractEventSchemaVersion()
-        if (!schemaCheck.ok) {
-            this.status.lastRunAt = new Date().toISOString()
-            this.status.lastError = schemaCheck.message
-            this.status.contractEventSchemaOk = false
-            logger.error('[CHAIN-INDEXER] Contract event schema mismatch', { message: schemaCheck.message })
-            return { ingested: 0, latestLedger: this.status.latestLedger }
-        }
-        this.status.contractEventSchemaOk = true
-
-        this.isSyncing = true
-        try {
-            const storedCursor = databaseService.getIndexerState(INDEXER_CURSOR_KEY)
-            const storedLatestLedger = Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || undefined
-
-            let cursor = storedCursor
-            let startLedger: number | undefined
-            if (!cursor) {
-                const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
-                const floorLedger = Math.max(1, latest.sequence - this.bootstrapWindowLedgers)
-                startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
-            }
-
-            let ingested = 0
-            let latestLedger = storedLatestLedger
-            let pagesRead = 0
-
-            while (pagesRead < this.maxPagesPerSync) {
-                const response = await this.rpcCallWithRetry(() =>
-                    this.rpcServer.getEvents({
-                        cursor,
-                        startLedger,
-                        limit: this.pageLimit,
-                        filters: [{ type: 'contract' }]
-                    })
-                )
-                pagesRead++
-                latestLedger = response.latestLedger
-
-                if (!response.events.length) break
-
-                for (const event of response.events) {
-                    let indexed: ReturnType<typeof this.toIndexedOnChainEvent>
-                    try {
-                        indexed = this.toIndexedOnChainEvent(event)
-                    } catch (err) {
-                        logger.warn('[CHAIN-INDEXER] Skipping malformed event', { error: String(err), txHash: event.txHash })
-                        continue
-                    }
-                    if (!indexed) continue
-
-                    const dedupKey = `${indexed.ledger}:${indexed.txHash}:${indexed.kind}:${indexed.portfolioId}`
-                    if (this.seenEventKeys.has(dedupKey)) {
-                        continue
-                    }
-                    this.seenEventKeys.add(dedupKey)
-                    
-                    // Prevent unbounded memory growth
-                    if (this.seenEventKeys.size > 10000) {
-                        const iterator = this.seenEventKeys.values()
-                        for (let i = 0; i < 1000; i++) {
-                            const val = iterator.next().value
-                            if (val !== undefined) {
-                                this.seenEventKeys.delete(val)
-                            }
-                        }
-                    }
-
-                    databaseService.ensurePortfolioExists(indexed.portfolioId, indexed.userAddress || 'ONCHAIN-INDEXER')
-                    databaseService.recordRebalanceEvent({
-                        portfolioId: indexed.portfolioId,
-                        timestamp: indexed.timestamp,
-                        trigger: indexed.trigger,
-                        reasonCode: 'ON_CHAIN_SYNC',
-                        trades: indexed.trades,
-                        gasUsed: 'on-chain',
-                        status: 'completed',
-                        isAutomatic: false,
-                        eventSource: 'onchain',
-                        onChainConfirmed: true,
-                        onChainEventType: indexed.kind,
-                        onChainTxHash: indexed.txHash,
-                        onChainLedger: indexed.ledger,
-                        onChainContractId: indexed.contractId,
-                        onChainPagingToken: indexed.pagingToken,
-                        isSimulated: false
-                    })
-                    ingested++
-                }
-
-                const nextCursor = response.events[response.events.length - 1]?.pagingToken
-                if (!nextCursor || nextCursor === cursor) break
-                cursor = nextCursor
-                startLedger = undefined
-            }
-
-            if (cursor) databaseService.setIndexerState(INDEXER_CURSOR_KEY, cursor)
-            if (latestLedger) databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(latestLedger))
-
-            this.status.lastRunAt = new Date().toISOString()
-            this.status.lastSuccessfulRunAt = this.status.lastRunAt
-            this.status.lastError = undefined
-            this.status.lastIngestedCount = ingested
-            this.status.cursor = cursor
-            this.status.latestLedger = latestLedger
-            this.status.enabled = true
-            this.consecutiveFailures = 0
-
-            return { ingested, latestLedger }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            const now = new Date().toISOString()
-            this.status.lastRunAt = now
-            this.status.lastFailedRunAt = now
-            this.status.lastError = message
-            this.consecutiveFailures++
-            this.pushRecentError(`[${now}] ${message}`)
-            logger.error('[CHAIN-INDEXER] Sync failed', {
-                error: message,
-                consecutiveFailures: this.consecutiveFailures
-            })
-            return { ingested: 0, latestLedger: this.status.latestLedger }
-        } finally {
-            this.isSyncing = false
-        }
     }
 
   private sleep(ms: number): Promise<void> {

@@ -180,8 +180,9 @@ export class StellarService {
                 if (balance.asset_type === 'native') {
                     balances['XLM'] = balance.balance
                 } else {
-                    const assetCode = balance.asset_code
-                    const assetIssuer = balance.asset_issuer
+                    const b = balance as { asset_code: string; asset_issuer: string; balance: string }
+                    const assetCode = b.asset_code
+                    const assetIssuer = b.asset_issuer
                     const key = `${assetCode}:${assetIssuer}`
                     balances[key] = balance.balance
                 }

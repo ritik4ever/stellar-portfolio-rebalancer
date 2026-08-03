@@ -28,6 +28,11 @@ const SENSITIVE_KEY_TOKENS = [
     'x-cg-pro-api-key',
     'x-cg-demo-api-key',
     'smtp_pass',
+    'webhookurl',
+    'webhook',
+    'emailaddress',
+    'email',
+    'smtpuser',
 ];
 
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, '');

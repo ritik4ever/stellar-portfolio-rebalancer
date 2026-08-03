@@ -201,7 +201,7 @@ export function dbGetAndDeleteDigestEventsBefore(cutoffIso: string): Notificatio
         );
     `).run()
 
-    const rows = db.prepare<[], any>(`
+    const rows = db.prepare<[string], any>(`
         SELECT * FROM notification_digest_events WHERE created_at <= ? ORDER BY created_at ASC
     `).all(cutoffIso)
 

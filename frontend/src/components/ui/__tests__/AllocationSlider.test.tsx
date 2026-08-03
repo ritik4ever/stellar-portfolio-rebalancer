@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { AllocationSlider } from '../AllocationSlider'
+import { vi } from 'vitest'
 
 describe('AllocationSlider', () => {
   it('renders correctly with initial value', () => {
@@ -10,7 +11,7 @@ describe('AllocationSlider', () => {
   })
 
   it('handles regular arrow keys to increment/decrement value', () => {
-    const handleChange = jest.fn()
+    const handleChange = vi.fn()
     render(<AllocationSlider label="Stock" value={50} onChange={handleChange} step={1} />)
     
     const slider = screen.getByRole('slider')
@@ -25,7 +26,7 @@ describe('AllocationSlider', () => {
   })
 
   it('handles Shift + arrow keys for larger increments', () => {
-    const handleChange = jest.fn()
+    const handleChange = vi.fn()
     render(<AllocationSlider label="Stock" value={50} onChange={handleChange} step={1} />)
     
     const slider = screen.getByRole('slider')

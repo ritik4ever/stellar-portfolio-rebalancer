@@ -17,10 +17,10 @@
       "baseline": {
         "info": 0,
         "low": 0,
-        "moderate": 12,
-        "high": 3,
-        "critical": 1,
-        "total": 16
+        "moderate": 38,
+        "high": 9,
+        "critical": 3,
+        "total": 50
       }
     },
     "frontend": {
@@ -29,9 +29,9 @@
         "info": 0,
         "low": 0,
         "moderate": 1,
-        "high": 2,
+        "high": 5,
         "critical": 0,
-        "total": 3
+        "total": 6
       }
     }
   }

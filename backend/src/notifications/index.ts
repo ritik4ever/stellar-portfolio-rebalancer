@@ -7,7 +7,7 @@ export async function sendTelegramNotification(
   data: Record<string, unknown>,
   preferences: NotificationPreferences,
 ): Promise<void> {
-  const chatId = (preferences as Record<string, unknown>).telegramChatId as string | undefined
+  const chatId = (preferences as unknown as Record<string, unknown>).telegramChatId as string | undefined
   if (!chatId) return
 
   try {

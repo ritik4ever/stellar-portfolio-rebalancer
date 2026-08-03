@@ -2639,6 +2639,34 @@ fn test_get_config_view_emergency_stop() {
     assert_eq!(config_view.portfolio, PortfolioOption::None);
 }
 
+// ── Recurring Deposits ───────────────────────────────────────────────────
+
+#[test]
+fn test_schedule_recurring_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.schedule_recurring_deposit(&pid, &1000, &asset, &3600);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset.clone()).unwrap_or(0), 0);
+}
+
 // ── get_drift_preview tests ──────────────────────────────────────────────────
 
 #[test]
@@ -2735,7 +2763,13 @@ fn test_get_drift_preview_unknown_portfolio_returns_empty() {
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
+    let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
     // portfolio_id 9999 was never created.
     let drifts = client.get_drift_preview(&9999u64);

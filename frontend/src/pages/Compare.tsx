@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { ArrowLeft, CheckCircle2, XCircle, TrendingUp, TrendingDown, Activity, Gauge, RotateCcw } from 'lucide-react'
@@ -16,9 +15,8 @@ const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
 
 const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => {
   const { t } = useTranslation()
-  const [searchParams, setSearchParams] = useSearchParams()
   const [selectedPortfolioIds, setSelectedPortfolioIds] = useState<string[]>(() => {
-    const params = searchParams.get('portfolios')
+    const params = new URLSearchParams(window.location.search).get('portfolios')
     return params ? params.split(',') : []
   })
 
@@ -28,12 +26,16 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
   const selectedPortfolios = portfolios?.filter(p => selectedPortfolioIds.includes(p.id)) || []
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
     if (selectedPortfolioIds.length > 0) {
-      setSearchParams({ portfolios: selectedPortfolioIds.join(',') })
+      params.set('portfolios', selectedPortfolioIds.join(','))
     } else {
-      setSearchParams({})
+      params.delete('portfolios')
     }
-  }, [selectedPortfolioIds, setSearchParams])
+    const qs = params.toString()
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    window.history.replaceState(null, '', url)
+  }, [selectedPortfolioIds])
 
   const togglePortfolio = (portfolioId: string) => {
     if (selectedPortfolioIds.includes(portfolioId)) {

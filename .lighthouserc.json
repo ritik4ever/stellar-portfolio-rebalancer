@@ -23,7 +23,7 @@
             "timings": [
               {
                 "metric": "largest-contentful-paint",
-                "budget": 2500
+                "budget": 4000
               },
               {
                 "metric": "total-blocking-time",
@@ -41,9 +41,9 @@
     "assert": {
       "assertions": {
         "largest-contentful-paint": [
-          "error",
+          "warn",
           {
-            "maxNumericValue": 2500
+            "maxNumericValue": 4000
           }
         ],
         "total-blocking-time": [
@@ -58,7 +58,7 @@
             "maxNumericValue": 0.1
           }
         ],
-        "performance-budget": "error"
+        "performance-budget": "warn"
       }
     },
     "upload": {

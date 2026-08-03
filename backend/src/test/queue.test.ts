@@ -57,6 +57,16 @@ vi.mock('../services/riskManagements.js', () => {
     return { RiskManagementService }
 })
 
+vi.mock('../services/rebalanceLock.js', () => ({
+    rebalanceLockService: {
+        acquireLock: vi.fn().mockResolvedValue(true),
+        releaseLock: vi.fn().mockResolvedValue(undefined),
+        isLocked: vi.fn().mockResolvedValue(false),
+        init: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+    }
+}))
+
 vi.mock('../services/serviceContainer.js', () => ({
     rebalanceHistoryService: {
         recordRebalanceEvent: vi.fn().mockResolvedValue({ id: 'hist-1' }),
@@ -138,6 +148,7 @@ import { analyticsService } from '../services/analyticsService.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
 import { getRebalanceQueue } from '../queue/queues.js'
 import { StellarService } from '../services/stellar.js'
+import { rebalanceLockService } from '../services/rebalanceLock.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

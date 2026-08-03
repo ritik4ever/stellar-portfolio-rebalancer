@@ -23,7 +23,7 @@ const stablePrices: PricesMap = {
 describe('rebalancingStrategyService', () => {
     it('covers all exported strategy types', () => {
         const strategyTypes = REBALANCE_STRATEGIES.map(s => s.value).sort()
-        expect(strategyTypes).toEqual(['custom', 'periodic', 'threshold', 'volatility'])
+        expect(strategyTypes).toEqual(['custom', 'dca', 'periodic', 'threshold', 'volatility'])
     })
 
     it('triggers threshold strategy when drift exceeds configured threshold', () => {

@@ -1,0 +1,451 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DriftGauge > renders drift approaching threshold 1`] = `
+<div>
+  <div
+    class="relative inline-flex flex-col items-center"
+  >
+    <svg
+      aria-label="XLM: current 54.2%, target 50.0%, drift +4.2%. Status: Approaching threshold."
+      class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+      focusable="true"
+      height="96"
+      role="img"
+      tabindex="0"
+      viewBox="0 0 96 96"
+      width="96"
+    >
+      <path
+        class="text-gray-200 dark:text-gray-700"
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 1 1 76.51054541744159 76.51054541744159"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="7.68"
+      />
+      <path
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 0 1 55.92814960689374 8.467142225602878"
+        fill="none"
+        stroke="#f59e0b"
+        stroke-linecap="round"
+        stroke-width="7.68"
+        style="transition: stroke 0.3s ease, stroke-dashoffset 0.4s ease;"
+      />
+      <line
+        aria-hidden="true"
+        stroke="#6b7280"
+        stroke-linecap="round"
+        stroke-width="2"
+        x1="48"
+        x2="48"
+        y1="12.287999999999997"
+        y2="3.0720000000000027"
+      />
+      <text
+        aria-hidden="true"
+        class="fill-gray-900 dark:fill-white"
+        fill="currentColor"
+        font-size="14.399999999999999"
+        font-weight="600"
+        text-anchor="middle"
+        x="48"
+        y="43.007999999999996"
+      >
+        XLM
+      </text>
+      <text
+        aria-hidden="true"
+        fill="#f59e0b"
+        font-size="12.48"
+        font-weight="500"
+        text-anchor="middle"
+        x="48"
+        y="62.976"
+      >
+        +4.2%
+      </text>
+    </svg>
+    <span
+      aria-hidden="true"
+      class="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400"
+    >
+      +4.2%
+    </span>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge > renders drift exceeding threshold 1`] = `
+<div>
+  <div
+    class="relative inline-flex flex-col items-center"
+  >
+    <svg
+      aria-label="XLM: current 56.8%, target 50.0%, drift +6.8%. Status: Exceeds threshold."
+      class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+      focusable="true"
+      height="96"
+      role="img"
+      tabindex="0"
+      viewBox="0 0 96 96"
+      width="96"
+    >
+      <path
+        class="text-gray-200 dark:text-gray-700"
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 1 1 76.51054541744159 76.51054541744159"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="7.68"
+      />
+      <path
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 0 1 60.70025647250188 9.732443433991314"
+        fill="none"
+        stroke="#ef4444"
+        stroke-linecap="round"
+        stroke-width="7.68"
+        style="transition: stroke 0.3s ease, stroke-dashoffset 0.4s ease;"
+      />
+      <line
+        aria-hidden="true"
+        stroke="#6b7280"
+        stroke-linecap="round"
+        stroke-width="2"
+        x1="48"
+        x2="48"
+        y1="12.287999999999997"
+        y2="3.0720000000000027"
+      />
+      <text
+        aria-hidden="true"
+        class="fill-gray-900 dark:fill-white"
+        fill="currentColor"
+        font-size="14.399999999999999"
+        font-weight="600"
+        text-anchor="middle"
+        x="48"
+        y="43.007999999999996"
+      >
+        XLM
+      </text>
+      <text
+        aria-hidden="true"
+        fill="#ef4444"
+        font-size="12.48"
+        font-weight="500"
+        text-anchor="middle"
+        x="48"
+        y="62.976"
+      >
+        +6.8%
+      </text>
+    </svg>
+    <span
+      aria-hidden="true"
+      class="mt-1 text-xs font-medium text-red-600 dark:text-red-400"
+    >
+      +6.8%
+    </span>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge > renders drift within threshold 1`] = `
+<div>
+  <div
+    class="relative inline-flex flex-col items-center"
+  >
+    <svg
+      aria-label="XLM: current 52.5%, target 50.0%, drift +2.5%. Status: Approaching threshold."
+      class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+      focusable="true"
+      height="96"
+      role="img"
+      tabindex="0"
+      viewBox="0 0 96 96"
+      width="96"
+    >
+      <path
+        class="text-gray-200 dark:text-gray-700"
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 1 1 76.51054541744159 76.51054541744159"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="7.68"
+      />
+      <path
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 0 1 52.73910786550002 7.9594798155773745"
+        fill="none"
+        stroke="#f59e0b"
+        stroke-linecap="round"
+        stroke-width="7.68"
+        style="transition: stroke 0.3s ease, stroke-dashoffset 0.4s ease;"
+      />
+      <line
+        aria-hidden="true"
+        stroke="#6b7280"
+        stroke-linecap="round"
+        stroke-width="2"
+        x1="48"
+        x2="48"
+        y1="12.287999999999997"
+        y2="3.0720000000000027"
+      />
+      <text
+        aria-hidden="true"
+        class="fill-gray-900 dark:fill-white"
+        fill="currentColor"
+        font-size="14.399999999999999"
+        font-weight="600"
+        text-anchor="middle"
+        x="48"
+        y="43.007999999999996"
+      >
+        XLM
+      </text>
+      <text
+        aria-hidden="true"
+        fill="#f59e0b"
+        font-size="12.48"
+        font-weight="500"
+        text-anchor="middle"
+        x="48"
+        y="62.976"
+      >
+        +2.5%
+      </text>
+    </svg>
+    <span
+      aria-hidden="true"
+      class="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400"
+    >
+      +2.5%
+    </span>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge > renders negative drift 1`] = `
+<div>
+  <div
+    class="relative inline-flex flex-col items-center"
+  >
+    <svg
+      aria-label="XLM: current 46.5%, target 50.0%, drift -3.5%. Status: Approaching threshold."
+      class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+      focusable="true"
+      height="96"
+      role="img"
+      tabindex="0"
+      viewBox="0 0 96 96"
+      width="96"
+    >
+      <path
+        class="text-gray-200 dark:text-gray-700"
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 1 1 76.51054541744159 76.51054541744159"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="7.68"
+      />
+      <path
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 0 1 41.37998634634346 8.227172350643698"
+        fill="none"
+        stroke="#f59e0b"
+        stroke-linecap="round"
+        stroke-width="7.68"
+        style="transition: stroke 0.3s ease, stroke-dashoffset 0.4s ease;"
+      />
+      <line
+        aria-hidden="true"
+        stroke="#6b7280"
+        stroke-linecap="round"
+        stroke-width="2"
+        x1="48"
+        x2="48"
+        y1="12.287999999999997"
+        y2="3.0720000000000027"
+      />
+      <text
+        aria-hidden="true"
+        class="fill-gray-900 dark:fill-white"
+        fill="currentColor"
+        font-size="14.399999999999999"
+        font-weight="600"
+        text-anchor="middle"
+        x="48"
+        y="43.007999999999996"
+      >
+        XLM
+      </text>
+      <text
+        aria-hidden="true"
+        fill="#f59e0b"
+        font-size="12.48"
+        font-weight="500"
+        text-anchor="middle"
+        x="48"
+        y="62.976"
+      >
+        -3.5%
+      </text>
+    </svg>
+    <span
+      aria-hidden="true"
+      class="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400"
+    >
+      -3.5%
+    </span>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge > renders with custom label 1`] = `
+<div>
+  <div
+    class="relative inline-flex flex-col items-center"
+  >
+    <svg
+      aria-label="Max Drift: current 51.2%, target 50.0%, drift +1.2%. Status: Within target."
+      class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+      focusable="true"
+      height="96"
+      role="img"
+      tabindex="0"
+      viewBox="0 0 96 96"
+      width="96"
+    >
+      <path
+        class="text-gray-200 dark:text-gray-700"
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 1 1 76.51054541744159 76.51054541744159"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="7.68"
+      />
+      <path
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 0 1 50.27882731031524 7.744449499606127"
+        fill="none"
+        stroke="#22c55e"
+        stroke-linecap="round"
+        stroke-width="7.68"
+        style="transition: stroke 0.3s ease, stroke-dashoffset 0.4s ease;"
+      />
+      <line
+        aria-hidden="true"
+        stroke="#6b7280"
+        stroke-linecap="round"
+        stroke-width="2"
+        x1="48"
+        x2="48"
+        y1="12.287999999999997"
+        y2="3.0720000000000027"
+      />
+      <text
+        aria-hidden="true"
+        class="fill-gray-900 dark:fill-white"
+        fill="currentColor"
+        font-size="14.399999999999999"
+        font-weight="600"
+        text-anchor="middle"
+        x="48"
+        y="43.007999999999996"
+      >
+        Max Drift
+      </text>
+      <text
+        aria-hidden="true"
+        fill="#22c55e"
+        font-size="12.48"
+        font-weight="500"
+        text-anchor="middle"
+        x="48"
+        y="62.976"
+      >
+        +1.2%
+      </text>
+    </svg>
+    <span
+      aria-hidden="true"
+      class="mt-1 text-xs font-medium text-green-600 dark:text-green-400"
+    >
+      +1.2%
+    </span>
+  </div>
+</div>
+`;
+
+exports[`DriftGauge > renders zero drift 1`] = `
+<div>
+  <div
+    class="relative inline-flex flex-col items-center"
+  >
+    <svg
+      aria-label="XLM: current 50.0%, target 50.0%, drift +0.0%. Status: Within target."
+      class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+      focusable="true"
+      height="96"
+      role="img"
+      tabindex="0"
+      viewBox="0 0 96 96"
+      width="96"
+    >
+      <path
+        class="text-gray-200 dark:text-gray-700"
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 1 1 76.51054541744159 76.51054541744159"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="7.68"
+      />
+      <path
+        d="M 19.4894545825584 76.51054541744159 A 40.32 40.32 0 0 1 48 7.68"
+        fill="none"
+        stroke="#22c55e"
+        stroke-linecap="round"
+        stroke-width="7.68"
+        style="transition: stroke 0.3s ease, stroke-dashoffset 0.4s ease;"
+      />
+      <line
+        aria-hidden="true"
+        stroke="#6b7280"
+        stroke-linecap="round"
+        stroke-width="2"
+        x1="48"
+        x2="48"
+        y1="12.287999999999997"
+        y2="3.0720000000000027"
+      />
+      <text
+        aria-hidden="true"
+        class="fill-gray-900 dark:fill-white"
+        fill="currentColor"
+        font-size="14.399999999999999"
+        font-weight="600"
+        text-anchor="middle"
+        x="48"
+        y="43.007999999999996"
+      >
+        XLM
+      </text>
+      <text
+        aria-hidden="true"
+        fill="#22c55e"
+        font-size="12.48"
+        font-weight="500"
+        text-anchor="middle"
+        x="48"
+        y="62.976"
+      >
+        +0.0%
+      </text>
+    </svg>
+    <span
+      aria-hidden="true"
+      class="mt-1 text-xs font-medium text-green-600 dark:text-green-400"
+    >
+      +0.0%
+    </span>
+  </div>
+</div>
+`;

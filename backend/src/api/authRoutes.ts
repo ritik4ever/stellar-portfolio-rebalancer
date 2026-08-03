@@ -196,4 +196,13 @@ router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
     }
 })
 
+router.get('/audit', requireJwt, async (_req: Request, res: Response) => {
+    try {
+        const events = getRecentAuthAuditEvents()
+        return ok(res, { events })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 export const authRouter = router

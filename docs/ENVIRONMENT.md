@@ -109,7 +109,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 ---
 
-## Backend Variables
+## Backend Variable Reference
 
 ### Core
 
@@ -127,6 +127,11 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `WS_PORT` | No | `3001` | WebSocket listen port (typically shares the HTTP port). | `3001` | |
 | `WS_HEARTBEAT_INTERVAL` | No | `30000` | WebSocket ping/pong heartbeat interval (ms). | `30000` | |
 | `CI` | No | _(empty)_ | CI environment marker used by scripts and validation checks. | `true` | |
+| `API_URL` | Yes | `http://localhost:3000` | Public URL of the API service used for webhook callbacks and links. | `https://api.example.com` | |
+| `APP_URL` | Yes | `http://localhost:5173` | Public URL of the frontend app used for CORS and redirects. | `https://app.example.com` | |
+| `ENABLE_API_DOCS` | No | `true` (dev), `false` (prod) | Enable Swagger/OpenAPI docs endpoint. | `true` | Disable in production to avoid leaking API surface. |
+| `HEALTH_PROBE_SECRET` | No | _(empty)_ | Shared secret required by health-check probes. | _(use secrets manager)_ | ⚠️ SECRET — prevents unauthorised health probe access. |
+| `VITEST` | No | `false` | Vitest test runner marker; enables test-only code paths. | `true` | |
 
 ### Database
 
@@ -140,6 +145,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `PGDATABASE` | No | _(empty)_ | PostgreSQL database name. | `stellar_portfolio` | |
 | `DB_POOL_SIZE` | No | `10` | Maximum number of connections in the PostgreSQL pool. | `20` | |
 | `DB_PATH` | No | `./data/portfolio.db` | SQLite database file path used when no PostgreSQL connection is configured. | `./data/portfolio.db` | |
+| `DB_HOST` | No | _(empty)_ | PostgreSQL host — fallback alias for `PGHOST`. | `db.example.com` | |
+| `DB_PORT` | No | `5432` | PostgreSQL port — fallback alias for `PGPORT`. | `5432` | |
+| `DB_USER` | No | _(empty)_ | PostgreSQL username — fallback alias for `PGUSER`. | `stellar_app` | |
+| `DB_PASSWORD` | No | _(empty)_ | PostgreSQL password — fallback alias for `PGPASSWORD`. | _(use secrets manager)_ | ⚠️ SECRET |
+| `DB_NAME` | No | _(empty)_ | PostgreSQL database name — fallback alias for `PGDATABASE`. | `stellar_portfolio` | |
+| `DB_SECRET_ARN` | No | _(empty)_ | AWS Secrets Manager ARN for database credentials. | `arn:aws:secretsmanager:...` | |
+| `AWS_DB_SECRET_ID` | No | _(empty)_ | AWS Secrets Manager secret ID for database credentials. | `my-db-secret` | |
+| `USE_AWS_SECRETS_MANAGER` | No | `false` | Enable AWS Secrets Manager for database/Redis credential retrieval. | `true` | |
+| `REDIS_SECRET_ARN` | No | _(empty)_ | AWS Secrets Manager ARN for Redis credentials. | `arn:aws:secretsmanager:...` | |
+| `AWS_REDIS_SECRET_ID` | No | _(empty)_ | AWS Secrets Manager secret ID for Redis credentials. | `my-redis-secret` | |
 
 ### Stellar & Soroban
 
@@ -159,15 +174,20 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `SOROBAN_EVENT_INDEXER_BOOTSTRAP_WINDOW` | No | `500` | Ledger lookback window used on first sync when no cursor exists. | `500` | |
 | `SOROBAN_EVENT_INDEXER_MAX_PAGES` | No | `10` | Maximum RPC pages consumed per sync cycle. | `10` | |
 | `CONTRACT_EVENT_SCHEMA_VERSION` | No | `1` | Expected contract event schema version. Mismatches block indexing at startup. | `1` | |
+| `ISSUER_METADATA_TTL_MS` | No | `300000` | Cache TTL for issuer metadata lookups (ms). | `300000` | |
 
 ### Price Feed
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `COINGECKO_API_KEY` | No | _(empty)_ | CoinGecko API key for production-grade rate limits. | _(use secrets manager)_ | ⚠️ SECRET — rotate via CoinGecko dashboard. See [rotation guide](#coingecko_api_key--vite_coingecko_api_key). |
+| `COINGECKO_BASE_URL` | No | _(empty)_ | CoinGecko API base URL override. | `https://api.coingecko.com` | |
+| `REFLECTOR_SERVICE_URL` | No | _(empty)_ | Reflector oracle or CoinGecko base URL (set to `http://localhost:8080` or `http://reflector-mock:8080` for offline dev). | `https://api.reflector.network` | |
+| `REFLECTOR_ADDRESS` | No | testnet default | Reflector contract strkey address for on-chain price checks. | `CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO` | |
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
 | `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
 | `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
+| `ORACLE_CACHE_TTL_SECONDS` | No | `60` | Oracle price cache TTL (seconds). | `60` | |
 
 ### Auto-Rebalancer
 
@@ -177,6 +197,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `AUTO_REBALANCE_CHECK_INTERVAL` | No | `3600000` | How often the auto-rebalancer checks all portfolios (ms). | `3600000` | |
 | `MIN_REBALANCE_INTERVAL` | No | `86400000` | Minimum time between successful rebalances per portfolio (ms). | `86400000` | |
 | `MAX_AUTO_REBALANCES_PER_DAY` | No | `3` | Daily cap for automatic rebalances per portfolio. | `3` | |
+| `REBALANCE_DRY_RUN_BASE_FEE_STROOPS` | No | `100` | Base fee (in stroops) used for dry-run rebalance cost estimates. | `100` | |
 
 ### API Rate Limiting
 
@@ -192,12 +213,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `RATE_LIMIT_WRITE_BURST_MAX` | No | `3` | Maximum write requests in the burst window. | `3` | |
 | `API_RATE_LIMIT_WINDOW` | No | `900000` | Security-middleware rate-limit window (ms). | `900000` | |
 | `API_RATE_LIMIT_MAX_REQUESTS` | No | `100` | Security-middleware max requests per window. | `100` | |
+| `RATE_LIMIT_GLOBAL_MAX` | No | `100` | Global rate limit max requests per window. | `100` | |
+| `RATE_LIMIT_GLOBAL_WINDOW_MS` | No | `60000` | Global rate limit sliding window (ms). | `60000` | |
 
 ### Redis
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for BullMQ queues and workers. | `redis://localhost:6379` | ⚠️ SECRET if your Redis instance requires a password (`redis://:password@host:port`). |
+| `REDIS_AUTH_TOKEN` | No | _(empty)_ | Redis auth token injected into `REDIS_URL` for authenticated connections. | `my-secret-token` | ⚠️ SECRET — rotated via AWS Secrets Manager. |
+| `REDIS_PASSWORD` | No | _(empty)_ | Redis password — fallback alias for `REDIS_AUTH_TOKEN`. | `my-redis-pass` | ⚠️ SECRET |
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
 
 ### Risk Controls
@@ -237,6 +262,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `ENABLE_REQUEST_VALIDATION` | No | `true` | Enables request payload schema validation. | `true` | |
 | `ADMIN_PUBLIC_KEYS` | No | _(empty)_ | Comma-separated Stellar public keys allowed to access privileged admin routes. | `GABC...XYZ,GDEF...UVW` | Restrict to known admin accounts only; audit this list on each rotation. |
 | `METRICS_ALLOWLIST` | No | _(empty)_ | Comma-separated IPs/CIDRs permitted to read `/metrics` outside development/test. | `10.0.0.0/8` | |
+| `JWT_CLOCK_SKEW_SEC` | No | `30` | Clock skew tolerance for JWT verification (seconds). | `30` | |
 
 ### Notifications
 
@@ -258,11 +284,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `EMAIL_MAX_BACKOFF_MS` | No | `30000` | Exponential backoff ceiling for email retries (ms). | `30000` | |
 | `EMAIL_BACKOFF_MULTIPLIER` | No | `2` | Exponential multiplier for email retry delays. Must be ≥ 1. | `2` | |
 | `NOTIFICATION_RATE_LIMIT_PER_HOUR` | No | `10` | Maximum notifications sent per user per hour. | `10` | |
+| `TELEGRAM_BOT_TOKEN` | No | _(empty)_ | Telegram bot token for push notifications. | _(use secrets manager)_ | ⚠️ SECRET — never log or expose. Rotate via BotFather. |
+| `UNSUBSCRIBE_SECRET` | No | _(empty)_ | Secret used to sign unsubscribe links and verify opt-out requests. | _(use secrets manager)_ | ⚠️ SECRET — must be consistent for unsubscribe link validity. |
 
 ### Observability
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
+| `OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing. | `true` | |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318/v1/traces` | OTLP exporter endpoint for trace data. | `http://api.example.com:4318/v1/traces` | |
+| `OTEL_SERVICE_NAME` | No | `stellar-portfolio-backend` | Service name attached to OpenTelemetry traces. | `stellar-portfolio-prod` | |
 | `SENTRY_ENABLED` | No | `false` | Enables the backend Sentry integration. | `true` | |
 | `SENTRY_DSN` | No | _(empty)_ | Sentry project DSN for error and performance reporting. | _(see Sentry dashboard)_ | ⚠️ SECRET — if exposed publicly, rotate via Sentry project settings. See [rotation guide](#sentry_dsn--vite_sentry_dsn). |
 | `SENTRY_ENVIRONMENT` | No | `development` | Sentry environment tag. Set to the deployed tier, not the local shell mode. | `production` | |
@@ -310,7 +341,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 ---
 
-## Frontend Variables
+## Frontend Variable Reference
 
 > All `VITE_*` variables are embedded in the browser bundle at build time and are publicly readable.
 > Never put private credentials in `VITE_*` variables.

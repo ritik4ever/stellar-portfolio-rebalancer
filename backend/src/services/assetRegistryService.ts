@@ -9,6 +9,25 @@ import { getFeatureFlags } from '../config/featureFlags.js'
 
 const STALE_POLICY_MS = 5 * 60 * 1000
 const QUARANTINE_POLICY_MS = 30 * 60 * 1000
+const DEFAULT_PAGE_SIZE = 50
+const MAX_PAGE_SIZE = 200
+
+interface AssetQueryOptions {
+    enabledOnly?: boolean
+    search?: string
+    issuer?: string
+    sortBy?: 'symbol' | 'name' | 'enabled'
+    order?: 'asc' | 'desc'
+    page?: number
+    limit?: number
+}
+
+interface AssetQueryResult {
+    assets: AssetRecord[]
+    page: number
+    limit: number
+    total: number
+}
 
 export interface AssetRecord {
     symbol: string
@@ -16,6 +35,7 @@ export interface AssetRecord {
     contractAddress?: string
     issuerAccount?: string
     coingeckoId?: string
+    issuerMetadata?: Record<string, unknown>
     enabled: boolean
     lastRefreshedAt?: string
     isQuarantined: boolean
@@ -53,6 +73,7 @@ export const assetRegistryService = {
             contractAddress: asset.contractAddress,
             issuerAccount: asset.issuerAccount,
             coingeckoId: asset.coingeckoId,
+            issuerMetadata: asset.issuerMetadata,
             enabled: asset.enabled,
             lastRefreshedAt: asset.lastRefreshedAt,
             isQuarantined,
@@ -85,7 +106,10 @@ export const assetRegistryService = {
             limit = DEFAULT_PAGE_SIZE
         } = options
 
-        let assets = databaseService.listAssets(enabledOnly)
+        let assets = databaseService.listAssets(enabledOnly).map(a => ({
+            ...a,
+            stale: a.enabled && a.lastRefreshedAt ? Date.now() - new Date(a.lastRefreshedAt).getTime() > STALE_POLICY_MS : true
+        }))
 
         const term = search?.trim().toUpperCase()
         if (term) {

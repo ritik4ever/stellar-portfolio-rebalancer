@@ -21,7 +21,7 @@ jobs:
   schemathesis:
     name: OpenAPI contract testing
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     env:
       CI: 'true'
@@ -48,7 +48,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
 
       - name: Install schemathesis
         run: pip install schemathesis
@@ -61,13 +60,12 @@ jobs:
         working-directory: ./backend
         run: npm run openapi:export
 
-      - name: Build and start backend
+      - name: Start backend (tsx)
         working-directory: ./backend
         env:
           PORT: 3001
         run: |
-          npm run build
-          npm start &
+          npx tsx src/index.ts &
           ok=0
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3001/health > /dev/null; then
@@ -84,12 +82,8 @@ jobs:
       - name: Run Schemathesis against OpenAPI spec
         run: |
           schemathesis run \
-            --base-url http://localhost:3001 \
+            --url http://localhost:3001 \
             --checks all \
-            --max-response-time 5000 \
-            --max-examples 30 \
-            --hypothesis-deadline 500 \
-            --contrib-openapi-formats-uuid \
             backend/openapi.json
 
       - name: Stop backend

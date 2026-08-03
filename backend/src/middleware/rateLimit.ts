@@ -146,18 +146,18 @@ function isProbePath(path: string): boolean {
   return ["/health", "/ready", "/readiness", "/metrics"].includes(path);
 }
 
-function isTrustedHealthProbe(req: Request): boolean {
-  const path = req.path || "";
-  if (!isProbePath(path)) return false;
+export function isTrustedHealthProbe(req: Request): boolean {
+   const path = req.path || "";
+   if (!isProbePath(path)) return false;
 
-  const ip = req.ip || "";
-  const loopbacks = ["::1", "127.0.0.1", "::ffff:127.0.0.1", "localhost"];
-  if (loopbacks.includes(ip)) return true;
+   const ip = req.ip || "";
+   const loopbacks = ["::1", "127.0.0.1", "::ffff:127.0.0.1", "localhost"];
+   if (loopbacks.includes(ip)) return true;
 
-  const secret = process.env.HEALTH_PROBE_SECRET || "";
-  if (secret && req.headers["x-probe-secret"] === secret) return true;
+   const secret = process.env.HEALTH_PROBE_SECRET || "";
+   if (secret && req.headers["x-probe-secret"] === secret) return true;
 
-  return false;
+   return false;
 }
 
 function skipSuccessfulRequests(

@@ -33,3 +33,4 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
     </div>
   )
 }
+

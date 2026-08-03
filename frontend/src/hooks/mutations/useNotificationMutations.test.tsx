@@ -34,9 +34,11 @@ const samplePrefs = {
     emailAddress: '',
     webhookEnabled: false,
     webhookUrl: '',
+    telegramEnabled: false,
+    telegramChatId: '',
     events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true },
     digestEnabled: false,
-    digestFrequency: 'realtime',
+    digestFrequency: 'realtime' as const,
 }
 
 describe('useNotificationMutations', () => {
@@ -72,7 +74,7 @@ describe('useNotificationMutations', () => {
         })
 
         await act(async () => {
-            await result.current.mutateAsync()
+            await result.current.mutateAsync(undefined)
         })
 
         expect(spy).toHaveBeenCalledWith({ queryKey: notificationKeys.preferences(userId) })

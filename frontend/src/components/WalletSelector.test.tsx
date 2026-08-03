@@ -122,6 +122,11 @@ vi.mock("../config/api", () => ({
   ENDPOINTS: { HEALTH: "/health" },
 }));
 
+vi.mock("../utils/networkDetection", () => ({
+  getConfiguredNetwork: vi.fn(() => "testnet"),
+  detectWalletNetwork: vi.fn().mockResolvedValue(null),
+}));
+
 describe("WalletSelector", () => {
   let mockOnConnect: (publicKey: string) => void;
   let mockOnError: (error: string) => void;

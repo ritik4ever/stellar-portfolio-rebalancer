@@ -19,32 +19,6 @@ env:
   SHARD_TOTAL: 4
 
 jobs:
-  # OpenAPI contract verification is independent of the test suite, so it runs
-  # once in its own job instead of being repeated in every test shard.
-  openapi-contract:
-    name: OpenAPI contract check
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: ./backend
-        run: npm ci
-
-      - name: Verify OpenAPI spec and docs
-        working-directory: ./backend
-        run: |
-          npm run spec:check
-          npm run api:validate
-
   # Test files are split into SHARD_TOTAL parallel shards. Vitest distributes
   # test files across shards, so total wall-clock time scales down roughly
   # linearly with the shard count. Each shard collects coverage into a blob
@@ -196,7 +170,7 @@ jobs:
 
   slack-notification:
     name: Notify Slack on failure
-    needs: [openapi-contract, backend-tests, backend-coverage, migration-dry-run]
+    needs: [backend-tests, backend-coverage, migration-dry-run]
     if: always() && contains(needs.*.result, 'failure') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

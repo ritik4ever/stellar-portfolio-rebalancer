@@ -1,4 +1,5 @@
 import { AutoRebalancerService } from './autoRebalancer.js'
+import type { ExecuteRebalanceOptions } from './stellar.js'
 
 let _autoRebalancerInstance: AutoRebalancerService | null = null
 
@@ -13,4 +14,6 @@ export const autoRebalancer = {
 	forceCheck: () => getAutoRebalancerInstance().forceCheck(),
 	getStatus: () => getAutoRebalancerInstance().getStatus(),
 	getStatistics: () => getAutoRebalancerInstance().getStatistics(),
+	shadowCheck: () => getAutoRebalancerInstance().shadowCheck(),
+	dryRunPortfolioRebalance: (portfolioId: string, options?: ExecuteRebalanceOptions) => getAutoRebalancerInstance().dryRunPortfolioRebalance(portfolioId, options),
 }

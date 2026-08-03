@@ -121,7 +121,7 @@ const RebalanceConfirm: React.FC<RebalanceConfirmProps> = ({
   const handleConfirm = useCallback(async () => {
     if (cooldownRemaining > 0 || !confirmed) return
     try {
-      const result = await executeRebalance.mutateAsync()
+      const result = await executeRebalance.mutateAsync(undefined)
       onSuccess?.(result)
       setLastRebalanceTime(Date.now())
       onClose()

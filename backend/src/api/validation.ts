@@ -193,6 +193,41 @@ export const notificationQuerySchema = z.object({
     reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
+// ─── User Preferences schemas ──────────────────────────────────────────────────
+export const userPreferencesQuerySchema = z.object({
+    userAddress: z.string().min(1, 'userAddress is required').optional(),
+    user_id: z.string().min(1).optional()
+}).refine(
+    (data) => !!(data.userAddress || data.user_id),
+    { message: 'userAddress is required', path: ['userAddress'] }
+);
+
+export const userPreferencesSchema = z.object({
+    emailEnabled: z.boolean().optional(),
+    emailAddress: z.string().email().optional(),
+    webhookEnabled: z.boolean().optional(),
+    webhookUrl: z.string().url().optional(),
+    events: z.object({
+        rebalance: z.boolean().optional(),
+        circuitBreaker: z.boolean().optional(),
+        priceMovement: z.boolean().optional(),
+        riskChange: z.boolean().optional(),
+    }).optional(),
+    digestMode: z.enum(['immediate', 'daily', 'weekly']).optional(),
+}).strict();
+
+// ─── Price/Ohlcv schemas ──────────────────────────────────────────────────────
+export const ohlcvQuerySchema = z.object({
+    symbol: z.string().min(1).optional(),
+    interval: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).optional(),
+    limit: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(1000).optional()
+    ),
+    startTime: z.string().optional(),
+    endTime: z.string().optional(),
+});
+
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
 export const adminAddAssetSchema = z.object({
     symbol: z.string().min(1, 'symbol is required').max(20),

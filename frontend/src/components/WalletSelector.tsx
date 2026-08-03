@@ -64,6 +64,8 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
 
     const handleConnect = async (walletType: string) => {
         setNetworkMismatch(null)
+        setConnecting(walletType)
+
         const configuredNetwork = getConfiguredNetwork()
 
         const detected = await detectWalletNetwork(walletType)
@@ -74,10 +76,10 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                 walletType,
             })
             onError(`Network mismatch: wallet on ${detected}, app expects ${configuredNetwork}`)
+            setConnecting(null)
             return
         }
 
-        setConnecting(walletType)
         try {
             const publicKey = await walletManager.connect(walletType as any)
             onConnect(publicKey)

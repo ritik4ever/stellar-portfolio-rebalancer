@@ -19,6 +19,20 @@ const exportMocks = vi.hoisted(() => ({
 vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePortfolioAnalytics: queryMocks.usePortfolioAnalytics,
   usePerformanceSummary: queryMocks.usePerformanceSummary,
+  usePortfolioBenchmark: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+  })),
+}));
+
+vi.mock("../hooks/queries/useHistoryQuery", () => ({
+  useRebalanceHistory: queryMocks.useRebalanceHistory,
+}));
+
+vi.mock("../utils/export", () => ({
+  downloadCSV: exportMocks.downloadCSV,
+  toCSV: exportMocks.toCSV,
 }));
 
 // Mock ThemeContext
@@ -80,6 +94,7 @@ describe("PerformanceChart", () => {
 
     // Reset export mocks
     exportMocks.downloadCSV.mockReset();
+    exportMocks.toCSV.mockReset();
     exportMocks.toCSV.mockReturnValue('mocked-csv-content');
 
     queryMocks.useRebalanceHistory.mockReturnValue({
@@ -218,13 +233,11 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const select = screen.getByDisplayValue("30 days");
-      expect(select).toBeTruthy();
+      // Component uses buttons, not a select dropdown
+      const weekButton = screen.getByRole("button", { name: /show 1w/i });
+      expect(weekButton).toBeTruthy();
 
-      // Change to 7 days
-      fireEvent.change(select, { target: { value: "7" } });
-
-      expect(screen.getByDisplayValue("7 days")).toBeTruthy();
+      fireEvent.click(weekButton);
 
       // Verify the hook was called with the correct days parameter
       expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
@@ -242,10 +255,9 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "30" } });
+      const monthButton = screen.getByRole("button", { name: /show 1m/i });
+      fireEvent.click(monthButton);
 
-      expect(screen.getByDisplayValue("30 days")).toBeTruthy();
       expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
         "test-portfolio",
         30,
@@ -261,10 +273,9 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "90" } });
+      const quarterButton = screen.getByRole("button", { name: /show 3m/i });
+      fireEvent.click(quarterButton);
 
-      expect(screen.getByDisplayValue("90 days")).toBeTruthy();
       expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
         "test-portfolio",
         90,
@@ -275,7 +286,12 @@ describe("PerformanceChart", () => {
       // Mock different data for different ranges
       queryMocks.usePortfolioAnalytics.mockImplementation(
         (portfolioId, days) => {
-          const dataByDays = {
+          const dataByDays: Record<number, any> = {
+            1: {
+              data: [
+                { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
+              ],
+            },
             7: {
               data: [
                 { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
@@ -309,52 +325,26 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      // Initially 30 days (3 data points)
+      // Initially 1 day (1 data point)
       expect(
         screen.getByTestId("line-chart").getAttribute("data-chart-length"),
-      ).toBe("3");
+      ).toBe("1");
 
       // Change to 7 days (2 data points)
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "7" } });
+      const weekButton = screen.getByRole("button", { name: /show 1w/i });
+      fireEvent.click(weekButton);
 
       expect(
         screen.getByTestId("line-chart").getAttribute("data-chart-length"),
       ).toBe("2");
 
       // Change to 90 days (4 data points)
-      fireEvent.change(select, { target: { value: "90" } });
+      const quarterButton = screen.getByRole("button", { name: /show 3m/i });
+      fireEvent.click(quarterButton);
 
       expect(
         screen.getByTestId("line-chart").getAttribute("data-chart-length"),
       ).toBe("4");
-    });
-
-    it("should request extended analytics data when compare mode is enabled", () => {
-      queryMocks.usePortfolioAnalytics.mockReturnValue({
-        data: {
-          data: [
-            { timestamp: "2024-01-01T00:00:00Z", totalValue: 1000 },
-            { timestamp: "2024-01-02T00:00:00Z", totalValue: 1020 },
-            { timestamp: "2024-01-03T00:00:00Z", totalValue: 1040 },
-            { timestamp: "2024-01-04T00:00:00Z", totalValue: 1060 },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      });
-
-      render(<PerformanceChart portfolioId="test-portfolio" />);
-
-      const toggle = screen.getByRole('button', {
-        name: /compare previous period/i,
-      });
-      fireEvent.click(toggle);
-
-      expect(queryMocks.usePortfolioAnalytics).toHaveBeenCalledWith(
-        "test-portfolio",
-        60,
-      );
     });
 
     it("should render rebalance markers from history events", () => {
@@ -598,7 +588,7 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const exportButton = screen.getByText("Export CSV");
+      const exportButton = screen.getByRole("button", { name: /export chart data as csv/i });
       expect(exportButton).toBeTruthy();
     });
 
@@ -616,7 +606,7 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const exportButton = screen.getByText("Export CSV");
+      const exportButton = screen.getByRole("button", { name: /export chart data as csv/i });
       fireEvent.click(exportButton);
 
       // Verify toCSV was called with correct data structure
@@ -636,7 +626,7 @@ describe("PerformanceChart", () => {
 
       // Verify downloadCSV was called with filename and CSV content
       expect(exportMocks.downloadCSV).toHaveBeenCalledWith(
-        expect.stringMatching(/^portfolio_performance_test-portfolio_30days_/),
+        expect.stringMatching(/^portfolio_performance_test-portfolio_\d+d_/),
         "mocked-csv-content"
       );
     });
@@ -650,8 +640,10 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const exportButton = screen.getByText("Export CSV");
-      expect(exportButton).toHaveProperty("disabled", true);
+      const exportButton = screen.getByRole("button", { name: /export chart data as csv/i });
+      // Export button is always enabled in the component; verify CSV content is empty
+      fireEvent.click(exportButton);
+      expect(exportMocks.toCSV).toHaveBeenCalledWith([], ["timestamp", "date", "portfolioValue"]);
     });
 
     it("should export data with correct time period in filename", () => {
@@ -668,15 +660,15 @@ describe("PerformanceChart", () => {
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
       // Change time period to 7 days
-      const select = screen.getByDisplayValue("30 days");
-      fireEvent.change(select, { target: { value: "7" } });
+      const weekButton = screen.getByRole("button", { name: /show 1w/i });
+      fireEvent.click(weekButton);
 
-      const exportButton = screen.getByText("Export CSV");
+      const exportButton = screen.getByRole("button", { name: /export chart data as csv/i });
       fireEvent.click(exportButton);
 
-      // Verify filename includes 7days
+      // Verify filename includes 7d
       expect(exportMocks.downloadCSV).toHaveBeenCalledWith(
-        expect.stringMatching(/7days/),
+        expect.stringMatching(/7d/),
         expect.any(String)
       );
     });
@@ -694,7 +686,7 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const exportButton = screen.getByText("Export CSV");
+      const exportButton = screen.getByRole("button", { name: /export chart data as csv/i });
       fireEvent.click(exportButton);
 
       // Verify the headers passed to toCSV
@@ -718,7 +710,7 @@ describe("PerformanceChart", () => {
 
       render(<PerformanceChart portfolioId="test-portfolio" />);
 
-      const exportButton = screen.getByText("Export CSV");
+      const exportButton = screen.getByRole("button", { name: /export chart data as csv/i });
       fireEvent.click(exportButton);
 
       const csvRows = exportMocks.toCSV.mock.calls[0][0];

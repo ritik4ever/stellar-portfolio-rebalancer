@@ -68,9 +68,12 @@ describe('Compare', () => {
   it('renders comparison table for 3 portfolios', async () => {
     render(<Compare onNavigate={onNavigate} publicKey={'GA-test-key'} />)
 
-    const card1 = screen.getByText('Growth Portfolio').closest('div')
-    const card2 = screen.getByText('Income Portfolio').closest('div')
-    const card3 = screen.getByText('Balanced Portfolio').closest('div')
+    const allCards = screen.getAllByText('Growth Portfolio')
+    const card1 = allCards[0].closest('div')
+    const allCards2 = screen.getAllByText('Income Portfolio')
+    const card2 = allCards2[0].closest('div')
+    const allCards3 = screen.getAllByText('Balanced Portfolio')
+    const card3 = allCards3[0].closest('div')
     if (card1) fireEvent.click(card1)
     if (card2) fireEvent.click(card2)
     if (card3) fireEvent.click(card3)

@@ -92,7 +92,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
   }, [analyticsData])
 
   const exportChartDataCSV = () => {
-    const rows = formatChartData.map((dataPoint) => ({
+    const rows = formatChartData.map((dataPoint: any) => ({
       timestamp: dataPoint.timestamp,
       date: dataPoint.date,
       portfolioValue: dataPoint.value,

@@ -13,7 +13,7 @@
  */
 import * as queueConnection from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
-import type { Redis } from 'ioredis'
+import { Redis } from 'ioredis'
 
 const SESSION_TTL_SECONDS = 60 * 60   // 1 hour
 const KEY_PREFIX = 'demo:session:'

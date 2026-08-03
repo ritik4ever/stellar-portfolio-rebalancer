@@ -28,8 +28,10 @@ import { getAccessToken } from '../services/authService'
 import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
-import { usePortfolioExport } from '../hooks/usePortfolio'
 import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
+import { DriftGaugeGrid, DriftGaugeAsset } from './DriftGauge'
+import PriceCandlestick, { RebalanceEvent as CandlestickRebalanceEvent } from './PriceCandlestick'
+import { trackEvent } from '../analytics'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -199,7 +201,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
 
     const executeRebalance = useCallback(async () => {
         try {
-            const result = await executeRebalanceMutation.mutateAsync()
+            const result = await executeRebalanceMutation.mutateAsync(undefined)
             trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
             setRebalanceNotice({
                 type: 'success',
@@ -334,6 +336,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const startClonePortfolio = useCallback(() => {
         if (portfolioData?.id && portfolioData.id !== 'demo') {
             const draft = buildPortfolioCloneDraft(portfolioData)
+            if (!draft) return
             savePortfolioCloneDraft(draft)
             onNavigate('setup')
         }
@@ -991,17 +994,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
-import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
 
-...
-    const refreshData = useCallback(async () => {
-        await Promise.all([
-            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
-            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
-            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
-        ])
-    }, [queryClient])
-...
                             <PriceTracker />
                         </div>
                     </div>
@@ -1045,7 +1038,7 @@ import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
                 {/* Notifications Tab */}
                 {activeTab === 'notifications' && (
                     <div className="space-y-6">
-                        <NotificationPreferences publicKey={publicKey} />
+                        <NotificationPreferences userId={publicKey ?? ''} />
                     </div>
                 )}
             </div>

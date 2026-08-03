@@ -52,7 +52,7 @@ describe('ThemeContext', () => {
 
     afterEach(() => {
         cleanup()
-        delete (window as Window & { matchMedia?: unknown }).matchMedia
+        delete (window as any).matchMedia
     })
 
     it('bootstraps dark class from stored preference', () => {

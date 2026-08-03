@@ -18,9 +18,21 @@ import { logger } from "../utils/logger.js";
 type ReadinessState = "ready" | "not_ready" | "disabled";
 
 // ── Readiness cache ─────────────────────────────────────────────────────────
+export interface ReadinessReport {
+  status: "ready" | "not_ready" | "disabled";
+  timestamp: string;
+  uptimeSeconds: number;
+  checks: Record<string, ReadinessCheck>;
+  probeBypass: {
+    probePaths: string[];
+    loopbackBypassEnabled: boolean;
+    secretConfigured: boolean;
+  };
+}
+
 interface CacheEntry {
-  report: object
-  expiresAt: number
+  report: ReadinessReport;
+  expiresAt: number;
 }
 
 let cacheTtlMs = parseInt(process.env.READINESS_CACHE_TTL_MS || "2000", 10)
@@ -325,7 +337,7 @@ export async function buildReadinessReport() {
     secretConfigured: Boolean(process.env.HEALTH_PROBE_SECRET),
   };
 
-  const report = {
+  const report: ReadinessReport = {
     status: ready ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),

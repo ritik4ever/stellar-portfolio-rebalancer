@@ -69,7 +69,7 @@ export async function runStartupSelfTest(
     const databaseCheck = await checkDatabase()
     checks.push(databaseCheck)
 
-    const redisAvailable = await probeRedis()
+    const redisAvailable = await probeRedis(config)
     const queueChecks = await checkQueues(redisAvailable)
     checks.push(...queueChecks)
 
@@ -242,7 +242,7 @@ async function checkProviders(): Promise<StartupSelfTestCheck[]> {
             remediation: diagnostics.summary.connectivityOk && diagnostics.summary.contractReachable
                 ? undefined
                 : 'Verify STELLAR_HORIZON_URL, STELLAR_NETWORK, and CONTRACT_ADDRESS before rerunning the self-test.',
-            details: diagnostics.summary,
+            details: diagnostics.summary as unknown as Record<string, unknown>,
         })
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

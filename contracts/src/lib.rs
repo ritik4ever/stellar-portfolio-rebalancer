@@ -7,6 +7,7 @@ use soroban_sdk::{
 };
 use soroban_sdk::token::Client as TokenClient;
 
+mod deposits;
 #[path = "strategies/dca.rs"]
 mod dca;
 mod circuit_breaker;
@@ -14,7 +15,13 @@ mod events;
 mod nav;
 mod oracle;
 mod portfolio;
+
+
+
 mod reflector;
+mod circuit_breaker;
+mod events;
+mod nav;
 mod stop_loss;
 mod strategies;
 #[cfg(all(test, feature = "testutils"))]
@@ -27,11 +34,13 @@ pub use oracle::*;
 use strategies::dca;
 pub use reflector::*;
 pub use types::*;
+pub use portfolio::*;
 pub use events::emit_dca_executed;
 pub use strategies::*;
 
 #[contract]
 pub struct PortfolioRebalancer;
+
 
 fn validate_slippage_policy_version(version: u32) -> bool {
     version == CURRENT_SLIPPAGE_POLICY_VERSION
@@ -145,6 +154,8 @@ impl PortfolioRebalancer {
         if target_allocations.len() > MAX_PORTFOLIO_ASSETS {
             return Err(Error::TooManyAssets);
         }
+
+
         if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
             return Err(Error::InvalidThreshold);
         }
@@ -184,6 +195,9 @@ impl PortfolioRebalancer {
         };
 
         let _estimated_footprint =
+
+            // portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
+
             portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
 
 
@@ -250,6 +264,142 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
         portfolio::emit_portfolio_deposit(&env, portfolio_id, asset, amount);
+        Ok(())
+    }
+
+    pub fn schedule_recurring_deposit(
+        env: Env,
+        portfolio_id: u64,
+        amount: i128,
+        asset: Address,
+        interval_seconds: u64,
+    ) -> Result<(), Error> {
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        if interval_seconds == 0 {
+            return Err(Error::InvalidInterval);
+        }
+
+        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
+            return Err(Error::EmergencyStop);
+        }
+
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+
+        let recurring = RecurringDeposit {
+            amount,
+            asset: asset.clone(),
+            interval_seconds,
+            last_executed: 0,
+            owner: portfolio.user.clone(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::RecurringDeposit(portfolio_id), &recurring);
+        deposits::emit_recurring_deposit_scheduled(
+            &env,
+            portfolio_id,
+            amount,
+            asset,
+            interval_seconds,
+        );
+        Ok(())
+    }
+
+    pub fn cancel_recurring_deposit(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
+            return Err(Error::EmergencyStop);
+        }
+
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::RecurringDeposit(portfolio_id))
+        {
+            return Err(Error::RecurringDepositNotConfigured);
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RecurringDeposit(portfolio_id));
+        deposits::emit_recurring_deposit_cancelled(&env, portfolio_id);
+        Ok(())
+    }
+
+    pub fn execute_recurring_deposit(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        let recurring: RecurringDeposit = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RecurringDeposit(portfolio_id))
+            .ok_or(Error::RecurringDepositNotConfigured)?;
+
+        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
+            return Err(Error::EmergencyStop);
+        }
+
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        if !portfolio.is_active {
+            return Err(Error::PortfolioPaused);
+        }
+
+        let current_time = guard_ledger_timestamp(&env);
+        if current_time < recurring.last_executed.saturating_add(recurring.interval_seconds) {
+            return Err(Error::RecurringDepositTooSoon);
+        }
+
+        let balance = portfolio
+            .current_balances
+            .get(recurring.asset.clone())
+            .unwrap_or(0);
+        portfolio
+            .current_balances
+            .set(recurring.asset.clone(), balance + recurring.amount);
+
+        let mut updated_recurring = recurring.clone();
+        updated_recurring.last_executed = current_time;
+        env.storage()
+            .persistent()
+            .set(&DataKey::RecurringDeposit(portfolio_id), &updated_recurring);
+
+        let mut rebalance_triggered = false;
+        let rebalance_needed = Self::check_rebalance_needed_internal(
+            &env,
+            &portfolio,
+        );
+        if rebalance_needed {
+            let result = Self::execute_rebalance_internal(
+                &env,
+                portfolio_id,
+                Map::new(&env),
+                false,
+                None,
+                true,
+            );
+            if result.is_ok() {
+                rebalance_triggered = true;
+            }
+        }
+
+        if !rebalance_triggered {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+        }
+
+        deposits::emit_recurring_deposit_executed(
+            &env,
+            portfolio_id,
+            recurring.amount,
+            recurring.asset,
+            current_time,
+            rebalance_triggered,
+        );
         Ok(())
     }
 
@@ -351,7 +501,7 @@ impl PortfolioRebalancer {
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None, false)
     }
 
     pub fn batch_rebalance(
@@ -391,7 +541,7 @@ impl PortfolioRebalancer {
     ) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(admin))
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(admin), false)
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {
@@ -512,6 +662,7 @@ impl PortfolioRebalancer {
         flags
     }
 
+
     pub fn capability_summary(env: Env) -> ContractCapabilitySummary {
         ContractCapabilitySummary {
             version: Self::version(env.clone()),
@@ -587,6 +738,11 @@ impl PortfolioRebalancer {
         if config.fee_bps > MAX_FEE_BPS {
             panic!("fee_bps must be between 0 and 50");
         }
+        env.storage().instance().set(&DataKey::FeeConfig, &config);
+        env.events().publish(
+            (Symbol::new(&env, "FeeConfigUpdated"),),
+            config.clone(),
+        );
         
         let current_time = env.ledger().timestamp();
         let execute_after = current_time.saturating_add(TIMELOCK_DELAY_SECONDS);
@@ -698,22 +854,32 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
+
+    /// Returns the minimum allowed rebalance threshold percentage.
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
         MIN_REBALANCE_THRESHOLD
     }
 
+
+    /// Returns the maximum allowed rebalance threshold percentage.
     pub fn max_rebalance_threshold(_env: Env) -> u32 {
         MAX_REBALANCE_THRESHOLD
     }
 
+
+    /// Returns the minimum allowed slippage tolerance in basis points.
     pub fn min_slippage_tolerance_bps(_env: Env) -> u32 {
         MIN_SLIPPAGE_TOLERANCE_BPS
     }
 
+
+    /// Returns the maximum allowed slippage tolerance in basis points.
     pub fn max_slippage_tolerance_bps(_env: Env) -> u32 {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
 
+
+    /// Returns the maximum number of assets allowed in a portfolio.
     pub fn max_portfolio_assets(_env: Env) -> u32 {
         MAX_PORTFOLIO_ASSETS
     }
@@ -843,6 +1009,8 @@ impl PortfolioRebalancer {
             .get(&DataKey::ContractPauseReason)
             .unwrap_or(PauseReason::None)
     }
+
+
 
     pub fn get_config_view(env: Env, portfolio_id: u64) -> ConfigView {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -994,6 +1162,39 @@ impl PortfolioRebalancer {
         })
     }
 
+    fn check_rebalance_needed_internal(
+        env: &Env,
+        portfolio: &Portfolio,
+    ) -> bool {
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(env, &reflector_address);
+
+        let total_value = match portfolio::calculate_portfolio_value(
+            env,
+            &portfolio.current_balances,
+            &portfolio.asset_decimals,
+            &reflector_client,
+        ) {
+            Ok(val) => val,
+            Err(_) => return false,
+        };
+
+        if total_value == 0 {
+            return false;
+        }
+
+        let preview = portfolio::build_rebalance_preview(env, portfolio, &reflector_client);
+        if let Ok(p) = preview {
+            p.rebalance_needed
+        } else {
+            false
+        }
+    }
+
     fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
         // Try V2 (strategy-aware) first.
         if let Some(p) = env.storage().persistent().get(&DataKey::PortfolioV2(portfolio_id)) {
@@ -1021,6 +1222,7 @@ impl PortfolioRebalancer {
         actual_balances: Map<Address, i128>,
         bypass_cooldown: bool,
         override_admin: Option<Address>,
+        skip_auth: bool,
     ) -> Result<(), Error> {
         if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
             return Err(Error::EmergencyStop);
@@ -1028,6 +1230,9 @@ impl PortfolioRebalancer {
 
         let mut portfolio = Self::load_portfolio(env, portfolio_id)?;
 
+
+
+        // Issue #861: validate allocations sum to exactly ALLOCATION_DENOMINATOR (10000 bps)
         if !portfolio::validate_allocations(&portfolio.target_allocations) {
             return Err(Error::InvalidAllocationSum);
         }
@@ -1039,12 +1244,14 @@ impl PortfolioRebalancer {
             return Err(Error::PortfolioPaused);
         }
 
-        let steward: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Steward(portfolio_id))
-            .unwrap_or(portfolio.user.clone());
-        steward.require_auth();
+        if !skip_auth {
+            let steward: Address = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Steward(portfolio_id))
+                .unwrap_or(portfolio.user.clone());
+            steward.require_auth();
+        }
 
         let current_time = guard_ledger_timestamp(env);
         if !bypass_cooldown
@@ -1062,6 +1269,15 @@ impl PortfolioRebalancer {
             .get(&DataKey::ReflectorAddress)
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
+
+        let cb_config: CircuitBreakerConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::CircuitBreakerConfig)
+            .unwrap_or(CircuitBreakerConfig {
+                spike_threshold_bps: 500,
+                window_seconds: 3600,
+            });
 
         let triggered = stop_loss::check_stop_losses(env, portfolio_id, &portfolio, &reflector_client);
         let has_triggered = triggered.len() > 0;
