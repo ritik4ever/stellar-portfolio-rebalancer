@@ -113,7 +113,7 @@ describe('GET /portfolios/summary', () => {
     it('rejects a request with no userAddress', async () => {
         const res = await request(app).get(SUMMARY_PATH)
 
-        expect(res.status).toBe(422)
+        expect(res.status).toBe(400)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
 

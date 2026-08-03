@@ -75,7 +75,8 @@ debugRouter.get('/debug/coingecko-test', blockDebugInProduction, requireAdmin, a
 
         const response = {
             responseStatus: fetchResponse.status,
-            responseData: data
+            responseData: data,
+            apiKeySet: !!apiKey,
         }
         return ok(res, redactObject(response))
     } catch (error) {
