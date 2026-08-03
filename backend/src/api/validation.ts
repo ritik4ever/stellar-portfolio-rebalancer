@@ -57,6 +57,10 @@ export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
     version: z.number().int().min(1, "Version must be a positive integer")
 });
 
+// Schema for POST /portfolio/:id/clone
+export const clonePortfolioSchema = z.object({
+    name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name cannot exceed 100 characters').optional()
+}).strict();
 // Schema for GET /portfolios/summary
 export const portfolioSummaryQuerySchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),

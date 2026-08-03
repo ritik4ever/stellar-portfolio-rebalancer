@@ -258,6 +258,8 @@ pub enum DataKey {
     CircuitBreakerConfig,
     /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
     PortfolioV2(u64),
+    QueuedFeeConfig,
+    QueuedUpgrade,
     Template(String),
     TemplateNames,
 }
@@ -306,9 +308,10 @@ pub enum Error {
     InvalidAllocationSum = 28,
     BatchTooLarge = 29,
     InvalidOracleAddress = 30,
-    TemplateNotFound = 31,
-    TemplateAlreadyExists = 32,
-    TooManyTemplates = 33,
+    TimelockNotElapsed = 31,
+    TemplateNotFound = 32,
+    TemplateAlreadyExists = 33,
+    TooManyTemplates = 34,
 }
 
 #[contracttype]
@@ -323,6 +326,20 @@ pub struct BatchRebalanceResult {
 pub enum BatchRebalanceResultStatus {
     Success,
     Failed(Error),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedFeeConfig {
+    pub config: FeeConfig,
+    pub execute_after: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub execute_after: u64,
 }
 
 #[contracttype]

@@ -5,22 +5,30 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+use soroban_sdk::token::Client as TokenClient;
 
+#[path = "strategies/dca.rs"]
+mod dca;
 mod circuit_breaker;
+mod events;
 mod nav;
+mod oracle;
 mod portfolio;
 mod reflector;
 mod stop_loss;
 mod strategies;
 mod templates;
-#[cfg(test)]
+#[cfg(all(test, feature = "testutils"))]
 mod test;
+#[cfg(all(test, feature = "testutils"))]
+mod property_tests;
 mod types;
 
+pub use oracle::*;
+use strategies::dca;
 pub use reflector::*;
 pub use types::*;
 pub use events::emit_dca_executed;
-pub use strategies::dca;
 pub use strategies::*;
 
 #[contract]
@@ -551,6 +559,27 @@ impl PortfolioRebalancer {
             .unwrap_or(portfolio.user)
     }
 
+    pub fn set_coingecko_address(env: Env, address: Address) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CoinGeckoAddress, &address);
+    }
+
+    pub fn set_oracle_config(env: Env, config: OracleConfig) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleConfig, &config);
+    }
+
+    pub fn get_oracle_config(env: Env) -> OracleConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleConfig)
+            .unwrap_or(OracleConfig::default())
+    }
+
     pub fn version(_env: Env) -> u32 {
         CONTRACT_VERSION
     }
@@ -912,10 +941,9 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::EmergencyStop)
             .unwrap_or(false);
-        let portfolio: PortfolioOption = if let Some(p) = env
-            .storage()
+        let portfolio: PortfolioOption = if let Some(p) =        env.storage()
             .persistent()
-            .get::<Portfolio>(&DataKey::PortfolioV2(portfolio_id))
+            .get(&DataKey::PortfolioV2(portfolio_id))
         {
             PortfolioOption::Some(p)
         } else if let Some(legacy) = env
@@ -943,7 +971,7 @@ impl PortfolioRebalancer {
         }
     }
 
-    pub fn set_circuit_breaker_config(
+    pub fn set_pf_circuit_breaker(
         env: Env,
         portfolio_id: u64,
         spike_threshold_bps: u32,
@@ -951,13 +979,7 @@ impl PortfolioRebalancer {
     ) -> Result<(), Error> {
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let caller_is_admin = env.auth().is_authorized(&admin);
-        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
-        
-        if !caller_is_admin && !caller_is_owner {
-            return Err(Error::PortfolioNotFound);
-        }
+        portfolio.user.require_auth();
         
         portfolio.circuit_breaker_config = CircuitBreakerConfig {
             spike_threshold_bps,
@@ -983,13 +1005,7 @@ impl PortfolioRebalancer {
     ) -> Result<(), Error> {
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let caller_is_admin = env.auth().is_authorized(&admin);
-        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
-        
-        if !caller_is_admin && !caller_is_owner {
-            return Err(Error::PortfolioNotFound);
-        }
+        portfolio.user.require_auth();
         
         portfolio.global_max_slippage_bps = global_max_slippage_bps;
         
@@ -1186,7 +1202,7 @@ impl PortfolioRebalancer {
         } else {
             0
         };
-        let fee_recipient = fee_config.fee_recipient;
+        let fee_recipient = fee_config.fee_recipient.clone();
 
         let mut has_actual_balances = false;
         for (_, _) in actual_balances.iter() {
@@ -1321,13 +1337,7 @@ impl PortfolioRebalancer {
     pub fn close_portfolio(env: Env, portfolio_id: u64) -> Result<(), Error> {
         let portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let caller_is_admin = env.auth().is_authorized(&admin);
-        let caller_is_owner = env.auth().is_authorized(&portfolio.user);
-        
-        if !caller_is_admin && !caller_is_owner {
-            return Err(Error::PortfolioNotFound);
-        }
+        portfolio.user.require_auth();
         
         // Sweep all asset balances to the owner
         let mut swept_amounts = Map::new(&env);
