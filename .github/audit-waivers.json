@@ -9,6 +9,66 @@
     {
       "id": "GHSA-5qjj-4xww-7phc",
       "reason": "valibot record() flatten issue — used only by storybook addon, pre-existing dependency"
+    },
+    {
+      "id": "GHSA-5375-pq7m-f5r2",
+      "reason": "@grpc/grpc-js malformed request crash — pre-existing transitive dependency via @grpc/grpc-js"
+    },
+    {
+      "id": "GHSA-99f4-grh7-6pcq",
+      "reason": "@grpc/grpc-js compressed message crash — pre-existing transitive dependency via @grpc/grpc-js"
+    },
+    {
+      "id": "GHSA-8988-4f7v-96qf",
+      "reason": "OpenTelemetry Core W3C Baggage unbounded memory — pre-existing transitive dependency"
+    },
+    {
+      "id": "GHSA-45rx-2jwx-cxfr",
+      "reason": "OpenTelemetry JS JaegerPropagator DoS — pre-existing transitive dependency"
+    },
+    {
+      "id": "GHSA-q6x5-8v7m-xcrf",
+      "reason": "protobufjs overlong UTF-8 decoding — pre-existing transitive dependency"
+    },
+    {
+      "id": "GHSA-3p68-rc4w-qgx5",
+      "reason": "Axios NO_PROXY SSRF bypass — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-w9j2-pvgh-6h63",
+      "reason": "Axios validateStatus prototype pollution — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-pmwg-cvhr-8vh7",
+      "reason": "Axios incomplete CVE-2025-62718 fix — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-3w6x-2g7m-8v23",
+      "reason": "Axios parseReviver prototype pollution — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-xhjh-pmcv-23jw",
+      "reason": "Axios null byte injection — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-445q-vr5w-6q77",
+      "reason": "Axios CRLF injection in formDataToStream — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-m7pr-hjqh-92cm",
+      "reason": "Axios no_proxy bypass via IP alias — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-5c9x-8gcm-mpgx",
+      "reason": "Axios maxBodyLength bypass on streamed uploads — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-vf2m-468p-8v99",
+      "reason": "Axios maxContentLength bypass on streamed responses — pre-existing dependency, fix requires major version bump"
+    },
+    {
+      "id": "GHSA-pf86-5x62-jrwf",
+      "reason": "Axios prototype pollution gadgets — pre-existing dependency, fix requires major version bump"
     }
   ],
   "cargo": []

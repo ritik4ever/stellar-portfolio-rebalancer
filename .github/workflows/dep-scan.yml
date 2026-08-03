@@ -53,23 +53,33 @@ jobs:
         working-directory: ${{ matrix.directory }}
         run: |
           WAIVER_FILE="${GITHUB_WORKSPACE}/.github/audit-waivers.json"
-          EXCLUDE_ARGS=""
+          AUDIT_JSON=$(mktemp)
+          npm audit --audit-level=high --json > "$AUDIT_JSON" 2>/dev/null || true
+
+          # Build jq filter to exclude waived advisory IDs
+          EXCLUDE_FILTER="."
           if [ -f "$WAIVER_FILE" ]; then
             WAIVERS=$(jq -r '.npm[]?.id // empty' "$WAIVER_FILE" 2>/dev/null || true)
             for waiver in $WAIVERS; do
-              EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude $waiver"
+              EXCLUDE_FILTER="$EXCLUDE_FILTER | del(.vulnerabilities | to_entries[] | select(.value.via[]? | select(type == \"object\" and .url == \"https://github.com/advisories/$waiver\")))"
             done
           fi
+
           echo "::group::npm audit output"
-          npm audit --audit-level=high $EXCLUDE_ARGS || {
+          FILTERED=$(jq "$EXCLUDE_FILTER" "$AUDIT_JSON")
+          HIGH_COUNT=$(echo "$FILTERED" | jq '[.vulnerabilities | to_entries[] | select(.value.severity == "high" or .value.severity == "critical")] | length')
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "$FILTERED" | jq -r '.vulnerabilities | to_entries[] | select(.value.severity == "high" or .value.severity == "critical") | "\(.key): \(.value.severity)"'
             echo "::endgroup::"
             echo "::error::npm audit found high/critical vulnerabilities in ${{ matrix.directory }}"
             echo "If this is an accepted risk, add the advisory ID to .github/audit-waivers.json"
             echo "See docs/DEPENDENCY_AUDIT.md for the waiver process."
+            rm -f "$AUDIT_JSON"
             exit 1
-          }
+          fi
           echo "::endgroup::"
           echo "No new high/critical vulnerabilities in ${{ matrix.directory }}"
+          rm -f "$AUDIT_JSON"
 
   cargo-audit:
     name: cargo audit
