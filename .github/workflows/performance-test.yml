@@ -58,14 +58,17 @@ jobs:
           export NODE_ENV=test
           export PORT=3001
           export DATABASE_URL="sqlite::memory:"
-          export JWT_SECRET="test-secret-key-for-ws-load-testing"
+          # Runtime-generated (never hardcoded/committed): avoids serializing a
+          # secret into the workflow or CI artifacts.
+          export JWT_SECRET="$(openssl rand -hex 32)"
           export STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
           export CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
           export LOG_LEVEL="warn"
           export AUTH_ENABLED="false"
           export ENABLE_STARTUP_SELF_TEST="false"
-          # Resolve ws package from backend's node_modules
-          export NODE_PATH="backend/node_modules"
+          # Resolve ws package from backend's node_modules (used via the createRequire
+          # fallback in the load test, since ESM import() ignores NODE_PATH)
+          export NODE_PATH="$GITHUB_WORKSPACE/backend/node_modules"
 
           # Start backend in background (use working-directory approach for reliable PID capture)
           node backend/dist/index.js &
@@ -91,7 +94,10 @@ jobs:
           CHAOS_WS_BATCH_SIZE="10" \
           CHAOS_WS_BATCH_DELAY_MS="200" \
           CHAOS_WS_DURATION_MS="30000" \
-          CHAOS_WS_AUTH_ENABLED="false" \
+          # /ws/portfolio/:id unconditionally requires a valid JWT, so the load
+          # test must sign tokens with the SAME runtime secret the backend uses.
+          CHAOS_WS_AUTH_ENABLED="true" \
+          CHAOS_WS_JWT_SECRET="$JWT_SECRET" \
           CHAOS_WS_RESULTS_DIR="ws-load-test-results" \
           node scripts/chaos/ws-portfolio-feed-load-test.mjs
           LOAD_TEST_EXIT=$?
@@ -121,7 +127,7 @@ jobs:
           echo "**Test Configuration:**" >> $GITHUB_STEP_SUMMARY
           echo "- Concurrent Connections: 50" >> $GITHUB_STEP_SUMMARY
           echo "- Sustain Duration: 30s" >> $GITHUB_STEP_SUMMARY
-          echo "- Auth Enabled: false" >> $GITHUB_STEP_SUMMARY
+          echo "- Auth Enabled: true (runtime-generated JWT secret)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Purpose:** Periodically verifies WebSocket portfolio feed capacity and documents connection ceiling for planning." >> $GITHUB_STEP_SUMMARY
 
@@ -167,7 +173,9 @@ jobs:
           export NODE_ENV=test
           export DATABASE_URL="sqlite::memory:"
           export REDIS_URL="redis://localhost:6379"
-          export JWT_SECRET="test-secret-key-for-performance-testing"
+          # Runtime-generated (never hardcoded/committed): avoids serializing a
+          # secret into the workflow or CI artifacts.
+          export JWT_SECRET="$(openssl rand -hex 32)"
           export STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
           export CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
           export LOG_LEVEL="warn"

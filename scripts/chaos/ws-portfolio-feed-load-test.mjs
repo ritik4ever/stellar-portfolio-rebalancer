@@ -29,14 +29,27 @@
 import { randomBytes } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-// ─── Dynamic import of ws to avoid issues when module not installed ──────────
-let WebSocketImpl
+// ─── Resolve optional runtime deps (ws, jsonwebtoken) ────────────────────────
+// In CI this script runs from the repo root while `ws`/`jsonwebtoken` live in
+// backend/node_modules. ESM `import()` ignores NODE_PATH, so fall back to
+// createRequire (CommonJS, honors NODE_PATH) and finally to the parent project
+// for local installs.
+import { createRequire } from 'node:module'
+
+const requireFromScript = createRequire(import.meta.url)
+
+let WebSocketImpl = null
 try {
   const wsModule = await import('ws')
   WebSocketImpl = wsModule.default || wsModule.WebSocket || wsModule
 } catch (_) {
-  console.error('[CHAOS-WS] The "ws" package is required. Run: npm install ws')
-  process.exit(1)
+  try {
+    const wsModule = requireFromScript('ws')
+    WebSocketImpl = wsModule.WebSocket || wsModule.default || wsModule
+  } catch (__) {
+    console.error('[CHAOS-WS] The "ws" package is required. Run: npm install ws')
+    process.exit(1)
+  }
 }
 
 // Optional: jwt for token generation when auth is enabled
@@ -44,7 +57,11 @@ let jwtModule = null
 try {
   jwtModule = await import('jsonwebtoken')
 } catch (_) {
-  // jwt is optional; only needed when CHAOS_WS_AUTH_ENABLED=true
+  try {
+    jwtModule = requireFromScript('jsonwebtoken')
+  } catch (__) {
+    // jwt is optional; only needed when CHAOS_WS_AUTH_ENABLED=true
+  }
 }
 
 // ─── Configuration ───────────────────────────────────────────────────────────
@@ -66,6 +83,16 @@ const CONFIG = {
 // Derive WebSocket URL from HTTP backend URL
 const httpHost = CONFIG.backendUrl.replace(/^https?:\/\//, '')
 const wsBaseUrl = `ws://${httpHost}`
+
+/**
+ * Configuration copy that is safe to persist/upload: the JWT secret must
+ * never be serialized into results files or CI artifacts.
+ */
+function sanitizeConfig(config) {
+  const safeConfig = { ...config }
+  safeConfig.jwtSecret = '[REDACTED]'
+  return safeConfig
+}
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 
@@ -200,7 +227,9 @@ function generateTestToken(portfolioId, userId) {
   if (!jwtModule) {
     throw new Error('jsonwebtoken module not available. Install: npm install jsonwebtoken')
   }
-  return jwtModule.default.sign(
+  // Works for both ESM namespace (jwtModule.default) and CJS exports (jwtModule)
+  const jwtApi = jwtModule.default || jwtModule
+  return jwtApi.sign(
     { sub: userId, type: 'access' },
     CONFIG.jwtSecret,
     { expiresIn: '1h' },
@@ -241,6 +270,8 @@ function connectPortfolioFeed(portfolioId, userId, token) {
       firstMessageTime: null,
       messagesReceived: [],
       state: 'connecting',
+      /** Set to true before an intentional teardown close so it is not counted as a drop/failure */
+      intentionalClose: false,
     }
 
     ws.on('open', () => {
@@ -300,7 +331,11 @@ function connectPortfolioFeed(portfolioId, userId, token) {
 
     ws.on('close', (code, reason) => {
       clearTimeout(connectTimeout)
-      if (record.state === 'connecting') {
+      // Intentional teardown (closeAllConnections) must never count as a drop
+      // or failure — those metrics are for unexpected disconnects only.
+      if (record.intentionalClose) {
+        record.state = 'closed-intentional'
+      } else if (record.state === 'connecting') {
         latencyMetrics.connectionsFailed++
         record.state = 'closed-early'
       } else if (record.state === 'open') {
@@ -346,6 +381,9 @@ function closeAllConnections(records) {
   log.info('Closing ' + openRecords.length + ' open connections...')
 
   for (const record of openRecords) {
+    // Mark as intentional so the 'close' handler does not count this teardown
+    // as an unexpected drop or a connection failure.
+    record.intentionalClose = true
     try {
       record.ws.close(1000, 'Load test complete')
     } catch (_) {
@@ -571,7 +609,7 @@ async function runLoadTest() {
     const resultsPath = path.default.join(dir, 'ws-load-test-results.json')
     const resultsData = {
       timestamp: new Date().toISOString(),
-      configuration: CONFIG,
+      configuration: sanitizeConfig(CONFIG),
       connectionSummary: {
         totalAttempted: CONFIG.concurrentConnections,
         succeeded: latencyMetrics.connectionsSucceeded,
