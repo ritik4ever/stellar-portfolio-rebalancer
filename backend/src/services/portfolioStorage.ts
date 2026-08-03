@@ -105,17 +105,47 @@ export class PortfolioStorage {
         return id
     }
 
+    async clonePortfolio(originalId: string, name?: string): Promise<Portfolio | undefined> {
+        const original = await this.getPortfolio(originalId)
+        if (!original) return undefined
+        const id = randomUUID()
+        const now = new Date().toISOString()
+        const cloneName = name !== undefined ? name : original.name
+        const cloned: Portfolio = {
+            ...original,
+            id,
+            name: cloneName,
+            createdAt: now,
+            lastRebalance: now,
+            version: 1
+        }
+        if (isDbConfigured()) {
+            await portfolioDb.dbCreatePortfolio(
+                id,
+                cloned.userAddress,
+                cloned.allocations,
+                cloned.threshold,
+                cloned.balances,
+                cloned.totalValue,
+                cloned.slippageTolerancePercent ?? cloned.slippageTolerance ?? 1
+            )
+        }
+        this.cacheSet(cloned)
+        return cloned
+    }
+
     async getPortfolio(id: string): Promise<Portfolio | undefined> {
         return this.cacheGet(id)
     }
 
-    async getUserPortfolios(userAddress: string): Promise<Portfolio[]> {
+    async getUserPortfolios(userAddress: string, includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
-            const list = await portfolioDb.dbGetUserPortfolios(userAddress)
+            const list = await portfolioDb.dbGetUserPortfolios(userAddress, includeArchived)
             if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
             return list
         }
-        return Array.from(this.portfolios.values()).filter(p => p.userAddress === userAddress)
+        return Array.from(this.portfolios.values())
+            .filter(p => p.userAddress === userAddress && (includeArchived || !p.archivedAt))
     }
 
     async updatePortfolio(id: string, updates: Partial<Portfolio>, expectedVersion?: number): Promise<boolean> {
@@ -146,14 +176,17 @@ export class PortfolioStorage {
         return true
     }
 
-    async searchPortfolios(searchQuery: string, limit: number, offset: number): Promise<Portfolio[]> {
+    async searchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
-            const list = await portfolioDb.dbSearchPortfolios(searchQuery, limit, offset)
+            const list = await portfolioDb.dbSearchPortfolios(searchQuery, limit, offset, includeArchived)
             if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
             return list
         }
         
         let all = Array.from(this.portfolios.values())
+        if (!includeArchived) {
+            all = all.filter(p => !p.archivedAt)
+        }
         if (searchQuery) {
             const q = searchQuery.toLowerCase()
             all = all.filter(p => 
@@ -165,13 +198,17 @@ export class PortfolioStorage {
         return all.slice(offset, offset + limit)
     }
 
-    async getAllPortfolios(): Promise<Portfolio[]> {
+    async getAllPortfolios(includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
-            const list = await portfolioDb.dbGetAllPortfolios()
+            const list = await portfolioDb.dbGetAllPortfolios(includeArchived)
             if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
             return list
         }
-        return Array.from(this.portfolios.values())
+        let all = Array.from(this.portfolios.values())
+        if (!includeArchived) {
+            all = all.filter(p => !p.archivedAt)
+        }
+        return all
     }
 
     async getPortfolioCount(): Promise<number> {
@@ -189,6 +226,42 @@ export class PortfolioStorage {
             return ok
         }
         return this.portfolios.delete(id)
+    }
+
+    async archivePortfolio(id: string): Promise<boolean> {
+        if (isDbConfigured()) {
+            const ok = await portfolioDb.dbArchivePortfolio(id)
+            if (ok) {
+                const p = await this.getPortfolio(id)
+                if (p) {
+                    p.archivedAt = new Date().toISOString()
+                    this.cacheSet(p)
+                }
+            }
+            return ok
+        }
+        const p = this.portfolios.get(id)
+        if (!p) return false
+        p.archivedAt = new Date().toISOString()
+        return true
+    }
+
+    async restorePortfolio(id: string): Promise<boolean> {
+        if (isDbConfigured()) {
+            const ok = await portfolioDb.dbRestorePortfolio(id)
+            if (ok) {
+                const p = await this.getPortfolio(id)
+                if (p) {
+                    p.archivedAt = undefined
+                    this.cacheSet(p)
+                }
+            }
+            return ok
+        }
+        const p = this.portfolios.get(id)
+        if (!p) return false
+        p.archivedAt = undefined
+        return true
     }
 
     /**

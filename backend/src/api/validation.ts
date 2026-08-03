@@ -57,6 +57,15 @@ export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
     version: z.number().int().min(1, "Version must be a positive integer")
 });
 
+// Schema for POST /portfolio/:id/clone
+export const clonePortfolioSchema = z.object({
+    name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name cannot exceed 100 characters').optional()
+}).strict();
+// Schema for GET /portfolios/summary
+export const portfolioSummaryQuerySchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required"),
+});
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({
@@ -147,6 +156,8 @@ export const recordConsentSchema = z.object({
     terms: z.boolean().refine((v) => v === true, { message: 'You must accept Terms of Service' }),
     privacy: z.boolean().refine((v) => v === true, { message: 'You must accept Privacy Policy' }),
     cookies: z.boolean().refine((v) => v === true, { message: 'You must accept Cookie Policy' }),
+    analytics: z.boolean().optional(),
+    marketing: z.boolean().optional(),
     documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict();
 
@@ -155,6 +166,8 @@ export const consentGrantSchema = z.object({
     terms: z.boolean().default(true),
     privacy: z.boolean().default(true),
     cookies: z.boolean().default(true),
+    analytics: z.boolean().optional(),
+    marketing: z.boolean().optional(),
     documentText: z.string().min(1, 'documentText must not be empty').optional()
 }).strict().refine(
     (data) => data.terms && data.privacy && data.cookies,

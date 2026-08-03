@@ -8,7 +8,11 @@ pub const MAX_ASSET_DECIMALS: u32 = 18;
 pub const SLIPPAGE_POLICY_VERSION_V1: u32 = 1;
 pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 /// Contract version representing the overall deployed logic version.
-pub const CONTRACT_VERSION: u32 = 1;
+/// Contract version representing the overall deployed logic version.
+/// Version 2 adds `strategy` and `strategy_config` fields to the Portfolio
+/// struct, stored under `DataKey::PortfolioV2(u64)`. Legacy portfolios
+/// stored under `DataKey::Portfolio(u64)` are migrated on read.
+pub const CONTRACT_VERSION: u32 = 2;
 /// Contract event schema version matching backend expected schema version.
 pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
 /// Maximum number of assets allowed in a single portfolio (#296).
@@ -41,6 +45,50 @@ pub const DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 3600; // 1 hour
 pub const DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 300; // 3%
 pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
 
+/// Rebalancing strategy types, mirroring backend `RebalanceStrategyType`.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum StrategyType {
+    /// Rebalance when allocation drift exceeds the configured threshold (default).
+    Threshold = 0,
+    /// Rebalance on a fixed schedule (e.g. every N seconds).
+    Periodic = 1,
+    /// Rebalance when market volatility exceeds a threshold.
+    Volatility = 2,
+    /// Custom rules: minimum interval between rebalances plus threshold check.
+    Custom = 3,
+}
+
+/// Per-strategy configuration parameters stored alongside the portfolio.
+/// Only the fields relevant to the portfolio's chosen strategy are used.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StrategyConfig {
+    /// For Periodic: interval in seconds between automatic rebalances.
+    pub interval_seconds: u64,
+    /// For Volatility: max allowable price change in basis points before triggering.
+    pub volatility_threshold_bps: u32,
+    /// For Custom: minimum seconds that must elapse between rebalances.
+    pub min_interval_seconds: u64,
+}
+
+impl Default for StrategyConfig {
+    fn default() -> Self {
+        StrategyConfig {
+            interval_seconds: 604800,          // 7 days
+            volatility_threshold_bps: 1000,     // 10%
+            min_interval_seconds: 86400,       // 1 day
+        }
+    }
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerConfig {
+    pub window_seconds: u64,
+    pub spike_threshold_bps: u32,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,6 +119,10 @@ pub struct Portfolio {
     pub pause_reason: PauseReason,
     pub circuit_breaker_config: CircuitBreakerConfig,
     pub global_max_slippage_bps: u32,
+    /// Rebalancing strategy type (defaults to Threshold for backward compatibility).
+    pub strategy: StrategyType,
+    /// Strategy-specific configuration parameters.
+    pub strategy_config: StrategyConfig,
 }
 
 #[contracttype]
@@ -82,6 +134,56 @@ pub enum PauseReason {
     AdminEmergency = 2,
     VolatilityCircuitBreaker = 3,
     CooldownActive = 4,
+}
+
+/// Legacy portfolio struct without strategy fields — used for on-read migration
+/// of portfolios stored before the strategy-aware schema. Once a legacy
+/// portfolio is read it is automatically upgraded and re-written under
+/// `DataKey::PortfolioV2` so subsequent reads use the new format directly.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LegacyPortfolio {
+    pub user: Address,
+    pub target_allocations: Map<Address, u32>,
+    pub current_balances: Map<Address, i128>,
+    pub asset_decimals: Map<Address, u32>,
+    pub rebalance_threshold: u32,
+    pub slippage_tolerance: u32,
+    pub slippage_policy_version: u32,
+    pub last_rebalance: u64,
+    pub total_value: i128,
+    pub is_active: bool,
+    pub pause_reason: PauseReason,
+    pub circuit_breaker_config: CircuitBreakerConfig,
+    pub global_max_slippage_bps: u32,
+}
+
+impl Default for StrategyType {
+    fn default() -> Self {
+        StrategyType::Threshold
+    }
+}
+
+impl From<LegacyPortfolio> for Portfolio {
+    fn from(lp: LegacyPortfolio) -> Self {
+        Portfolio {
+            user: lp.user,
+            target_allocations: lp.target_allocations,
+            current_balances: lp.current_balances,
+            asset_decimals: lp.asset_decimals,
+            rebalance_threshold: lp.rebalance_threshold,
+            slippage_tolerance: lp.slippage_tolerance,
+            slippage_policy_version: lp.slippage_policy_version,
+            last_rebalance: lp.last_rebalance,
+            total_value: lp.total_value,
+            is_active: lp.is_active,
+            pause_reason: lp.pause_reason,
+            circuit_breaker_config: lp.circuit_breaker_config,
+            global_max_slippage_bps: lp.global_max_slippage_bps,
+            strategy: StrategyType::Threshold,
+            strategy_config: StrategyConfig::default(),
+        }
+    }
 }
 
 #[contracttype]
@@ -121,13 +223,6 @@ pub struct FeeConfig {
     pub fee_bps: u32,
     pub fee_recipient: Address,
     pub enabled: bool,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CircuitBreakerConfig {
-    pub spike_threshold_bps: u32,
-    pub window_seconds: u64,
 }
 
 #[contracttype]
@@ -176,7 +271,12 @@ pub enum DataKey {
     RecurringDeposit(u64),
     DCAConfig(u64),
     NavHistory(u64),
+    StopLoss(u64, Address),
     CircuitBreakerConfig,
+    /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
+    PortfolioV2(u64),
+    QueuedFeeConfig,
+    QueuedUpgrade,
 }
 
 #[contracttype]
@@ -226,6 +326,8 @@ pub enum Error {
     InvalidInterval = 31,
 
     BatchTooLarge = 29,
+    InvalidOracleAddress = 30,
+    TimelockNotElapsed = 31,
 }
 
 #[contracttype]
@@ -240,9 +342,20 @@ pub struct BatchRebalanceResult {
 pub enum BatchRebalanceResultStatus {
     Success,
     Failed(Error),
+}
 
-    InvalidOracleAddress = 29,
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedFeeConfig {
+    pub config: FeeConfig,
+    pub execute_after: u64,
+}
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub execute_after: u64,
 }
 
 #[contracttype]
@@ -305,13 +418,6 @@ pub struct AssetDrift {
     pub drift_pct: u32,
     /// `true` when `drift_pct` exceeds the portfolio's rebalance threshold.
     pub needs_rebalance: bool,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CircuitBreakerConfig {
-    pub spike_threshold_bps: u32,
-    pub window_seconds: u64,
 }
 
 #[contracttype]

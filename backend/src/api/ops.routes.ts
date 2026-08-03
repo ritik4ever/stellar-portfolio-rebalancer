@@ -459,6 +459,61 @@ opsRouter.get('/contract/diagnostics/auth-status', (_req: Request, res: Response
 })
 
 // ================================
+// CREDENTIAL ROTATION ROUTES
+// ================================
+
+opsRouter.get('/credentials/status', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        const { credentialManager } = await import('../config/credentialManager.js')
+        const dbCreds = credentialManager.getDbCredentialsSync()
+        const redisCreds = await credentialManager.getRedisCredentials()
+        const status = {
+            database: {
+                configured: Boolean(dbCreds.user || dbCreds.connectionString),
+                source: dbCreds.source,
+                lastRefreshed: dbCreds.lastRefreshed.toISOString()
+            },
+            redis: {
+                configured: Boolean(redisCreds.url),
+                source: redisCreds.source,
+                lastRefreshed: redisCreds.lastRefreshed.toISOString(),
+                urlRedacted: redisCreds.url.replace(/:\/\/[^@]*@/, '://***@')
+            },
+            timestamp: new Date().toISOString()
+        }
+        return ok(res, status)
+    } catch (error) {
+        logger.error('[OPS] Failed to check credential status', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/credentials/refresh', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        const { refreshDbPool } = await import('../db/client.js')
+        const { refreshRedisCredentials } = await import('../queue/connection.js')
+        const dbPool = await refreshDbPool()
+        const redisUrl = await refreshRedisCredentials()
+        const status = {
+            database: {
+                refreshed: true,
+                poolMax: dbPool.options.max
+            },
+            redis: {
+                refreshed: true,
+                urlRedacted: redisUrl.replace(/:\/\/[^@]*@/, '://***@')
+            },
+            timestamp: new Date().toISOString()
+        }
+        logger.info('[OPS] Manual credential rotation refresh triggered', status)
+        return ok(res, status)
+    } catch (error) {
+        logger.error('[OPS] Failed to refresh credentials', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
 // RISK MANAGEMENT ROUTES
 // ================================
 

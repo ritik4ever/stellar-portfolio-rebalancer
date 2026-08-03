@@ -192,6 +192,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   const [cloneDraft, setCloneDraft] = useState<PortfolioCloneDraft | null>(() =>
     loadPortfolioCloneDraft(),
   );
+  const [entryMode, setEntryMode] = useState<'manual' | 'bulk'>('manual');
 
   const [draftPromptResolved, setDraftPromptResolved] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(() => {
@@ -525,6 +526,13 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // Alias so the mobile action bar can reference the same submit handler
   const handleSubmit = createPortfolio;
 
+  const handleBulkImportSuccess = (portfolioId: string) => {
+    setSuccess(true)
+    setTimeout(() => {
+      onNavigate('dashboard')
+    }, 2000)
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -615,6 +623,44 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
             </div>
           </div>
         )}
+
+        {/* ── Entry Mode Tabs: Manual vs Bulk Import ── */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm mb-6">
+          <div className="flex border-b border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setEntryMode('manual')}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                entryMode === 'manual'
+                  ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Manual Entry
+            </button>
+            <button
+              onClick={() => setEntryMode('bulk')}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                entryMode === 'bulk'
+                  ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              Bulk Import (CSV/JSON)
+            </button>
+          </div>
+        </div>
+
+        {/* ── Bulk Import Tab Content ── */}
+        {entryMode === 'bulk' && (
+          <BulkPortfolioImport
+            userAddressForDemo={publicKey}
+            onImported={handleBulkImportSuccess}
+          />
+        )}
+
+        {/* ── Manual Entry Tab Content ── */}
+        {entryMode === 'manual' && (
+          <>
 
         {/* ── Local draft restore prompt ── */}
         {pendingDraft && (
@@ -1336,6 +1382,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
           </div>
         </div>
+
+        {/* close entryMode === 'manual' Fragment */}
+        </>
+        )}
 
         {/* NEW: Sticky Mobile Action Bar for Portfolio Setup */}
         <div className="mobile-action-bar fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 md:hidden z-40">

@@ -40,6 +40,8 @@ export interface RebalanceHistoryQueryOptions {
 interface PortfolioRow {
   id: string;
   user_address: string;
+  name?: string | null;
+  description?: string | null;
   allocations: string;
   threshold: number;
   slippage_tolerance_percent?: number;
@@ -114,6 +116,8 @@ export interface ConsentRecord {
   termsAcceptedAt: string | null;
   privacyAcceptedAt: string | null;
   cookieAcceptedAt: string | null;
+  analyticsAcceptedAt: string | null;
+  marketingAcceptedAt: string | null;
   revokedAt: string | null;
   active: boolean;
   documentVersion: string | null;
@@ -241,6 +245,8 @@ CREATE TABLE IF NOT EXISTS legal_consent (
     terms_accepted_at   TEXT,
     privacy_accepted_at TEXT,
     cookie_accepted_at  TEXT,
+    analytics_accepted_at TEXT,
+    marketing_accepted_at TEXT,
     revoked_at          TEXT,
     is_active           INTEGER NOT NULL DEFAULT 1,
     ip_address          TEXT,
@@ -467,6 +473,13 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
   return {
     id: row.id,
     userAddress: row.user_address,
+    name: row.name ?? undefined,
+    // `name` and `description` are persisted on create and on versioned
+    // update, so they have to be read back here. Dropping them made every
+    // versioned update rewrite the stored name as NULL, because the merge
+    // that feeds the UPDATE started from a row that had already lost it.
+    ...(row.name == null ? {} : { name: row.name }),
+    ...(row.description == null ? {} : { description: row.description }),
     allocations: safeJsonParse(
       row.allocations,
       {},
@@ -702,6 +715,10 @@ export class DatabaseService {
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
     }
+    if (!cols.some((c) => c.name === "name")) {
+      this.db.exec("ALTER TABLE portfolios ADD COLUMN name TEXT");
+      logger.info("[DB] Migration: added name column to portfolios");
+    }
 
     const consentCols = this.db
       .prepare("PRAGMA table_info(legal_consent)")
@@ -715,6 +732,14 @@ export class DatabaseService {
         "ALTER TABLE legal_consent ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
       );
       logger.info("[DB] Migration: added is_active column to legal_consent");
+    }
+    if (!consentCols.some((c) => c.name === "analytics_accepted_at")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN analytics_accepted_at TEXT");
+      logger.info("[DB] Migration: added analytics_accepted_at column to legal_consent");
+    }
+    if (!consentCols.some((c) => c.name === "marketing_accepted_at")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN marketing_accepted_at TEXT");
+      logger.info("[DB] Migration: added marketing_accepted_at column to legal_consent");
     }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS consent_audit_events (
@@ -886,6 +911,43 @@ export class DatabaseService {
       throw new Error(
         `Failed to create portfolio with balances for user '${userAddress}': ${err}`,
       );
+    }
+  }
+
+  clonePortfolio(originalId: string, name?: string): Portfolio | undefined {
+    try {
+      const original = this.getPortfolio(originalId);
+      if (!original) return undefined;
+
+      const id = generateId();
+      const now = new Date().toISOString();
+      const cloneName = name !== undefined ? name : original.name;
+
+      this.db
+        .prepare(
+          `
+                INSERT INTO portfolios (id, user_address, name, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `,
+        )
+        .run(
+          id,
+          original.userAddress,
+          cloneName ?? null,
+          JSON.stringify(original.allocations),
+          original.threshold,
+          original.slippageTolerancePercent ?? original.slippageTolerance ?? 1,
+          JSON.stringify(original.balances || {}),
+          original.totalValue || 0,
+          now,
+          now,
+          original.strategy || "threshold",
+          JSON.stringify(original.strategyConfig || {}),
+        );
+
+      return this.getPortfolio(id);
+    } catch (err) {
+      throw new Error(`Failed to clone portfolio '${originalId}': ${err}`);
     }
   }
 
@@ -1287,6 +1349,8 @@ export class DatabaseService {
       terms: boolean;
       privacy: boolean;
       cookies: boolean;
+      analytics?: boolean;
+      marketing?: boolean;
       ipAddress?: string;
       userAgent?: string;
       documentText?: string;
@@ -1294,15 +1358,27 @@ export class DatabaseService {
   ): void {
     const now = new Date().toISOString();
     const docVersion = computeDocumentVersionHash(opts.documentText);
+    const analyticsFlag = opts.analytics === undefined ? null : (opts.analytics ? 1 : 0);
+    const marketingFlag = opts.marketing === undefined ? null : (opts.marketing ? 1 : 0);
     const grant = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, ip_address, user_agent, document_version, updated_at)
-               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
+          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, analytics_accepted_at, marketing_accepted_at, revoked_at, is_active, ip_address, user_agent, document_version, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
                  privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
                  cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
+                 analytics_accepted_at = CASE
+                   WHEN ? IS NULL THEN analytics_accepted_at
+                   WHEN ? = 1 THEN excluded.analytics_accepted_at
+                   ELSE NULL
+                 END,
+                 marketing_accepted_at = CASE
+                   WHEN ? IS NULL THEN marketing_accepted_at
+                   WHEN ? = 1 THEN excluded.marketing_accepted_at
+                   ELSE NULL
+                 END,
                  revoked_at = NULL,
                  is_active = 1,
                  ip_address = excluded.ip_address,
@@ -1315,10 +1391,16 @@ export class DatabaseService {
           opts.terms ? now : null,
           opts.privacy ? now : null,
           opts.cookies ? now : null,
+          analyticsFlag === 1 ? now : null,
+          marketingFlag === 1 ? now : null,
           opts.ipAddress ?? null,
           opts.userAgent ?? null,
           docVersion,
           now,
+          analyticsFlag,
+          analyticsFlag,
+          marketingFlag,
+          marketingFlag,
         );
       this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion);
     });
@@ -1363,7 +1445,7 @@ export class DatabaseService {
     logger.info("[DB] Consent revoked", { userId, documentVersion: docVersion });
   }
 
-  getConsent(userId: string): ConsentRecord | undefined {
+getConsent(userId: string): ConsentRecord | undefined {
     const row = this.db
       .prepare<
         [string],
@@ -1371,17 +1453,21 @@ export class DatabaseService {
           terms_accepted_at: string | null;
           privacy_accepted_at: string | null;
           cookie_accepted_at: string | null;
+          analytics_accepted_at: string | null;
+          marketing_accepted_at: string | null;
           revoked_at: string | null;
           is_active: number;
           document_version: string | null;
         }
-      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, document_version FROM legal_consent WHERE user_id = ?")
+      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, analytics_accepted_at, marketing_accepted_at, revoked_at, is_active, document_version FROM legal_consent WHERE user_id = ?")
       .get(userId);
     if (!row) return undefined;
     return {
       termsAcceptedAt: row.terms_accepted_at,
       privacyAcceptedAt: row.privacy_accepted_at,
       cookieAcceptedAt: row.cookie_accepted_at,
+      analyticsAcceptedAt: row.analytics_accepted_at,
+      marketingAcceptedAt: row.marketing_accepted_at,
       revokedAt: row.revoked_at,
       active: row.is_active === 1,
       documentVersion: row.document_version,

@@ -6,8 +6,16 @@ use portfolio_rebalancer::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
+    token::TokenClient,
     Address, Env, Map, String, Vec,
 };
+
+fn create_token_and_mint(env: &Env, admin: &Address, to: &Address, amount: i128) -> Address {
+    let token_id = env.register_stellar_asset_contract(admin.clone());
+    let token = TokenClient::new(env, &token_id);
+    token.mint(to, &amount);
+    token_id
+}
 
 // ── Mock Reflector simulating live Reflector oracle on testnet ──────────
 
@@ -64,8 +72,8 @@ fn integration_full_rebalance_flow() {
 
     client.initialize(&admin, &reflector_id);
 
-    let asset_a = Address::generate(&env);
-    let asset_b = Address::generate(&env);
+    let asset_a = create_token_and_mint(&env, &admin, &user, 300_000_000);
+    let asset_b = create_token_and_mint(&env, &admin, &user, 200_000_000);
 
     let mut allocations = Map::new(&env);
     allocations.set(asset_a.clone(), 5000);
@@ -117,6 +125,14 @@ fn integration_full_rebalance_flow() {
     let valuation = client.get_portfolio_value_usd(&pid);
     assert!(valuation.total_usd_value > 0);
     assert_eq!(valuation.assets.len(), 2);
+
+    // Verify on-chain token balances match internal post-rebalance balances
+    let token_a = TokenClient::new(&env, &asset_a);
+    let token_b = TokenClient::new(&env, &asset_b);
+    let contract_internal_a = portfolio.current_balances.get(asset_a).unwrap();
+    let contract_internal_b = portfolio.current_balances.get(asset_b).unwrap();
+    assert_eq!(token_a.balance(&contract_id), contract_internal_a);
+    assert_eq!(token_b.balance(&contract_id), contract_internal_b);
 }
 
 // ── Basis points allocation validation ─────────────────────────────────
@@ -234,8 +250,8 @@ fn integration_portfolio_value_usd_returns_correct_structure() {
 
     client.initialize(&admin, &reflector_id);
 
-    let asset_a = Address::generate(&env);
-    let asset_b = Address::generate(&env);
+    let asset_a = create_token_and_mint(&env, &admin, &user, 2_000_000);
+    let asset_b = create_token_and_mint(&env, &admin, &user, 1_000_000);
 
     let mut allocations = Map::new(&env);
     allocations.set(asset_a.clone(), 7000);
@@ -289,8 +305,8 @@ fn integration_emergency_stop_blocks_rebalance() {
 
     client.initialize(&admin, &reflector_id);
 
-    let asset_a = Address::generate(&env);
-    let asset_b = Address::generate(&env);
+    let asset_a = create_token_and_mint(&env, &admin, &user, 300_000_000);
+    let asset_b = create_token_and_mint(&env, &admin, &user, 200_000_000);
 
     let mut allocations = Map::new(&env);
     allocations.set(asset_a.clone(), 5000);
@@ -324,4 +340,170 @@ fn integration_emergency_stop_blocks_rebalance() {
     client.set_emergency_stop(&false);
     let result = client.try_execute_rebalance(&pid, &Map::new(&env));
     assert!(result.is_ok());
+}
+
+// ── Post-rebalance on-chain balance verification ────────────────────────
+
+#[test]
+fn integration_post_rebalance_onchain_balances_match() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1_000_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, mock_reflector::TestnetReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    // Create two tokens: asset_a (60%) and asset_b (40%)
+    let asset_a = create_token_and_mint(&env, &admin, &user, 100_000_000);
+    let asset_b = create_token_and_mint(&env, &admin, &user, 100_000_000);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(asset_a.clone(), 6000);
+    allocations.set(asset_b.clone(), 4000);
+
+    let mut asset_decimals = Map::new(&env);
+    asset_decimals.set(asset_a.clone(), DEFAULT_ASSET_DECIMALS);
+    asset_decimals.set(asset_b.clone(), DEFAULT_ASSET_DECIMALS);
+
+    let pid = client.create_portfolio(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+
+    // Deposit only into asset_a — portfolio starts imbalanced
+    client.deposit(&pid, &asset_a, &100_000_000, &String::from_str(&env, ""));
+
+    let token_a = TokenClient::new(&env, &asset_a);
+    let token_b = TokenClient::new(&env, &asset_b);
+
+    // Before rebalance: contract holds 100M of A, 0 of B; user holds 0 A, 100M B
+    assert_eq!(token_a.balance(&contract_id), 100_000_000);
+    assert_eq!(token_b.balance(&contract_id), 0);
+    assert_eq!(token_a.balance(&user), 0);
+    assert_eq!(token_b.balance(&user), 100_000_000);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1_000_000 + 5000;
+    });
+
+    client.execute_rebalance(&pid, &Map::new(&env));
+
+    let portfolio = client.get_portfolio(&pid);
+
+    // Verify on-chain balances match internal balances exactly
+    let internal_a = portfolio.current_balances.get(asset_a.clone()).unwrap_or(0);
+    let internal_b = portfolio.current_balances.get(asset_b.clone()).unwrap_or(0);
+
+    assert_eq!(
+        token_a.balance(&contract_id),
+        internal_a,
+        "on-chain A must match internal A"
+    );
+    assert_eq!(
+        token_b.balance(&contract_id),
+        internal_b,
+        "on-chain B must match internal B"
+    );
+
+    // Total on-chain value should be preserved (100M A initially)
+    // With mock price of 50 USD per unit, the split should be 60/40
+    assert!(
+        internal_a + internal_b <= 100_000_000,
+        "total after rebalance should not exceed initial deposit"
+    );
+}
+
+// ── Atomicity: failed rebalance does not alter balances ──────────────────
+
+#[test]
+fn integration_failed_rebalance_leaves_state_unchanged() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1_000_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, mock_reflector::TestnetReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    let asset = create_token_and_mint(&env, &admin, &user, 100_000_000);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), 10000);
+
+    let mut asset_decimals = Map::new(&env);
+    asset_decimals.set(asset.clone(), DEFAULT_ASSET_DECIMALS);
+
+    let pid = client.create_portfolio(
+        &user,
+        &allocations,
+        &asset_decimals,
+        &5,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+
+    client.deposit(&pid, &asset, &50_000_000, &String::from_str(&env, ""));
+
+    // Snapshot balances before a failed attempt
+    let token = TokenClient::new(&env, &asset);
+    let contract_balance_before = token.balance(&contract_id);
+    let user_balance_before = token.balance(&user);
+
+    // Corrupt allocations so rebalance fails validation
+    use portfolio_rebalancer::{DataKey, Portfolio};
+    env.as_contract(&contract_id, || {
+        let mut portfolio: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Portfolio(pid))
+            .unwrap();
+        portfolio.target_allocations.set(asset.clone(), 5000);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(pid), &portfolio);
+    });
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1_000_000 + 5000;
+    });
+
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::InvalidAllocationSum)));
+
+    // Verify on-chain balances are completely unchanged
+    assert_eq!(
+        token.balance(&contract_id),
+        contract_balance_before,
+        "contract balance unchanged after failed rebalance"
+    );
+    assert_eq!(
+        token.balance(&user),
+        user_balance_before,
+        "user balance unchanged after failed rebalance"
+    );
+
+    // Internal portfolio state also unchanged
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.last_rebalance,
+        1_000_000,
+        "last_rebalance must not advance"
+    );
 }

@@ -16,10 +16,14 @@ import {
 
 export type MessageListener = (data: Record<string, unknown>) => void
 
+export type ConnectionQuality = 'good' | 'degraded' | 'poor' | 'unknown'
+
 export type RealtimeConnectionContextValue = {
     state: RealtimeConnectionState
     statusDetail: string | null
     reconnectInfo: RealtimeReconnectInfo | null
+    quality: ConnectionQuality
+    latency: number | null
     reconnect: () => void
     disconnect: () => void
     send: (type: string, payload: unknown) => boolean
@@ -32,8 +36,40 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
     const [state, setState] = useState<RealtimeConnectionState>('disconnected')
     const [statusDetail, setStatusDetail] = useState<string | null>(null)
     const [reconnectInfo, setReconnectInfo] = useState<RealtimeReconnectInfo | null>(null)
+    
+    const [latency, setLatency] = useState<number | null>(null)
+    const [disconnectHistory, setDisconnectHistory] = useState<number[]>([])
+
     const clientRef = useRef<RebalancerWSClient | null>(null)
     const listenersRef = useRef<Set<MessageListener>>(new Set())
+
+    // Track state changes for disconnects
+    useEffect(() => {
+        if (state === 'disconnected' || state === 'reconnecting') {
+            setDisconnectHistory((prev) => {
+                const now = Date.now()
+                const recent = prev.filter(time => now - time < 5 * 60 * 1000)
+                return [...recent, now]
+            })
+        }
+    }, [state])
+
+    // Derive quality based on latency and disconnects
+    const quality = useMemo<ConnectionQuality>(() => {
+        if (state === 'disconnected' || state === 'reconnecting') return 'unknown'
+        if (state === 'connecting') return 'unknown'
+        
+        const now = Date.now()
+        const recentDisconnects = disconnectHistory.filter(time => now - time < 60 * 1000).length
+
+        if (recentDisconnects >= 2) return 'poor'
+        if (latency !== null) {
+            if (latency > 500) return 'poor'
+            if (latency > 200) return 'degraded'
+            return 'good'
+        }
+        return 'good'
+    }, [latency, disconnectHistory, state])
 
     useEffect(() => {
         if (typeof WebSocket === 'undefined') {
@@ -47,9 +83,14 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
             onStatusDetail: setStatusDetail,
             onReconnectInfo: setReconnectInfo,
             onMessage: (data) => {
+                const msg = data as Record<string, unknown>
+                if (msg.type === 'PONG' && typeof msg.timestamp === 'number') {
+                    setLatency(Date.now() - msg.timestamp)
+                }
+
                 listenersRef.current.forEach((listener) => {
                     try {
-                        listener(data as Record<string, unknown>)
+                        listener(msg)
                     } catch {
                         // isolate listener errors
                     }
@@ -65,7 +106,14 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
         document.addEventListener('visibilitychange', onVisibility)
         onVisibility()
 
+        const pingInterval = setInterval(() => {
+            if (clientRef.current?.send) {
+                clientRef.current.send('PING', { timestamp: Date.now() })
+            }
+        }, 5000)
+
         return () => {
+            clearInterval(pingInterval)
             document.removeEventListener('visibilitychange', onVisibility)
             client.disconnect()
             clientRef.current = null
@@ -92,8 +140,8 @@ export function RealtimeConnectionProvider({ children }: { children: React.React
     }, [])
 
     const value = useMemo(
-        () => ({ state, statusDetail, reconnectInfo, reconnect, disconnect, send, addMessageListener }),
-        [state, statusDetail, reconnectInfo, reconnect, disconnect, send, addMessageListener],
+        () => ({ state, statusDetail, reconnectInfo, quality, latency, reconnect, disconnect, send, addMessageListener }),
+        [state, statusDetail, reconnectInfo, quality, latency, reconnect, disconnect, send, addMessageListener],
     )
 
     return (

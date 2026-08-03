@@ -11,7 +11,7 @@
  *   session.portfolio = { ... }
  *   await saveDemoSession(sessionKey, session)
  */
-import { REDIS_URL } from '../queue/connection.js'
+import * as queueConnection from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 import { Redis } from 'ioredis'
 
@@ -26,14 +26,32 @@ export interface DemoSession {
 
 let redis: Redis | null = null
 
-async function getRedis(): Promise<Redis | null> {
-    if (redis) return redis
+async function getRedis(forceRefresh = false): Promise<Redis | null> {
+    if (redis && !forceRefresh) return redis
     try {
-        const client = new Redis(REDIS_URL, {
+        const url =
+            typeof queueConnection.getRedisUrl === 'function'
+                ? queueConnection.getRedisUrl(forceRefresh)
+                : queueConnection.REDIS_URL
+        const ioredisMod = await import('ioredis')
+        const IORedis = (ioredisMod as any).default || ioredisMod
+        const client = new IORedis(url, {
             maxRetriesPerRequest: 1,
             enableReadyCheck: false,
             lazyConnect: true,
         })
+        if (typeof client.on === 'function') {
+            client.on('error', (err: Error) => {
+                const msg = (err.message || '').toLowerCase()
+                if (msg.includes('noauth') || msg.includes('wrongpass') || msg.includes('authentication')) {
+                    logger.warn('[demoSession] Redis authentication error detected — refreshing credentials...')
+                    redis = null
+                    if (typeof queueConnection.refreshRedisCredentials === 'function') {
+                        queueConnection.refreshRedisCredentials().catch(() => {})
+                    }
+                }
+            })
+        }
         await client.connect()
         redis = client
         return redis
