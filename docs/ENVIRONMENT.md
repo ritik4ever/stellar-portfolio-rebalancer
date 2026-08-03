@@ -145,6 +145,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `PGDATABASE` | No | _(empty)_ | PostgreSQL database name. | `stellar_portfolio` | |
 | `DB_POOL_SIZE` | No | `10` | Maximum number of connections in the PostgreSQL pool. | `20` | |
 | `DB_PATH` | No | `./data/portfolio.db` | SQLite database file path used when no PostgreSQL connection is configured. | `./data/portfolio.db` | |
+| `DB_HOST` | No | _(empty)_ | PostgreSQL host — fallback alias for `PGHOST`. | `db.example.com` | |
+| `DB_PORT` | No | `5432` | PostgreSQL port — fallback alias for `PGPORT`. | `5432` | |
+| `DB_USER` | No | _(empty)_ | PostgreSQL username — fallback alias for `PGUSER`. | `stellar_app` | |
+| `DB_PASSWORD` | No | _(empty)_ | PostgreSQL password — fallback alias for `PGPASSWORD`. | _(use secrets manager)_ | ⚠️ SECRET |
+| `DB_NAME` | No | _(empty)_ | PostgreSQL database name — fallback alias for `PGDATABASE`. | `stellar_portfolio` | |
+| `DB_SECRET_ARN` | No | _(empty)_ | AWS Secrets Manager ARN for database credentials. | `arn:aws:secretsmanager:...` | |
+| `AWS_DB_SECRET_ID` | No | _(empty)_ | AWS Secrets Manager secret ID for database credentials. | `my-db-secret` | |
+| `USE_AWS_SECRETS_MANAGER` | No | `false` | Enable AWS Secrets Manager for database/Redis credential retrieval. | `true` | |
+| `REDIS_SECRET_ARN` | No | _(empty)_ | AWS Secrets Manager ARN for Redis credentials. | `arn:aws:secretsmanager:...` | |
+| `AWS_REDIS_SECRET_ID` | No | _(empty)_ | AWS Secrets Manager secret ID for Redis credentials. | `my-redis-secret` | |
 
 ### Stellar & Soroban
 
@@ -171,6 +181,9 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `COINGECKO_API_KEY` | No | _(empty)_ | CoinGecko API key for production-grade rate limits. | _(use secrets manager)_ | ⚠️ SECRET — rotate via CoinGecko dashboard. See [rotation guide](#coingecko_api_key--vite_coingecko_api_key). |
+| `COINGECKO_BASE_URL` | No | _(empty)_ | CoinGecko API base URL override. | `https://api.coingecko.com` | |
+| `REFLECTOR_SERVICE_URL` | No | _(empty)_ | Reflector oracle or CoinGecko base URL (set to `http://localhost:8080` or `http://reflector-mock:8080` for offline dev). | `https://api.reflector.network` | |
+| `REFLECTOR_ADDRESS` | No | testnet default | Reflector contract strkey address for on-chain price checks. | `CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO` | |
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
 | `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
 | `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
@@ -208,6 +221,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for BullMQ queues and workers. | `redis://localhost:6379` | ⚠️ SECRET if your Redis instance requires a password (`redis://:password@host:port`). |
+| `REDIS_AUTH_TOKEN` | No | _(empty)_ | Redis auth token injected into `REDIS_URL` for authenticated connections. | `my-secret-token` | ⚠️ SECRET — rotated via AWS Secrets Manager. |
+| `REDIS_PASSWORD` | No | _(empty)_ | Redis password — fallback alias for `REDIS_AUTH_TOKEN`. | `my-redis-pass` | ⚠️ SECRET |
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
 
 ### Risk Controls
