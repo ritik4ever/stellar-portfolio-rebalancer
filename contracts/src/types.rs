@@ -250,6 +250,7 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
+    CostBasis(u64),
     StopLoss(u64, Address),
     CircuitBreakerConfig,
     /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
@@ -402,4 +403,13 @@ pub struct NavSnapshot {
     pub usd_nav: i128,
     pub sequence: u32,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LossHarvestCandidate {
+    pub asset: Address,
+    pub cost_basis: i128,
+    pub current_price: i128,
+    pub loss_pct: u32,
 }

@@ -66,6 +66,7 @@ export interface Portfolio {
     createdAt: string
     lastRebalance: string
     version: number
+    costBasis?: Record<string, number>
     /** ISO timestamp until which scheduled rebalancing is paused due to a CVaR/VaR breach. */
     riskPausedUntil?: string
 }

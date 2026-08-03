@@ -132,6 +132,7 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
         .set(&DataKey::DCAConfig(portfolio_id), &config);
 
     // Emit event
+    events::emit_dca_executed(env, &portfolio.user, portfolio_id, config.amount, purchased, current_ts);
     portfolio::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_ts);
     Ok(())
 }

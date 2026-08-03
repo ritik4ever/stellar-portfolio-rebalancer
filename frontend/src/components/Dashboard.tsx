@@ -13,6 +13,7 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import { TaxLossHarvesting } from './TaxLossHarvesting'
 
 import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
@@ -39,7 +40,7 @@ interface DashboardProps {
 type DashboardPriceRow = { price?: number; change?: number;[key: string]: unknown }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications'>('overview')
+    const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'notifications' | 'tax-harvesting'>('overview')
     const [rebalanceNotice, setRebalanceNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
     const [candlestickAsset, setCandlestickAsset] = useState<string>('XLM')
 
@@ -727,6 +728,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
                             }`}>Notifications</button>
+                        <button onClick={() => setActiveTab('tax-harvesting')}
+                            className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'tax-harvesting'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300'
+                            }`}>Tax Harvesting</button>
                     </nav>
                 </div>
 
@@ -1046,6 +1052,13 @@ import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
                 {activeTab === 'notifications' && (
                     <div className="space-y-6">
                         <NotificationPreferences publicKey={publicKey} />
+                    </div>
+                )}
+
+                {/* Tax-loss Harvesting Tab */}
+                {activeTab === 'tax-harvesting' && (
+                    <div className="space-y-6">
+                        <TaxLossHarvesting portfolioId={portfolioData?.id || null} />
                     </div>
                 )}
             </div>

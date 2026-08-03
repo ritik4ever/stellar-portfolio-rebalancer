@@ -15,6 +15,10 @@ mod nav;
 mod oracle;
 mod portfolio;
 mod reflector;
+mod tax;
+#[path = "strategies/dca.rs"]
+mod dca;
+#[cfg(test)]
 mod stop_loss;
 mod strategies;
 #[cfg(all(test, feature = "testutils"))]
@@ -195,6 +199,27 @@ impl PortfolioRebalancer {
         // Store under V2 key (strategy-aware schema).
         env.storage()
             .persistent()
+            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+
+        // Store initial cost basis
+        let reflector_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReflectorAddress)
+            .unwrap();
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+        let mut cost_basis = Map::new(&env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            let price = reflector_client
+                .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+                .map(|p| p.price)
+                .unwrap_or(0);
+            cost_basis.set(asset.clone(), price);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::CostBasis(portfolio_id), &cost_basis);
+
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
         portfolio::emit_portfolio_created(&env, portfolio_id, user);
         Ok(portfolio_id)
@@ -1226,6 +1251,18 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
 
+        let mut cost_basis = Map::new(env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            let price = reflector_client
+                .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+                .map(|p| p.price)
+                .unwrap_or(0);
+            cost_basis.set(asset.clone(), price);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::CostBasis(portfolio_id), &cost_basis);
+
         if let Some(admin) = override_admin {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
         }
@@ -1249,6 +1286,12 @@ impl PortfolioRebalancer {
         nav::get_nav_history(&env, portfolio_id, limit)
     }
 
+    pub fn get_loss_harvest_candidates(
+        env: Env,
+        portfolio_id: u64,
+        threshold_pct: u32,
+    ) -> Result<Vec<LossHarvestCandidate>, Error> {
+        tax::get_loss_harvest_candidates(&env, portfolio_id, threshold_pct)
     pub fn close_portfolio(env: Env, portfolio_id: u64) -> Result<(), Error> {
         let portfolio = Self::load_portfolio(&env, portfolio_id)?;
         

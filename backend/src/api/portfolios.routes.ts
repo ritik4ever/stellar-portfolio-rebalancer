@@ -157,6 +157,63 @@ portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMidd
     }
 });
 
+portfoliosRouter.get('/portfolio/:id/tax-loss-candidates', async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const thresholdParam = req.query.threshold_pct as string | undefined
+        const thresholdPct = thresholdParam ? parseFloat(thresholdParam) : 5
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        }
+
+        // Fetch current oracle prices
+        const prices = await reflectorService.getCurrentPrices()
+
+        // Compare current price vs stored cost basis to find candidates
+        const candidates: Array<{
+            asset: string
+            costBasis: number
+            currentPrice: number
+            lossPct: number
+        }> = []
+
+        const costBasis = portfolio.costBasis ?? {}
+
+        for (const asset of Object.keys(portfolio.allocations)) {
+            const storedBasis = costBasis[asset] ?? 0
+            if (storedBasis <= 0) continue
+
+            const currentPriceData = prices[asset]
+            const currentPrice = currentPriceData ? currentPriceData.price : 0
+            if (currentPrice <= 0) continue
+
+            if (currentPrice < storedBasis) {
+                const lossPct = ((storedBasis - currentPrice) / storedBasis) * 100
+                if (lossPct > thresholdPct) {
+                    candidates.push({
+                        asset,
+                        costBasis: storedBasis,
+                        currentPrice,
+                        lossPct
+                    })
+                }
+            }
+        }
+
+        // Sort candidates by unrealized loss % descending
+        candidates.sort((a, b) => b.lossPct - a.lossPct)
+
+        return ok(res, { candidates, thresholdPct })
+    } catch (error) {
+        logger.error('[ERROR] Get tax loss candidates failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
@@ -762,6 +819,28 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
             const result = await stellarService.executeRebalance(portfolioId, mapRebalanceOptions(req.body));
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
+
+            const updatedCostBasis: Record<string, number> = {};
+            for (const asset of Object.keys(portfolio.allocations)) {
+                const priceData = prices[asset];
+                if (priceData && priceData.price > 0) {
+                    updatedCostBasis[asset] = priceData.price;
+                } else {
+                    const fallback: Record<string, number> = {
+                        XLM: 0.45,
+                        USDC: 1.0,
+                        BTC: 85000,
+                        ETH: 3400,
+                        yXLM: 0.47,
+                        AQUA: 0.001,
+                    };
+                    updatedCostBasis[asset] = portfolio.costBasis?.[asset] ?? fallback[asset] ?? 1.0;
+                }
+            }
+            await portfolioStorage.updatePortfolio(portfolioId, {
+                costBasis: updatedCostBasis,
+                lastRebalance: new Date().toISOString()
+            });
 
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
