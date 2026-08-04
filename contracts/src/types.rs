@@ -36,6 +36,10 @@ pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
 pub const MIN_SLIPPAGE_TOLERANCE_BPS: u32 = 10;
 pub const MAX_SLIPPAGE_TOLERANCE_BPS: u32 = 500;
 pub const MAX_FEE_BPS: u32 = 50;
+/// Maximum number of named templates the registry (`DataKey::TemplateNames`)
+/// may hold. Bounds `list_templates`'s result size and the per-write cost of
+/// rewriting the registry on every `create_template` call.
+pub const MAX_TEMPLATES: u32 = 50;
 
 /// Maximum number of portfolios accepted by `batch_rebalance` in one call.
 pub const MAX_BATCH_REBALANCE_PORTFOLIOS: u32 = 10;
@@ -268,6 +272,8 @@ pub enum DataKey {
     OracleConfig,
     /// Contract-level max execution slippage (in basis points) for an asset class.
     AssetSlippage(Address),
+    Template(String),
+    TemplateNames,
 }
 
 #[contracttype]
@@ -312,12 +318,14 @@ pub enum Error {
     InvalidAmount = 26,
     WithdrawFailed = 27,
     InvalidAllocationSum = 28,
-
     BatchTooLarge = 29,
     InvalidOracleAddress = 30,
     TimelockNotElapsed = 31,
     InvalidSlippageLimit = 32,
     InvalidPrice = 33,
+    TemplateNotFound = 34,
+    TemplateAlreadyExists = 35,
+    TooManyTemplates = 36,
 }
 
 #[contracttype]

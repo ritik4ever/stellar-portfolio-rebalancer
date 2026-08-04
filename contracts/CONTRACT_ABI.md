@@ -5,6 +5,7 @@ Contract source:
 - `contracts/src/lib.rs`
 - `contracts/src/types.rs`
 - `contracts/src/portfolio.rs`
+- `contracts/src/templates.rs`
 - `contracts/src/reflector.rs`
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
@@ -78,6 +79,59 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Notes:** The contract exposes `get_portfolio` to read portfolio contents by
   id. Consumers should store the returned id along with the portfolio metadata
   to maintain a canonical reference.
+
+### `create_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only: stores a new named on-chain allocation template. Templates
+  are persistent contract storage, not hardcoded contract logic, so new named
+  presets (e.g. "Conservative", "Balanced", "Aggressive") can be added or
+  changed without a contract upgrade.
+- **Parameters:**
+  - `name`: Template name; must not already be in use.
+  - `allocations`: Target allocations per asset (`Address -> percentage`), same shape and validation as `create_portfolio`'s `target_allocations`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::InvalidAllocation)` — allocations do not sum to 100% or contain a zero percentage.
+  - `Err(Error::TooManyAssets)` — the allocation map has more than `MAX_PORTFOLIO_ASSETS` (10) entries, same limit `create_portfolio` enforces.
+  - `Err(Error::PortfolioStorageFootprintTooLarge)` — a portfolio instantiated from this template would exceed `MAX_PORTFOLIO_STORAGE_BYTES`, estimated using default asset decimals and no balances yet (a lower bound on the real footprint).
+  - `Err(Error::TemplateAlreadyExists)` — a template with this name already exists; use `update_template` instead.
+  - `Err(Error::TooManyTemplates)` — the template registry already holds `MAX_TEMPLATES` (50) entries.
+- **Preconditions:** `admin.require_auth()` succeeds.
+- **Notes:** These limits exist so a template accepted here can, under normal use, be turned into a portfolio later via `create_portfolio_from_template` without hitting `create_portfolio`'s own asset-count and storage-footprint checks. This is not an absolute guarantee: the footprint estimate here assumes `asset_decimals` at portfolio-creation time has exactly one entry per allocated asset (as `create_portfolio_from_template`'s own `asset_decimals` parameter normally would). Since decimal *values* are fixed-width and don't affect the serialized size, only the number of `asset_decimals` entries matters — a caller who supplies extra, unrelated entries in `asset_decimals` at `create_portfolio_from_template` time can still exceed `MAX_PORTFOLIO_STORAGE_BYTES` despite the template having been accepted here.
+
+### `update_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only: replaces the allocations of an existing named template.
+- **Parameters:** Same as `create_template`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::InvalidAllocation)`
+  - `Err(Error::TooManyAssets)`
+  - `Err(Error::PortfolioStorageFootprintTooLarge)`
+  - `Err(Error::TemplateNotFound)` — no template with this name exists; use `create_template` instead.
+- **Preconditions:** `admin.require_auth()` succeeds.
+
+### `get_template(env: Env, name: String) -> Option<Map<Address, u32>>`
+
+- **Purpose:** Public read-only view of a template's stored allocations.
+- **Returns:** `Some(allocations)` if the template exists, `None` otherwise.
+- **Preconditions:** None; callable without signing.
+
+### `list_templates(env: Env) -> Vec<String>`
+
+- **Purpose:** Public read-only view of all known template names, in creation order.
+- **Preconditions:** None; callable without signing.
+
+### `create_portfolio_from_template(env: Env, user: Address, template_name: String, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
+
+- **Purpose:** Creates a new user portfolio using the allocations stored under a named
+  template instead of passing `target_allocations` directly. Shares the same
+  validation, storage-footprint checks, and `("portfolio","created")` event
+  emission as `create_portfolio`.
+- **Parameters:** Same as `create_portfolio`, except `target_allocations` is replaced by `template_name`.
+- **Returns:** `Ok(portfolio_id)` or any error `create_portfolio` can return, plus:
+  - `Err(Error::TemplateNotFound)` — no template with this name exists.
+- **Preconditions:**
+  - `user.require_auth()` succeeds.
+  - A template named `template_name` exists.
 
 ### `get_portfolio(env: Env, portfolio_id: u64) -> Portfolio`
 
@@ -299,6 +353,12 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `25` | `AssetNotSupported` | An asset in the portfolio has no price data available from the Reflector oracle. | Verify the asset is listed in the Reflector oracle. Check the asset's contract address or Stellar issuer is correctly specified. |
 | `26` | `InvalidAmount` | A deposit or trade amount is zero, negative, or below the minimum trade size. | Provide a positive amount greater than the minimum trade size. |
 | `27` | `WithdrawFailed` | A withdrawal operation could not be completed. | Check that the portfolio has sufficient balance and is not paused. Verify the withdrawal amount does not exceed available balances. |
+| `28` | `InvalidAllocationSum` | A portfolio's target allocations no longer sum to exactly 100% at rebalance time. | Update the portfolio's target allocations so they sum to exactly 100% before retrying. |
+| `29` | `BatchTooLarge` | `batch_rebalance` was called with more than `MAX_BATCH_REBALANCE_PORTFOLIOS` (10) portfolio IDs. | Split the batch into groups of 10 or fewer portfolio IDs per call. |
+| `30` | `InvalidOracleAddress` | The address passed to `initialize` as `reflector_address` does not behave like a Reflector oracle (its `base()` call failed or returned unexpectedly). | Verify the Reflector contract address is correct and deployed on the target network before calling `initialize`. |
+| `31` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
+| `32` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
+| `33` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | There is no delete entrypoint. Repurpose an existing template's allocations via `update_template` instead of creating a new one. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 
