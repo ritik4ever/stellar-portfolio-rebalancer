@@ -22,4 +22,5 @@ portfolioRouter.use(debugRouter)
 portfolioRouter.use(consentRouter)
 portfolioRouter.use(assetsRouter)
 portfolioRouter.use(analyticsRouter)
+portfolioRouter.use('/admin', adminRouter)
 
