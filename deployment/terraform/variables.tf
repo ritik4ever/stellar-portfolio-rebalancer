@@ -52,6 +52,79 @@ variable "ecs_task_memory" {
   }
 }
 
+variable "monthly_cost_limit" {
+  description = "Monthly cost limit in USD per workspace"
+  type        = map(number)
+  default = {
+    staging    = 50.0
+    production = 200.0
+  }
+}
+
+variable "budget_notification_emails" {
+  description = "Email addresses for budget notifications"
+  type        = list(string)
+  default     = []
+}
+
+variable "budget_notification_sns_topics" {
+  description = "SNS topic ARNs for budget notifications"
+  type        = list(string)
+  default     = []
+}
+
+variable "create_budget_sns_topic" {
+  description = "Create an SNS topic for budget alerts"
+  type        = bool
+  default     = true
+}
+
+variable "enable_service_budgets" {
+  description = "Enable service-specific usage budgets"
+  type        = bool
+  default     = false
+}
+
+variable "ec2_usage_limit" {
+  description = "EC2/compute usage limit in GB-Hours"
+  type        = number
+  default     = 1000.0
+}
+
+variable "enable_cost_anomaly_detection" {
+  description = "Enable CloudWatch anomaly detection for daily spend"
+  type        = bool
+  default     = false
+}
+
+variable "daily_spend_threshold" {
+  description = "Daily spend threshold in USD for anomaly detection"
+  type        = number
+  default     = 10.0
+}
+
+variable "enable_blue_green" {
+  description = "Enable blue/green deployment for ECS"
+  type        = map(bool)
+  default = {
+    staging    = false
+    production = true
+  }
+}
+
+variable "blue_green_deployment_config" {
+  description = "Blue/green deployment configuration"
+  type = object({
+    termination_wait_time_in_minutes = optional(number, 30)
+    deployment_ready_option = optional(object({
+      action_on_timeout = optional(string, "CONTINUE_DEPLOYMENT")
+    }), {})
+  })
+  default = {
+    termination_wait_time_in_minutes = 30
+    deployment_ready_option = {
+      action_on_timeout = "CONTINUE_DEPLOYMENT"
+    }
 variable "ecs_min_capacity" {
   description = "Minimum number of ECS tasks"
   type        = map(number)
