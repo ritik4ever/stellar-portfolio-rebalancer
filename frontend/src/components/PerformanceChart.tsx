@@ -78,7 +78,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
   const benchmarks = benchmarkResult?.benchmarks || []
 
   const loading = portfolioId && portfolioId !== 'demo' ? (analyticsLoading || summaryLoading || historyLoading || benchmarkLoading) : false
-  const error = analyticsError || summaryError || historyError || benchmarkError ? 'Failed to load performance data' : null
+  const error = analyticsError || summaryError || historyError ? 'Failed to load performance data' : null
 
   const formatChartData = useMemo(() => {
     return analyticsData.map((snapshot: any) => {
@@ -386,29 +386,40 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
         </div>
       )}
 
-      {benchmarks.length > 0 && (
+      {(benchmarks.length > 0 || !benchmarkLoading) && (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mt-6">
           <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-4">Benchmark Comparison (Alpha)</h3>
-          <div className="h-64" role="img" aria-label="Benchmark comparison chart showing alpha">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={benchmarks} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
-                <XAxis dataKey="name" stroke={isDark ? '#9CA3AF' : '#666'} tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }} />
-                <YAxis stroke={isDark ? '#9CA3AF' : '#666'} tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }} tickFormatter={(value) => `${value.toFixed(1)}%`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '0.5rem' }}
-                  itemStyle={{ color: isDark ? '#F9FAFB' : '#111827' }}
-                  formatter={(value: number) => [`${value.toFixed(2)}%`, 'Alpha']}
-                />
-                <ReferenceDot y={0} stroke="#666" />
-                <Bar dataKey="alpha" radius={[4, 4, 0, 0]}>
-                  {benchmarks.map((entry: any, index: number) => (
-                    <Cell key={`cell-${index}`} fill={entry.alpha >= 0 ? '#10B981' : '#EF4444'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {benchmarks.length > 0 ? (
+            <div className="h-64" role="img" aria-label="Benchmark comparison chart showing alpha">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={benchmarks} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f0f0f0'} />
+                  <XAxis dataKey="name" stroke={isDark ? '#9CA3AF' : '#666'} tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }} />
+                  <YAxis stroke={isDark ? '#9CA3AF' : '#666'} tick={{ fontSize: 12, fill: isDark ? '#9CA3AF' : '#666' }} tickFormatter={(value) => `${value.toFixed(1)}%`} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '0.5rem' }}
+                    itemStyle={{ color: isDark ? '#F9FAFB' : '#111827' }}
+                    formatter={(value: number) => [`${value.toFixed(2)}%`, 'Alpha']}
+                  />
+                  <ReferenceDot y={0} stroke="#666" />
+                  <Bar dataKey="alpha" radius={[4, 4, 0, 0]}>
+                    {benchmarks.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={entry.alpha >= 0 ? '#10B981' : '#EF4444'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400" role="note">
+              <AlertCircle className="w-4 h-4 mt-0.5 text-gray-400 dark:text-gray-500" aria-hidden />
+              <p>
+                Benchmark data is unavailable for the selected period
+                {benchmarkError ? ' (benchmark service is currently unavailable)' : ''} — showing
+                portfolio performance only.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

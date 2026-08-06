@@ -7,6 +7,7 @@ export interface NotificationPreferencesRow {
     webhook_enabled: number
     webhook_url: string | null
     digest_mode: string | null
+    price_alert_thresholds: string | null
     event_rebalance: number
     event_circuit_breaker: number
     event_price_movement: number
@@ -22,6 +23,7 @@ export interface NotificationPreferences {
     webhookEnabled: boolean
     webhookUrl?: string
     digestMode?: 'immediate' | 'daily' | 'weekly'
+    priceAlertThresholds?: Record<string, number>
     events: {
         rebalance: boolean
         circuitBreaker: boolean
@@ -80,6 +82,15 @@ function ensureNotificationTable() {
         CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
     `)
     migrateNotificationLogColumns(db)
+    migrateNotificationPreferenceColumns(db)
+}
+
+function migrateNotificationPreferenceColumns(db: Database.Database): void {
+    const columns = db.prepare(`PRAGMA table_info(notification_preferences)`).all() as Array<{ name: string }>
+    const names = new Set(columns.map((c) => c.name))
+    if (!names.has('price_alert_thresholds')) {
+        db.exec(`ALTER TABLE notification_preferences ADD COLUMN price_alert_thresholds TEXT`)
+    }
 }
 
 function migrateNotificationLogColumns(db: Database.Database): void {
@@ -93,6 +104,19 @@ function migrateNotificationLogColumns(db: Database.Database): void {
     }
 }
 
+function parsePriceAlertThresholds(raw: string | null): Record<string, number> | undefined {
+    if (!raw) return undefined
+    try {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed as Record<string, number>
+        }
+    } catch {
+        // Ignore corrupt JSON and fall back to no overrides
+    }
+    return undefined
+}
+
 function rowToPreferences(r: NotificationPreferencesRow): NotificationPreferences {
     return {
         userId: r.user_id,
@@ -101,6 +125,7 @@ function rowToPreferences(r: NotificationPreferencesRow): NotificationPreference
         webhookEnabled: r.webhook_enabled === 1,
         webhookUrl: r.webhook_url || undefined,
         digestMode: r.digest_mode ? (r.digest_mode as 'immediate' | 'daily' | 'weekly') : 'immediate',
+        priceAlertThresholds: parsePriceAlertThresholds(r.price_alert_thresholds),
         events: {
             rebalance: r.event_rebalance === 1,
             circuitBreaker: r.event_circuit_breaker === 1,
@@ -119,16 +144,17 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
     db.prepare(`
         INSERT INTO notification_preferences 
             (user_id, email_enabled, email_address, webhook_enabled, webhook_url, 
-             digest_mode,
+             digest_mode, price_alert_thresholds,
              event_rebalance, event_circuit_breaker, event_price_movement, event_risk_change,
              created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (user_id) DO UPDATE SET
             email_enabled = excluded.email_enabled,
             email_address = excluded.email_address,
             webhook_enabled = excluded.webhook_enabled,
             webhook_url = excluded.webhook_url,
             digest_mode = excluded.digest_mode,
+            price_alert_thresholds = excluded.price_alert_thresholds,
             event_rebalance = excluded.event_rebalance,
             event_circuit_breaker = excluded.event_circuit_breaker,
             event_price_movement = excluded.event_price_movement,
@@ -141,6 +167,9 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
         preferences.webhookEnabled ? 1 : 0,
         preferences.webhookUrl || null,
         preferences.digestMode || 'immediate',
+        preferences.priceAlertThresholds && Object.keys(preferences.priceAlertThresholds).length > 0
+            ? JSON.stringify(preferences.priceAlertThresholds)
+            : null,
         preferences.events.rebalance ? 1 : 0,
         preferences.events.circuitBreaker ? 1 : 0,
         preferences.events.priceMovement ? 1 : 0,

@@ -40,6 +40,8 @@ import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
 import PortfolioWizard from './pages/PortfolioWizard'
 import Compare from './pages/Compare'
+import AnalyticsPage from './pages/Analytics'
+import TaxReportPage from './pages/TaxReport'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
@@ -532,6 +534,20 @@ function App() {
             ) : currentView === 'compare' ? (
                 <ErrorBoundary fallbackTitle="Compare Portfolios">
                     <Compare
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'analytics' ? (
+                <ErrorBoundary fallbackTitle="Portfolio Analytics">
+                    <AnalyticsPage
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'tax-report' ? (
+                <ErrorBoundary fallbackTitle="Tax Report">
+                    <TaxReportPage
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
                     />

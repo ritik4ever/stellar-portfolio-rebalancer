@@ -14,6 +14,7 @@ import {
 } from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
 import { normalizeNotificationPreferences } from "./notificationPreferences.js";
+import { databaseService } from "./databaseService.js";
 import {
   getNotificationDeliveryConfig,
   type NotificationDeliveryConfig,
@@ -57,6 +58,13 @@ class WebhookProvider implements NotificationProvider {
     preferences: NotificationPreferences,
   ): Promise<void> {
     if (!preferences.webhookEnabled || !preferences.webhookUrl) {
+      dbLogNotificationOutcome(
+        payload.userId,
+        "webhook",
+        payload.eventType,
+        "skipped",
+        "Webhook disabled or missing URL",
+      );
       return;
     }
 
@@ -377,6 +385,67 @@ export class NotificationService {
     if (existing) return existing;
     logger.info('[NOTIFICATION] Initializing default preferences for new user', { userId });
     return dbInitDefaultNotificationPreferences(userId);
+  }
+
+  /**
+   * Get per-asset price alert threshold overrides for a user.
+   */
+  getPriceAlertThresholds(userId: string): Record<string, number> {
+    return this.getPreferences(userId).priceAlertThresholds || {};
+  }
+
+  /**
+   * Get the global default price alert threshold for a user, falling back
+   * to a sensible default when the user has not configured one.
+   */
+  getDefaultPriceAlertThreshold(userId: string): number {
+    const prefs = databaseService.getUserPreferences(userId);
+    const threshold = prefs?.default_threshold;
+    return typeof threshold === 'number' && Number.isFinite(threshold) ? threshold : 5;
+  }
+
+  /**
+   * Resolve the effective price alert threshold for a single asset,
+   * prioritizing a per-asset override before falling back to the user's
+   * global default.
+   */
+  getEffectivePriceAlertThreshold(userId: string, asset: string): number {
+    const overrides = this.getPriceAlertThresholds(userId);
+    const override = overrides[asset];
+    if (typeof override === 'number' && Number.isFinite(override)) {
+      return override;
+    }
+    return this.getDefaultPriceAlertThreshold(userId);
+  }
+
+  /**
+   * Set per-asset price alert threshold overrides, merging into any
+   * existing overrides for the user.
+   */
+  setPriceAlertThresholds(userId: string, thresholds: Record<string, number>): void {
+    const preferences = this.getPreferences(userId);
+    preferences.priceAlertThresholds = {
+      ...(preferences.priceAlertThresholds || {}),
+      ...thresholds,
+    };
+    dbSaveNotificationPreferences(preferences);
+    logger.info('[NOTIFICATION] Price alert thresholds updated', { userId, assetCount: Object.keys(thresholds).length });
+  }
+
+  /**
+   * Remove a single per-asset price alert threshold override.
+   */
+  deletePriceAlertThreshold(userId: string, asset: string): boolean {
+    const preferences = this.getPreferences(userId);
+    const overrides = { ...(preferences.priceAlertThresholds || {}) };
+    if (!(asset in overrides)) {
+      return false;
+    }
+    delete overrides[asset];
+    preferences.priceAlertThresholds = overrides;
+    dbSaveNotificationPreferences(preferences);
+    logger.info('[NOTIFICATION] Price alert threshold removed', { userId, asset });
+    return true;
   }
 
   /**

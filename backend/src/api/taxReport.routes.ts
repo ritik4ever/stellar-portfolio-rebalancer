@@ -170,7 +170,7 @@ function toCSV(entries: TaxReportEntry[]): string {
   return [headers, ...rows].join('\n')
 }
 
-taxReportRouter.get('/tax-report', (req: Request, res: Response) => {
+taxReportRouter.get('/portfolio/tax-report', (req: Request, res: Response) => {
   try {
     const yearParam = req.query.year as string | undefined
     const format = (req.query.format as string)?.toLowerCase() === 'csv' ? 'csv' : 'json'

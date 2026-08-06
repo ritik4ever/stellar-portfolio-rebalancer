@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { NotificationService, type NotificationPayload } from "../services/notificationService.js";
 import { buildNotificationPayload, buildTestNotificationPayload } from "../services/notificationTemplates.js";
+import { normalizeNotificationPreferences } from "../services/notificationPreferences.js";
 import * as notificationDb from "../db/notificationDb.js";
+import { databaseService } from "../services/databaseService.js";
 import nodemailer from "nodemailer";
 import { createHmac } from "node:crypto";
 
@@ -234,17 +236,17 @@ describe("NotificationService", () => {
       expect(mockNodemailerTransporter.sendMail).not.toHaveBeenCalled();
     });
 
-    it("queues event when user has daily digest preference", async () => {
-      const digestPrefs = { ...emailPrefs, digestMode: 'daily' } as any;
-      getPrefsSpy.mockReturnValue(digestPrefs);
+    it("re-queues digest events when the user's digest mode does not match", async () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, digestMode: 'weekly' });
+      vi.spyOn(notificationDb, 'dbGetAndDeleteDigestEventsBefore').mockReturnValue([
+        { id: 1, user_id: 'test-user', event_type: 'rebalance', title: 'Rebalance Complete', message: 'Your portfolio has been rebalanced successfully.', data: null, created_at: new Date().toISOString() },
+      ]);
       const saveDigestSpy = vi.spyOn(notificationDb, 'dbSaveDigestEvent').mockImplementation(() => {});
 
       const service = new NotificationService();
-      const payload: NotificationPayload = { ...basePayload };
+      await service.processDigests('daily');
 
-      await service.notify(payload);
-
-      expect(saveDigestSpy).toHaveBeenCalledWith('test-user', 'rebalance', expect.any(String), expect.any(String), undefined);
+      expect(saveDigestSpy).toHaveBeenCalledWith('test-user', 'rebalance', 'Rebalance Complete', 'Your portfolio has been rebalanced successfully.', undefined);
     });
   });
 
@@ -319,6 +321,85 @@ describe("NotificationService", () => {
     });
   });
 
+  describe("Price alert thresholds", () => {
+    let getUserPreferencesSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      getUserPreferencesSpy = vi.spyOn(databaseService, "getUserPreferences").mockReturnValue({ default_threshold: 5 } as any);
+    });
+
+    it("returns empty overrides when user has none configured", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs });
+      const service = new NotificationService();
+      expect(service.getPriceAlertThresholds("test-user")).toEqual({});
+    });
+
+    it("returns per-asset overrides from preferences", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, priceAlertThresholds: { XLM: 7, BTC: 3 } });
+      const service = new NotificationService();
+      expect(service.getPriceAlertThresholds("test-user")).toEqual({ XLM: 7, BTC: 3 });
+    });
+
+    it("resolves the global default threshold from user preferences", () => {
+      getUserPreferencesSpy.mockReturnValue({ default_threshold: 12 } as any);
+      const service = new NotificationService();
+      expect(service.getDefaultPriceAlertThreshold("test-user")).toBe(12);
+    });
+
+    it("falls back to 5 when the user has no global default threshold", () => {
+      getUserPreferencesSpy.mockReturnValue({} as any);
+      const service = new NotificationService();
+      expect(service.getDefaultPriceAlertThreshold("test-user")).toBe(5);
+    });
+
+    it("evaluates per-asset override before the global default", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, priceAlertThresholds: { XLM: 7 } });
+      getUserPreferencesSpy.mockReturnValue({ default_threshold: 5 } as any);
+      const service = new NotificationService();
+      expect(service.getEffectivePriceAlertThreshold("test-user", "XLM")).toBe(7);
+    });
+
+    it("falls back to the global default when no per-asset override exists", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, priceAlertThresholds: { BTC: 3 } });
+      getUserPreferencesSpy.mockReturnValue({ default_threshold: 9 } as any);
+      const service = new NotificationService();
+      expect(service.getEffectivePriceAlertThreshold("test-user", "XLM")).toBe(9);
+    });
+
+    it("falls back to 5 when neither override nor global default is set", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs });
+      getUserPreferencesSpy.mockReturnValue({} as any);
+      const service = new NotificationService();
+      expect(service.getEffectivePriceAlertThreshold("test-user", "XLM")).toBe(5);
+    });
+
+    it("saves merged overrides when setting new thresholds", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, priceAlertThresholds: { XLM: 7 } });
+      const service = new NotificationService();
+      service.setPriceAlertThresholds("test-user", { BTC: 3 });
+      expect(savePrefsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ priceAlertThresholds: { XLM: 7, BTC: 3 } })
+      );
+    });
+
+    it("deletes a per-asset override when it exists", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, priceAlertThresholds: { XLM: 7, BTC: 3 } });
+      const service = new NotificationService();
+      const removed = service.deletePriceAlertThreshold("test-user", "XLM");
+      expect(removed).toBe(true);
+      expect(savePrefsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ priceAlertThresholds: { BTC: 3 } })
+      );
+    });
+
+    it("returns false when deleting a non-existent override", () => {
+      getPrefsSpy.mockReturnValue({ ...emailPrefs, priceAlertThresholds: { BTC: 3 } });
+      const service = new NotificationService();
+      expect(service.deletePriceAlertThreshold("test-user", "XLM")).toBe(false);
+      expect(savePrefsSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("getLogs", () => {
     it("retrieves notification logs for a user", () => {
       const mockLogs = [
@@ -340,7 +421,7 @@ describe("NotificationService", () => {
       const service = new NotificationService();
       service.subscribe(emailPrefs);
 
-      expect(savePrefsSpy).toHaveBeenCalledWith(emailPrefs);
+      expect(savePrefsSpy).toHaveBeenCalledWith(normalizeNotificationPreferences(emailPrefs));
     });
 
     it("disables all notifications when unsubscribing", () => {
