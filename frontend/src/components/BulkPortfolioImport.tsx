@@ -1,26 +1,8 @@
-import { useMemo, useState } from 'react'
-
-type BulkImportRowError = {
-  row: number
-  field: string
-  message: string
-}
-
-type BulkImportValidationError = {
-  error: 'VALIDATION_ERROR' | string
-  message?: string
-  code?: string
-  errors?: BulkImportRowError[]
-  meta?: {
-    totalRows?: number
-    validRows?: number
-  }
-}
-
-type BulkImportSuccessResponse = {
-  portfolioId: string
-  status: 'created'
-}
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useBulkImport,
+  type BulkImportRowError,
+} from '../hooks/mutations/useBulkImport'
 
 type ParsedRow = {
   asset: string
@@ -34,6 +16,10 @@ type EditableRow = {
   current: ParsedRow
   status: RowStatus
   errors: BulkImportRowError[]
+}
+
+type SuccessSummary = {
+  portfolioId: string
 }
 
 function detectLikelyJson(file: File): boolean {
@@ -80,6 +66,15 @@ function getErrorForField(errors: BulkImportRowError[], field: string): string |
   return errors.find(e => e.field === field)?.message
 }
 
+function readFileText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.onerror = () => reject(new Error('Could not read file'))
+    reader.readAsText(file)
+  })
+}
+
 export default function BulkPortfolioImport(props: {
   userAddressForDemo?: string | null
   onImported?: (portfolioId: string) => void
@@ -87,14 +82,20 @@ export default function BulkPortfolioImport(props: {
   const { onImported } = props
 
   const [file, setFile] = useState<File | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
 
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [rowErrors, setRowErrors] = useState<BulkImportRowError[]>([])
   const [meta, setMeta] = useState<{ totalRows?: number; validRows?: number } | null>(null)
+  const [success, setSuccess] = useState<SuccessSummary | null>(null)
+  const [progress, setProgress] = useState(0)
   const [preview, setPreview] = useState<string | null>(null)
   const [editableRows, setEditableRows] = useState<EditableRow[]>([])
-  const [retryBusy, setRetryBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const dragCounterRef = useRef(0)
+  const progressTimerRef = useRef<number | null>(null)
+
+  const mutation = useBulkImport()
 
   const importMode = useMemo(() => {
     if (!file) return 'unknown'
@@ -108,13 +109,40 @@ export default function BulkPortfolioImport(props: {
     [editableRows]
   )
 
-  const handlePickFile: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current != null) {
+        window.clearInterval(progressTimerRef.current)
+        progressTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const startProgress = () => {
+    setProgress(5)
+    progressTimerRef.current = window.setInterval(() => {
+      setProgress(p => (p < 90 ? Math.min(90, p + 8 + Math.random() * 10) : p))
+    }, 200)
+  }
+
+  const stopProgress = (final: number) => {
+    if (progressTimerRef.current != null) {
+      window.clearInterval(progressTimerRef.current)
+      progressTimerRef.current = null
+    }
+    setProgress(final)
+  }
+
+  const resetImportState = () => {
     setSubmitError(null)
     setRowErrors([])
     setMeta(null)
+    setSuccess(null)
     setEditableRows([])
+  }
 
-    const picked = e.target.files?.[0] ?? null
+  const applyFile = (picked: File | null) => {
+    resetImportState()
     setFile(picked)
 
     if (!picked) {
@@ -130,44 +158,88 @@ export default function BulkPortfolioImport(props: {
     reader.readAsText(picked)
   }
 
+  const handlePickFile: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+    applyFile(e.target.files?.[0] ?? null)
+    e.target.value = ''
+  }
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current += 1
+    setDragActive(true)
+  }
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0
+      setDragActive(false)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current = 0
+    setDragActive(false)
+
+    const dropped = e.dataTransfer.files?.[0] ?? null
+    if (dropped) applyFile(dropped)
+  }
+
   const handleImport = async () => {
     if (!file) {
       setSubmitError('Choose a CSV or JSON file first')
       return
     }
 
-    setBusy(true)
-    setSubmitError(null)
-    setRowErrors([])
-    setMeta(null)
-    setEditableRows([])
+    resetImportState()
+    setSuccess(null)
+    setProgress(0)
+    startProgress()
+
+    const likelyJson = detectLikelyJson(file) || importMode === 'json'
 
     try {
-      const likelyJson = detectLikelyJson(file) || importMode === 'json'
-      const text = await file.text()
+      const text = await readFileText(file)
 
-      const headers: Record<string, string> = {
-        Accept: 'application/json',
-      }
-
-      if (likelyJson) headers['Content-Type'] = 'application/json'
-      else headers['Content-Type'] = 'text/csv'
-
-      const res = await fetch('/api/v1/portfolio/import', {
-        method: 'POST',
-        headers,
-        body: likelyJson ? text : text,
+      const result = await mutation.mutateAsync({
+        content: text,
+        contentType: likelyJson ? 'application/json' : 'text/csv',
       })
 
-      const data = await res.json().catch(() => null)
+      stopProgress(100)
+      setSuccess({ portfolioId: result.portfolioId })
+      if (onImported) onImported(result.portfolioId)
+    } catch (err: unknown) {
+      stopProgress(0)
+      const importError = err as Error & {
+        rowErrors?: BulkImportRowError[]
+        totalRows?: number
+        validRows?: number
+      }
+      const errors = importError.rowErrors ?? []
+      setRowErrors(errors)
+      if (importError.totalRows != null) {
+        setMeta({ totalRows: importError.totalRows, validRows: importError.validRows ?? 0 })
+      }
+      setSubmitError(importError.message || 'Import failed')
 
-      if (!res.ok) {
-        const err = data as BulkImportValidationError | null
-        const errors = err?.errors ?? []
-        setRowErrors(errors)
-        setMeta(err?.meta ?? null)
-        setSubmitError(err?.message || 'Import failed')
-
+      if (errors.length > 0) {
+        let text = ''
+        try {
+          text = await readFileText(file)
+        } catch {
+          text = ''
+        }
         const parsed = likelyJson ? parseJsonRows(text) : parseCsvRows(text)
         setEditableRows(parsed.map((row, idx) => ({
           original: { ...row },
@@ -175,16 +247,7 @@ export default function BulkPortfolioImport(props: {
           status: getRowErrors(errors, idx).length > 0 ? 'error' : 'pending',
           errors: getRowErrors(errors, idx)
         })))
-        return
       }
-
-      const okData = data as BulkImportSuccessResponse
-      if (onImported) onImported(okData.portfolioId)
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Import failed'
-      setSubmitError(msg)
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -206,8 +269,10 @@ export default function BulkPortfolioImport(props: {
     const correctedRows = editableRows.filter(r => r.status === 'corrected' || r.status === 'error')
     if (correctedRows.length === 0) return
 
-    setRetryBusy(true)
     setSubmitError(null)
+    setSuccess(null)
+    setProgress(0)
+    startProgress()
 
     try {
       const payload = correctedRows.map(r => ({
@@ -215,37 +280,12 @@ export default function BulkPortfolioImport(props: {
         allocation_pct: parseFloat(r.current.allocation_pct) || 0
       }))
 
-      const res = await fetch('/api/v1/portfolio/import', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
+      const result = await mutation.mutateAsync({
+        content: JSON.stringify(payload),
+        contentType: 'application/json',
       })
 
-      const data = await res.json().catch(() => null)
-
-      if (!res.ok) {
-        const err = data as BulkImportValidationError | null
-        const newErrors = err?.errors ?? []
-
-        setEditableRows(prev => prev.map((row) => {
-          if (row.status !== 'corrected' && row.status !== 'error') return row
-          const rowSpecificErrors = newErrors.filter(
-            e => e.field === 'asset' || e.field === 'allocation_pct'
-          )
-          if (rowSpecificErrors.length > 0) {
-            return { ...row, status: 'error' as RowStatus, errors: rowSpecificErrors }
-          }
-          return { ...row, status: 'success' as RowStatus, errors: [] }
-        }))
-
-        setRowErrors(newErrors)
-        setSubmitError(err?.message || 'Retry failed for some rows')
-        return
-      }
-
+      stopProgress(100)
       setEditableRows(prev => prev.map((row) => {
         if (row.status === 'corrected' || row.status === 'error') {
           return { ...row, status: 'success' as RowStatus, errors: [] }
@@ -253,13 +293,26 @@ export default function BulkPortfolioImport(props: {
         return row
       }))
 
-      const okData = data as BulkImportSuccessResponse
-      if (onImported) onImported(okData.portfolioId)
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Retry failed'
-      setSubmitError(msg)
-    } finally {
-      setRetryBusy(false)
+      setSuccess({ portfolioId: result.portfolioId })
+      if (onImported) onImported(result.portfolioId)
+    } catch (err: unknown) {
+      stopProgress(0)
+      const importError = err as Error & { rowErrors?: BulkImportRowError[] }
+      const newErrors = importError.rowErrors ?? []
+
+      setEditableRows(prev => prev.map((row) => {
+        if (row.status !== 'corrected' && row.status !== 'error') return row
+        const rowSpecificErrors = newErrors.filter(
+          e => e.field === 'asset' || e.field === 'allocation_pct'
+        )
+        if (rowSpecificErrors.length > 0) {
+          return { ...row, status: 'error' as RowStatus, errors: rowSpecificErrors }
+        }
+        return { ...row, status: 'success' as RowStatus, errors: [] }
+      }))
+
+      setRowErrors(newErrors)
+      setSubmitError(importError.message || 'Retry failed for some rows')
     }
   }
 
@@ -281,6 +334,8 @@ export default function BulkPortfolioImport(props: {
     }
   }
 
+  const uploading = mutation.isPending
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
@@ -291,35 +346,108 @@ export default function BulkPortfolioImport(props: {
         <span className="font-mono">allocation_pct</span>. The allocations must sum to 100%.
       </p>
 
-      <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            File (CSV or JSON)
-          </label>
-          <input
-            type="file"
-            accept=".csv,.json,text/csv,application/json"
-            onChange={handlePickFile}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Drop CSV or JSON file or click to browse"
+        onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            fileInputRef.current?.click()
+          }
+        }}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+          dragActive
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+            : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 hover:border-blue-400 dark:hover:border-blue-500'
+        }`}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.json,text/csv,application/json"
+          onChange={handlePickFile}
+          className="sr-only"
+        />
+        <svg
+          className={`w-10 h-10 ${dragActive ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 16V4m0 0 4 4m-4-4L8 8m-5 9v3a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"
           />
-          {file && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              Selected: <span className="font-mono">{file.name}</span>
-            </div>
-          )}
-        </div>
+        </svg>
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {dragActive ? 'Drop your file here' : 'Drag & drop your CSV or JSON file here'}
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          or <span className="font-semibold text-blue-600 dark:text-blue-400">click to browse</span>
+        </p>
+      </div>
 
+      {file && (
+        <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          Selected: <span className="font-mono">{file.name}</span>
+        </div>
+      )}
+
+      <div className="mt-4 flex justify-end">
         <button
           type="button"
-          disabled={busy || !file}
+          disabled={uploading || !file}
           onClick={handleImport}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors"
         >
-          {busy ? 'Importing...' : 'Import'}
+          {uploading ? 'Importing...' : 'Import'}
         </button>
       </div>
 
-      {preview && editableRows.length === 0 && (
+      {uploading && (
+        <div className="mt-4" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} aria-label="Uploading file">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+              Uploading...
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {Math.round(progress)}%
+            </span>
+          </div>
+          <div className="h-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-600 transition-all duration-200"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {success && !uploading && (
+        <div
+          className="mt-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-lg p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="text-sm font-medium text-green-800 dark:text-green-200">
+            Import successful — portfolio created.
+          </div>
+          <div className="text-xs text-green-700 dark:text-green-300 mt-1 font-mono">
+            Portfolio ID: {success.portfolioId}
+          </div>
+        </div>
+      )}
+
+      {preview && editableRows.length === 0 && !success && (
         <div className="mt-4">
           <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Preview (first bytes)</div>
           <pre className="bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-xs overflow-auto max-h-40">
@@ -348,11 +476,11 @@ export default function BulkPortfolioImport(props: {
             {hasCorrectedRows && (
               <button
                 type="button"
-                disabled={retryBusy}
+                disabled={uploading}
                 onClick={handleRetryCorrected}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-xs font-medium rounded-lg transition-colors"
               >
-                {retryBusy ? 'Retrying...' : 'Fix & Retry Corrected Rows'}
+                {uploading ? 'Retrying...' : 'Fix & Retry Corrected Rows'}
               </button>
             )}
           </div>
