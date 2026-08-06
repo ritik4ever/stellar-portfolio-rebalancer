@@ -997,6 +997,10 @@ GET /api/v1/assets/{symbol}
 
 ## Notifications
 
+- **GET /api/notifications/alerts/thresholds** — Get per-asset price alert threshold overrides and the global default for a user (query: `userId`, required).
+- **PUT /api/notifications/alerts/thresholds** — Merge per-asset price alert threshold overrides for a user (body: `userId`, `thresholds`).
+- **DELETE /api/notifications/alerts/thresholds** — Remove a single per-asset price alert threshold override (query: `userId`, `asset`, both required).
+
 ### Subscribe
 
 ```bash
@@ -1032,6 +1036,47 @@ DELETE /api/v1/notifications/unsubscribe?userId=GALPHABET...&reason=no-longer-ne
 ```bash
 GET /api/v1/notifications/logs?userId=GALPHABET...
 ```
+
+### Get Price Alert Thresholds
+
+```bash
+GET /api/v1/notifications/alerts/thresholds?userId=GALPHABET...
+```
+
+Returns per-asset price alert threshold overrides and the user's global default:
+
+```json
+{
+  "success": true,
+  "data": {
+    "thresholds": { "XLM": 7, "BTC": 3 },
+    "defaultThreshold": 5
+  },
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+### Set Price Alert Thresholds
+
+```bash
+PUT /api/v1/notifications/alerts/thresholds
+Content-Type: application/json
+
+{
+  "userId": "GALPHABET...",
+  "thresholds": { "XLM": 7, "BTC": 3 }
+}
+```
+
+Merges the provided per-asset overrides into the user's existing overrides.
+
+### Delete a Price Alert Threshold
+
+```bash
+DELETE /api/v1/notifications/alerts/thresholds?userId=GALPHABET...&asset=XLM
+```
+
+Removes the per-asset override for the given asset so alert evaluation falls back to the user's global default.
 
 ---
 

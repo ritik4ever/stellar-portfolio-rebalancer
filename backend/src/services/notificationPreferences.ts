@@ -23,12 +23,20 @@ const webhookUrlSchema = z
     message: "webhookUrl must use http or https",
   });
 
+export const priceAlertThresholdsSchema = z
+  .record(
+    z.string().trim().min(1).toUpperCase(),
+    z.number().positive("price alert thresholds must be positive numbers").max(10000)
+  )
+  .optional();
+
 export const notificationPreferencesSchema = z
   .object({
     userId: z.string().min(1, "userId is required").optional(),
     emailEnabled: z.boolean(),
     webhookEnabled: z.boolean(),
     digestMode: z.enum(['immediate','daily','weekly']).optional(),
+    priceAlertThresholds: priceAlertThresholdsSchema,
     emailAddress: z.preprocess(
       (v) => (v === "" ? undefined : v),
       z.string().email("emailAddress must be a valid email").optional(),
@@ -74,6 +82,7 @@ export function normalizeNotificationPreferences(
       ? input.webhookUrl?.trim() || undefined
       : undefined,
     digestMode: input.digestMode || 'immediate',
+    priceAlertThresholds: input.priceAlertThresholds,
     events: {
       rebalance: input.events.rebalance,
       circuitBreaker: input.events.circuitBreaker,

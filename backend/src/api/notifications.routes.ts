@@ -4,7 +4,7 @@ import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { notificationSubscribeSchema, notificationQuerySchema } from './validation.js'
+import { notificationSubscribeSchema, notificationQuerySchema, notificationThresholdsQuerySchema, notificationThresholdsBodySchema } from './validation.js'
 import { getAuthConfig } from '../services/authService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -84,6 +84,107 @@ notificationsRouter.get('/notifications/preferences', requireJwtWhenEnabled, val
         return ok(res, { preferences })
     } catch (error) {
         logger.error('Failed to get notification preferences', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Get per-asset price alert thresholds
+notificationsRouter.get('/notifications/alerts/thresholds', requireJwtWhenEnabled, validateQuery(notificationThresholdsQuerySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot read alert thresholds for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
+        }
+
+        const thresholds = notificationService.getPriceAlertThresholds(userId)
+        const defaultThreshold = notificationService.getDefaultPriceAlertThreshold(userId)
+
+        return ok(res, { thresholds, defaultThreshold })
+    } catch (error) {
+        logger.error('Failed to get price alert thresholds', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Set per-asset price alert thresholds
+notificationsRouter.put('/notifications/alerts/thresholds', requireJwtWhenEnabled, validateRequest(notificationThresholdsBodySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const bodyId = req.body?.userId as string | undefined
+            if (bodyId && bodyId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot manage alert thresholds for another user')
+            }
+        } else {
+            userId = req.body?.userId
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        }
+
+        const { thresholds } = req.body as { thresholds: Record<string, number> }
+        if (!thresholds || Object.keys(thresholds).length === 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'At least one threshold must be provided')
+        }
+
+        notificationService.setPriceAlertThresholds(userId, thresholds)
+
+        const updated = notificationService.getPriceAlertThresholds(userId)
+        const defaultThreshold = notificationService.getDefaultPriceAlertThreshold(userId)
+
+        return ok(res, { thresholds: updated, defaultThreshold })
+    } catch (error) {
+        logger.error('Failed to set price alert thresholds', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Remove a per-asset price alert threshold
+notificationsRouter.delete('/notifications/alerts/thresholds', requireJwtWhenEnabled, validateQuery(notificationThresholdsQuerySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot manage alert thresholds for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
+        }
+
+        const asset = req.query.asset as string | undefined
+        if (!asset) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'asset query parameter is required')
+        }
+
+        const removed = notificationService.deletePriceAlertThreshold(userId, asset)
+        if (!removed) {
+            return fail(res, 404, 'NOT_FOUND', `No threshold override found for asset ${asset}`)
+        }
+
+        const thresholds = notificationService.getPriceAlertThresholds(userId)
+        const defaultThreshold = notificationService.getDefaultPriceAlertThreshold(userId)
+
+        return ok(res, { thresholds, defaultThreshold })
+    } catch (error) {
+        logger.error('Failed to delete price alert threshold', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

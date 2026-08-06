@@ -193,6 +193,19 @@ export const notificationQuerySchema = z.object({
     reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
+export const notificationThresholdsQuerySchema = z.object({
+    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    asset: z.string().trim().min(1, 'asset query parameter is required').toUpperCase().optional()
+});
+
+export const notificationThresholdsBodySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    thresholds: z.record(
+        z.string().trim().min(1).toUpperCase(),
+        z.number().positive('Threshold must be a positive number').max(10000)
+    )
+}).strict();
+
 // ─── Admin asset schemas ──────────────────────────────────────────────────────
 export const adminAddAssetSchema = z.object({
     symbol: z.string().min(1, 'symbol is required').max(20),
