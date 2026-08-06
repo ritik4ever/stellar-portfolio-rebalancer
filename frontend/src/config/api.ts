@@ -153,6 +153,8 @@ export const API_CONFIG = {
         },
         PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/performance-summary`,
+        TAX_REPORT: (year?: number) =>
+            `${API_RESOURCE_ROOT}/portfolio/tax-report${year ? `?year=${year}` : ''}`,
         PRICES: `${API_RESOURCE_ROOT}/prices`,
         MARKET_MOVERS: `${API_RESOURCE_ROOT}/market/movers`,
         PRICES_ENHANCED: `${API_RESOURCE_ROOT}/prices/enhanced`,
