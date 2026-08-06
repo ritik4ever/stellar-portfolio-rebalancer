@@ -813,6 +813,28 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/portfolio/tax-report': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get tax report',
+                description: 'Realized gain/loss tax report computed with FIFO cost basis for a tax year.',
+                parameters: [
+                    { name: 'year', in: 'query', schema: { type: 'integer', minimum: 2000, maximum: 2100, description: 'Tax year (defaults to the current year)' } },
+                    { name: 'format', in: 'query', schema: { type: 'string', enum: ['json', 'csv'], default: 'json' } },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Tax report summary (JSON) or CSV download (format=csv)',
+                        content: {
+                            'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } },
+                            'text/csv': { schema: { type: 'string' } },
+                        },
+                    },
+                    '400': { description: 'Invalid year', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/risk/metrics/{portfolioId}': {
             get: {
                 tags: ['Risk'],

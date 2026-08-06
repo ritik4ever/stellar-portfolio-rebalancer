@@ -496,6 +496,7 @@ available price contributes zero to `total_value_usd` rather than being assumed.
 - **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
 - **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
 - **GET /api/portfolio/{id}/performance-summary** — Performance summary.
+- **GET /api/portfolio/tax-report** — Realized gain/loss tax report computed with FIFO cost basis (query: `year` optional, defaults to current year; `format` `json` (default) or `csv`).
 
 Response:
 ```json

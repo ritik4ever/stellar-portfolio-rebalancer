@@ -9,10 +9,12 @@ import { consentRouter } from './consent.routes.js'
 import { assetsRouter } from './assets.routes.js'
 import { analyticsRouter } from './analytics.routes.js'
 import { adminRouter } from './admin.routes.js'
+import { taxReportRouter } from './taxReport.routes.js'
 
 
 export const portfolioRouter = Router()
 
+portfolioRouter.use(taxReportRouter)
 portfolioRouter.use(portfoliosRouter)
 portfolioRouter.use(portfolioImportRouter)
 portfolioRouter.use(rebalancingRouter)
