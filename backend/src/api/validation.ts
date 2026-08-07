@@ -325,3 +325,64 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+// ─── Analytics query schemas ─────────────────────────────────────────────────
+// Replaces ad-hoc manual if/throw checks in analytics.routes.ts with schema
+// validation that produces the same VALIDATION_ERROR responses.
+
+const isoDateOrUndefined = z.preprocess(
+    (v) => (v === undefined || v === '' ? undefined : v),
+    z.string().datetime({ offset: true }).optional()
+);
+
+const daysOrUndefined = z.preprocess(
+    (v) => (v === undefined || v === '' ? undefined : Number(v)),
+    z.number().int().min(1).max(3650).optional()
+);
+
+// GET /portfolio/:id/analytics?from=...&to=...&days=...
+export const analyticsQuerySchema = z.object({
+    from: isoDateOrUndefined,
+    to: isoDateOrUndefined,
+    days: daysOrUndefined,
+}).strict().refine(
+    (data) => {
+        // Both or neither of from/to must be present.
+        return (data.from !== undefined) === (data.to !== undefined);
+    },
+    { message: 'from and to dates must be provided together', path: ['from'] }
+).refine(
+    (data) => {
+        if (data.from === undefined || data.to === undefined) return true;
+        const from = new Date(data.from).getTime();
+        const to = new Date(data.to).getTime();
+        if (isNaN(from) || isNaN(to)) return false;
+        const now = Date.now();
+        if (from > now || to > now) return false;
+        return from <= to;
+    },
+    { message: 'Invalid date range: must be valid ISO 8601, not in the future, and from must be before to', path: ['from'] }
+);
+
+// GET /portfolio/:id/benchmark?from=...&to=... (both required)
+export const analyticsBenchmarkQuerySchema = z.object({
+    from: z.preprocess(
+        (v) => (v === undefined || v === '' ? undefined : v),
+        z.string().datetime({ offset: true })
+    ).refine((v): v is string => v !== undefined, { message: 'from is required', path: ['from'] }),
+    to: z.preprocess(
+        (v) => (v === undefined || v === '' ? undefined : v),
+        z.string().datetime({ offset: true })
+    ).refine((v): v is string => v !== undefined, { message: 'to is required', path: ['to'] }),
+}).strict().refine(
+    (data) => {
+        if (data.from === undefined || data.to === undefined) return true;
+        const from = new Date(data.from).getTime();
+        const to = new Date(data.to).getTime();
+        if (isNaN(from) || isNaN(to)) return false;
+        const now = Date.now();
+        if (from > now || to > now) return false;
+        return from <= to;
+    },
+    { message: 'Invalid date range: must be valid ISO 8601, not in the future, and from must be before to', path: ['from'] }
+);

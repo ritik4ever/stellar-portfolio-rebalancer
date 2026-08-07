@@ -7,6 +7,8 @@ import { riskManagementService, rebalanceHistoryService } from '../services/serv
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { validateQuery } from '../middleware/validate.js'
+import { analyticsQuerySchema, analyticsBenchmarkQuerySchema } from './validation.js'
 
 const STABLECOINS = new Set(['USDC', 'USDT', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDN'])
 
@@ -59,16 +61,12 @@ export const analyticsRouter = Router()
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 
-analyticsRouter.get('/portfolio/:id/analytics', async (req: Request, res: Response) => {
+analyticsRouter.get('/portfolio/:id/analytics', validateQuery(analyticsQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
         const from = req.query.from as string | undefined
         const to = req.query.to as string | undefined
         const days = parseInt(req.query.days as string) || undefined
-
-        if (!portfolioId) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
-        }
 
         const portfolio = portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) {
@@ -77,22 +75,6 @@ analyticsRouter.get('/portfolio/:id/analytics', async (req: Request, res: Respon
 
         let snapshots
         if (from && to) {
-            const fromDate = new Date(from)
-            const toDate = new Date(to)
-
-            if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
-                return fail(res, 400, 'VALIDATION_ERROR', 'Invalid date format. Use ISO 8601 (e.g. 2025-01-01T00:00:00Z)')
-            }
-
-            const now = new Date()
-            if (fromDate > now || toDate > now) {
-                return fail(res, 400, 'VALIDATION_ERROR', 'Future dates are not accepted')
-            }
-
-            if (fromDate > toDate) {
-                return fail(res, 400, 'VALIDATION_ERROR', 'from date must be before to date')
-            }
-
             snapshots = analyticsService.getAnalyticsInRange(portfolioId, from, to)
         } else {
             snapshots = analyticsService.getAnalytics(portfolioId, days || 30)
@@ -381,22 +363,19 @@ analyticsRouter.get('/portfolio/:id/risk-score', async (req: Request, res: Respo
     }
 })
 
-analyticsRouter.get('/portfolio/:id/benchmark', async (req: Request, res: Response) => {
+analyticsRouter.get('/portfolio/:id/benchmark', validateQuery(analyticsBenchmarkQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id
-        const from = req.query.from as string | undefined
-        const to = req.query.to as string | undefined
+        // Schema-validated by analyticsBenchmarkQuerySchema: from/to are guaranteed strings here.
+        const from = req.query.from as string
+        const to = req.query.to as string
 
-        if (!portfolioId || !from || !to) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID, from, and to are required')
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
 
         const fromDate = new Date(from)
         const toDate = new Date(to)
-
-        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Invalid date format')
-        }
 
         // Get Portfolio Return
         const snapshots = analyticsService.getAnalyticsInRange(portfolioId, from, to)
