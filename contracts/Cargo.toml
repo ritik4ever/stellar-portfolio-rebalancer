@@ -13,7 +13,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 # Force ed25519-dalek 2.x to prevent 3.0.0 conflict with testutils
-ed25519-dalek = "=2.2.0"
+ed25519-dalek = "=3.0.0"
 soroban-sdk = "27.0.2"
 
 [dev-dependencies]
@@ -25,7 +25,7 @@ soroban-sdk = "27.0.2"
 # package.json "test:contracts"), which enables the package `testutils` feature
 # (mapping to `soroban-sdk/testutils`) for the whole build uniformly.
 proptest = "1.4.0"
-ed25519-dalek = "2.2.0"
+ed25519-dalek = "3.0.0"
 
 [features]
 default = []
