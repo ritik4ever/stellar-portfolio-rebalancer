@@ -87,8 +87,12 @@ pub fn merge_portfolios(env: &Env, source_id: u64, target_id: u64) -> Result<(),
         return Err(Error::TooManyAssets);
     }
     for (asset, decimals) in source.asset_decimals.iter() {
-        if !target.asset_decimals.contains_key(asset.clone()) {
-            target.asset_decimals.set(asset, decimals);
+        match target.asset_decimals.get(asset.clone()) {
+            Some(target_decimals) if target_decimals != decimals => {
+                return Err(Error::InvalidAssetDecimals);
+            }
+            Some(_) => {}
+            None => target.asset_decimals.set(asset, decimals),
         }
     }
     target.total_value = target
