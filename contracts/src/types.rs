@@ -326,6 +326,10 @@ pub enum Error {
     TemplateNotFound = 34,
     TemplateAlreadyExists = 35,
     TooManyTemplates = 36,
+    InvalidSplitPercentage = 37,
+    CannotMergeSamePortfolio = 38,
+    PortfolioOwnerMismatch = 39,
+    ArithmeticOverflow = 40,
 }
 
 #[contracttype]
