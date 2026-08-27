@@ -385,3 +385,46 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+const isoDateQuery = z.preprocess(
+    (value) => value === undefined || value === '' ? undefined : value,
+    z.string().datetime({ offset: true }).optional()
+);
+
+const boundedIntegerQuery = (minimum: number, maximum: number) => z.preprocess(
+    (value) => value === undefined || value === '' ? undefined : Number(value),
+    z.number().int().min(minimum).max(maximum).optional()
+);
+
+export const analyticsQuerySchema = z.object({
+    from: isoDateQuery,
+    to: isoDateQuery,
+    days: boundedIntegerQuery(1, 3650),
+}).strict().superRefine((data, context) => {
+    if ((data.from === undefined) !== (data.to === undefined)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['from'], message: 'from and to dates must be provided together' });
+        return;
+    }
+    if (data.from !== undefined && data.to !== undefined) {
+        const from = new Date(data.from).getTime();
+        const to = new Date(data.to).getTime();
+        if (from > Date.now() || to > Date.now()) {
+            context.addIssue({ code: z.ZodIssueCode.custom, path: ['from'], message: 'Future dates are not accepted' });
+        } else if (from > to) {
+            context.addIssue({ code: z.ZodIssueCode.custom, path: ['from'], message: 'from date must be before to date' });
+        }
+    }
+});
+
+export const analyticsBenchmarkQuerySchema = z.object({
+    from: z.string({ message: 'from is required' }).datetime({ offset: true }),
+    to: z.string({ message: 'to is required' }).datetime({ offset: true }),
+}).strict().superRefine((data, context) => {
+    const from = new Date(data.from).getTime();
+    const to = new Date(data.to).getTime();
+    if (from > Date.now() || to > Date.now()) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['from'], message: 'Future dates are not accepted' });
+    } else if (from > to) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['from'], message: 'from date must be before to date' });
+    }
+});
