@@ -10,7 +10,9 @@ const portfolioStrategyConfigSchema = z.object({
     intervalDays: z.number().min(1).max(365).optional(),
     volatilityThresholdPct: z.number().min(1).max(100).optional(),
     minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
-    dryRun: z.boolean().optional(),
+    dcaAmount: z.number().positive().optional(),
+    dcaIntervalDays: z.number().int().min(1).max(365).optional(),
+    dcaStartDate: z.string().date().optional(),
 }).strict()
 
 export const portfolioAllocationsSchema = z.record(z.string(), z.number().min(0).max(100)).refine(
@@ -29,7 +31,7 @@ export const portfolioSettingsSchema = z.object({
     allocations: portfolioAllocationsSchema,
     threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
     slippageTolerance: z.number().min(0.1, "Slippage tolerance must be between 0.1% and 5%").max(5, "Slippage tolerance must be between 0.1% and 5%").optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom', 'dca']).optional(),
     strategyConfig: portfolioStrategyConfigSchema.optional(),
     name: z.string().max(256, "name is too long").optional(),
     description: z.string().max(2000, "description is too long").optional(),
@@ -293,7 +295,7 @@ export const createDraftSchema = z.object({
     ),
     threshold: z.number().min(1).max(50),
     slippageTolerance: z.number().min(0.1).max(5).optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom', 'dca']).optional(),
     strategyConfig: z.object({
         intervalDays: z.number().min(1).max(365).optional(),
         volatilityThresholdPct: z.number().min(1).max(100).optional(),
@@ -313,7 +315,7 @@ export const updateDraftSchema = z.object({
     ).optional(),
     threshold: z.number().min(1).max(50).optional(),
     slippageTolerance: z.number().min(0.1).max(5).optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom', 'dca']).optional(),
     strategyConfig: z.object({
         intervalDays: z.number().min(1).max(365).optional(),
         volatilityThresholdPct: z.number().min(1).max(100).optional(),
