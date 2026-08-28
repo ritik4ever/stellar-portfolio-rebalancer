@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { Search, ChevronDown, Check, ExternalLink, Globe } from 'lucide-react'
 import { useAssets } from '../hooks/queries/useAssetsQuery'
+import { AssetVerificationBadge, type AssetVerificationStatus } from './AssetVerificationBadge'
 
 const DEBOUNCE_MS = 250
 
@@ -18,6 +19,7 @@ interface Asset {
     issuer?: string
     domain?: string
     type?: 'native' | 'credit_alphanum4' | 'credit_alphanum12'
+    verificationStatus?: AssetVerificationStatus
     displayName: string
     searchText: string
 }
@@ -280,6 +282,7 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
                                             {value === asset.symbol && (
                                                 <Check className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                                             )}
+                                            <AssetVerificationBadge status={asset.verificationStatus} />
                                             {matchByDomain[asset.symbol] && (
                                                 <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
                                                     <Globe className="w-3 h-3" />

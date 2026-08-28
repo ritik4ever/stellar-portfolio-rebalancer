@@ -9,7 +9,15 @@ import { requireAdmin } from '../middleware/auth.js'
 import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest } from '../middleware/validate.js'
-import { adminAddAssetSchema, adminPatchAssetSchema, assetsListQuerySchema } from './validation.js'
+import {
+    adminAddAssetSchema,
+    adminPatchAssetSchema,
+    assetsListQuerySchema,
+    assetVerificationDecisionSchema,
+    submitUnlistedAssetSchema
+} from './validation.js'
+import { AssetVerificationError } from '../services/assetRegistryService.js'
+import { requireJwt } from '../middleware/requireJwt.js'
 import { logger, logAudit } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
@@ -66,6 +74,94 @@ assetsRouter.get('/assets/:id', (req: Request, res: Response) => {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
+
+// ── issuer verification workflow (#1412) ──────────────────────────────────────
+
+/**
+ * User: submit an unlisted asset for issuer verification.
+ * The asset is created pending and disabled — never silently trusted.
+ */
+assetsRouter.post(
+    '/assets/submissions',
+    requireJwt,
+    validateRequest(submitUnlistedAssetSchema),
+    async (req: Request, res: Response) => {
+        try {
+            const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
+            const asset = await assetRegistryService.submitForVerification(symbol, name, {
+                contractAddress,
+                issuerAccount,
+                coingeckoId,
+                submittedBy: req.user?.address
+            })
+
+            logAudit('asset_verification_submitted', {
+                symbol: asset.symbol,
+                issuerAccount: asset.issuerAccount,
+                submittedBy: req.user?.address
+            })
+
+            return ok(res, { asset }, { status: 201 })
+        } catch (error) {
+            if (error instanceof AssetRegistryConflictError) {
+                return fail(res, 409, 'CONFLICT', getErrorMessage(error))
+            }
+            if (error instanceof AssetRegistryValidationError) {
+                return fail(res, 400, 'VALIDATION_ERROR', getErrorMessage(error))
+            }
+            logger.error('[ERROR] Asset verification submission failed', { error: getErrorObject(error) })
+            return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        }
+    }
+)
+
+/** Admin: list submissions awaiting a verification decision. */
+assetsRouter.get('/admin/assets/submissions', requireAdmin, (_req: Request, res: Response) => {
+    try {
+        const submissions = assetRegistryService.listPendingVerifications()
+        return ok(res, { submissions, count: submissions.length })
+    } catch (error) {
+        logger.error('[ERROR] Listing asset submissions failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: approve or reject a pending submission. */
+assetsRouter.post(
+    '/admin/assets/:symbol/verification',
+    requireAdmin,
+    validateRequest(assetVerificationDecisionSchema),
+    (req: Request, res: Response) => {
+        try {
+            const { decision, notes } = req.body as { decision: 'approve' | 'reject'; notes?: string }
+            const reviewer = req.adminPublicKey ?? 'unknown'
+
+            const asset = decision === 'approve'
+                ? assetRegistryService.approveVerification(req.params.symbol, reviewer, notes)
+                : assetRegistryService.rejectVerification(req.params.symbol, reviewer, notes)
+
+            logAudit(`asset_verification_${decision}d`, {
+                symbol: asset.symbol,
+                reviewedBy: reviewer,
+                notes
+            })
+
+            return ok(res, { asset })
+        } catch (error) {
+            if (error instanceof AssetVerificationError) {
+                const notFound = getErrorMessage(error).includes('not found')
+                return fail(
+                    res,
+                    notFound ? 404 : 409,
+                    notFound ? 'NOT_FOUND' : 'CONFLICT',
+                    getErrorMessage(error)
+                )
+            }
+            logger.error('[ERROR] Asset verification decision failed', { error: getErrorObject(error) })
+            return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        }
+    }
+)
 
 /** Admin: list all assets (including disabled) */
 assetsRouter.get('/admin/assets', requireAdmin, (req: Request, res: Response) => {

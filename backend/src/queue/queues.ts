@@ -15,6 +15,7 @@ export const QUEUE_NAMES = {
   PRICE_HISTORY_PRUNE: "price-history-prune",
   PRICE_HISTORY_BACKFILL: "price-history-backfill",
   USER_ALERTS: "user-alerts",
+  SCHEDULED_EXPORT: "scheduled-export",
 } as const;
 
 export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
@@ -91,6 +92,21 @@ export interface UserAlertsJobData {
     correlationId?: string
 }
 
+/** Recurring emailed portfolio export sweep (#1411). */
+export interface ScheduledExportJobData {
+    triggeredBy?: 'scheduler' | 'manual'
+    correlationId?: string
+    /** Optional cutoff for which schedules count as due; defaults to now. */
+    asOf?: string
+}
+
+export interface ScheduledExportJobResult {
+    processed: number
+    sent: number
+    failed: number
+    skipped: number
+}
+
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
 
 let portfolioCheckQueue: Queue<PortfolioCheckJobData> | null = null;
@@ -104,6 +120,7 @@ let priceHistorySnapshotQueue: Queue<PriceHistoryJobData> | null = null;
 let priceHistoryPruneQueue: Queue<PriceHistoryJobData> | null = null;
 let priceHistoryBackfillQueue: Queue<PriceHistoryBackfillJobData> | null = null;
 let userAlertsQueue: Queue<UserAlertsJobData> | null = null;
+let scheduledExportQueue: Queue<ScheduledExportJobData, ScheduledExportJobResult> | null = null;
 let dlqQueue: Queue<DLQJobData> | null = null;
 
 function getDefaultJobOptions() {
@@ -300,6 +317,24 @@ export function getUserAlertsQueue(): Queue<UserAlertsJobData> | null {
     }
 }
 
+export function getScheduledExportQueue(): Queue<ScheduledExportJobData, ScheduledExportJobResult> | null {
+    try {
+        if (!scheduledExportQueue) {
+            scheduledExportQueue = new Queue<ScheduledExportJobData, ScheduledExportJobResult>(
+                QUEUE_NAMES.SCHEDULED_EXPORT,
+                {
+                    connection: getConnectionOptions(),
+                    defaultJobOptions: getDefaultJobOptions(),
+                },
+            )
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.SCHEDULED_EXPORT}`)
+        }
+        return scheduledExportQueue
+    } catch {
+        return null
+    }
+}
+
 export function getQueueByName(name: string): Queue<any, any> | null {
   const queueMap: Record<string, () => any> = {
     [QUEUE_NAMES.PORTFOLIO_CHECK]: getPortfolioCheckQueue,
@@ -313,6 +348,7 @@ export function getQueueByName(name: string): Queue<any, any> | null {
     [QUEUE_NAMES.PRICE_HISTORY_PRUNE]: getPriceHistoryPruneQueue,
     [QUEUE_NAMES.PRICE_HISTORY_BACKFILL]: getPriceHistoryBackfillQueue,
     [QUEUE_NAMES.USER_ALERTS]: getUserAlertsQueue,
+    [QUEUE_NAMES.SCHEDULED_EXPORT]: getScheduledExportQueue,
   };
 
   const getter = queueMap[name];
@@ -335,6 +371,7 @@ export async function closeAllQueues(): Promise<void> {
     priceHistoryPruneQueue?.close(),
     priceHistoryBackfillQueue?.close(),
     userAlertsQueue?.close(),
+    scheduledExportQueue?.close(),
   ]);
   portfolioCheckQueue = null;
   rebalanceQueue = null;
@@ -348,5 +385,6 @@ export async function closeAllQueues(): Promise<void> {
   priceHistoryPruneQueue = null;
   priceHistoryBackfillQueue = null;
   userAlertsQueue = null;
+  scheduledExportQueue = null;
   logger.info("[QUEUE] All queues closed");
 }
