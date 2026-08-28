@@ -216,6 +216,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `REBALANCE_MIN_LIQUIDITY_COVERAGE` | No | `1.0` | Required liquidity coverage multiplier before a trade proceeds. | `1.0` | |
 | `REBALANCE_ALLOW_PARTIAL_FILL` | No | `true` | Allows partial order fills when a full fill is unavailable. | `true` | |
 | `REBALANCE_ROLLBACK_ON_FAILURE` | No | `true` | Attempts to roll back all changes if execution fails mid-flow. | `true` | |
+| `REBALANCE_LOCK_TTL_MS` | No | `300000` | Time-to-live for rebalancing concurrency locks (ms). Valid range: 1000–1800000. | `600000` | |
 | `RISK_VOLATILITY_HIGH` | No | `10` | Volatility percentage threshold for high-risk classification. | `10` | |
 | `RISK_VOLATILITY_CRITICAL` | No | `15` | Volatility percentage threshold for critical-risk classification. | `15` | |
 | `RISK_CONCENTRATION_HIGH` | No | `60` | Concentration percentage threshold for high-risk classification. | `60` | |
@@ -295,6 +296,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `DEMO_MODE` | No | `true` | Enables local demo portfolio flows. Set to `false` in production. | `false` | |
 | `ALLOW_FALLBACK_PRICES` | No | `true` | Uses fallback price data when the primary feed fails. | `false` | |
 | `ALLOW_MOCK_PRICE_HISTORY` | No | `true` | Allows generated historical price data. Disable in production. | `false` | |
+| `PRICE_HISTORY_BACKFILL_DAYS` | No | `90` | Days of price history backfilled when a new asset is added. Valid range: 1–365. | `45` | |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | No | `false` | Allows anonymous portfolio listing by user address in demo mode. | `false` | |
 | `ENABLE_DEBUG_ROUTES` | No | `true` | Enables debug/test route groups. **Must be `false` in production.** | `false` | ⚠️ Exposes internal test routes and can leak stack traces — the highest-risk flag in this section. |
 | `ALLOW_DEMO_BALANCE_FALLBACK` | No | `true` | Uses demo balances when a live on-chain balance fetch fails. | `false` | |

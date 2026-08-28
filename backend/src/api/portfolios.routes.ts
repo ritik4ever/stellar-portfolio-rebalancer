@@ -15,13 +15,13 @@ import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { getPortfolioExport } from '../services/portfolioExportService.js'
+import { getPortfolioExport, getRebalanceHistoryExport } from '../services/portfolioExportService.js'
 
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema } from './validation.js'
 import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
 import type { Portfolio } from '../types/index.js'
 
@@ -840,6 +840,36 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
         });
     } catch (error) {
         logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
+portfoliosRouter.get('/portfolio/:id/rebalance-history/export', validateQuery(rebalanceHistoryExportQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
+        }
+
+        const { format = 'json', from, to } = req.query as any;
+
+        const start = Date.now();
+        const result = await getRebalanceHistoryExport(portfolioId, format, { from, to });
+        const duration = Date.now() - start;
+
+        if (!result) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
+        }
+
+        if (duration > 200) {
+            logger.warn('Slow rebalance history export detected', { portfolioId, durationMs: duration });
+        }
+
+        res.setHeader('Content-Type', result.contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+        return res.status(200).send(result.body);
+    } catch (error) {
+        logger.error('[ERROR] Failed to export rebalance history', { error: getErrorObject(error) });
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
 });

@@ -360,7 +360,7 @@ notificationsRouter.post('/admin/notifications/dead-letter/:id/replay', requireA
             )
             return ok(res, { message: 'Dead-letter item replayed successfully' })
         } catch (replayError) {
-            await webhookDeadLetterQueue.push(item)
+            await webhookDeadLetterQueue.requeue(item)
             return fail(res, 502, 'REPLAY_FAILED', 'Replay delivery failed, item re-queued')
         }
     } catch (error) {
@@ -437,7 +437,7 @@ notificationsRouter.post('/admin/notifications/dead-letter/batch-replay', requir
                 )
                 results.succeeded++
             } catch (replayError) {
-                await webhookDeadLetterQueue.push(item)
+                await webhookDeadLetterQueue.requeue(item)
                 results.failed++
                 results.failedIds.push(item.id)
             }

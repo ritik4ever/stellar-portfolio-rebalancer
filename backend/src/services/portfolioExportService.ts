@@ -220,3 +220,86 @@ export async function getPortfolioExport(
 
     return null
 }
+
+export interface RebalanceHistoryExportJsonPayload {
+    exportedAt: string
+    portfolioId: string
+    filters: { from: string | null; to: string | null }
+    count: number
+    meta: { format: 'json'; purpose: 'rebalance history export' }
+    history: RebalanceEvent[]
+}
+
+export function buildRebalanceHistoryExportJson(
+    portfolioId: string,
+    filters: { from?: string; to?: string },
+    history: RebalanceEvent[],
+): RebalanceHistoryExportJsonPayload {
+    return {
+        exportedAt: new Date().toISOString(),
+        portfolioId,
+        filters: { from: filters.from ?? null, to: filters.to ?? null },
+        count: history.length,
+        meta: { format: 'json', purpose: 'rebalance history export' },
+        history,
+    }
+}
+
+export function buildRebalanceHistoryExportCsv(history: RebalanceEvent[]): string {
+    const headers = [
+        'id', 'portfolioId', 'timestamp', 'trigger', 'trades', 'gasUsed', 'status',
+        'isAutomatic', 'eventSource', 'onChainTxHash', 'fromAsset', 'toAsset', 'amount',
+        'feePaid', 'slippageBps', 'gasFeeXlm', 'gasFeeUsd', 'tradeLegs',
+    ]
+    const rows = history.map((e) => [
+        e.id,
+        e.portfolioId,
+        e.timestamp,
+        e.trigger,
+        e.trades,
+        e.gasUsed,
+        e.status,
+        e.isAutomatic ? 'true' : 'false',
+        e.eventSource ?? '',
+        e.onChainTxHash ?? '',
+        e.details?.fromAsset ?? '',
+        e.details?.toAsset ?? '',
+        e.details?.amount ?? '',
+        e.feePaid ?? '',
+        e.slippageBps ?? '',
+        e.details?.gasFeeXlm ?? '',
+        e.details?.gasFeeUsd ?? '',
+        e.details?.gasBreakdown ? JSON.stringify(e.details.gasBreakdown) : '',
+    ])
+    const head = headers.join(',')
+    const body = rows.map((r) => r.map(csvEscape).join(',')).join('\n')
+    return `${head}\n${body}\n`
+}
+
+export async function getRebalanceHistoryExport(
+    portfolioId: string,
+    format: 'json' | 'csv',
+    filters: { from?: string; to?: string } = {},
+): Promise<ExportResult | null> {
+    const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+    if (!portfolio) return null
+
+    const history = await rebalanceHistoryService.getRebalanceHistoryForExport(portfolioId, filters)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const safeId = portfolioId.slice(0, 8)
+
+    if (format === 'json') {
+        const payload = buildRebalanceHistoryExportJson(portfolioId, filters, history)
+        return {
+            contentType: 'application/json; charset=utf-8',
+            filename: `portfolio-${safeId}-rebalance-history-${timestamp}.json`,
+            body: JSON.stringify(payload, null, 2),
+        }
+    }
+
+    return {
+        contentType: 'text/csv; charset=utf-8',
+        filename: `portfolio-${safeId}-rebalance-history-${timestamp}.csv`,
+        body: buildRebalanceHistoryExportCsv(history),
+    }
+}

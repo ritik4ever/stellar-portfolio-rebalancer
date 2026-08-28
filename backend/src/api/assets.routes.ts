@@ -13,6 +13,7 @@ import { adminAddAssetSchema, adminPatchAssetSchema, assetsListQuerySchema } fro
 import { logger, logAudit } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { schedulePriceHistoryBackfill } from '../queue/workers/priceHistoryWorker.js'
 
 export const assetsRouter = Router()
 
@@ -113,6 +114,9 @@ assetsRouter.post('/admin/assets', requireAdmin, idempotencyMiddleware, validate
         )
         const parsedSymbol =
             typeof symbol === 'string' ? symbol.trim().toUpperCase() : ''
+        if (parsedSymbol) {
+            void schedulePriceHistoryBackfill(parsedSymbol)
+        }
         const asset = assetRegistryService.getBySymbol(parsedSymbol)
         if (asset) {
             const auditFields: Record<string, unknown> = {

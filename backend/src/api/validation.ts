@@ -289,6 +289,28 @@ export const portfolioExportQuerySchema = z.object({
     format: z.enum(['json', 'csv', 'pdf']).optional()
 });
 
+export const rebalanceHistoryExportQuerySchema = z.object({
+    format: z.enum(['csv', 'json']).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+});
+
+export const portfolioRebalanceHistoryQuerySchema = z.object({
+    from: z.string().optional(),
+    to: z.string().optional(),
+    trigger_type: z.enum(['manual', 'auto', 'circuit_breaker']).optional(),
+    status: z.enum(['success', 'partial', 'failed']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).optional()
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).optional()
+    ),
+    sort: z.enum(['asc', 'desc']).optional(),
+});
+
 export const rebalanceHistoryQuerySchema = z.object({
     portfolioId: z.string().optional(),
     limit: z.preprocess(
