@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Search, X, AlertTriangle, Check } from 'lucide-react'
 import { useAssets } from '../hooks/queries/useAssetsQuery'
 import { api, ENDPOINTS } from '../config/api'
+import { AssetVerificationBadge, type AssetVerificationStatus } from './AssetVerificationBadge'
 
 interface AssetSearchAsset {
   symbol: string
@@ -10,6 +11,7 @@ interface AssetSearchAsset {
   domain?: string
   contract?: string
   type?: 'native' | 'credit_alphanum4' | 'credit_alphanum12'
+  verificationStatus?: AssetVerificationStatus
 }
 
 interface AssetSearchResult extends AssetSearchAsset {
@@ -450,6 +452,7 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
                       {value === asset.symbol && (
                         <Check className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                       )}
+                      <AssetVerificationBadge status={asset.verificationStatus} />
                       {!asset.isSupported && supportedContracts.length > 0 && (
                         <span className="inline-flex items-center gap-1 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded">
                           <AlertTriangle className="w-3 h-3" />

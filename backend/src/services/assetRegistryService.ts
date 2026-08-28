@@ -10,6 +10,8 @@ import { getFeatureFlags } from '../config/featureFlags.js'
 const STALE_POLICY_MS = 5 * 60 * 1000
 const QUARANTINE_POLICY_MS = 30 * 60 * 1000
 
+export type AssetVerificationStatus = 'pending' | 'verified' | 'rejected'
+
 export interface AssetRecord {
     symbol: string
     name: string
@@ -20,6 +22,20 @@ export interface AssetRecord {
     lastRefreshedAt?: string
     isQuarantined: boolean
     stale: boolean
+    /** Issuer-verification state (#1412). Assets predating the workflow read as 'verified'. */
+    verificationStatus: AssetVerificationStatus
+    verificationNotes?: string
+    submittedBy?: string
+    reviewedBy?: string
+    reviewedAt?: string
+}
+
+/** Raised when a verification transition is not allowed from the asset's current state. */
+export class AssetVerificationError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'AssetVerificationError'
+    }
 }
 
 
@@ -56,7 +72,12 @@ export const assetRegistryService = {
             enabled: asset.enabled,
             lastRefreshedAt: asset.lastRefreshedAt,
             isQuarantined,
-            stale
+            stale,
+            verificationStatus: asset.verificationStatus ?? 'verified',
+            verificationNotes: asset.verificationNotes,
+            submittedBy: asset.submittedBy,
+            reviewedBy: asset.reviewedBy,
+            reviewedAt: asset.reviewedAt
         }
     },
 
@@ -165,6 +186,93 @@ export const assetRegistryService = {
             coingeckoId: parsed.coingeckoId,
             issuerMetadata: metadata
         })
+    },
+
+    // ── issuer-verification workflow (#1412) ──────────────────────────────────
+
+    /**
+     * User submission of an unlisted asset. The asset is created in `pending`
+     * state and disabled, so it is visible for review but cannot be traded until
+     * an admin approves it — unlisted issuers are never silently trusted.
+     */
+    async submitForVerification(
+        symbol: unknown,
+        name: unknown,
+        options: {
+            contractAddress?: unknown
+            issuerAccount?: unknown
+            coingeckoId?: unknown
+            submittedBy?: string
+        } = {}
+    ): Promise<AssetRecord> {
+        const parsed = parseAssetCreatePayload(symbol, name, options)
+        if (databaseService.getAssetBySymbol(parsed.symbol)) {
+            throw new AssetRegistryConflictError(`An asset with symbol ${parsed.symbol} already exists`)
+        }
+
+        const flags = getFeatureFlags()
+        const metadata = (flags.enableIssuerMetadata && parsed.issuerAccount)
+            ? await issuerMetadataService.getMetadata(parsed.issuerAccount)
+            : undefined
+
+        databaseService.addAsset(parsed.symbol, parsed.name, {
+            contractAddress: parsed.contractAddress,
+            issuerAccount: parsed.issuerAccount,
+            coingeckoId: parsed.coingeckoId,
+            issuerMetadata: metadata,
+            verificationStatus: 'pending',
+            submittedBy: options.submittedBy
+        })
+
+        logger.info('[ASSET-REGISTRY] Unlisted asset submitted for verification', {
+            symbol: parsed.symbol,
+            issuerAccount: parsed.issuerAccount,
+            submittedBy: options.submittedBy
+        })
+
+        return this.getBySymbol(parsed.symbol)!
+    },
+
+    /** Assets awaiting an admin decision, oldest submission first. */
+    listPendingVerifications(): AssetRecord[] {
+        return databaseService
+            .listAssetsByVerificationStatus('pending')
+            .map(a => this.checkAndApplyAutoQuarantine(a))
+    },
+
+    /**
+     * Approve a pending submission: marks it verified and enables it.
+     * Only pending assets can be approved.
+     */
+    approveVerification(symbol: string, reviewedBy: string, notes?: string): AssetRecord {
+        const asset = this.requirePending(symbol, 'approved')
+        databaseService.setAssetVerification(asset.symbol, 'verified', { reviewedBy, notes })
+        logger.info('[ASSET-REGISTRY] Asset issuer verified', { symbol: asset.symbol, reviewedBy })
+        return this.getBySymbol(asset.symbol)!
+    },
+
+    /**
+     * Reject a pending submission: marks it rejected and keeps it disabled.
+     * Only pending assets can be rejected.
+     */
+    rejectVerification(symbol: string, reviewedBy: string, notes?: string): AssetRecord {
+        const asset = this.requirePending(symbol, 'rejected')
+        databaseService.setAssetVerification(asset.symbol, 'rejected', { reviewedBy, notes })
+        logger.warn('[ASSET-REGISTRY] Asset issuer rejected', { symbol: asset.symbol, reviewedBy, notes })
+        return this.getBySymbol(asset.symbol)!
+    },
+
+    requirePending(symbol: string, decision: string): AssetRecord {
+        const asset = this.getBySymbol(symbol)
+        if (!asset) {
+            throw new AssetVerificationError(`Asset ${symbol.toUpperCase()} not found`)
+        }
+        if (asset.verificationStatus !== 'pending') {
+            throw new AssetVerificationError(
+                `Asset ${asset.symbol} cannot be ${decision}: it is already ${asset.verificationStatus}`
+            )
+        }
+        return asset
     },
 
     remove(symbol: string): boolean {
