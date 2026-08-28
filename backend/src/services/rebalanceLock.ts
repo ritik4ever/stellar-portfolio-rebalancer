@@ -1,6 +1,7 @@
 import Redis from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
+import { getRebalanceLockConfig } from '../config/rebalanceLockConfig.js'
 
 /**
  * Service to manage concurrency locks for portfolio rebalancing.
@@ -55,10 +56,10 @@ export class RebalanceLockService {
     /**
      * Attempts to acquire a lock for the given portfolio.
      * @param portfolioId The ID of the portfolio to lock.
-     * @param ttlMs Time-to-live for the lock in milliseconds (default: 5 minutes)
+     * @param ttlMs Time-to-live for the lock in milliseconds (default: REBALANCE_LOCK_TTL_MS, 5 minutes)
      * @returns Boolean indicating if the lock was successfully acquired.
      */
-    public async acquireLock(portfolioId: string, ttlMs: number = 5 * 60 * 1000): Promise<boolean> {
+    public async acquireLock(portfolioId: string, ttlMs: number = getRebalanceLockConfig().ttlMs): Promise<boolean> {
         if (!this.isInitialized) {
             await this.init()
         }
@@ -131,6 +132,35 @@ export class RebalanceLockService {
     }
 
     /**
+     * Extends the TTL of an already-held lock (used to keep long-running
+     * rebalances alive). No-op when the lock is not currently held.
+     * @param portfolioId The ID of the portfolio whose lock should be renewed.
+     * @param ttlMs Renewed time-to-live in milliseconds (default: REBALANCE_LOCK_TTL_MS)
+     * @returns Boolean indicating whether the lock was renewed.
+     */
+    public async renewLock(portfolioId: string, ttlMs: number = getRebalanceLockConfig().ttlMs): Promise<boolean> {
+        if (!this.isInitialized) {
+            await this.init()
+        }
+
+        const lockKey = this.getLockKey(portfolioId)
+
+        if (this.useRedis && this.redis) {
+            try {
+                const renewed = await this.redis.pexpire(lockKey, ttlMs)
+                return renewed === 1
+            } catch (error) {
+                logger.error(`[LOCK_SERVICE] Failed to renew Redis lock for ${portfolioId}`, {
+                    error: error instanceof Error ? error.message : String(error)
+                })
+                return false
+            }
+        }
+
+        return this.renewMemoryLock(lockKey, ttlMs)
+    }
+
+    /**
      * Cleanup and close Redis connection.
      */
     public async stop(): Promise<void> {
@@ -161,6 +191,14 @@ export class RebalanceLockService {
     private isMemoryLocked(lockKey: string): boolean {
         const expiry = this.fallbackLocks.get(lockKey)
         return !!expiry && expiry > Date.now()
+    }
+
+    private renewMemoryLock(lockKey: string, ttlMs: number): boolean {
+        if (!this.isMemoryLocked(lockKey)) {
+            return false
+        }
+        this.fallbackLocks.set(lockKey, Date.now() + ttlMs)
+        return true
     }
 }
 
