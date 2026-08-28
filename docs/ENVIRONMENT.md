@@ -190,6 +190,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `RATE_LIMIT_BURST_WINDOW_MS` | No | `10000` | Burst-protection window size (ms). | `10000` | |
 | `RATE_LIMIT_BURST_MAX` | No | `20` | Maximum requests in the burst window. | `20` | |
 | `RATE_LIMIT_WRITE_BURST_MAX` | No | `3` | Maximum write requests in the burst window. | `3` | |
+| `RATE_LIMIT_NEAR_LIMIT_RATIO` | No | `0.8` | Fraction of the limit at which an identifier is flagged `near-limit` on the admin rate-limit dashboard. | `0.8` | |
 | `API_RATE_LIMIT_WINDOW` | No | `900000` | Security-middleware rate-limit window (ms). | `900000` | |
 | `API_RATE_LIMIT_MAX_REQUESTS` | No | `100` | Security-middleware max requests per window. | `100` | |
 

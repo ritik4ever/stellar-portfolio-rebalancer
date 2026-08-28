@@ -4,7 +4,7 @@ import {
     AssetRegistryConflictError,
     AssetRegistryValidationError
 } from '../services/assetRegistryValidation.js'
-import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
+import { rateLimitMonitor, type RateLimitDashboardQuery } from '../services/rateLimitMonitor.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
@@ -95,6 +95,49 @@ assetsRouter.get('/admin/rate-limits/metrics', requireAdmin, (req: Request, res:
         })
     } catch (error) {
         logger.error('[ERROR] Admin rate limit metrics failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * Admin: combined per-IP + per-API-key rate limit dashboard.
+ *
+ * Query params:
+ *   type     — ip | apiKey | all           (default: all)
+ *   status   — throttled | near-limit | ok | at-risk | all  (default: all)
+ *   search   — substring match on the identifier
+ *   page     — 1-based page number         (default: 1)
+ *   pageSize — 1..200                      (default: 25)
+ *
+ * Throttled and near-limit identifiers are also surfaced in `attention`
+ * regardless of the current page.
+ */
+assetsRouter.get('/admin/rate-limits/dashboard', requireAdmin, (req: Request, res: Response) => {
+    try {
+        const type = (req.query.type as string | undefined)?.toLowerCase()
+        const status = (req.query.status as string | undefined)?.toLowerCase()
+
+        const VALID_TYPES = ['ip', 'apikey', 'all']
+        const VALID_STATUSES = ['ok', 'near-limit', 'throttled', 'at-risk', 'all']
+
+        if (type && !VALID_TYPES.includes(type)) {
+            return fail(res, 400, 'VALIDATION_ERROR', `Invalid type. Use one of: ip, apiKey, all.`)
+        }
+        if (status && !VALID_STATUSES.includes(status)) {
+            return fail(res, 400, 'VALIDATION_ERROR', `Invalid status. Use one of: ${VALID_STATUSES.join(', ')}.`)
+        }
+
+        const dashboard = rateLimitMonitor.getRateLimitDashboard({
+            type: type === 'apikey' ? 'apiKey' : (type as 'ip' | 'all' | undefined),
+            status: status as RateLimitDashboardQuery['status'],
+            search: req.query.search as string | undefined,
+            page: req.query.page ? Number(req.query.page) : undefined,
+            pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+        })
+
+        return ok(res, dashboard)
+    } catch (error) {
+        logger.error('[ERROR] Admin rate limit dashboard failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
