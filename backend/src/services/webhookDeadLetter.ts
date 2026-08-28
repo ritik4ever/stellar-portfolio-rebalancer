@@ -61,6 +61,24 @@ class WebhookDeadLetterQueue {
         })
     }
 
+    /**
+     * Re-queue a previously replayed item after delivery failed again.
+     * Persists the incremented attempt count so operators can see how many
+     * times the payload has been replayed while sitting in the dead-letter.
+     */
+    async requeue(item: DeadLetterItem): Promise<void> {
+        await this.push({
+            ...item,
+            attemptsExhausted: item.attemptsExhausted + 1,
+        })
+        logger.warn('[DLQ] Failed replay re-queued with incremented attempts', {
+            itemId: item.id,
+            userId: item.userId,
+            eventType: item.eventType,
+            attempts: item.attemptsExhausted + 1,
+        })
+    }
+
     async list(): Promise<DeadLetterItem[]> {
         if (!this.initialized) await this.init()
 
