@@ -2043,6 +2043,41 @@ getConsent(userId: string): ConsentRecord | undefined {
     });
   }
 
+  /**
+   * Most recent price snapshot captured at or before `asOf` (ISO timestamp).
+   * Used by the tax report so each tax lot keeps its acquisition-date price
+   * instead of collapsing onto the latest price.
+   */
+  getPriceSnapshotAsOf(
+    asset: string,
+    asOf: string,
+  ): { price: number; change?: number; capturedAt: string } | undefined {
+    return this._withTiming("getPriceSnapshotAsOf", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string, string],
+            { price: number; change: number | null; captured_at: string }
+          >(
+            `SELECT price, change, captured_at FROM price_snapshots
+             WHERE asset = ? AND captured_at <= ?
+             ORDER BY captured_at DESC LIMIT 1`,
+          )
+          .get(asset, asOf);
+        if (!row) return undefined;
+        return {
+          price: row.price,
+          change: row.change ?? undefined,
+          capturedAt: row.captured_at,
+        };
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve price snapshot for asset '${asset}' as of '${asOf}': ${err}`,
+        );
+      }
+    });
+  }
+
   // ──────────────────────────────────────────
   // Portfolio draft methods
   // ──────────────────────────────────────────
