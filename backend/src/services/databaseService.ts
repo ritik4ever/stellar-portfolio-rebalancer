@@ -110,6 +110,7 @@ interface ConsentAuditRow {
   ip_address: string | null;
   user_agent: string | null;
   document_version: string | null;
+  categories: string | null;
 }
 
 export interface ConsentRecord {
@@ -131,6 +132,10 @@ export interface ConsentAuditEvent {
   ipAddress: string | null;
   userAgent: string | null;
   documentVersion: string | null;
+  version?: string | null;
+  categories?: string[];
+  category?: string[] | string;
+  categoryDetails?: Record<string, boolean>;
 }
 
 /**
@@ -263,7 +268,8 @@ CREATE TABLE IF NOT EXISTS consent_audit_events (
     timestamp   TEXT NOT NULL,
     ip_address  TEXT,
     user_agent  TEXT,
-    document_version TEXT
+    document_version TEXT,
+    categories  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
@@ -761,11 +767,17 @@ export class DatabaseService {
           timestamp   TEXT NOT NULL,
           ip_address  TEXT,
           user_agent  TEXT,
-          document_version TEXT
+          document_version TEXT,
+          categories  TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_consent_audit_events_user_timestamp
           ON consent_audit_events (user_id, timestamp);
     `);
+    const auditCols = this.db.pragma("table_info(consent_audit_events)") as Array<{ name: string }>;
+    if (auditCols.length > 0 && !auditCols.some((c) => c.name === "categories")) {
+      this.db.exec("ALTER TABLE consent_audit_events ADD COLUMN categories TEXT");
+      logger.info("[DB] Migration: added categories column to consent_audit_events");
+    }
   }
 
   private _seedDefaultAssets(): void {
@@ -1377,6 +1389,13 @@ export class DatabaseService {
     const docVersion = computeDocumentVersionHash(opts.documentText);
     const analyticsFlag = opts.analytics === undefined ? null : (opts.analytics ? 1 : 0);
     const marketingFlag = opts.marketing === undefined ? null : (opts.marketing ? 1 : 0);
+    const grantedCategories: string[] = [];
+    if (opts.terms) grantedCategories.push("terms");
+    if (opts.privacy) grantedCategories.push("privacy");
+    if (opts.cookies) grantedCategories.push("cookies");
+    if (opts.analytics) grantedCategories.push("analytics");
+    if (opts.marketing) grantedCategories.push("marketing");
+
     const grant = this.db.transaction(() => {
       this.db
         .prepare(
@@ -1419,7 +1438,7 @@ export class DatabaseService {
           marketingFlag,
           marketingFlag,
         );
-      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion);
+      this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion, grantedCategories);
     });
     grant();
     logger.info("[DB] Consent recorded", { userId, documentVersion: docVersion });
@@ -1435,6 +1454,7 @@ export class DatabaseService {
   ): void {
     const now = new Date().toISOString();
     const docVersion = opts.documentText ? computeDocumentVersionHash(opts.documentText) : null;
+    const revokedCategories = ["terms", "privacy", "cookies", "analytics", "marketing"];
     const revoke = this.db.transaction(() => {
       this.db
         .prepare(
@@ -1456,7 +1476,7 @@ export class DatabaseService {
           docVersion,
           now,
         );
-      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent, docVersion);
+      this.insertConsentAuditEvent(userId, "revoke", now, opts.ipAddress, opts.userAgent, docVersion, revokedCategories);
     });
     revoke();
     logger.info("[DB] Consent revoked", { userId, documentVersion: docVersion });
@@ -1504,21 +1524,52 @@ getConsent(userId: string): ConsentRecord | undefined {
   getConsentAudit(userId: string): ConsentAuditEvent[] {
     const rows = this.db
       .prepare<[string], ConsentAuditRow>(
-        `SELECT id, user_id, action, timestamp, ip_address, user_agent, document_version
+        `SELECT id, user_id, action, timestamp, ip_address, user_agent, document_version, categories
          FROM consent_audit_events
          WHERE user_id = ?
          ORDER BY timestamp ASC, id ASC`,
       )
       .all(userId);
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.user_id,
-      action: row.action,
-      timestamp: row.timestamp,
-      ipAddress: row.ip_address,
-      userAgent: row.user_agent,
-      documentVersion: row.document_version,
-    }));
+    return rows.map((row) => {
+      let parsedCategories: string[] = [];
+      if (row.categories) {
+        try {
+          const parsed = JSON.parse(row.categories);
+          if (Array.isArray(parsed)) {
+            parsedCategories = parsed;
+          } else if (typeof parsed === "string") {
+            parsedCategories = [parsed];
+          }
+        } catch {
+          parsedCategories = [row.categories];
+        }
+      } else {
+        parsedCategories =
+          row.action === "grant"
+            ? ["terms", "privacy", "cookies"]
+            : ["terms", "privacy", "cookies", "analytics", "marketing"];
+      }
+      const categoryDetails: Record<string, boolean> = {
+        terms: parsedCategories.includes("terms"),
+        privacy: parsedCategories.includes("privacy"),
+        cookies: parsedCategories.includes("cookies"),
+        analytics: parsedCategories.includes("analytics"),
+        marketing: parsedCategories.includes("marketing"),
+      };
+      return {
+        id: row.id,
+        userId: row.user_id,
+        action: row.action,
+        timestamp: row.timestamp,
+        ipAddress: row.ip_address,
+        userAgent: row.user_agent,
+        documentVersion: row.document_version,
+        version: row.document_version,
+        categories: parsedCategories,
+        category: parsedCategories,
+        categoryDetails,
+      };
+    });
   }
 
   private insertConsentAuditEvent(
@@ -1528,11 +1579,13 @@ getConsent(userId: string): ConsentRecord | undefined {
     ipAddress?: string,
     userAgent?: string,
     documentVersion?: string | null,
+    categories?: string[] | null,
   ): void {
+    const categoriesJson = categories ? JSON.stringify(categories) : null;
     this.db
       .prepare(
-        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent, document_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO consent_audit_events (id, user_id, action, timestamp, ip_address, user_agent, document_version, categories)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         generateId(),
@@ -1542,6 +1595,7 @@ getConsent(userId: string): ConsentRecord | undefined {
         ipAddress ?? null,
         userAgent ?? null,
         documentVersion ?? null,
+        categoriesJson,
       );
   }
 
