@@ -18,6 +18,15 @@ vi.mock("../db/refreshTokenDb.js", () => ({
   deleteAllRefreshTokensForUser: vi.fn(() => Promise.resolve(0)),
   generateRefreshTokenId: vi.fn(() => "mock-jti"),
   touchRefreshToken: vi.fn(() => Promise.resolve()),
+  // refresh-token family rotation (#1406)
+  generateRefreshTokenFamilyId: vi.fn(() => 'mock-family'),
+  createRefreshTokenFamily: vi.fn(() => Promise.resolve()),
+  getRefreshTokenFamily: vi.fn(() => Promise.resolve(null)),
+  advanceRefreshTokenFamily: vi.fn(() => Promise.resolve()),
+  recordRotatedRefreshToken: vi.fn(() => Promise.resolve()),
+  findRotatedRefreshToken: vi.fn(() => Promise.resolve(null)),
+  revokeRefreshTokenFamily: vi.fn(() => Promise.resolve(0)),
+  pruneExpiredRotations: vi.fn(() => Promise.resolve(0)),
 }));
 
 vi.mock("../services/tokenRevocation.js", () => ({

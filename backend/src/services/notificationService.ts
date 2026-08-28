@@ -26,6 +26,13 @@ import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter
 // Types
 // ─────────────────────────────────────────────
 
+/** Nodemailer-compatible attachment (used by the scheduled CSV export, #1411). */
+export interface EmailAttachment {
+  filename: string;
+  content: string | Buffer;
+  contentType?: string;
+}
+
 export interface NotificationPayload {
   userId: string;
   eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
@@ -259,7 +266,13 @@ class EmailProvider implements NotificationProvider {
     );
   }
 
-  async sendRaw(options: { to: string; subject: string; html: string; text: string }): Promise<void> {
+  async sendRaw(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    attachments?: EmailAttachment[];
+  }): Promise<void> {
     if (!this.transporter) {
       logger.warn("Cannot send raw email - transporter not available");
       return;
@@ -271,6 +284,7 @@ class EmailProvider implements NotificationProvider {
       subject: options.subject,
       text: options.text,
       html: options.html,
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     };
 
     const info = await this.transporter.sendMail(mailOptions);
@@ -559,7 +573,13 @@ export class NotificationService {
    * wrapping it in a NotificationPayload. Used by the digest module
    * for portfolio summary emails.
    */
-  async sendRawEmail(options: { to: string; subject: string; html: string; text: string }): Promise<void> {
+  async sendRawEmail(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    attachments?: EmailAttachment[];
+  }): Promise<void> {
     const emailProvider = this.providers.find(
       (p) => p instanceof EmailProvider
     ) as EmailProvider | undefined;
@@ -567,6 +587,31 @@ export class NotificationService {
     if (!emailProvider) {
       logger.warn("Email provider not available for raw email");
       return;
+    }
+
+    await emailProvider.sendRaw(options);
+  }
+
+  /**
+   * Send an email with file attachments, failing loudly when email is not
+   * configured. Scheduled exports (#1411) must surface a delivery failure so the
+   * schedule can record it, rather than silently doing nothing.
+   */
+  async sendEmailWithAttachment(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    attachments: EmailAttachment[];
+  }): Promise<void> {
+    const emailProvider = this.providers.find(
+      (p) => p instanceof EmailProvider
+    ) as EmailProvider | undefined;
+
+    if (!emailProvider?.isAvailable()) {
+      throw new Error(
+        "Email transport is not configured — set SMTP_HOST, SMTP_USER and SMTP_PASS",
+      );
     }
 
     await emailProvider.sendRaw(options);

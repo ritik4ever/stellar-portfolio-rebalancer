@@ -15,13 +15,13 @@ import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { getPortfolioExport, getRebalanceHistoryExport } from '../services/portfolioExportService.js'
+import { getPortfolioExport, getRebalanceHistoryExport, setExportSchedule, getExportSchedule, deleteExportSchedule } from '../services/portfolioExportService.js'
 
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema } from './validation.js'
 import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
 import type { Portfolio } from '../types/index.js'
 
@@ -510,6 +510,83 @@ portfoliosRouter.get('/user/:address/drafts', async (req: Request, res: Response
         return ok(res, { drafts })
     } catch (error) {
         logger.error('[DRAFT] List drafts failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ── recurring emailed exports (#1411) ────────────────────────────────────────
+
+/** Opt a portfolio into (or out of) a weekly emailed CSV export. */
+portfoliosRouter.put(
+    '/portfolio/:id/export-schedule',
+    requireJwt,
+    validateRequest(exportScheduleSchema),
+    async (req: Request, res: Response) => {
+        try {
+            const portfolioId = req.params.id
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            if (portfolio.userAddress !== req.user!.address) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only schedule exports for your own portfolio')
+            }
+            if (!databaseService.hasFullConsent(portfolio.userAddress)) {
+                return fail(res, 403, 'FORBIDDEN', 'Active consent is required before scheduling exports')
+            }
+
+            const { frequency, emailAddress, enabled, firstRunAt } = req.body
+            const schedule = setExportSchedule({
+                portfolioId,
+                userAddress: portfolio.userAddress,
+                emailAddress,
+                frequency,
+                enabled,
+                firstRunAt,
+            })
+
+            return ok(res, { schedule })
+        } catch (error) {
+            logger.error('[EXPORT-SCHEDULE] Failed to save schedule', { error: getErrorObject(error) })
+            return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        }
+    }
+)
+
+/** Read the current schedule for a portfolio. */
+portfoliosRouter.get('/portfolio/:id/export-schedule', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        if (portfolio.userAddress !== req.user!.address) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only view your own export schedule')
+        }
+
+        const schedule = getExportSchedule(portfolioId)
+        if (!schedule) return fail(res, 404, 'NOT_FOUND', 'No export schedule configured for this portfolio')
+
+        return ok(res, { schedule })
+    } catch (error) {
+        logger.error('[EXPORT-SCHEDULE] Failed to read schedule', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Cancel a recurring export. */
+portfoliosRouter.delete('/portfolio/:id/export-schedule', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        if (portfolio.userAddress !== req.user!.address) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only cancel your own export schedule')
+        }
+
+        const deleted = deleteExportSchedule(portfolioId)
+        if (!deleted) return fail(res, 404, 'NOT_FOUND', 'No export schedule configured for this portfolio')
+
+        return ok(res, { portfolioId, deleted: true })
+    } catch (error) {
+        logger.error('[EXPORT-SCHEDULE] Failed to delete schedule', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

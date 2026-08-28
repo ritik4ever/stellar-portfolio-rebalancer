@@ -220,6 +220,29 @@ export const adminAddAssetSchema = z.object({
     coingeckoId: z.string().optional()
 }).strict();
 
+// Recurring emailed portfolio export schedule (#1411).
+export const exportScheduleSchema = z.object({
+    frequency: z.literal('weekly').default('weekly'),
+    emailAddress: z.string().email('emailAddress must be a valid email'),
+    enabled: z.boolean().default(true),
+    firstRunAt: z.string().datetime('firstRunAt must be an ISO timestamp').optional()
+}).strict();
+
+// User submission of an unlisted asset for issuer verification (#1412).
+export const submitUnlistedAssetSchema = z.object({
+    symbol: z.string().min(1, 'symbol is required').max(20),
+    name: z.string().min(1, 'name is required').max(100),
+    contractAddress: z.string().optional(),
+    issuerAccount: z.string().optional(),
+    coingeckoId: z.string().optional()
+}).strict();
+
+// Admin approve/reject decision on a pending submission (#1412).
+export const assetVerificationDecisionSchema = z.object({
+    decision: z.enum(['approve', 'reject']),
+    notes: z.string().max(500).optional()
+}).strict();
+
 export const adminPatchAssetSchema = z.object({
     enabled: z.boolean().optional(),
     quarantined: z.boolean().optional()
