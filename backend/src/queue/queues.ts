@@ -13,6 +13,7 @@ export const QUEUE_NAMES = {
   DLQ: "dead-letter-queue",
   PRICE_HISTORY_SNAPSHOT: "price-history-snapshot",
   PRICE_HISTORY_PRUNE: "price-history-prune",
+  PRICE_HISTORY_BACKFILL: "price-history-backfill",
   USER_ALERTS: "user-alerts",
 } as const;
 
@@ -78,6 +79,13 @@ export interface PriceHistoryJobData {
     triggeredBy?: 'scheduler' | 'startup'
 }
 
+export interface PriceHistoryBackfillJobData {
+    asset: string
+    days?: number
+    triggeredBy?: 'asset_added' | 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
+}
+
 export interface UserAlertsJobData {
     triggeredBy?: 'scheduler' | 'manual' | 'startup'
     correlationId?: string
@@ -94,6 +102,7 @@ let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> |
 let autoRebalanceCheckQueue: Queue<AutoRebalanceCheckJobData> | null = null;
 let priceHistorySnapshotQueue: Queue<PriceHistoryJobData> | null = null;
 let priceHistoryPruneQueue: Queue<PriceHistoryJobData> | null = null;
+let priceHistoryBackfillQueue: Queue<PriceHistoryBackfillJobData> | null = null;
 let userAlertsQueue: Queue<UserAlertsJobData> | null = null;
 let dlqQueue: Queue<DLQJobData> | null = null;
 
@@ -261,6 +270,21 @@ export function getPriceHistoryPruneQueue(): Queue<PriceHistoryJobData> | null {
     }
 }
 
+export function getPriceHistoryBackfillQueue(): Queue<PriceHistoryBackfillJobData> | null {
+    try {
+        if (!priceHistoryBackfillQueue) {
+            priceHistoryBackfillQueue = new Queue(QUEUE_NAMES.PRICE_HISTORY_BACKFILL, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PRICE_HISTORY_BACKFILL}`)
+        }
+        return priceHistoryBackfillQueue
+    } catch {
+        return null
+    }
+}
+
 export function getUserAlertsQueue(): Queue<UserAlertsJobData> | null {
     try {
         if (!userAlertsQueue) {
@@ -287,6 +311,7 @@ export function getQueueByName(name: string): Queue<any, any> | null {
     [QUEUE_NAMES.DLQ]: getDLQQueue,
     [QUEUE_NAMES.PRICE_HISTORY_SNAPSHOT]: getPriceHistorySnapshotQueue,
     [QUEUE_NAMES.PRICE_HISTORY_PRUNE]: getPriceHistoryPruneQueue,
+    [QUEUE_NAMES.PRICE_HISTORY_BACKFILL]: getPriceHistoryBackfillQueue,
     [QUEUE_NAMES.USER_ALERTS]: getUserAlertsQueue,
   };
 
@@ -308,6 +333,7 @@ export async function closeAllQueues(): Promise<void> {
     dlqQueue?.close(),
     priceHistorySnapshotQueue?.close(),
     priceHistoryPruneQueue?.close(),
+    priceHistoryBackfillQueue?.close(),
     userAlertsQueue?.close(),
   ]);
   portfolioCheckQueue = null;
@@ -320,6 +346,7 @@ export async function closeAllQueues(): Promise<void> {
   dlqQueue = null;
   priceHistorySnapshotQueue = null;
   priceHistoryPruneQueue = null;
+  priceHistoryBackfillQueue = null;
   userAlertsQueue = null;
   logger.info("[QUEUE] All queues closed");
 }
