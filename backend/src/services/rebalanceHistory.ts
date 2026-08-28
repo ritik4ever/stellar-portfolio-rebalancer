@@ -230,6 +230,29 @@ export class RebalanceHistoryService {
         return dbGetRebalanceHistoryAll(limit, offset)
     }
 
+    /**
+     * Fetches a portfolio's rebalance history for full export, optionally
+     * restricted to an ISO date range (applied in-memory on parsed timestamps).
+     */
+    async getRebalanceHistoryForExport(
+        portfolioId: string,
+        filters: { from?: string; to?: string } = {},
+        limit: number = 10_000
+    ): Promise<RebalanceEvent[]> {
+        const events = await dbGetRebalanceHistoryByPortfolio(portfolioId, limit, 0)
+        const fromMs = filters.from ? Date.parse(filters.from) : NaN
+        const toMs = filters.to ? Date.parse(filters.to) : NaN
+        if (Number.isNaN(fromMs) && Number.isNaN(toMs)) {
+            return events
+        }
+        return events.filter((event) => {
+            const ts = Date.parse(event.timestamp)
+            if (!Number.isNaN(fromMs) && ts < fromMs) return false
+            if (!Number.isNaN(toMs) && ts > toMs) return false
+            return true
+        })
+    }
+
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {
         try {
             // Always use databaseService (SQLite)
