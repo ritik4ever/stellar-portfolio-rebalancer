@@ -9,7 +9,11 @@ import { getAuthConfig } from '../services/authService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
-import { webhookDeadLetterQueue } from '../services/webhookDeadLetter.js'
+import {
+    webhookDeadLetterQueue,
+    queryDeadLetterItems,
+    postDeadLetterPayload,
+} from '../services/webhookDeadLetter.js'
 import { deliverWithBackoff } from '../services/notificationDelivery.js'
 import { getNotificationDeliveryConfig } from '../config/notificationDeliveryConfig.js'
 
@@ -304,10 +308,22 @@ notificationsRouter.post('/notifications/webhook/callback', async (req: Request,
     }
 })
 
+/**
+ * Admin: browse dead-lettered webhook deliveries (#1393).
+ * Each entry carries its failure reason and original payload. Filtering and
+ * pagination keep the view usable when a broken endpoint has produced many.
+ */
 notificationsRouter.get('/admin/notifications/dead-letter', requireAdmin, async (req: Request, res: Response) => {
     try {
-        const items = await webhookDeadLetterQueue.list()
-        return ok(res, { items, count: items.length })
+        const all = await webhookDeadLetterQueue.list()
+        const listing = queryDeadLetterItems(all, {
+            userId: req.query.userId as string | undefined,
+            eventType: req.query.eventType as string | undefined,
+            search: req.query.search as string | undefined,
+            page: req.query.page ? Number(req.query.page) : undefined,
+            pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+        })
+        return ok(res, listing)
     } catch (error) {
         logger.error('Failed to list dead-letter items', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -337,25 +353,7 @@ notificationsRouter.post('/admin/notifications/dead-letter/:id/replay', requireA
                     policy,
                 },
                 async () => {
-                    const controller = new AbortController()
-                    const timeout = policy.requestTimeoutMs || 5000
-                    const timeoutId = setTimeout(() => controller.abort(), timeout)
-                    try {
-                        const response = await fetch(item.webhookUrl, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-Webhook-Event': item.eventType,
-                            },
-                            body: JSON.stringify(item.payload),
-                            signal: controller.signal,
-                        })
-                        if (!response.ok) {
-                            throw new Error(`Webhook responded with status ${response.status}`)
-                        }
-                    } finally {
-                        clearTimeout(timeoutId)
-                    }
+                    await postDeadLetterPayload(item, policy.requestTimeoutMs || 5000)
                 },
             )
             return ok(res, { message: 'Dead-letter item replayed successfully' })
@@ -414,26 +412,8 @@ notificationsRouter.post('/admin/notifications/dead-letter/batch-replay', requir
                         policy,
                     },
                     async () => {
-                        const controller = new AbortController()
-                        const timeout = policy.requestTimeoutMs || 5000
-                        const timeoutId = setTimeout(() => controller.abort(), timeout)
-                        try {
-                            const response = await fetch(item.webhookUrl, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'X-Webhook-Event': item.eventType,
-                                },
-                                body: JSON.stringify(item.payload),
-                                signal: controller.signal,
-                            })
-                            if (!response.ok) {
-                                throw new Error(`Webhook responded with status ${response.status}`)
-                            }
-                        } finally {
-                            clearTimeout(timeoutId)
-                        }
-                    },
+                    await postDeadLetterPayload(item, policy.requestTimeoutMs || 5000)
+                },
                 )
                 results.succeeded++
             } catch (replayError) {

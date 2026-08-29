@@ -289,3 +289,66 @@ const authSecurityEventsTotal = new Counter({
 export function recordAuthSecurityEvent(eventType: string): void {
     authSecurityEventsTotal.inc({ event_type: eventType })
 }
+
+// ── Notification delivery metrics (#1394) ────────────────────────────────────
+//
+// Success/failure is tracked per channel so an outage in one provider (say
+// webhooks) is visible without being averaged away by the healthy ones.
+// `reason` is a coarse, bounded classification of the failure — never the raw
+// error string, which would blow up cardinality.
+
+const notificationDeliveryTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}notification_delivery_total`,
+    help: 'Total notification delivery attempts by channel and outcome',
+    labelNames: ['channel', 'outcome', 'reason', 'event_type'] as const,
+    registers: [register],
+})
+
+const notificationDeliveryAttemptsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}notification_delivery_attempts_total`,
+    help: 'Total individual notification delivery attempts, including retries',
+    labelNames: ['channel', 'outcome'] as const,
+    registers: [register],
+})
+
+const notificationDeliveryDuration = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}notification_delivery_duration_seconds`,
+    help: 'Wall-clock duration of a notification delivery, including retries',
+    labelNames: ['channel', 'outcome'] as const,
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    registers: [register],
+})
+
+export type NotificationDeliveryOutcome = 'success' | 'failure'
+
+/** Terminal outcome of a delivery (after any retries). */
+export function recordNotificationDelivery(input: {
+    channel: string
+    outcome: NotificationDeliveryOutcome
+    reason?: string
+    eventType?: string
+    durationSeconds?: number
+}): void {
+    const labels = {
+        channel: input.channel,
+        outcome: input.outcome,
+        reason: input.reason ?? 'none',
+        event_type: input.eventType ?? 'unknown',
+    }
+    notificationDeliveryTotal.inc(labels)
+
+    if (typeof input.durationSeconds === 'number') {
+        notificationDeliveryDuration.observe(
+            { channel: input.channel, outcome: input.outcome },
+            input.durationSeconds,
+        )
+    }
+}
+
+/** One attempt within a delivery — `retried` attempts are counted here only. */
+export function recordNotificationDeliveryAttempt(
+    channel: string,
+    outcome: 'success' | 'failure' | 'retried',
+): void {
+    notificationDeliveryAttemptsTotal.inc({ channel, outcome })
+}
