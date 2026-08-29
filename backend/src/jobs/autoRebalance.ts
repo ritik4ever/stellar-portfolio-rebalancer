@@ -4,9 +4,13 @@ import { randomUUID } from "node:crypto";
 import { runWithRequestContext } from "../utils/requestContext.js";
 import { logger, logAudit } from "../utils/logger.js";
 import { portfolioStorage } from "../services/portfolioStorage.js";
-import { StellarService } from "../services/stellar.js";
 import { ReflectorService } from "../services/reflector.js";
-import { riskManagementService } from "../services/serviceContainer.js";
+import { buildRebalancePlan } from "../services/rebalancePlan.js";
+import {
+  rebalanceHistoryService,
+  riskManagementService,
+} from "../services/serviceContainer.js";
+import { notificationService } from "../services/notificationService.js";
 import { CircuitBreakers } from "../services/circuitBreakers.js";
 import { getRebalanceQueue } from "../queue/queues.js";
 import type { AutoRebalanceCheckJobData } from "../queue/queues.js";
@@ -31,6 +35,7 @@ const MIN_COOLDOWN_HOURS = 1;
 interface AutoRebalanceSummary {
   portfoliosChecked: number;
   portfoliosTriggered: number;
+  portfoliosSimulated: number;
   portfoliosSkipped: { reason: string; count: number }[];
   errors: string[];
 }
@@ -42,6 +47,29 @@ function isAutoRebalanceEnabled(p: Portfolio): boolean {
   if (p.threshold <= 0) return false;
   if (p.strategyConfig && p.strategyConfig.enabled === false) return false;
   return true;
+}
+
+export type AutoRebalanceDryRunSource = "portfolio" | "environment" | "disabled";
+
+/**
+ * Portfolio configuration takes precedence over the deployment-wide setting so
+ * operators can opt individual portfolios in or out during a staged rollout.
+ */
+export function resolveAutoRebalanceDryRun(
+  portfolio: Portfolio,
+  env: NodeJS.ProcessEnv = process.env,
+): { enabled: boolean; source: AutoRebalanceDryRunSource } {
+  const portfolioSetting = portfolio.strategyConfig?.dryRun;
+  if (typeof portfolioSetting === "boolean") {
+    return { enabled: portfolioSetting, source: "portfolio" };
+  }
+
+  const environmentSetting = env.AUTO_REBALANCE_DRY_RUN?.trim().toLowerCase();
+  if (environmentSetting === "true") {
+    return { enabled: true, source: "environment" };
+  }
+
+  return { enabled: false, source: "disabled" };
 }
 
 function computeDrift(
@@ -89,6 +117,7 @@ export async function processAutoRebalanceJob(
     const summary: AutoRebalanceSummary = {
       portfoliosChecked: 0,
       portfoliosTriggered: 0,
+      portfoliosSimulated: 0,
       portfoliosSkipped: [],
       errors: [],
     };
@@ -104,7 +133,7 @@ export async function processAutoRebalanceJob(
     }
 
     const reflector = new ReflectorService();
-    const prices = await reflector.getCurrentPrices();
+    const { prices, feedMeta } = await reflector.getCurrentPricesWithMeta();
 
     const marketCheck = CircuitBreakers.checkMarketConditions(prices);
     if (!marketCheck.safe) {
@@ -117,14 +146,7 @@ export async function processAutoRebalanceJob(
       return summary;
     }
 
-    const stellarService = new StellarService();
     const rebalanceQueue = getRebalanceQueue();
-
-    if (!rebalanceQueue) {
-      logger.warn("[WORKER:auto-rebalance] Rebalance queue unavailable", { jobId: job.id });
-      summary.errors.push("Rebalance queue unavailable");
-      return summary;
-    }
 
     const skipCounts: Record<string, number> = {};
 
@@ -166,6 +188,67 @@ export async function processAutoRebalanceJob(
           continue;
         }
 
+        const dryRun = resolveAutoRebalanceDryRun(portfolio);
+        if (dryRun.enabled) {
+          const plan = buildRebalancePlan(portfolio, prices, feedMeta);
+          const estimatedTrades = plan.estimatedFees.tradeCount;
+
+          logger.info("[WORKER:auto-rebalance] Dry-run plan computed — no transaction submitted", {
+            portfolioId: portfolio.id,
+            dryRunSource: dryRun.source,
+            plan,
+          });
+
+          await rebalanceHistoryService.recordRebalanceEvent({
+            portfolioId: portfolio.id,
+            trigger: "Automatic Rebalancing (Dry Run Simulation)",
+            trades: estimatedTrades,
+            gasUsed: "0 XLM",
+            status: "completed",
+            isAutomatic: true,
+            actor: "scheduler",
+            source: "auto_rebalance",
+            eventSource: "simulated",
+            isSimulated: true,
+            triggerMetadata: {
+              dryRun: true,
+              simulated: true,
+              dryRunSource: dryRun.source,
+              plan,
+            },
+            estimatedSlippageBps: plan.estimatedSlippageBps,
+          });
+
+          try {
+            await notificationService.notify({
+              userId: portfolio.userAddress,
+              portfolioId: portfolio.id,
+              eventType: "rebalance",
+              title: "Rebalance Simulation (Dry Run)",
+              message: `Simulation only — no on-chain transaction was submitted. The scheduled plan contains ${estimatedTrades} estimated trade${estimatedTrades === 1 ? "" : "s"}.`,
+              data: {
+                portfolioId: portfolio.id,
+                dryRun: true,
+                isSimulated: true,
+                plan,
+              },
+              timestamp: new Date().toISOString(),
+            });
+          } catch (notifyErr) {
+            logger.error("[WORKER:auto-rebalance] Dry-run notification failed (non-fatal)", {
+              portfolioId: portfolio.id,
+              error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+            });
+          }
+
+          summary.portfoliosSimulated++;
+          continue;
+        }
+
+        if (!rebalanceQueue) {
+          throw new Error("Rebalance queue unavailable");
+        }
+
         await rebalanceQueue.add(
           `rebalance-${portfolio.id}`,
           {
@@ -200,14 +283,16 @@ export async function processAutoRebalanceJob(
       jobId: job.id,
       checked: summary.portfoliosChecked,
       triggered: summary.portfoliosTriggered,
+      simulated: summary.portfoliosSimulated,
       skipped: summary.portfoliosSkipped,
       errors: summary.errors.length,
     });
 
-    if (summary.portfoliosTriggered > 0) {
+    if (summary.portfoliosTriggered > 0 || summary.portfoliosSimulated > 0) {
       logAudit("auto_rebalance_check_triggered", {
         checked: summary.portfoliosChecked,
         triggered: summary.portfoliosTriggered,
+        simulated: summary.portfoliosSimulated,
         skipped: summary.portfoliosSkipped,
       });
     }
