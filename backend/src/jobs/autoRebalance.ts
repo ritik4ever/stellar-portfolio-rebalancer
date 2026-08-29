@@ -43,6 +43,7 @@ interface AutoRebalanceSummary {
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("auto-rebalance", 1);
 
+/** Return whether scheduled auto-rebalance checks are enabled for a portfolio. */
 function isAutoRebalanceEnabled(p: Portfolio): boolean {
   if (p.threshold <= 0) return false;
   if (p.strategyConfig && p.strategyConfig.enabled === false) return false;
@@ -72,6 +73,7 @@ export function resolveAutoRebalanceDryRun(
   return { enabled: false, source: "disabled" };
 }
 
+/** Compute the largest allocation drift and whether it exceeds the portfolio threshold. */
 function computeDrift(
   portfolio: Portfolio,
   prices: PricesMap,
@@ -101,6 +103,7 @@ function computeDrift(
   return { drifted, maxDriftPct, details };
 }
 
+/** Evaluate eligible portfolios and either simulate or enqueue their rebalance plans. */
 export async function processAutoRebalanceJob(
   job: Job<AutoRebalanceCheckJobData>,
 ): Promise<AutoRebalanceSummary> {

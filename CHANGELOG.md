@@ -104,6 +104,8 @@ Release changelog entries are generated into these sections:
 
 ### Added
 
+- Scheduled auto-rebalance dry-run mode with portfolio-level and environment configuration, simulated history/notifications, and no on-chain submission ([#1401](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1401))
+
 - Multi-portfolio dashboard summary endpoint `GET /api/v1/portfolios/summary?userAddress=ADDR` ([#974](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/974))
   - Returns `id`, `name`, `total_value_usd`, `drift_status`, and `last_rebalanced` for every portfolio belonging to one address in a single request, replacing one call per portfolio
   - Resolves prices once from the oracle cache and shares them across the whole response; an address with no portfolios skips the price lookup entirely and returns an empty array

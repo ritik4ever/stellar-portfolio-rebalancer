@@ -94,6 +94,7 @@ const portfolio = {
   strategyConfig: { dryRun: true },
 };
 
+/** Build the minimal scheduled BullMQ job used by the worker tests. */
 function mockJob(): Job<any> {
   return {
     id: "auto-check-1",
