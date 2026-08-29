@@ -2653,6 +2653,25 @@ getConsent(userId: string): ConsentRecord | undefined {
     });
   }
 
+  // ── generic key/value helpers (used by the Telegram chat link, #1396) ────
+
+  getKvValue(key: string): string | undefined {
+    return this.getIndexerState(key);
+  }
+
+  setKvValue(key: string, value: string): void {
+    this.setIndexerState(key, value);
+  }
+
+  deleteKvValue(key: string): boolean {
+    try {
+      const result = this.db.prepare("DELETE FROM kv_store WHERE key = ?").run(key);
+      return result.changes > 0;
+    } catch {
+      return false;
+    }
+  }
+
   ensurePortfolioExists(portfolioId: string, userAddress: string): void {
     try {
       const existing = this.getPortfolio(portfolioId);
