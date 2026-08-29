@@ -126,7 +126,7 @@ class CredentialManager {
         }
 
         const rawHost = process.env.REDIS_HOST?.trim();
-        const rawUrl = process.env.REDIS_URL?.trim() || (rawHost ? edis:// : 'redis://localhost:6379');
+        const rawUrl = process.env.REDIS_URL?.trim() || (rawHost ? 'redis://' + rawHost : 'redis://localhost:6379');
         const authToken = (process.env.REDIS_AUTH_TOKEN || process.env.REDIS_PASSWORD)?.trim();
 
         let url = rawUrl;
@@ -163,7 +163,7 @@ class CredentialManager {
                     const parsed = JSON.parse(secretValue);
                     const authToken = parsed.auth_token || parsed.authToken || parsed.password || '';
                     const rawHost = process.env.REDIS_HOST?.trim();
-        const rawUrl = process.env.REDIS_URL?.trim() || (rawHost ? edis:// : 'redis://localhost:6379');
+        const rawUrl = process.env.REDIS_URL?.trim() || (rawHost ? 'redis://' + rawHost : 'redis://localhost:6379');
                     let url = rawUrl;
                     if (authToken && !url.includes('@')) {
                         url = url.replace(/^(rediss?:\/\/)/, `$1:${encodeURIComponent(authToken)}@`);
