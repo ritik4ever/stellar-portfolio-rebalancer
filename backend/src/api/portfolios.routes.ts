@@ -16,12 +16,13 @@ import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { getPortfolioExport, getRebalanceHistoryExport, setExportSchedule, getExportSchedule, deleteExportSchedule } from '../services/portfolioExportService.js'
+import { buildRebalancePlan, buildBatchRebalancePlan } from '../services/rebalancePlan.js'
 
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
 import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
 import type { Portfolio } from '../types/index.js'
 
@@ -776,6 +777,47 @@ portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: 
         return ok(res, buildRebalancePlan(portfolio, prices, feedMeta))
     } catch (error) {
         logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Batch rebalance planning: compute plans for many portfolios in one call
+// without executing any trades. Each portfolio is planned in isolation; a
+// failure for one portfolio does not block the others, and the response
+// carries a combined summary (total trades / estimated fees).
+portfoliosRouter.post('/portfolios/rebalance-plans', validateRequest(batchRebalancePlansSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioIds = req.body.portfolioIds as string[]
+        const uniqueIds = [...new Set(portfolioIds)]
+
+        // Per-portfolio load isolation: a missing/unreadable portfolio is
+        // reported in `failed` instead of aborting the whole batch.
+        const portfolios: Portfolio[] = []
+        const failed: { portfolioId: string; error: string }[] = []
+        for (const portfolioId of uniqueIds) {
+            try {
+                const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
+                if (!portfolio) {
+                    failed.push({ portfolioId, error: 'Portfolio not found' })
+                    continue
+                }
+                portfolios.push(portfolio)
+            } catch (error) {
+                failed.push({ portfolioId, error: getErrorMessage(error) })
+            }
+        }
+
+        const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
+        const result = buildBatchRebalancePlan(portfolios, prices, feedMeta)
+        // Merge load-phase failures into the planning-phase failure list.
+        result.failed.push(...failed)
+        result.summary.failedCount = result.failed.length
+        result.summary.totalPortfolios = uniqueIds.length
+        result.summary.plansGenerated = result.plans.length
+
+        return ok(res, result)
+    } catch (error) {
+        logger.error('[ERROR] Batch rebalance plans failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
