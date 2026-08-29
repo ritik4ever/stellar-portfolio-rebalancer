@@ -7,6 +7,7 @@ import cors from 'cors'
 import swaggerUi from 'swagger-ui-express'
 import { WebSocketServer } from 'ws'
 import { validateStartupConfigOrThrow, buildStartupSummary, logStartupSubsystems } from './config/startupConfig.js'
+import { getFeatureFlags } from './config/featureFlags.js'
 import { logger } from './utils/logger.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
@@ -91,6 +92,22 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     mountApiRoutes(app)
     mountLegacyNonApiRedirects(app)
+
+    // Stage-warm the issuer metadata cache so deployments don't serve stale or
+    // missing metadata immediately after rollout. Fire-and-forget: failures are
+    // logged and skipped without delaying startup.
+    const flags = getFeatureFlags()
+    const warmAccounts = (process.env.ISSUER_METADATA_WARM_ACCOUNTS || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    if (flags.enableIssuerMetadata && warmAccounts.length > 0) {
+        import('./services/issuerMetadataService.js').then(({ warmIssuerMetadataCache }) =>
+            warmIssuerMetadataCache(warmAccounts).then((warmed) => {
+                logger.info('[ISSUER-METADATA] Cache warm-up complete', { requested: warmAccounts.length, warmed })
+            })
+        )
+    }
 
     app.get('/health', (_req: Request, res: Response) => {
         res.status(200).type('text/plain').send('ok')

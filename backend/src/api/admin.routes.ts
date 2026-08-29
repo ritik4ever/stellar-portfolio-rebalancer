@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { requireAdmin } from '../middleware/auth.js'
 import { databaseService } from '../services/databaseService.js'
+import { issuerMetadataService } from '../services/issuerMetadataService.js'
 import { logger } from '../utils/logger.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
@@ -122,5 +123,61 @@ adminRouter.get('/audit-log', requireAdmin, async (req: Request, res: Response) 
   } catch (error) {
     logger.error('[ADMIN] Failed to query audit log', { error: getErrorMessage(error) })
     return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+})
+
+// ── Issuer metadata cache (TTL + stale-serve + manual refresh) ───────────────
+
+adminRouter.get('/issuer-metadata/:issuer', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const issuer = req.params.issuer
+    if (!issuer) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
+    }
+    const result = await issuerMetadataService.getMetadataWithStatus(issuer)
+    if (!result) {
+      return fail(res, 404, 'NOT_FOUND', 'No metadata available for this issuer account')
+    }
+    return ok(res, {
+      issuer,
+      fetchedAtMs: result.fetchedAtMs,
+      expiresAtMs: result.expiresAtMs,
+      stale: result.stale,
+      source: result.source,
+      data: result.data
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to read issuer metadata', { error: getErrorMessage(error), issuer: req.params.issuer })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+})
+
+adminRouter.post('/issuer-metadata/:issuer/refresh', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const issuer = req.params.issuer
+    if (!issuer) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
+    }
+    const actor = req.adminPublicKey ?? 'unknown'
+    logger.info('[ADMIN] Issuer metadata refresh requested', { issuer, adminPublicKey: actor })
+
+    const result = await issuerMetadataService.forceRefreshMetadata(issuer)
+    logAdminAction(actor, 'issuer_metadata_refresh', issuer, null, {
+      stale: result.stale,
+      source: result.source,
+      fetchedAtMs: result.fetchedAtMs
+    })
+
+    return ok(res, {
+      issuer,
+      stale: result.stale,
+      source: result.source,
+      fetchedAtMs: result.fetchedAtMs,
+      expiresAtMs: result.expiresAtMs,
+      data: result.data
+    })
+  } catch (error) {
+    logger.warn('[ADMIN] Issuer metadata refresh failed', { error: getErrorMessage(error), issuer: req.params.issuer })
+    return fail(res, 502, 'UPSTREAM_ERROR', `Failed to refresh issuer metadata: ${getErrorMessage(error)}`)
   }
 })
