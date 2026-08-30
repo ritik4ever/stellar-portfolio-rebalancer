@@ -2,6 +2,7 @@ import Redis from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 import { getRebalanceLockConfig } from '../config/rebalanceLockConfig.js'
+import { recordLockContention, recordLockHoldDuration, type LockBackend } from '../observability/metrics.js'
 
 /**
  * Service to manage concurrency locks for portfolio rebalancing.
@@ -12,6 +13,8 @@ export class RebalanceLockService {
     private redis: Redis | null = null
     private fallbackLocks: Map<string, number> = new Map()
     private fallbackHeartbeats: Map<string, number> = new Map()
+    // #1399 — acquire timestamp per lock, used to record hold duration on release.
+    private acquiredAt: Map<string, number> = new Map()
     private isInitialized: boolean = false
     private useRedis: boolean = false
     private static instance: RebalanceLockService | null = null
@@ -71,7 +74,14 @@ export class RebalanceLockService {
             try {
                 const result = await this.redis.set(lockKey, Date.now().toString(), 'PX', ttlMs, 'NX')
 
-                return result === 'OK'
+                const acquired = result === 'OK'
+                if (acquired) {
+                    this.acquiredAt.set(lockKey, Date.now())
+                } else {
+                    // #1399 — the lock was already held by another caller.
+                    recordLockContention('redis')
+                }
+                return acquired
             } catch (error) {
                 logger.error(`[LOCK_SERVICE] Failed to acquire Redis lock for ${portfolioId}`, {
                     error: error instanceof Error ? error.message : String(error)
@@ -93,6 +103,16 @@ export class RebalanceLockService {
 
         const lockKey = this.getLockKey(portfolioId)
 
+        // #1399 — record how long this lock was held, backend-labeled so a
+        // spike in memory-backed holds (no real cross-instance exclusion) is
+        // distinguishable from expected Redis contention.
+        const acquiredAt = this.acquiredAt.get(lockKey)
+        if (acquiredAt !== undefined) {
+            const backend: LockBackend = this.useRedis ? 'redis' : 'memory'
+            recordLockHoldDuration(backend, (Date.now() - acquiredAt) / 1000)
+            this.acquiredAt.delete(lockKey)
+        }
+
         if (this.useRedis && this.redis) {
             try {
                 await this.redis.del(lockKey)
@@ -101,8 +121,8 @@ export class RebalanceLockService {
                     error: error instanceof Error ? error.message : String(error)
                 })
             }
-        } 
-        
+        }
+
         // Always clean up memory lock just in case
         this.fallbackLocks.delete(lockKey)
     }
@@ -256,11 +276,14 @@ export class RebalanceLockService {
         const existingExpiry = this.fallbackLocks.get(lockKey)
 
         if (existingExpiry && existingExpiry > now) {
-            return false // Lock is currently held and active
+            // #1399 — the lock is currently held and active.
+            recordLockContention('memory')
+            return false
         }
 
         // Lock is either not held or expired
         this.fallbackLocks.set(lockKey, now + ttlMs)
+        this.acquiredAt.set(lockKey, now)
         return true
     }
 
