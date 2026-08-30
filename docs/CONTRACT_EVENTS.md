@@ -80,6 +80,19 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
 
+### Governance: two-step admin transfer
+
+Admin handover does not use the `portfolio` topic domain — both events are topic-indexed by the **admin address acting at that step**, so a watcher can filter on the outgoing admin:
+
+| Topic[0]             | Topic[1]                  | Payload      | Emitted by       |
+| -------------------- | ------------------------- | ------------ | ---------------- |
+| `admin_proposed`     | `current_admin: Address`  | `Address`    | `propose_admin`  |
+| `admin_transferred`  | `previous_admin: Address` | `Address`    | `accept_admin`   |
+
+The payload is the incoming admin in both cases: the nominee for `admin_proposed`, the address that actually took the role for `admin_transferred`.
+
+Because the transfer is two-step, `admin_proposed` is **not** a change of authority — `DataKey::Admin` is untouched until the matching `admin_transferred` lands. A proposal may be superseded by a later `admin_proposed` from the same admin (the newest nomination wins) and may never be accepted at all, so consumers must treat `admin_transferred` as the only authoritative signal that the admin changed. There is no single-call `set_admin`: after `initialize`, every admin change produces exactly this pair of events.
+
 The `deposit` event now includes a `memo: String` field at tuple index `3`. Backend indexers must decode the 4-tuple `(u64, Address, i128, String)` instead of the previous 3-tuple.
 
 ## Payload parsing (backend)

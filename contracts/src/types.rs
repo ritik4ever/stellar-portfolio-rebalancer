@@ -286,6 +286,10 @@ pub enum DataKey {
     /// Marks `Address` as a registered operator (scoped permission distinct
     /// from full Admin rights) when present and `true`.
     Operator(Address),
+    /// Address nominated by the current admin via `propose_admin`, pending
+    /// its own `accept_admin` call. Cleared once the transfer completes.
+    /// Absence of this key means no admin transfer is in flight.
+    PendingAdmin,
 }
 
 #[contracttype]
@@ -341,6 +345,12 @@ pub enum Error {
     /// Caller authenticated successfully but is neither the contract admin
     /// nor a registered operator for an operator-eligible entrypoint.
     Unauthorized = 37,
+    /// `accept_admin` was called while no admin transfer is in flight
+    /// (`propose_admin` has never run, or the transfer already completed).
+    NoPendingAdmin = 38,
+    /// A proposed admin is required to differ from the current admin;
+    /// re-proposing the incumbent would be a no-op transfer.
+    InvalidAdminProposal = 39,
 }
 
 #[contracttype]
