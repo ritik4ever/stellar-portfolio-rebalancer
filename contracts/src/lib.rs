@@ -1322,9 +1322,6 @@ impl PortfolioRebalancer {
         }
 
         let total_value = preview.total_value;
-        let mut snapshot = portfolio.clone();
-        snapshot.total_value = total_value;
-
         let trades = preview.candidate_trades;
 
         let fee_config = Self::get_fee_config(env.clone());
@@ -1378,7 +1375,7 @@ impl PortfolioRebalancer {
                         let slippage_bps = (diff_abs * 10000) / expected_abs;
                         
                         // Per-asset slippage check (existing behavior)
-                        if slippage_bps > snapshot.slippage_tolerance as i128 {
+                        if slippage_bps > portfolio.slippage_tolerance as i128 {
                             return Err(Error::SlippageExceeded);
                         }
                         
