@@ -40,6 +40,8 @@ export interface RebalanceHistoryQueryOptions {
 interface PortfolioRow {
   id: string;
   user_address: string;
+  name?: string | null;
+  description?: string | null;
   allocations: string;
   threshold: number;
   slippage_tolerance_percent?: number;
@@ -114,6 +116,8 @@ export interface ConsentRecord {
   termsAcceptedAt: string | null;
   privacyAcceptedAt: string | null;
   cookieAcceptedAt: string | null;
+  analyticsAcceptedAt: string | null;
+  marketingAcceptedAt: string | null;
   revokedAt: string | null;
   active: boolean;
   documentVersion: string | null;
@@ -231,16 +235,25 @@ CREATE TABLE IF NOT EXISTS assets (
     enabled           INTEGER NOT NULL DEFAULT 1,
     last_refreshed_at TEXT,
     is_quarantined    INTEGER NOT NULL DEFAULT 0,
+    verification_status TEXT NOT NULL DEFAULT 'verified'
+                        CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+    verification_notes  TEXT,
+    submitted_by        TEXT,
+    reviewed_by         TEXT,
+    reviewed_at         TEXT,
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_assets_enabled ON assets(enabled) WHERE enabled = 1;
+CREATE INDEX IF NOT EXISTS idx_assets_verification ON assets(verification_status);
 
 CREATE TABLE IF NOT EXISTS legal_consent (
     user_id             TEXT PRIMARY KEY,
     terms_accepted_at   TEXT,
     privacy_accepted_at TEXT,
     cookie_accepted_at  TEXT,
+    analytics_accepted_at TEXT,
+    marketing_accepted_at TEXT,
     revoked_at          TEXT,
     is_active           INTEGER NOT NULL DEFAULT 1,
     ip_address          TEXT,
@@ -309,11 +322,98 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     notification_digest_frequency TEXT,
     updated_at                    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id          TEXT PRIMARY KEY,
+    actor       TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target      TEXT,
+    before_value TEXT,
+    after_value  TEXT,
+    timestamp   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_actor ON admin_audit_log (actor);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action ON admin_audit_log (action);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_timestamp ON admin_audit_log (timestamp);
 `;
 
 // ─────────────────────────────────────────────
 // Demo seed data
 // ─────────────────────────────────────────────
+
+// ── asset row mapping ────────────────────────────────────────────────────────
+// Single source of truth for the asset column list so every read path returns
+// the same shape, including the verification-workflow fields (#1412).
+
+export type AssetVerificationStatus = "pending" | "verified" | "rejected";
+
+export interface AssetDbRecord {
+  symbol: string;
+  name: string;
+  contractAddress?: string;
+  issuerAccount?: string;
+  coingeckoId?: string;
+  enabled: boolean;
+  lastRefreshedAt?: string;
+  isQuarantined: boolean;
+  verificationStatus: AssetVerificationStatus;
+  verificationNotes?: string;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
+interface AssetDbRow {
+  symbol: string;
+  name: string;
+  contract_address: string | null;
+  issuer_account: string | null;
+  coingecko_id: string | null;
+  enabled: number;
+  last_refreshed_at: string | null;
+  is_quarantined: number;
+  verification_status: string | null;
+  verification_notes: string | null;
+  submitted_by: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+
+const ASSET_COLUMNS = [
+  "symbol",
+  "name",
+  "contract_address",
+  "issuer_account",
+  "coingecko_id",
+  "enabled",
+  "last_refreshed_at",
+  "is_quarantined",
+  "verification_status",
+  "verification_notes",
+  "submitted_by",
+  "reviewed_by",
+  "reviewed_at",
+].join(", ");
+
+function assetRowToRecord(row: AssetDbRow): AssetDbRecord {
+  return {
+    symbol: row.symbol,
+    name: row.name,
+    contractAddress: row.contract_address ?? undefined,
+    issuerAccount: row.issuer_account ?? undefined,
+    coingeckoId: row.coingecko_id ?? undefined,
+    enabled: row.enabled === 1,
+    lastRefreshedAt: row.last_refreshed_at ?? undefined,
+    isQuarantined: row.is_quarantined === 1,
+    // Rows written before the workflow existed have no status; treat as verified.
+    verificationStatus: (row.verification_status as AssetVerificationStatus) ?? "verified",
+    verificationNotes: row.verification_notes ?? undefined,
+    submittedBy: row.submitted_by ?? undefined,
+    reviewedBy: row.reviewed_by ?? undefined,
+    reviewedAt: row.reviewed_at ?? undefined,
+  };
+}
 
 const DEMO_PORTFOLIO_ID = "demo-portfolio-1";
 
@@ -467,6 +567,13 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
   return {
     id: row.id,
     userAddress: row.user_address,
+    name: row.name ?? undefined,
+    // `name` and `description` are persisted on create and on versioned
+    // update, so they have to be read back here. Dropping them made every
+    // versioned update rewrite the stored name as NULL, because the merge
+    // that feeds the UPDATE started from a row that had already lost it.
+    ...(row.name == null ? {} : { name: row.name }),
+    ...(row.description == null ? {} : { description: row.description }),
     allocations: safeJsonParse(
       row.allocations,
       {},
@@ -659,6 +766,34 @@ export class DatabaseService {
   }
 
   private _migrateSchema(): void {
+    // Issuer-verification workflow columns (#1412). Existing rows are treated as
+    // already-verified so the catalog behaves exactly as before the workflow existed.
+    const assetCols = this.db
+      .prepare("PRAGMA table_info(assets)")
+      .all() as Array<{ name: string }>;
+    const assetColNames = new Set(assetCols.map((c) => c.name));
+    const assetMigrations: Array<[string, string]> = [
+      [
+        "verification_status",
+        "ALTER TABLE assets ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'verified'",
+      ],
+      ["verification_notes", "ALTER TABLE assets ADD COLUMN verification_notes TEXT"],
+      ["submitted_by", "ALTER TABLE assets ADD COLUMN submitted_by TEXT"],
+      ["reviewed_by", "ALTER TABLE assets ADD COLUMN reviewed_by TEXT"],
+      ["reviewed_at", "ALTER TABLE assets ADD COLUMN reviewed_at TEXT"],
+    ];
+    for (const [column, statement] of assetMigrations) {
+      if (!assetColNames.has(column)) {
+        this.db.exec(statement);
+        logger.info(`[DB] Migration: added ${column} column to assets`);
+      }
+    }
+    if (!assetColNames.has("verification_status")) {
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_assets_verification ON assets(verification_status)",
+      );
+    }
+
     const cols = this.db
       .prepare("PRAGMA table_info(portfolios)")
       .all() as Array<{ name: string }>;
@@ -700,6 +835,10 @@ export class DatabaseService {
       );
       logger.info("[DB] Migration: added strategy_config column to portfolios");
     }
+    if (!cols.some((c) => c.name === "name")) {
+      this.db.exec("ALTER TABLE portfolios ADD COLUMN name TEXT");
+      logger.info("[DB] Migration: added name column to portfolios");
+    }
 
     const consentCols = this.db
       .prepare("PRAGMA table_info(legal_consent)")
@@ -713,6 +852,14 @@ export class DatabaseService {
         "ALTER TABLE legal_consent ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
       );
       logger.info("[DB] Migration: added is_active column to legal_consent");
+    }
+    if (!consentCols.some((c) => c.name === "analytics_accepted_at")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN analytics_accepted_at TEXT");
+      logger.info("[DB] Migration: added analytics_accepted_at column to legal_consent");
+    }
+    if (!consentCols.some((c) => c.name === "marketing_accepted_at")) {
+      this.db.exec("ALTER TABLE legal_consent ADD COLUMN marketing_accepted_at TEXT");
+      logger.info("[DB] Migration: added marketing_accepted_at column to legal_consent");
     }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS consent_audit_events (
@@ -884,6 +1031,43 @@ export class DatabaseService {
       throw new Error(
         `Failed to create portfolio with balances for user '${userAddress}': ${err}`,
       );
+    }
+  }
+
+  clonePortfolio(originalId: string, name?: string): Portfolio | undefined {
+    try {
+      const original = this.getPortfolio(originalId);
+      if (!original) return undefined;
+
+      const id = generateId();
+      const now = new Date().toISOString();
+      const cloneName = name !== undefined ? name : original.name;
+
+      this.db
+        .prepare(
+          `
+                INSERT INTO portfolios (id, user_address, name, allocations, threshold, slippage_tolerance_percent, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `,
+        )
+        .run(
+          id,
+          original.userAddress,
+          cloneName ?? null,
+          JSON.stringify(original.allocations),
+          original.threshold,
+          original.slippageTolerancePercent ?? original.slippageTolerance ?? 1,
+          JSON.stringify(original.balances || {}),
+          original.totalValue || 0,
+          now,
+          now,
+          original.strategy || "threshold",
+          JSON.stringify(original.strategyConfig || {}),
+        );
+
+      return this.getPortfolio(id);
+    } catch (err) {
+      throw new Error(`Failed to clone portfolio '${originalId}': ${err}`);
     }
   }
 
@@ -1094,88 +1278,84 @@ export class DatabaseService {
   // Asset registry (configurable assets)
   // ──────────────────────────────────────────
 
-  listAssets(enabledOnly: boolean = true): Array<{
-    symbol: string;
-    name: string;
-    contractAddress?: string;
-    issuerAccount?: string;
-    coingeckoId?: string;
-    enabled: boolean;
-    lastRefreshedAt?: string;
-    isQuarantined: boolean;
-  }> {
+  listAssets(enabledOnly: boolean = true): AssetDbRecord[] {
     try {
       const rows = this.db
-        .prepare<
-          [],
-          {
-            symbol: string;
-            name: string;
-            contract_address: string | null;
-            issuer_account: string | null;
-            coingecko_id: string | null;
-            issuer_metadata: string | null;
-            enabled: number;
-            last_refreshed_at: string | null;
-            is_quarantined: number;
-          }
-        >(enabledOnly ? "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE enabled = 1 AND is_quarantined = 0 ORDER BY symbol" : "SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets ORDER BY symbol")
+        .prepare<[], AssetDbRow>(
+          enabledOnly
+            ? `SELECT ${ASSET_COLUMNS} FROM assets WHERE enabled = 1 AND is_quarantined = 0 ORDER BY symbol`
+            : `SELECT ${ASSET_COLUMNS} FROM assets ORDER BY symbol`,
+        )
         .all();
-      return rows.map((r) => ({
-        symbol: r.symbol,
-        name: r.name,
-        contractAddress: r.contract_address ?? undefined,
-        issuerAccount: r.issuer_account ?? undefined,
-        coingeckoId: r.coingecko_id ?? undefined,
-        enabled: r.enabled === 1,
-        lastRefreshedAt: r.last_refreshed_at ?? undefined,
-        isQuarantined: r.is_quarantined === 1,
-      }));
+      return rows.map(assetRowToRecord);
     } catch (err) {
       throw new Error(`Failed to list assets: ${err}`);
     }
   }
 
-  getAssetBySymbol(symbol: string):
-    | {
-        symbol: string;
-        name: string;
-        contractAddress?: string;
-        issuerAccount?: string;
-        coingeckoId?: string;
-        enabled: boolean;
-        lastRefreshedAt?: string;
-        isQuarantined: boolean;
-      }
-    | undefined {
+  /** Assets awaiting an admin verification decision (#1412). */
+  listAssetsByVerificationStatus(
+    status: "pending" | "verified" | "rejected",
+  ): AssetDbRecord[] {
+    try {
+      const rows = this.db
+        .prepare<
+          [string],
+          AssetDbRow
+        >(`SELECT ${ASSET_COLUMNS} FROM assets WHERE verification_status = ? ORDER BY created_at ASC`)
+        .all(status);
+      return rows.map(assetRowToRecord);
+    } catch (err) {
+      throw new Error(`Failed to list assets with status '${status}': ${err}`);
+    }
+  }
+
+  /**
+   * Record an admin verification decision. Rejecting or returning an asset to
+   * pending also disables it so it cannot be traded while unverified.
+   */
+  setAssetVerification(
+    symbol: string,
+    status: "pending" | "verified" | "rejected",
+    options: { reviewedBy?: string; notes?: string } = {},
+  ): boolean {
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE assets
+           SET verification_status = ?,
+               verification_notes = ?,
+               reviewed_by = ?,
+               reviewed_at = ?,
+               enabled = ?,
+               updated_at = ?
+           WHERE symbol = ?`,
+        )
+        .run(
+          status,
+          options.notes ?? null,
+          options.reviewedBy ?? null,
+          new Date().toISOString(),
+          status === "verified" ? 1 : 0,
+          new Date().toISOString(),
+          symbol.toUpperCase(),
+        );
+      return result.changes > 0;
+    } catch (err) {
+      throw new Error(`Failed to set verification status for '${symbol}': ${err}`);
+    }
+  }
+
+  getAssetBySymbol(symbol: string): AssetDbRecord | undefined {
     try {
       const row = this.db
         .prepare<
           [string],
-          {
-            symbol: string;
-            name: string;
-            contract_address: string | null;
-            issuer_account: string | null;
-            coingecko_id: string | null;
-            issuer_metadata: string | null;
-            enabled: number;
-            last_refreshed_at: string | null;
-            is_quarantined: number;
-          }
-        >("SELECT symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined FROM assets WHERE symbol = ?")
+          AssetDbRow
+        >(`SELECT ${ASSET_COLUMNS} FROM assets WHERE symbol = ?`)
         .get(symbol.toUpperCase());
       if (!row) return undefined;
-      return {
-        symbol: row.symbol,
-        name: row.name,
-        contractAddress: row.contract_address ?? undefined,
-        issuerAccount: row.issuer_account ?? undefined,
-        coingeckoId: row.coingecko_id ?? undefined,
-        enabled: row.enabled === 1,
-        lastRefreshedAt: row.last_refreshed_at ?? undefined,
-        isQuarantined: row.is_quarantined === 1,
-      };
+      return assetRowToRecord(row);
     } catch (err) {
       throw new Error(`Failed to get asset '${symbol}': ${err}`);
     }
@@ -1189,14 +1369,23 @@ export class DatabaseService {
       issuerAccount?: string;
       coingeckoId?: string;
       issuerMetadata?: IssuerMetadata;
+      verificationStatus?: "pending" | "verified" | "rejected";
+      submittedBy?: string;
     } = {},
   ): void {
     try {
       const sym = symbol.toUpperCase();
       const now = new Date().toISOString();
+      // Unverified submissions are stored disabled so they cannot be traded
+      // before an admin decision (#1412).
+      const status = options.verificationStatus ?? "verified";
       this.db
         .prepare(
-          "INSERT INTO assets (symbol, name, contract_address, issuer_account, coingecko_id, enabled, last_refreshed_at, is_quarantined, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?)",
+          `INSERT INTO assets (
+             symbol, name, contract_address, issuer_account, coingecko_id, issuer_metadata,
+             enabled, last_refreshed_at, is_quarantined,
+             verification_status, submitted_by, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
         )
         .run(
           sym,
@@ -1205,7 +1394,10 @@ export class DatabaseService {
           options.issuerAccount ?? null,
           options.coingeckoId ?? null,
           options.issuerMetadata ? JSON.stringify(options.issuerMetadata) : null,
+          status === "verified" ? 1 : 0,
           now,
+          status,
+          options.submittedBy ?? null,
           now,
           now,
         );
@@ -1290,6 +1482,8 @@ export class DatabaseService {
       terms: boolean;
       privacy: boolean;
       cookies: boolean;
+      analytics?: boolean;
+      marketing?: boolean;
       ipAddress?: string;
       userAgent?: string;
       documentText?: string;
@@ -1297,15 +1491,27 @@ export class DatabaseService {
   ): void {
     const now = new Date().toISOString();
     const docVersion = computeDocumentVersionHash(opts.documentText);
+    const analyticsFlag = opts.analytics === undefined ? null : (opts.analytics ? 1 : 0);
+    const marketingFlag = opts.marketing === undefined ? null : (opts.marketing ? 1 : 0);
     const grant = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, ip_address, user_agent, document_version, updated_at)
-               VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
+          `INSERT INTO legal_consent (user_id, terms_accepted_at, privacy_accepted_at, cookie_accepted_at, analytics_accepted_at, marketing_accepted_at, revoked_at, is_active, ip_address, user_agent, document_version, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  terms_accepted_at = COALESCE(excluded.terms_accepted_at, terms_accepted_at),
                  privacy_accepted_at = COALESCE(excluded.privacy_accepted_at, privacy_accepted_at),
                  cookie_accepted_at = COALESCE(excluded.cookie_accepted_at, cookie_accepted_at),
+                 analytics_accepted_at = CASE
+                   WHEN ? IS NULL THEN analytics_accepted_at
+                   WHEN ? = 1 THEN excluded.analytics_accepted_at
+                   ELSE NULL
+                 END,
+                 marketing_accepted_at = CASE
+                   WHEN ? IS NULL THEN marketing_accepted_at
+                   WHEN ? = 1 THEN excluded.marketing_accepted_at
+                   ELSE NULL
+                 END,
                  revoked_at = NULL,
                  is_active = 1,
                  ip_address = excluded.ip_address,
@@ -1318,10 +1524,16 @@ export class DatabaseService {
           opts.terms ? now : null,
           opts.privacy ? now : null,
           opts.cookies ? now : null,
+          analyticsFlag === 1 ? now : null,
+          marketingFlag === 1 ? now : null,
           opts.ipAddress ?? null,
           opts.userAgent ?? null,
           docVersion,
           now,
+          analyticsFlag,
+          analyticsFlag,
+          marketingFlag,
+          marketingFlag,
         );
       this.insertConsentAuditEvent(userId, "grant", now, opts.ipAddress, opts.userAgent, docVersion);
     });
@@ -1366,7 +1578,7 @@ export class DatabaseService {
     logger.info("[DB] Consent revoked", { userId, documentVersion: docVersion });
   }
 
-  getConsent(userId: string): ConsentRecord | undefined {
+getConsent(userId: string): ConsentRecord | undefined {
     const row = this.db
       .prepare<
         [string],
@@ -1374,17 +1586,21 @@ export class DatabaseService {
           terms_accepted_at: string | null;
           privacy_accepted_at: string | null;
           cookie_accepted_at: string | null;
+          analytics_accepted_at: string | null;
+          marketing_accepted_at: string | null;
           revoked_at: string | null;
           is_active: number;
           document_version: string | null;
         }
-      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, revoked_at, is_active, document_version FROM legal_consent WHERE user_id = ?")
+      >("SELECT terms_accepted_at, privacy_accepted_at, cookie_accepted_at, analytics_accepted_at, marketing_accepted_at, revoked_at, is_active, document_version FROM legal_consent WHERE user_id = ?")
       .get(userId);
     if (!row) return undefined;
     return {
       termsAcceptedAt: row.terms_accepted_at,
       privacyAcceptedAt: row.privacy_accepted_at,
       cookieAcceptedAt: row.cookie_accepted_at,
+      analyticsAcceptedAt: row.analytics_accepted_at,
+      marketingAcceptedAt: row.marketing_accepted_at,
       revokedAt: row.revoked_at,
       active: row.is_active === 1,
       documentVersion: row.document_version,
@@ -1943,6 +2159,41 @@ export class DatabaseService {
     });
   }
 
+  /**
+   * Most recent price snapshot captured at or before `asOf` (ISO timestamp).
+   * Used by the tax report so each tax lot keeps its acquisition-date price
+   * instead of collapsing onto the latest price.
+   */
+  getPriceSnapshotAsOf(
+    asset: string,
+    asOf: string,
+  ): { price: number; change?: number; capturedAt: string } | undefined {
+    return this._withTiming("getPriceSnapshotAsOf", () => {
+      try {
+        const row = this.db
+          .prepare<
+            [string, string],
+            { price: number; change: number | null; captured_at: string }
+          >(
+            `SELECT price, change, captured_at FROM price_snapshots
+             WHERE asset = ? AND captured_at <= ?
+             ORDER BY captured_at DESC LIMIT 1`,
+          )
+          .get(asset, asOf);
+        if (!row) return undefined;
+        return {
+          price: row.price,
+          change: row.change ?? undefined,
+          capturedAt: row.captured_at,
+        };
+      } catch (err) {
+        throw new Error(
+          `Failed to retrieve price snapshot for asset '${asset}' as of '${asOf}': ${err}`,
+        );
+      }
+    });
+  }
+
   // ──────────────────────────────────────────
   // Portfolio draft methods
   // ──────────────────────────────────────────
@@ -2402,6 +2653,25 @@ export class DatabaseService {
     });
   }
 
+  // ── generic key/value helpers (used by the Telegram chat link, #1396) ────
+
+  getKvValue(key: string): string | undefined {
+    return this.getIndexerState(key);
+  }
+
+  setKvValue(key: string, value: string): void {
+    this.setIndexerState(key, value);
+  }
+
+  deleteKvValue(key: string): boolean {
+    try {
+      const result = this.db.prepare("DELETE FROM kv_store WHERE key = ?").run(key);
+      return result.changes > 0;
+    } catch {
+      return false;
+    }
+  }
+
   ensurePortfolioExists(portfolioId: string, userAddress: string): void {
     try {
       const existing = this.getPortfolio(portfolioId);
@@ -2447,6 +2717,99 @@ export class DatabaseService {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  recordAdminAuditEntry(
+    actor: string,
+    action: string,
+    target: string | null,
+    beforeValue: unknown,
+    afterValue: unknown,
+  ): string {
+    const id = randomUUID();
+    const timestamp = new Date().toISOString();
+    this._withTiming("recordAdminAuditEntry", () => {
+      this.db
+        .prepare(
+          `INSERT INTO admin_audit_log (id, actor, action, target, before_value, after_value, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          actor,
+          action,
+          target,
+          beforeValue != null ? JSON.stringify(beforeValue) : null,
+          afterValue != null ? JSON.stringify(afterValue) : null,
+          timestamp,
+        );
+    });
+    return id;
+  }
+
+  queryAdminAuditLog(filters: {
+    actor?: string;
+    action?: string;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+    offset?: number;
+  }): { entries: Array<{
+    id: string;
+    actor: string;
+    action: string;
+    target: string | null;
+    before_value: string | null;
+    after_value: string | null;
+    timestamp: string;
+  }>; total: number } {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters.actor) {
+      conditions.push("actor = ?");
+      params.push(filters.actor);
+    }
+    if (filters.action) {
+      conditions.push("action = ?");
+      params.push(filters.action);
+    }
+    if (filters.startDate) {
+      conditions.push("timestamp >= ?");
+      params.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      conditions.push("timestamp <= ?");
+      params.push(filters.endDate);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limit = Math.min(filters.limit ?? 50, 200);
+    const offset = filters.offset ?? 0;
+
+    return this._withTiming("queryAdminAuditLog", () => {
+      const total = (
+        this.db
+          .prepare(`SELECT COUNT(*) as cnt FROM admin_audit_log ${whereClause}`)
+          .get(...params) as { cnt: number }
+      ).cnt;
+
+      const entries = this.db
+        .prepare(
+          `SELECT * FROM admin_audit_log ${whereClause} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
+        )
+        .all(...params, limit, offset) as Array<{
+          id: string;
+          actor: string;
+          action: string;
+          target: string | null;
+          before_value: string | null;
+          after_value: string | null;
+          timestamp: string;
+        }>;
+
+      return { entries, total };
+    });
   }
 }
 

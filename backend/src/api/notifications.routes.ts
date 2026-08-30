@@ -4,12 +4,16 @@ import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { notificationSubscribeSchema, notificationQuerySchema } from './validation.js'
+import { notificationSubscribeSchema, notificationQuerySchema, notificationThresholdsQuerySchema, notificationThresholdsBodySchema } from './validation.js'
 import { getAuthConfig } from '../services/authService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
-import { webhookDeadLetterQueue } from '../services/webhookDeadLetter.js'
+import {
+    webhookDeadLetterQueue,
+    queryDeadLetterItems,
+    postDeadLetterPayload,
+} from '../services/webhookDeadLetter.js'
 import { deliverWithBackoff } from '../services/notificationDelivery.js'
 import { getNotificationDeliveryConfig } from '../config/notificationDeliveryConfig.js'
 
@@ -84,6 +88,107 @@ notificationsRouter.get('/notifications/preferences', requireJwtWhenEnabled, val
         return ok(res, { preferences })
     } catch (error) {
         logger.error('Failed to get notification preferences', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Get per-asset price alert thresholds
+notificationsRouter.get('/notifications/alerts/thresholds', requireJwtWhenEnabled, validateQuery(notificationThresholdsQuerySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot read alert thresholds for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
+        }
+
+        const thresholds = notificationService.getPriceAlertThresholds(userId)
+        const defaultThreshold = notificationService.getDefaultPriceAlertThreshold(userId)
+
+        return ok(res, { thresholds, defaultThreshold })
+    } catch (error) {
+        logger.error('Failed to get price alert thresholds', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Set per-asset price alert thresholds
+notificationsRouter.put('/notifications/alerts/thresholds', requireJwtWhenEnabled, validateRequest(notificationThresholdsBodySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const bodyId = req.body?.userId as string | undefined
+            if (bodyId && bodyId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot manage alert thresholds for another user')
+            }
+        } else {
+            userId = req.body?.userId
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        }
+
+        const { thresholds } = req.body as { thresholds: Record<string, number> }
+        if (!thresholds || Object.keys(thresholds).length === 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'At least one threshold must be provided')
+        }
+
+        notificationService.setPriceAlertThresholds(userId, thresholds)
+
+        const updated = notificationService.getPriceAlertThresholds(userId)
+        const defaultThreshold = notificationService.getDefaultPriceAlertThreshold(userId)
+
+        return ok(res, { thresholds: updated, defaultThreshold })
+    } catch (error) {
+        logger.error('Failed to set price alert thresholds', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Remove a per-asset price alert threshold
+notificationsRouter.delete('/notifications/alerts/thresholds', requireJwtWhenEnabled, validateQuery(notificationThresholdsQuerySchema), async (req: Request, res: Response) => {
+    try {
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot manage alert thresholds for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
+        }
+
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
+        }
+
+        const asset = req.query.asset as string | undefined
+        if (!asset) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'asset query parameter is required')
+        }
+
+        const removed = notificationService.deletePriceAlertThreshold(userId, asset)
+        if (!removed) {
+            return fail(res, 404, 'NOT_FOUND', `No threshold override found for asset ${asset}`)
+        }
+
+        const thresholds = notificationService.getPriceAlertThresholds(userId)
+        const defaultThreshold = notificationService.getDefaultPriceAlertThreshold(userId)
+
+        return ok(res, { thresholds, defaultThreshold })
+    } catch (error) {
+        logger.error('Failed to delete price alert threshold', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -203,10 +308,22 @@ notificationsRouter.post('/notifications/webhook/callback', async (req: Request,
     }
 })
 
+/**
+ * Admin: browse dead-lettered webhook deliveries (#1393).
+ * Each entry carries its failure reason and original payload. Filtering and
+ * pagination keep the view usable when a broken endpoint has produced many.
+ */
 notificationsRouter.get('/admin/notifications/dead-letter', requireAdmin, async (req: Request, res: Response) => {
     try {
-        const items = await webhookDeadLetterQueue.list()
-        return ok(res, { items, count: items.length })
+        const all = await webhookDeadLetterQueue.list()
+        const listing = queryDeadLetterItems(all, {
+            userId: req.query.userId as string | undefined,
+            eventType: req.query.eventType as string | undefined,
+            search: req.query.search as string | undefined,
+            page: req.query.page ? Number(req.query.page) : undefined,
+            pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+        })
+        return ok(res, listing)
     } catch (error) {
         logger.error('Failed to list dead-letter items', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -236,34 +353,82 @@ notificationsRouter.post('/admin/notifications/dead-letter/:id/replay', requireA
                     policy,
                 },
                 async () => {
-                    const controller = new AbortController()
-                    const timeout = policy.requestTimeoutMs || 5000
-                    const timeoutId = setTimeout(() => controller.abort(), timeout)
-                    try {
-                        const response = await fetch(item.webhookUrl, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-Webhook-Event': item.eventType,
-                            },
-                            body: JSON.stringify(item.payload),
-                            signal: controller.signal,
-                        })
-                        if (!response.ok) {
-                            throw new Error(`Webhook responded with status ${response.status}`)
-                        }
-                    } finally {
-                        clearTimeout(timeoutId)
-                    }
+                    await postDeadLetterPayload(item, policy.requestTimeoutMs || 5000)
                 },
             )
             return ok(res, { message: 'Dead-letter item replayed successfully' })
         } catch (replayError) {
-            await webhookDeadLetterQueue.push(item)
+            await webhookDeadLetterQueue.requeue(item)
             return fail(res, 502, 'REPLAY_FAILED', 'Replay delivery failed, item re-queued')
         }
     } catch (error) {
         logger.error('Failed to replay dead-letter item', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+notificationsRouter.post('/admin/notifications/dead-letter/batch-replay', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { ids, replayAll } = req.body as { ids?: string[]; replayAll?: boolean }
+        
+        if (!ids && !replayAll) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Either ids array or replayAll flag is required')
+        }
+
+        const allItems = await webhookDeadLetterQueue.list()
+        const itemsToReplay = replayAll ? allItems : allItems.filter(item => ids!.includes(item.id))
+
+        if (itemsToReplay.length === 0) {
+            return fail(res, 404, 'NOT_FOUND', 'No matching dead-letter items found')
+        }
+
+        const deliveryConfig = getNotificationDeliveryConfig()
+        const policy = {
+            ...deliveryConfig.webhook,
+            maxAttempts: Math.min(deliveryConfig.webhook.maxAttempts, 5),
+        }
+
+        const results = {
+            total: itemsToReplay.length,
+            succeeded: 0,
+            failed: 0,
+            failedIds: [] as string[],
+        }
+
+        for (const item of itemsToReplay) {
+            const removed = await webhookDeadLetterQueue.replay(item.id)
+            if (!removed) {
+                results.failed++
+                results.failedIds.push(item.id)
+                continue
+            }
+
+            try {
+                await deliverWithBackoff(
+                    {
+                        provider: 'webhook',
+                        userId: item.userId,
+                        eventType: item.eventType,
+                        policy,
+                    },
+                    async () => {
+                    await postDeadLetterPayload(item, policy.requestTimeoutMs || 5000)
+                },
+                )
+                results.succeeded++
+            } catch (replayError) {
+                await webhookDeadLetterQueue.requeue(item)
+                results.failed++
+                results.failedIds.push(item.id)
+            }
+        }
+
+        return ok(res, {
+            message: `Batch replay completed: ${results.succeeded} succeeded, ${results.failed} failed`,
+            results,
+        })
+    } catch (error) {
+        logger.error('Failed to batch replay dead-letter items', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

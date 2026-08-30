@@ -67,10 +67,17 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
 
 ### `PGPASSWORD` / `DATABASE_URL`
 
-1. Rotate the password via your Postgres provider (RDS, Neon, Supabase, etc.) or with `ALTER USER`.
-2. Update `PGPASSWORD` (or the password segment of `DATABASE_URL`) in your secrets manager.
-3. Restart the backend — the connection pool re-establishes with the new credential.
-4. Drop or disable the old credential.
+1. When using AWS Secrets Manager automatic rotation (`secret_rotation_days`), RDS master and application credentials rotate on a scheduled basis.
+2. For manual rotations, rotate the password via your Postgres provider (RDS, Neon, Supabase, etc.) or with `ALTER USER`, and update the value in your secrets manager.
+3. The backend `CredentialManager` reads credentials dynamically and automatically refreshes the connection pool across rotation events without manual intervention.
+4. Drop or disable the old credential after verification.
+5. For step-by-step verification and rollback instructions, see [OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager](OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager).
+
+### `REDIS_URL` / `REDIS_AUTH_TOKEN`
+
+1. Rotate the AUTH token via AWS Secrets Manager or your Redis/ElastiCache provider (`secret_rotation_days`).
+2. The backend dynamically re-reads `REDIS_AUTH_TOKEN` (or AWS Secrets Manager secret) and refreshes Redis client connections automatically across rotation events without manual intervention.
+3. For step-by-step verification and rollback instructions, see [OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager](OPERATIONS.md#database-and-redis-credential-rotation-aws-secrets-manager).
 
 ### `WEBHOOK_SIGNING_SECRET`
 
@@ -183,6 +190,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `RATE_LIMIT_BURST_WINDOW_MS` | No | `10000` | Burst-protection window size (ms). | `10000` | |
 | `RATE_LIMIT_BURST_MAX` | No | `20` | Maximum requests in the burst window. | `20` | |
 | `RATE_LIMIT_WRITE_BURST_MAX` | No | `3` | Maximum write requests in the burst window. | `3` | |
+| `RATE_LIMIT_NEAR_LIMIT_RATIO` | No | `0.8` | Fraction of the limit at which an identifier is flagged `near-limit` on the admin rate-limit dashboard. | `0.8` | |
 | `API_RATE_LIMIT_WINDOW` | No | `900000` | Security-middleware rate-limit window (ms). | `900000` | |
 | `API_RATE_LIMIT_MAX_REQUESTS` | No | `100` | Security-middleware max requests per window. | `100` | |
 
@@ -209,6 +217,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `REBALANCE_MIN_LIQUIDITY_COVERAGE` | No | `1.0` | Required liquidity coverage multiplier before a trade proceeds. | `1.0` | |
 | `REBALANCE_ALLOW_PARTIAL_FILL` | No | `true` | Allows partial order fills when a full fill is unavailable. | `true` | |
 | `REBALANCE_ROLLBACK_ON_FAILURE` | No | `true` | Attempts to roll back all changes if execution fails mid-flow. | `true` | |
+| `REBALANCE_LOCK_TTL_MS` | No | `300000` | Time-to-live for rebalancing concurrency locks (ms). Valid range: 1000–1800000. | `600000` | |
 | `RISK_VOLATILITY_HIGH` | No | `10` | Volatility percentage threshold for high-risk classification. | `10` | |
 | `RISK_VOLATILITY_CRITICAL` | No | `15` | Volatility percentage threshold for critical-risk classification. | `15` | |
 | `RISK_CONCENTRATION_HIGH` | No | `60` | Concentration percentage threshold for high-risk classification. | `60` | |
@@ -288,6 +297,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `DEMO_MODE` | No | `true` | Enables local demo portfolio flows. Set to `false` in production. | `false` | |
 | `ALLOW_FALLBACK_PRICES` | No | `true` | Uses fallback price data when the primary feed fails. | `false` | |
 | `ALLOW_MOCK_PRICE_HISTORY` | No | `true` | Allows generated historical price data. Disable in production. | `false` | |
+| `PRICE_HISTORY_BACKFILL_DAYS` | No | `90` | Days of price history backfilled when a new asset is added. Valid range: 1–365. | `45` | |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | No | `false` | Allows anonymous portfolio listing by user address in demo mode. | `false` | |
 | `ENABLE_DEBUG_ROUTES` | No | `true` | Enables debug/test route groups. **Must be `false` in production.** | `false` | ⚠️ Exposes internal test routes and can leak stack traces — the highest-risk flag in this section. |
 | `ALLOW_DEMO_BALANCE_FALLBACK` | No | `true` | Uses demo balances when a live on-chain balance fetch fails. | `false` | |

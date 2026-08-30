@@ -26,9 +26,11 @@ const router = Router()
 
 // ── validation schemas ─────────────────────────────────────────────────────────
 
+// scope defaults to the least-privileged option so a caller that omits it
+// never accidentally mints a write-capable key.
 const createApiKeySchema = z.object({
     name: z.string().min(1).max(128),
-    scope: z.enum(['read-only', 'read-write']),
+    scope: z.enum(['read-only', 'read-write']).default('read-only'),
 })
 
 const rotateApiKeySchema = z.object({

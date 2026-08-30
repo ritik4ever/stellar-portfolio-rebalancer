@@ -13,7 +13,9 @@ export const QUEUE_NAMES = {
   DLQ: "dead-letter-queue",
   PRICE_HISTORY_SNAPSHOT: "price-history-snapshot",
   PRICE_HISTORY_PRUNE: "price-history-prune",
+  PRICE_HISTORY_BACKFILL: "price-history-backfill",
   USER_ALERTS: "user-alerts",
+  SCHEDULED_EXPORT: "scheduled-export",
 } as const;
 
 export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
@@ -78,9 +80,31 @@ export interface PriceHistoryJobData {
     triggeredBy?: 'scheduler' | 'startup'
 }
 
+export interface PriceHistoryBackfillJobData {
+    asset: string
+    days?: number
+    triggeredBy?: 'asset_added' | 'scheduler' | 'manual' | 'startup'
+    correlationId?: string
+}
+
 export interface UserAlertsJobData {
     triggeredBy?: 'scheduler' | 'manual' | 'startup'
     correlationId?: string
+}
+
+/** Recurring emailed portfolio export sweep (#1411). */
+export interface ScheduledExportJobData {
+    triggeredBy?: 'scheduler' | 'manual'
+    correlationId?: string
+    /** Optional cutoff for which schedules count as due; defaults to now. */
+    asOf?: string
+}
+
+export interface ScheduledExportJobResult {
+    processed: number
+    sent: number
+    failed: number
+    skipped: number
 }
 
 // ─── Singleton Queues ─────────────────────────────────────────────────────────
@@ -94,7 +118,9 @@ let portfolioExportQueue: Queue<PortfolioExportJobData, PortfolioExportResult> |
 let autoRebalanceCheckQueue: Queue<AutoRebalanceCheckJobData> | null = null;
 let priceHistorySnapshotQueue: Queue<PriceHistoryJobData> | null = null;
 let priceHistoryPruneQueue: Queue<PriceHistoryJobData> | null = null;
+let priceHistoryBackfillQueue: Queue<PriceHistoryBackfillJobData> | null = null;
 let userAlertsQueue: Queue<UserAlertsJobData> | null = null;
+let scheduledExportQueue: Queue<ScheduledExportJobData, ScheduledExportJobResult> | null = null;
 let dlqQueue: Queue<DLQJobData> | null = null;
 
 function getDefaultJobOptions() {
@@ -261,6 +287,21 @@ export function getPriceHistoryPruneQueue(): Queue<PriceHistoryJobData> | null {
     }
 }
 
+export function getPriceHistoryBackfillQueue(): Queue<PriceHistoryBackfillJobData> | null {
+    try {
+        if (!priceHistoryBackfillQueue) {
+            priceHistoryBackfillQueue = new Queue(QUEUE_NAMES.PRICE_HISTORY_BACKFILL, {
+                connection: getConnectionOptions(),
+                defaultJobOptions: getDefaultJobOptions(),
+            })
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.PRICE_HISTORY_BACKFILL}`)
+        }
+        return priceHistoryBackfillQueue
+    } catch {
+        return null
+    }
+}
+
 export function getUserAlertsQueue(): Queue<UserAlertsJobData> | null {
     try {
         if (!userAlertsQueue) {
@@ -271,6 +312,24 @@ export function getUserAlertsQueue(): Queue<UserAlertsJobData> | null {
             logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.USER_ALERTS}`)
         }
         return userAlertsQueue
+    } catch {
+        return null
+    }
+}
+
+export function getScheduledExportQueue(): Queue<ScheduledExportJobData, ScheduledExportJobResult> | null {
+    try {
+        if (!scheduledExportQueue) {
+            scheduledExportQueue = new Queue<ScheduledExportJobData, ScheduledExportJobResult>(
+                QUEUE_NAMES.SCHEDULED_EXPORT,
+                {
+                    connection: getConnectionOptions(),
+                    defaultJobOptions: getDefaultJobOptions(),
+                },
+            )
+            logger.info(`[QUEUE] Created queue: ${QUEUE_NAMES.SCHEDULED_EXPORT}`)
+        }
+        return scheduledExportQueue
     } catch {
         return null
     }
@@ -287,7 +346,9 @@ export function getQueueByName(name: string): Queue<any, any> | null {
     [QUEUE_NAMES.DLQ]: getDLQQueue,
     [QUEUE_NAMES.PRICE_HISTORY_SNAPSHOT]: getPriceHistorySnapshotQueue,
     [QUEUE_NAMES.PRICE_HISTORY_PRUNE]: getPriceHistoryPruneQueue,
+    [QUEUE_NAMES.PRICE_HISTORY_BACKFILL]: getPriceHistoryBackfillQueue,
     [QUEUE_NAMES.USER_ALERTS]: getUserAlertsQueue,
+    [QUEUE_NAMES.SCHEDULED_EXPORT]: getScheduledExportQueue,
   };
 
   const getter = queueMap[name];
@@ -308,7 +369,9 @@ export async function closeAllQueues(): Promise<void> {
     dlqQueue?.close(),
     priceHistorySnapshotQueue?.close(),
     priceHistoryPruneQueue?.close(),
+    priceHistoryBackfillQueue?.close(),
     userAlertsQueue?.close(),
+    scheduledExportQueue?.close(),
   ]);
   portfolioCheckQueue = null;
   rebalanceQueue = null;
@@ -320,6 +383,8 @@ export async function closeAllQueues(): Promise<void> {
   dlqQueue = null;
   priceHistorySnapshotQueue = null;
   priceHistoryPruneQueue = null;
+  priceHistoryBackfillQueue = null;
   userAlertsQueue = null;
+  scheduledExportQueue = null;
   logger.info("[QUEUE] All queues closed");
 }

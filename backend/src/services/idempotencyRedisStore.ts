@@ -1,9 +1,12 @@
 import Redis from 'ioredis'
 import { REDIS_URL, redisProbe } from '../queue/connection.js'
+import { dbStoreIdempotencyResult, dbGetIdempotencyResult } from '../db/idempotencyDb.js'
 import { logger } from '../utils/logger.js'
+import type { IdempotencyRecord } from '../types/index.js'
 
 let redis: Redis | null = null
 let redisAvailable: boolean | null = null
+let failoverActive = false
 
 async function getRedis(): Promise<Redis | null> {
     if (redisAvailable === null) {
@@ -21,15 +24,37 @@ async function getRedis(): Promise<Redis | null> {
             enableReadyCheck: false
         })
         redis.on('error', () => {
+            if (redisAvailable) {
+                logger.warn('[IDEMPOTENCY-REDIS] Redis connection error, activating DB failover')
+            }
             redisAvailable = false
+            failoverActive = true
         })
     }
     return redis
 }
 
-const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+function activateFailover(reason: string): void {
+    if (!failoverActive) {
+        failoverActive = true
+        redisAvailable = false
+        logger.warn('[IDEMPOTENCY-REDIS] Failover to DB-backed store activated', { reason })
+    }
+}
 
-export async function redisStoreIdempotencyResult(
+export function isFailoverActive(): boolean {
+    return failoverActive
+}
+
+export function resetFailover(): void {
+    failoverActive = false
+    redisAvailable = null
+}
+
+const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+const IDEMPOTENCY_TTL_MS = IDEMPOTENCY_TTL_SECONDS * 1000
+
+export async function storeIdempotencyResult(
     key: string,
     requestHash: string,
     method: string,
@@ -39,59 +64,75 @@ export async function redisStoreIdempotencyResult(
 ): Promise<void> {
     try {
         const r = await getRedis()
-        if (!r) return
-        const payload = JSON.stringify({
-            key,
-            requestHash,
-            method,
-            path,
-            statusCode,
-            responseBody: JSON.stringify(responseBody)
-        })
-        const redisKey = `idempotency:${key}`
-        await r.setex(redisKey, IDEMPOTENCY_TTL_SECONDS, payload)
-    } catch {
-        logger.warn('[IDEMPOTENCY-REDIS] Failed to store idempotency result in Redis')
+        if (r) {
+            const payload = JSON.stringify({
+                key,
+                requestHash,
+                method,
+                path,
+                statusCode,
+                responseBody: JSON.stringify(responseBody)
+            })
+            const redisKey = `idempotency:${key}`
+            await r.setex(redisKey, IDEMPOTENCY_TTL_SECONDS, payload)
+            dbStoreIdempotencyResult(key, requestHash, method, path, statusCode, responseBody, IDEMPOTENCY_TTL_MS)
+            return
+        }
+        activateFailover('Redis connection unavailable')
+    } catch (err) {
+        activateFailover(err instanceof Error ? err.message : String(err))
     }
+    dbStoreIdempotencyResult(key, requestHash, method, path, statusCode, responseBody, IDEMPOTENCY_TTL_MS)
 }
 
-export async function redisGetIdempotencyResult(key: string): Promise<{
-    key: string
-    requestHash: string
-    method: string
-    path: string
-    statusCode: number
-    responseBody: string
-    createdAt: string
-    expiresAt: string
-} | undefined> {
+export async function getIdempotencyResult(key: string): Promise<IdempotencyRecord | undefined> {
     try {
         const r = await getRedis()
-        if (!r) return undefined
-        const raw = await r.get(`idempotency:${key}`)
-        if (!raw) return undefined
-        const parsed = JSON.parse(raw) as {
-            key: string
-            requestHash: string
-            method: string
-            path: string
-            statusCode: number
-            responseBody: string
+        if (r) {
+            const raw = await r.get(`idempotency:${key}`)
+            if (raw) {
+                const parsed = JSON.parse(raw) as {
+                    key: string
+                    requestHash: string
+                    method: string
+                    path: string
+                    statusCode: number
+                    responseBody: string
+                }
+                const now = new Date()
+                return {
+                    key: parsed.key,
+                    requestHash: parsed.requestHash,
+                    method: parsed.method,
+                    path: parsed.path,
+                    statusCode: parsed.statusCode,
+                    responseBody: parsed.responseBody,
+                    createdAt: new Date(now.getTime() - IDEMPOTENCY_TTL_SECONDS * 1000).toISOString(),
+                    expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_SECONDS * 1000).toISOString()
+                }
+            }
+            return dbGetIdempotencyResult(key)
         }
-        const now = new Date()
-        return {
-            key: parsed.key,
-            requestHash: parsed.requestHash,
-            method: parsed.method,
-            path: parsed.path,
-            statusCode: parsed.statusCode,
-            responseBody: parsed.responseBody,
-            createdAt: new Date(now.getTime() - IDEMPOTENCY_TTL_SECONDS * 1000).toISOString(),
-            expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_SECONDS * 1000).toISOString()
-        }
-    } catch {
-        return undefined
+        activateFailover('Redis connection unavailable')
+    } catch (err) {
+        activateFailover(err instanceof Error ? err.message : String(err))
     }
+    return dbGetIdempotencyResult(key)
+}
+
+export async function redisStoreIdempotencyResult(
+    key: string,
+    requestHash: string,
+    method: string,
+    path: string,
+    statusCode: number,
+    responseBody: unknown
+): Promise<void> {
+    return storeIdempotencyResult(key, requestHash, method, path, statusCode, responseBody)
+}
+
+export async function redisGetIdempotencyResult(key: string): Promise<IdempotencyRecord | undefined> {
+    return getIdempotencyResult(key)
 }
 
 export async function closeIdempotencyRedis(): Promise<void> {
@@ -99,5 +140,6 @@ export async function closeIdempotencyRedis(): Promise<void> {
         await redis.quit()
         redis = null
         redisAvailable = null
+        failoverActive = false
     }
 }

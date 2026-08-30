@@ -254,6 +254,11 @@ export function isCapabilitySupported(
     return report.availableMethods.includes(method)
 }
 
+/** Whether the deployment supports updating target allocations natively. */
+export function canUpdateAllocations(report: ContractCapabilityReport | null): boolean {
+    return isCapabilitySupported(report, 'update_allocations')
+}
+
 /**
  * Guard a write before it is attempted. Returns the matrix entry's `fallback`
  * string when the write must be skipped, or `null` when it is safe to proceed.

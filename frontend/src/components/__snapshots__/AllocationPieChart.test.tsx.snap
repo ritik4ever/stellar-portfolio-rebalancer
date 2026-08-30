@@ -1,23 +1,60 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`AllocationPieChart snapshot > renders chart with data 1`] = `
+exports[`AllocationPieChart > renders chart with data 1`] = `
 <div>
   <div
     class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
   >
-    <h3
-      class="text-lg font-semibold text-gray-900 dark:text-white mb-4"
-    >
-      Allocation
-    </h3>
     <div
-      class="h-64 flex items-center justify-center"
+      class="flex items-center justify-between mb-4"
+    >
+      <h3
+        class="text-lg font-semibold text-gray-900 dark:text-white"
+      >
+        Allocation
+      </h3>
+      <button
+        class="inline-flex items-center justify-center gap-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border bg-transparent border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-1.5 text-sm rounded-md "
+        data-testid="edit-btn"
+      >
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+          />
+          <path
+            d="m15 5 4 4"
+          />
+        </svg>
+        Edit
+      </button>
+    </div>
+    <div
+      class="h-64 flex items-center justify-center "
+      data-editing="false"
+      data-testid="pie-chart-container"
     >
       <div>
         <div>
           <div>
-            <div />
-            <div />
+            <div
+              data-testid="pie-cell-0"
+              fill="#3B82F6"
+            />
+            <div
+              data-testid="pie-cell-1"
+              fill="#10B981"
+            />
           </div>
           <div />
         </div>
@@ -77,18 +114,49 @@ exports[`AllocationPieChart snapshot > renders chart with data 1`] = `
 </div>
 `;
 
-exports[`AllocationPieChart snapshot > renders empty state 1`] = `
+exports[`AllocationPieChart > renders empty state 1`] = `
 <div>
   <div
     class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
   >
-    <h3
-      class="text-lg font-semibold text-gray-900 dark:text-white mb-4"
-    >
-      Allocation
-    </h3>
     <div
-      class="h-64 flex items-center justify-center"
+      class="flex items-center justify-between mb-4"
+    >
+      <h3
+        class="text-lg font-semibold text-gray-900 dark:text-white"
+      >
+        Allocation
+      </h3>
+      <button
+        class="inline-flex items-center justify-center gap-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border bg-transparent border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-1.5 text-sm rounded-md "
+        data-testid="edit-btn"
+      >
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+          />
+          <path
+            d="m15 5 4 4"
+          />
+        </svg>
+        Edit
+      </button>
+    </div>
+    <div
+      class="h-64 flex items-center justify-center "
+      data-editing="false"
+      data-testid="pie-chart-container"
     >
       <div>
         <div>
@@ -104,7 +172,7 @@ exports[`AllocationPieChart snapshot > renders empty state 1`] = `
 </div>
 `;
 
-exports[`AllocationPieChart snapshot > renders loading skeleton 1`] = `
+exports[`AllocationPieChart > renders loading skeleton 1`] = `
 <div>
   <div
     aria-busy="true"
@@ -125,23 +193,57 @@ exports[`AllocationPieChart snapshot > renders loading skeleton 1`] = `
 </div>
 `;
 
-exports[`AllocationPieChart snapshot > renders single asset 1`] = `
+exports[`AllocationPieChart > renders single asset 1`] = `
 <div>
   <div
     class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
   >
-    <h3
-      class="text-lg font-semibold text-gray-900 dark:text-white mb-4"
-    >
-      Allocation
-    </h3>
     <div
-      class="h-64 flex items-center justify-center"
+      class="flex items-center justify-between mb-4"
+    >
+      <h3
+        class="text-lg font-semibold text-gray-900 dark:text-white"
+      >
+        Allocation
+      </h3>
+      <button
+        class="inline-flex items-center justify-center gap-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border bg-transparent border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-1.5 text-sm rounded-md "
+        data-testid="edit-btn"
+      >
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+          />
+          <path
+            d="m15 5 4 4"
+          />
+        </svg>
+        Edit
+      </button>
+    </div>
+    <div
+      class="h-64 flex items-center justify-center "
+      data-editing="false"
+      data-testid="pie-chart-container"
     >
       <div>
         <div>
           <div>
-            <div />
+            <div
+              data-testid="pie-cell-0"
+              fill="#3B82F6"
+            />
           </div>
           <div />
         </div>

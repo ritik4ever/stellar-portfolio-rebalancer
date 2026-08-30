@@ -8,6 +8,7 @@ import {
     Memo
 } from '@stellar/stellar-sdk'
 import { Dec } from '../utils/decimal.js'
+import { logger } from '../utils/logger.js'
 import type { ExecutionExplanation } from '../types/index.js'
 
 export interface DEXTradeRequest {
@@ -256,6 +257,32 @@ export class StellarDEXService {
             rollback.success = rollbackResult.success
             rollback.rolledBackTrades = rollbackResult.rolledBackTrades
             rollback.failures = rollbackResult.failures
+        }
+
+        // A mid-sequence leg failed (or filled only partially) after other
+        // legs already succeeded: flag this for reconciliation with a
+        // structured log capturing exactly which legs succeeded vs failed,
+        // and whether rollback/compensation ran and how it went.
+        if (executedTrades.length > 0 && (failedTrades.length > 0 || partialFills.length > 0)) {
+            logger.warn('[DEX] rebalance_partial_failure', {
+                userAddress,
+                succeededLegs: executedTrades.map(t => ({
+                    tradeId: t.tradeId,
+                    fromAsset: t.fromAsset,
+                    toAsset: t.toAsset,
+                    executedAmount: t.executedAmount,
+                    status: t.status,
+                    txHash: t.txHash,
+                    rolledBack: t.rolledBack ?? false
+                })),
+                failedLegs: failedTrades.map(t => ({
+                    tradeId: t.tradeId,
+                    fromAsset: t.fromAsset,
+                    toAsset: t.toAsset,
+                    failureReason: t.failureReason
+                })),
+                rollback
+            })
         }
 
         const totalSlippageBps = slippageWeight > 0 ? (slippageWeightedSum / slippageWeight) : 0

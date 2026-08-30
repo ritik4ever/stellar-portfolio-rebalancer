@@ -3,7 +3,12 @@ import { logger } from '../utils/logger.js'
 import { probeRedis } from '../queue/connection.js'
 import { QUEUE_NAMES } from '../queue/queues.js'
 
-type SelfTestStatus = 'passed' | 'failed'
+/**
+ * `degraded` marks a dependency that is down but does not stop the service from
+ * running — the process starts, `report.ok` stays true, and the check is listed
+ * separately so operators still see it.
+ */
+type SelfTestStatus = 'passed' | 'failed' | 'degraded'
 
 export interface StartupSelfTestCheck {
     name: string
@@ -21,6 +26,7 @@ export interface StartupSelfTestReport {
         totalChecks: number
         passedChecks: number
         failedChecks: number
+        degradedChecks: number
     }
     config: Record<string, unknown>
     checks: StartupSelfTestCheck[]
@@ -28,6 +34,7 @@ export interface StartupSelfTestReport {
 
 const QUEUE_CHECK_TIMEOUT_MS = 3000
 const PROVIDER_CHECK_TIMEOUT_MS = 5000
+const ORACLE_CHECK_TIMEOUT_MS = 5000
 
 export async function runStartupSelfTest(
     env: NodeJS.ProcessEnv = process.env,
@@ -82,6 +89,17 @@ export async function runStartupSelfTest(
         checks,
     })
 
+    const degraded = checks.filter((check) => check.status === 'degraded')
+    if (degraded.length > 0) {
+        logger.warn('[STARTUP] Self-test completed with degraded dependencies', {
+            degraded: degraded.map((check) => ({
+                name: check.name,
+                message: check.message,
+                remediation: check.remediation,
+            })),
+        })
+    }
+
     if (report.ok) {
         logger.info('[STARTUP] Self-test passed', {
             durationMs: report.durationMs,
@@ -105,11 +123,13 @@ export async function runStartupSelfTest(
 export function formatStartupSelfTestReport(report: StartupSelfTestReport): string {
     const lines = [
         `[STARTUP] Self-test ${report.ok ? 'passed' : 'failed'} in ${report.durationMs}ms`,
-        `  checks: ${report.summary.passedChecks}/${report.summary.totalChecks} passed`,
+        `  checks: ${report.summary.passedChecks}/${report.summary.totalChecks} passed` +
+            (report.summary.degradedChecks > 0 ? `, ${report.summary.degradedChecks} degraded` : ''),
     ]
 
     for (const check of report.checks) {
-        const statusLabel = check.status === 'passed' ? 'PASS' : 'FAIL'
+        const statusLabel =
+            check.status === 'passed' ? 'PASS' : check.status === 'degraded' ? 'DEGRADED' : 'FAIL'
         lines.push(`  - ${statusLabel} ${check.name}: ${check.message}`)
         if (check.remediation) {
             lines.push(`    remediation: ${check.remediation}`)
@@ -288,7 +308,77 @@ async function checkProviders(): Promise<StartupSelfTestCheck[]> {
         })
     }
 
+    providerChecks.push(await checkReflectorOracle())
+
     return providerChecks
+}
+
+/**
+ * Reflector oracle reachability (#1405).
+ *
+ * The oracle is the *primary* price source; CoinGecko is the fallback, so an
+ * unreachable oracle degrades the service rather than stopping it. This check is
+ * deliberately separate from `provider.price-feed` so the diagnostic points at
+ * the oracle instead of the fallback, and carries the probe's `reason` code so
+ * an unconfigured oracle reads differently from a broken one.
+ */
+async function checkReflectorOracle(): Promise<StartupSelfTestCheck> {
+    const name = 'provider.reflector-oracle'
+
+    try {
+        const { ReflectorService } = await import('../services/reflector.js')
+        const reflector = new ReflectorService()
+        const result = await withTimeout(
+            reflector.testOracleReachability({ timeoutMs: ORACLE_CHECK_TIMEOUT_MS }),
+            ORACLE_CHECK_TIMEOUT_MS + 1000,
+            'Reflector oracle reachability check timed out',
+        )
+
+        if (result.reason === 'ok') {
+            return {
+                name,
+                status: 'passed',
+                message: `Reflector oracle is reachable and serving fresh quotes (${result.latencyMs}ms)`,
+                details: { ...result },
+            }
+        }
+
+        return {
+            name,
+            status: 'degraded',
+            message: ORACLE_MESSAGES[result.reason],
+            remediation: ORACLE_REMEDIATIONS[result.reason],
+            details: { ...result },
+        }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return {
+            name,
+            status: 'degraded',
+            message: 'Reflector oracle reachability probe threw an error',
+            remediation:
+                'Inspect the Reflector oracle client configuration; the service will keep running on fallback prices.',
+            details: { error: message, reason: 'unreachable' },
+        }
+    }
+}
+
+const ORACLE_MESSAGES: Record<string, string> = {
+    not_configured: 'Reflector oracle is not configured — running on fallback price sources only',
+    unreachable: 'Reflector oracle is unreachable — running on fallback price sources',
+    timeout: 'Reflector oracle did not respond in time — running on fallback price sources',
+    http_error: 'Reflector oracle returned an error response — running on fallback price sources',
+    no_data: 'Reflector oracle returned no price data — running on fallback price sources',
+    stale: 'Reflector oracle is reachable but serving stale quotes',
+}
+
+const ORACLE_REMEDIATIONS: Record<string, string> = {
+    not_configured: 'Set REFLECTOR_API_URL to enable oracle-sourced prices.',
+    unreachable: 'Verify REFLECTOR_API_URL and outbound network access to the oracle host, then rerun the self-test.',
+    timeout: 'Check oracle latency and network path; raise the timeout only if the oracle is known to be slow.',
+    http_error: 'Check the oracle endpoint path and any auth requirements for the configured REFLECTOR_API_URL.',
+    no_data: 'Confirm the probed asset is published by the configured oracle instance.',
+    stale: 'Investigate the oracle publisher — quotes are older than PRICE_DATA_MAX_AGE.',
 }
 
 function buildQueueFailureCheck(name: string): StartupSelfTestCheck {
@@ -308,8 +398,10 @@ function buildReport(input: {
 }): StartupSelfTestReport {
     const passedChecks = input.checks.filter((check) => check.status === 'passed').length
     const failedChecks = input.checks.filter((check) => check.status === 'failed').length
+    const degradedChecks = input.checks.filter((check) => check.status === 'degraded').length
 
     return {
+        // Degraded checks are reported but do not block startup.
         ok: failedChecks === 0,
         timestamp: new Date().toISOString(),
         durationMs: Date.now() - input.startedAt,
@@ -317,6 +409,7 @@ function buildReport(input: {
             totalChecks: input.checks.length,
             passedChecks,
             failedChecks,
+            degradedChecks,
         },
         config: input.config,
         checks: input.checks,

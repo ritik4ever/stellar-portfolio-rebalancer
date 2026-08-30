@@ -5,19 +5,31 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+use soroban_sdk::token::Client as TokenClient;
 
+mod circuit_breaker;
+mod events;
 mod nav;
+mod oracle;
 mod portfolio;
 mod reflector;
+mod slippage;
+mod stop_loss;
 mod strategies;
-#[cfg(test)]
+mod templates;
+mod upgrade;
+#[cfg(all(test, feature = "testutils"))]
 mod test;
+#[cfg(all(test, feature = "testutils"))]
+mod property_tests;
 mod types;
 
+pub use oracle::*;
 use strategies::dca;
-
 pub use reflector::*;
 pub use types::*;
+pub use events::emit_dca_executed;
+pub use strategies::*;
 
 #[contract]
 pub struct PortfolioRebalancer;
@@ -48,10 +60,29 @@ fn guard_ledger_timestamp(env: &Env) -> u64 {
 
 #[contractimpl]
 impl PortfolioRebalancer {
+    /// Validate that `reflector_address` behaves like a Reflector oracle by
+    /// making a lightweight read-only call (`base()`) and checking the result.
+    ///
+    /// This is a best-effort guard, not a full interface conformance check:
+    /// - A malicious contract could implement `base()` but return wrong data in
+    ///   `lastprice()`. Further operations (rebalance, preview) will detect
+    ///   missing or invalid price data at the point of use.
+    /// - The goal is to fail early when the address is clearly not a Reflector
+    ///   contract (e.g. a typo, an EOA, or a random contract).
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
         }
+
+        // Lightweight validation: call base() on the provided address.
+        // If the call fails (host error) or returns an unexpected type, the
+        // address is not a valid Reflector oracle.
+        let reflector_client = ReflectorClient::new(&env, &reflector_address);
+        match reflector_client.try_base() {
+            Ok(Ok(_asset)) => {}
+            _ => return Err(Error::InvalidOracleAddress),
+        }
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
@@ -60,11 +91,80 @@ impl PortfolioRebalancer {
             .instance()
             .set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
+        // A freshly initialized contract has no legacy storage to migrate,
+        // so it starts on the current schema directly.
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &CURRENT_STORAGE_SCHEMA_VERSION);
         Ok(())
+    }
+
+    /// Currently persisted storage schema version (see
+    /// `CURRENT_STORAGE_SCHEMA_VERSION`), advanced automatically by
+    /// `execute_upgrade` via `migrate_storage`.
+    pub fn storage_schema_version(env: Env) -> u32 {
+        upgrade::current_schema_version(&env)
     }
 
     pub fn get_admin(env: Env) -> Address {
         env.storage().instance().get(&DataKey::Admin).unwrap()
+    }
+
+    /// Step 1 of the two-step admin transfer: nominate `new_admin`.
+    ///
+    /// Admin-only. Nomination alone grants `new_admin` nothing — every
+    /// admin-gated entrypoint keeps checking `DataKey::Admin`, which is only
+    /// rewritten once `new_admin` calls [`accept_admin`] itself. This makes
+    /// an admin handover impossible to complete against an address that
+    /// cannot sign (a typo, a contract with no auth path, a lost key).
+    ///
+    /// Calling this again replaces any proposal still in flight, so the
+    /// current admin can retarget or effectively cancel a mistaken nomination
+    /// by proposing a different address.
+    pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        if new_admin == admin {
+            return Err(Error::InvalidAdminProposal);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_admin_proposed(&env, &admin, &new_admin);
+        Ok(())
+    }
+
+    /// Step 2 of the two-step admin transfer: the pending admin claims the role.
+    ///
+    /// Callable only by the address stored by [`propose_admin`] — it must
+    /// authorize this call itself, which is what proves the incoming admin
+    /// controls the key. On success `DataKey::Admin` is rewritten, the
+    /// pending nomination is cleared, and the previous admin loses every
+    /// admin right immediately.
+    ///
+    /// Returns [`Error::NoPendingAdmin`] when no transfer is in flight.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoPendingAdmin)?;
+        pending_admin.require_auth();
+
+        let previous_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        env.storage().instance().set(&DataKey::Admin, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        events::emit_admin_transferred(&env, &previous_admin, &pending_admin);
+        Ok(())
+    }
+
+    /// The address nominated by [`propose_admin`] and still awaiting its
+    /// [`accept_admin`] call, or `None` when no transfer is in flight.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     pub fn create_portfolio(
@@ -76,8 +176,120 @@ impl PortfolioRebalancer {
         slippage_tolerance: u32,
         slippage_policy_version: u32,
     ) -> Result<u64, Error> {
+        Self::create_portfolio_with_strategy(
+            env,
+            user,
+            target_allocations,
+            asset_decimals,
+            rebalance_threshold,
+            slippage_tolerance,
+            slippage_policy_version,
+            StrategyType::Threshold,
+            StrategyConfig::default(),
+        )
+    }
+
+    /// Create a portfolio with full strategy configuration.
+    /// `strategy` defaults to [`StrategyType::Threshold`] for callers that
+    /// do not pass explicit strategy parameters (backward compatible with
+    /// the original [`create_portfolio`] signature).
+    pub fn create_portfolio_with_strategy(
+        env: Env,
+        user: Address,
+        target_allocations: Map<Address, u32>,
+        asset_decimals: Map<Address, u32>,
+        rebalance_threshold: u32,
+        slippage_tolerance: u32,
+        slippage_policy_version: u32,
+        strategy: StrategyType,
+        strategy_config: StrategyConfig,
+    ) -> Result<u64, Error> {
+        user.require_auth();
+        Self::create_portfolio_internal(
+            &env,
+            user,
+            target_allocations,
+            asset_decimals,
+            rebalance_threshold,
+            slippage_tolerance,
+            slippage_policy_version,
+            strategy,
+            strategy_config,
+        )
+    }
+
+    /// Admin-only: store a new named on-chain allocation template.
+    ///
+    /// Templates are on-chain data (persistent storage), not hardcoded
+    /// constants, so the set of available templates can grow over time
+    /// without a contract upgrade.
+    pub fn create_template(
+        env: Env,
+        name: String,
+        allocations: Map<Address, u32>,
+    ) -> Result<(), Error> {
+        templates::create_template(&env, name, allocations)
+    }
+
+    /// Admin-only: change the allocations of an existing named template.
+    pub fn update_template(
+        env: Env,
+        name: String,
+        allocations: Map<Address, u32>,
+    ) -> Result<(), Error> {
+        templates::update_template(&env, name, allocations)
+    }
+
+    /// Public view: fetch a template's stored target allocations, if any.
+    pub fn get_template(env: Env, name: String) -> Option<Map<Address, u32>> {
+        templates::get_template(&env, name)
+    }
+
+    /// Public view: list the names of all known templates.
+    pub fn list_templates(env: Env) -> Vec<String> {
+        templates::list_templates(&env)
+    }
+
+    /// Create a portfolio using the allocations stored under a named
+    /// template, instead of passing `target_allocations` explicitly.
+    pub fn create_portfolio_from_template(
+        env: Env,
+        user: Address,
+        template_name: String,
+        asset_decimals: Map<Address, u32>,
+        rebalance_threshold: u32,
+        slippage_tolerance: u32,
+        slippage_policy_version: u32,
+    ) -> Result<u64, Error> {
         user.require_auth();
 
+        let target_allocations = templates::get_template(&env, template_name)
+            .ok_or(Error::TemplateNotFound)?;
+
+        Self::create_portfolio_internal(
+            &env,
+            user,
+            target_allocations,
+            asset_decimals,
+            rebalance_threshold,
+            slippage_tolerance,
+            slippage_policy_version,
+            StrategyType::Threshold,
+            StrategyConfig::default(),
+        )
+    }
+
+    fn create_portfolio_internal(
+        env: &Env,
+        user: Address,
+        target_allocations: Map<Address, u32>,
+        asset_decimals: Map<Address, u32>,
+        rebalance_threshold: u32,
+        slippage_tolerance: u32,
+        slippage_policy_version: u32,
+        strategy: StrategyType,
+        strategy_config: StrategyConfig,
+    ) -> Result<u64, Error> {
         if !portfolio::validate_allocations(&target_allocations) {
             return Err(Error::InvalidAllocation);
         }
@@ -107,19 +319,26 @@ impl PortfolioRebalancer {
         let portfolio = Portfolio {
             user: user.clone(),
             target_allocations,
-            current_balances: Map::new(&env),
+            current_balances: Map::new(env),
             asset_decimals,
             rebalance_threshold,
             slippage_tolerance,
             slippage_policy_version,
-            last_rebalance: guard_ledger_timestamp(&env),
+            last_rebalance: guard_ledger_timestamp(env),
             total_value: 0,
             is_active: true,
             pause_reason: PauseReason::None,
+            circuit_breaker_config: CircuitBreakerConfig {
+                spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+                window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
+            },
+            global_max_slippage_bps: DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS,
+            strategy,
+            strategy_config,
         };
 
         let _estimated_footprint =
-            portfolio::validate_portfolio_storage_footprint(&env, portfolio_id, &portfolio)?;
+            portfolio::validate_portfolio_storage_footprint(env, portfolio_id, &portfolio)?;
 
 
         env.storage()
@@ -127,18 +346,16 @@ impl PortfolioRebalancer {
             .set(&DataKey::NextPortfolioId, &(portfolio_id + 1));
         portfolio::check_portfolio_invariants(&portfolio)?;
 
+        // Store under V2 key (strategy-aware schema).
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
         portfolio::emit_portfolio_created(&env, portfolio_id, user);
         Ok(portfolio_id)
     }
 
     pub fn get_portfolio(env: Env, portfolio_id: u64) -> Portfolio {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap()
+        Self::load_portfolio(&env, portfolio_id).unwrap()
     }
 
     pub fn check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error> {
@@ -175,6 +392,9 @@ impl PortfolioRebalancer {
             .unwrap_or(portfolio.user.clone());
         steward.require_auth();
 
+        let token_client = TokenClient::new(&env, &asset);
+        token_client.transfer(&steward, &env.current_contract_address(), &amount);
+
         let current_balance = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
         portfolio
             .current_balances
@@ -182,7 +402,7 @@ impl PortfolioRebalancer {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
         portfolio::emit_portfolio_deposit(&env, portfolio_id, asset, amount);
         Ok(())
     }
@@ -210,6 +430,9 @@ impl PortfolioRebalancer {
             return Err(Error::InsufficientBalance);
         }
 
+        let token_client = TokenClient::new(&env, &asset);
+        token_client.transfer(&env.current_contract_address(), &portfolio.user, &amount);
+
         let new_balance = current_balance - amount;
         if new_balance == 0 {
             portfolio.current_balances.remove(asset.clone());
@@ -223,17 +446,16 @@ impl PortfolioRebalancer {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
         portfolio::emit_portfolio_withdraw(&env, portfolio_id, asset, amount);
         Ok(())
     }
 
     pub fn check_rebalance_needed(env: Env, portfolio_id: u64) -> bool {
-        let portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
+        let portfolio: Portfolio = match Self::load_portfolio(&env, portfolio_id) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
 
         let reflector_address: Address = env
             .storage()
@@ -286,14 +508,87 @@ impl PortfolioRebalancer {
         Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, false, None)
     }
 
+    pub fn batch_rebalance(
+        env: Env,
+        portfolio_ids: Vec<u64>,
+    ) -> Result<Vec<BatchRebalanceResult>, Error> {
+        if portfolio_ids.len() > MAX_BATCH_REBALANCE_PORTFOLIOS {
+            return Err(Error::BatchTooLarge);
+        }
+
+        let mut results = Vec::new(&env);
+        for portfolio_id in portfolio_ids.iter() {
+            let result = match Self::execute_rebalance_internal(
+                &env,
+                portfolio_id,
+                Map::new(&env),
+                false,
+                None,
+            ) {
+                Ok(()) => BatchRebalanceResultStatus::Success,
+                Err(error) => BatchRebalanceResultStatus::Failed(error),
+            };
+
+            results.push_back(BatchRebalanceResult {
+                portfolio_id,
+                result,
+            });
+        }
+
+        Ok(results)
+    }
+
+    /// Force-rebalance a portfolio, bypassing the cooldown. Callable by the
+    /// contract Admin or by any registered Operator (see `add_operator`) --
+    /// `caller` must be one of the two, and must authorize the call itself.
     pub fn admin_force_rebalance(
         env: Env,
+        caller: Address,
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
+        caller.require_auth();
+
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(admin))
+        if caller != admin && !Self::is_operator(env.clone(), caller.clone()) {
+            return Err(Error::Unauthorized);
+        }
+
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(caller))
+    }
+
+    /// Admin-only: register `operator` as a scoped operator, allowed to call
+    /// `admin_force_rebalance` but nothing else that's admin-only (e.g.
+    /// `upgrade`, `set_fee_config` remain Admin-only).
+    pub fn add_operator(env: Env, operator: Address) {
+        require_admin(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Operator(operator.clone()), &true);
+        env.events().publish(
+            (Symbol::new(&env, "operator_added"),),
+            operator,
+        );
+    }
+
+    /// Admin-only: revoke a previously registered operator.
+    pub fn remove_operator(env: Env, operator: Address) {
+        require_admin(&env);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Operator(operator.clone()));
+        env.events().publish(
+            (Symbol::new(&env, "operator_removed"),),
+            operator,
+        );
+    }
+
+    /// Whether `address` is currently a registered operator.
+    pub fn is_operator(env: Env, address: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Operator(address))
+            .unwrap_or(false)
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {
@@ -317,16 +612,37 @@ impl PortfolioRebalancer {
         dca::execute_dca(&env, portfolio_id)
     }
 
+    pub fn set_stop_loss(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+        price: i128,
+    ) -> Result<(), Error> {
+        stop_loss::set_stop_loss(&env, portfolio_id, asset, price)
+    }
+
+    pub fn remove_stop_loss(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+    ) -> Result<(), Error> {
+        stop_loss::remove_stop_loss(&env, portfolio_id, asset)
+    }
+
+    pub fn get_stop_loss(
+        env: Env,
+        portfolio_id: u64,
+        asset: Address,
+    ) -> Option<i128> {
+        stop_loss::get_stop_loss(&env, portfolio_id, asset)
+    }
+
     pub fn transfer_stewardship(
         env: Env,
         portfolio_id: u64,
         new_steward: Address,
     ) -> Result<(), Error> {
-        let portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
+        let portfolio: Portfolio = Self::load_portfolio(&env, portfolio_id)?;
 
         let current_steward: Address = env
             .storage()
@@ -348,15 +664,32 @@ impl PortfolioRebalancer {
     }
 
     pub fn get_steward(env: Env, portfolio_id: u64) -> Address {
-        let portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
+        let portfolio: Portfolio = Self::load_portfolio(&env, portfolio_id).unwrap();
         env.storage()
             .persistent()
             .get(&DataKey::Steward(portfolio_id))
             .unwrap_or(portfolio.user)
+    }
+
+    pub fn set_coingecko_address(env: Env, address: Address) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CoinGeckoAddress, &address);
+    }
+
+    pub fn set_oracle_config(env: Env, config: OracleConfig) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleConfig, &config);
+    }
+
+    pub fn get_oracle_config(env: Env) -> OracleConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleConfig)
+            .unwrap_or(OracleConfig::default())
     }
 
     pub fn version(_env: Env) -> u32 {
@@ -390,15 +723,107 @@ impl PortfolioRebalancer {
     }
 
 
+    pub fn set_circuit_breaker_config(env: Env, config: CircuitBreakerConfig) {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CircuitBreakerConfig, &config);
+    }
+
+    pub fn get_circuit_breaker_config(env: Env) -> CircuitBreakerConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::CircuitBreakerConfig)
+            .unwrap_or(CircuitBreakerConfig {
+                spike_threshold_bps: 500,
+                window_seconds: 3600,
+            })
+    }
+
+    pub fn update_allocations(
+        env: Env,
+        portfolio_id: u64,
+        new_allocations: Map<Address, u32>,
+    ) -> Result<(), Error> {
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        portfolio.user.require_auth();
+
+        if !portfolio::validate_allocations(&new_allocations) {
+            return Err(Error::InvalidAllocation);
+        }
+
+        for (asset, _) in new_allocations.iter() {
+            if !portfolio.asset_decimals.contains_key(asset.clone()) {
+                return Err(Error::AssetNotSupported);
+            }
+        }
+
+        let old_allocations = portfolio.target_allocations.clone();
+        portfolio.target_allocations = new_allocations.clone();
+
+        portfolio::check_portfolio_invariants(&portfolio)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+
+        env.events().publish(
+            (
+                symbol_short!("portfolio"),
+                Symbol::new(&env, "alloc_upd"),
+            ),
+            (portfolio_id, old_allocations, new_allocations),
+        );
+
+        Ok(())
+    }
+
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         if config.fee_bps > MAX_FEE_BPS {
             panic!("fee_bps must be between 0 and 50");
         }
-        env.storage().instance().set(&DataKey::FeeConfig, &config);
-        env.events()
-            .publish((Symbol::new(&env, "FeeConfigUpdated"),), config);
+        
+        let current_time = env.ledger().timestamp();
+        let execute_after = current_time.saturating_add(TIMELOCK_DELAY_SECONDS);
+        
+        let queued = QueuedFeeConfig {
+            config: config.clone(),
+            execute_after,
+        };
+        
+        env.storage().instance().set(&DataKey::QueuedFeeConfig, &queued);
+        
+        env.events().publish(
+            (Symbol::new(&env, "fee_config_queued"),),
+            (config, execute_after),
+        );
+    }
+
+    pub fn execute_fee_config(env: Env) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        
+        let queued: QueuedFeeConfig = env.storage()
+            .instance()
+            .get(&DataKey::QueuedFeeConfig)
+            .ok_or(Error::PreviewUnavailable)?;
+        
+        let current_time = env.ledger().timestamp();
+        if current_time < queued.execute_after {
+            return Err(Error::TimelockNotElapsed);
+        }
+        
+        env.storage().instance().set(&DataKey::FeeConfig, &queued.config);
+        env.storage().instance().remove(&DataKey::QueuedFeeConfig);
+        
+        env.events().publish(
+            (Symbol::new(&env, "FeeConfigUpdated"),),
+            queued.config,
+        );
+        
+        Ok(())
     }
 
     pub fn get_fee_config(env: Env) -> FeeConfig {
@@ -413,26 +838,65 @@ impl PortfolioRebalancer {
             })
     }
 
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+    pub fn queue_upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
+        
+        let current_time = env.ledger().timestamp();
+        let execute_after = current_time.saturating_add(TIMELOCK_DELAY_SECONDS);
+        
+        let queued = QueuedUpgrade {
+            new_wasm_hash: new_wasm_hash.clone(),
+            execute_after,
+        };
+        
+        env.storage().instance().set(&DataKey::QueuedUpgrade, &queued);
+        
+        env.events().publish(
+            (Symbol::new(&env, "upgrade_queued"),),
+            (new_wasm_hash, execute_after),
+        );
+    }
+
+    pub fn execute_upgrade(env: Env) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        
+        let queued: QueuedUpgrade = env.storage()
+            .instance()
+            .get(&DataKey::QueuedUpgrade)
+            .ok_or(Error::PreviewUnavailable)?;
+        
+        let current_time = env.ledger().timestamp();
+        if current_time < queued.execute_after {
+            return Err(Error::TimelockNotElapsed);
+        }
+        
         let current_hash: Option<BytesN<32>> = env.storage().instance().get(&DataKey::WasmHash);
         env.storage()
             .instance()
             .set(&DataKey::UpgradeAuthority, &admin);
         env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+            .update_current_contract_wasm(queued.new_wasm_hash.clone());
         env.storage()
             .instance()
-            .set(&DataKey::WasmHash, &new_wasm_hash);
+            .set(&DataKey::WasmHash, &queued.new_wasm_hash);
+        env.storage().instance().remove(&DataKey::QueuedUpgrade);
+
+        // Bring storage up to the current schema before any new
+        // functionality introduced by this upgrade is exposed.
+        upgrade::migrate_storage(&env);
+
         env.events().publish(
             ("portfolio", "upgraded"),
             UpgradeEvent {
                 from_hash: current_hash.unwrap_or(BytesN::from_array(&env, &[0u8; 32])),
-                to_hash: new_wasm_hash,
+                to_hash: queued.new_wasm_hash,
                 timestamp: env.ledger().timestamp(),
             },
         );
+        
+        Ok(())
     }
 
     pub fn min_rebalance_threshold(_env: Env) -> u32 {
@@ -456,11 +920,7 @@ impl PortfolioRebalancer {
     }
 
     pub fn preview_rebalance(env: Env, portfolio_id: u64) -> RebalancePreview {
-        let portfolio: Portfolio = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
+        let portfolio: Portfolio = Self::load_portfolio(&env, portfolio_id).unwrap();
         let reflector_address: Address = env
             .storage()
             .instance()
@@ -480,13 +940,9 @@ impl PortfolioRebalancer {
     }
 
     pub fn get_drift_preview(env: Env, portfolio_id: u64) -> Vec<AssetDrift> {
-        let portfolio: Portfolio = match env
-            .storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-        {
-            Some(p) => p,
-            None => return Vec::new(&env),
+        let portfolio: Portfolio = match Self::load_portfolio(&env, portfolio_id) {
+            Ok(p) => p,
+            Err(_) => return Vec::new(&env),
         };
 
         if portfolio.target_allocations.is_empty() {
@@ -539,16 +995,47 @@ impl PortfolioRebalancer {
     }
 
     pub fn pause_portfolio(env: Env, portfolio_id: u64, reason: PauseReason) {
-        let mut portfolio: Portfolio = env
+        let mut portfolio: Portfolio = Self::load_portfolio(&env, portfolio_id).unwrap();
+        
+        let steward: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .unwrap();
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
+        
         portfolio.is_active = false;
         portfolio.pause_reason = reason;
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            ("portfolio", "paused"),
+            (portfolio_id, steward, reason),
+        );
+    }
+
+    pub fn resume_portfolio(env: Env, portfolio_id: u64) {
+        let mut portfolio: Portfolio = Self::load_portfolio(&env, portfolio_id).unwrap();
+        
+        let steward: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Steward(portfolio_id))
+            .unwrap_or(portfolio.user.clone());
+        steward.require_auth();
+        
+        portfolio.is_active = true;
+        portfolio.pause_reason = PauseReason::None;
+        env.storage()
+            .persistent()
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            ("portfolio", "resumed"),
+            (portfolio_id, steward),
+        );
     }
 
     pub fn get_contract_pause_reason(env: Env) -> PauseReason {
@@ -570,13 +1057,27 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::EmergencyStop)
             .unwrap_or(false);
-        let portfolio: PortfolioOption = match env
+        let portfolio: PortfolioOption = if let Some(p) =        env.storage()
+            .persistent()
+            .get(&DataKey::PortfolioV2(portfolio_id))
+        {
+            PortfolioOption::Some(p)
+        } else if let Some(legacy) = env
             .storage()
             .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
+            .get::<DataKey, LegacyPortfolio>(&DataKey::Portfolio(portfolio_id))
         {
-            Some(p) => PortfolioOption::Some(p),
-            None => PortfolioOption::None,
+            let p: Portfolio = legacy.into();
+            // Migrate on read
+            env.storage()
+                .persistent()
+                .set(&DataKey::PortfolioV2(portfolio_id), &p);
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Portfolio(portfolio_id));
+            PortfolioOption::Some(p)
+        } else {
+            PortfolioOption::None
         };
         ConfigView {
             admin,
@@ -584,6 +1085,71 @@ impl PortfolioRebalancer {
             emergency_stop,
             portfolio,
         }
+    }
+
+    pub fn set_pf_circuit_breaker(
+        env: Env,
+        portfolio_id: u64,
+        spike_threshold_bps: u32,
+        window_seconds: u64,
+    ) -> Result<(), Error> {
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        
+        portfolio.user.require_auth();
+        
+        portfolio.circuit_breaker_config = CircuitBreakerConfig {
+            spike_threshold_bps,
+            window_seconds,
+        };
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            (Symbol::new(&env, "circuit_breaker_config_updated"),),
+            (portfolio_id, spike_threshold_bps, window_seconds),
+        );
+        
+        Ok(())
+    }
+
+    pub fn set_global_max_slippage(
+        env: Env,
+        portfolio_id: u64,
+        global_max_slippage_bps: u32,
+    ) -> Result<(), Error> {
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        
+        portfolio.user.require_auth();
+        
+        portfolio.global_max_slippage_bps = global_max_slippage_bps;
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        
+        env.events().publish(
+            (Symbol::new(&env, "global_max_slippage_updated"),),
+            (portfolio_id, global_max_slippage_bps),
+        );
+        
+        Ok(())
+    }
+
+    /// Set the contract-level max execution slippage limit (in basis points)
+    /// for an asset class. Admin-only. Values above [`MAX_ASSET_SLIPPAGE_BPS`]
+    /// (500 bps / 5%) are rejected with [`Error::InvalidSlippageLimit`].
+    pub fn set_asset_slippage(env: Env, asset: Address, bps: u32) -> Result<(), Error> {
+        require_admin(&env);
+        slippage::set_asset_slippage(&env, &asset, bps)
+    }
+
+    /// Return the contract-level max execution slippage limit (in basis
+    /// points) for an asset class. Falls back to [`DEFAULT_ASSET_SLIPPAGE_BPS`]
+    /// (100 bps / 1%) when no explicit limit has been configured.
+    pub fn get_asset_slippage(env: Env, asset: Address) -> u32 {
+        slippage::get_asset_slippage(&env, &asset)
     }
 
     pub fn get_portfolio_value_usd(
@@ -645,10 +1211,24 @@ impl PortfolioRebalancer {
     }
 
     fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Portfolio(portfolio_id))
-            .ok_or(Error::PortfolioNotFound)
+        // Try V2 (strategy-aware) first.
+        if let Some(p) = env.storage().persistent().get(&DataKey::PortfolioV2(portfolio_id)) {
+            return Ok(p);
+        }
+        // Fall back: attempt migration from legacy (pre-strategy) storage.
+        if let Some(legacy) =
+            env.storage().persistent().get::<DataKey, LegacyPortfolio>(&DataKey::Portfolio(portfolio_id))
+        {
+            let portfolio: Portfolio = legacy.into();
+            env.storage()
+                .persistent()
+                .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Portfolio(portfolio_id));
+            return Ok(portfolio);
+        }
+        Err(Error::PortfolioNotFound)
     }
 
     fn execute_rebalance_internal(
@@ -699,7 +1279,37 @@ impl PortfolioRebalancer {
             .unwrap();
         let reflector_client = ReflectorClient::new(env, &reflector_address);
 
-        let preview = portfolio::build_rebalance_preview(env, &portfolio, &reflector_client)?;
+        let triggered = stop_loss::check_stop_losses(env, portfolio_id, &portfolio, &reflector_client);
+        let has_triggered = triggered.len() > 0;
+        let portfolio_for_preview = if has_triggered {
+            let adjusted = stop_loss::apply_stop_loss_adjustments(env, &triggered, &portfolio.target_allocations);
+            for (asset, price) in triggered.iter() {
+                stop_loss::emit_stop_loss_triggered(env, portfolio_id, asset.clone(), price);
+            }
+            let mut p = portfolio.clone();
+            p.target_allocations = adjusted;
+            p
+        } else {
+            portfolio.clone()
+        };
+
+        let preview = portfolio::build_rebalance_preview(env, &portfolio_for_preview, &reflector_client)?;
+
+        let mut current_prices = Map::new(env);
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(price_data) =
+                reflector_client.lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
+            {
+                current_prices.set(asset, price_data.price);
+            }
+        }
+
+        crate::circuit_breaker::check_volatility(
+            env,
+            &portfolio.circuit_breaker_config,
+            &reflector_client,
+            &current_prices,
+        )?;
 
         for (asset, _) in portfolio.target_allocations.iter() {
             if let Some(reason) = preview.skip_reasons.get(asset) {
@@ -742,6 +1352,7 @@ impl PortfolioRebalancer {
             };
 
             if total_value > 0 {
+                let mut total_slippage_bps = 0i128;
                 for (asset, target_pct) in portfolio.target_allocations.iter() {
                     let price_data = reflector_client
                         .lastprice(&crate::reflector::Asset::Stellar(asset.clone()))
@@ -765,21 +1376,50 @@ impl PortfolioRebalancer {
                         let diff = expected_balance - actual_balance;
                         let diff_abs = if diff >= 0 { diff } else { -diff };
                         let slippage_bps = (diff_abs * 10000) / expected_abs;
+                        
+                        // Per-asset slippage check (existing behavior)
                         if slippage_bps > snapshot.slippage_tolerance as i128 {
                             return Err(Error::SlippageExceeded);
                         }
+                        
+                        // Contract-level per-asset slippage guard (#962): derive the
+                        // effective DEX execution price from the reported balances and
+                        // enforce the admin-configurable asset-class limit (default 1%,
+                        // max 5%). `actual_price = expected_price * actual_balance /
+                        // expected_balance` keeps the measured deviation identical to the
+                        // balance-based `slippage_bps` above, so the portfolio-level and
+                        // contract-level checks stay consistent.
+                        let actual_price = (price * actual_balance) / expected_balance;
+                        slippage::check_execution_slippage(env, &asset, price, actual_price)?;
+                        // Accumulate for global slippage check
+                        total_slippage_bps += slippage_bps;
                     }
+                }
+                
+                // Global slippage cap check across all legs
+                if total_slippage_bps > portfolio.global_max_slippage_bps as i128 {
+                    return Err(Error::SlippageExceeded);
                 }
             }
         }
 
+        let contract_address = env.current_contract_address();
         for (asset, amount) in trades.iter() {
+            let abs_amount = amount.abs();
             let fee_amount = if effective_fee_bps > 0 {
-                (amount.abs() * effective_fee_bps as i128) / 10000
+                (abs_amount * effective_fee_bps as i128) / 10000
             } else {
                 0
             };
             let effective_amount = amount - fee_amount;
+
+            let token_client = TokenClient::new(env, &asset);
+            if amount > 0 {
+                token_client.transfer(&steward, &contract_address, &abs_amount);
+            } else if amount < 0 {
+                token_client.transfer(&contract_address, &steward, &abs_amount);
+            }
+
             let current = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
             portfolio
                 .current_balances
@@ -802,7 +1442,7 @@ impl PortfolioRebalancer {
         portfolio.last_rebalance = current_time;
         env.storage()
             .persistent()
-            .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
 
         if let Some(admin) = override_admin {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
@@ -825,6 +1465,58 @@ impl PortfolioRebalancer {
 
     pub fn get_nav_history(env: Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
         nav::get_nav_history(&env, portfolio_id, limit)
+    }
+
+    pub fn close_portfolio(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        let portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        
+        portfolio.user.require_auth();
+        
+        // Sweep all asset balances to the owner
+        let mut swept_amounts = Map::new(&env);
+        for (asset, balance) in portfolio.current_balances.iter() {
+            if balance > 0 {
+                let token_client = token::Client::new(&env, &asset);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &portfolio.user,
+                    &balance,
+                );
+                swept_amounts.set(asset, balance);
+            }
+        }
+        
+        // Remove portfolio storage
+        // Remove portfolio storage (both legacy and V2 keys).
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Portfolio(portfolio_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::PortfolioV2(portfolio_id));
+        
+        // Remove steward if exists
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Steward(portfolio_id));
+        
+        // Remove DCA config if exists
+        env.storage()
+            .persistent()
+            .remove(&DataKey::DCAConfig(portfolio_id));
+        
+        // Remove NAV history if exists
+        env.storage()
+            .persistent()
+            .remove(&DataKey::NavHistory(portfolio_id));
+        
+        // Emit portfolio_closed event
+        env.events().publish(
+            (Symbol::new(&env, "portfolio_closed"),),
+            (portfolio_id, portfolio.user, swept_amounts),
+        );
+        
+        Ok(())
     }
 }
 

@@ -7,13 +7,13 @@ terraform {
     }
   }
 
-  # NOTE: To use an S3 backend for remote state, uncomment and configure below.
-  # backend "s3" {
-  #   bucket         = "stellar-portfolio-tf-state"
-  #   key            = "state/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "stellar-portfolio-tf-locks"
-  # }
+  backend "s3" {
+    bucket         = "stellar-portfolio-tf-state"
+    key            = "${terraform.workspace}/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "stellar-portfolio-tf-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

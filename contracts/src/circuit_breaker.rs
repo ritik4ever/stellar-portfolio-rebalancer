@@ -9,9 +9,20 @@ pub fn check_volatility(
     current_prices: &Map<Address, i128>,
 ) -> Result<(), Error> {
     for (asset, current_price) in current_prices.iter() {
-        let records = (config.window_seconds / 60).max(1) as u32;
+        if config.window_seconds < 60 {
+            return Err(Error::InvalidThreshold);
+        }
         
-        if let Some(historical_price) = client.twap(&crate::reflector::Asset::Stellar(asset.clone()), records) {
+        let records = (config.window_seconds / 60) as u32;
+        
+        // An empty price history (records == 0) would otherwise lead to a
+        // divide-by-zero when averaging TWAP samples. Guard explicitly so we
+        // fail safely instead of panicking/returning an invalid ratio.
+        if records == 0 {
+            return Err(Error::InvalidThreshold);
+        }
+        
+        if let Some(historical_price) = client.twap(&crate::reflector::Asset::Stellar(asset.clone()), &records) {
             if historical_price > 0 {
                 let diff = current_price - historical_price;
                 let diff_abs = if diff < 0 { -diff } else { diff };

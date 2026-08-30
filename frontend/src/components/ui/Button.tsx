@@ -40,7 +40,4 @@ export const Button: React.FC<ButtonProps> = ({
       {children}
     </button>
   )
-}
 
-</parameter>
-</write_to_file>

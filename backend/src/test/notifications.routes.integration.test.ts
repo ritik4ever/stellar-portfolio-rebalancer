@@ -220,7 +220,7 @@ describe('Notification Preferences API Integration Tests', () => {
             const res = await request(app)
                 .post('/api/notifications/subscribe')
                 .send({})
-                .expect(400)
+                .expect(422)
 
             expect(res.body.success).toBe(false)
         })
@@ -437,6 +437,124 @@ describe('Notification Preferences API Integration Tests', () => {
 
             expect(res.body.success).toBe(true)
             expect(Array.isArray(res.body.data.logs)).toBe(true)
+        })
+    })
+
+    describe('Price alert threshold overrides', () => {
+        it('GET returns empty overrides and the global default for a new user', async () => {
+            const res = await request(app)
+                .get('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER })
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.thresholds).toEqual({})
+            expect(res.body.data.defaultThreshold).toBe(5)
+        })
+
+        it('GET returns 400 when userId is missing', async () => {
+            const res = await request(app)
+                .get('/api/notifications/alerts/thresholds')
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('PUT sets per-asset overrides and GET returns them', async () => {
+            await request(app)
+                .put('/api/notifications/alerts/thresholds')
+                .send({ userId: TEST_USER, thresholds: { XLM: 7, BTC: 3 } })
+                .expect(200)
+
+            const res = await request(app)
+                .get('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER })
+                .expect(200)
+
+            expect(res.body.data.thresholds).toEqual({ XLM: 7, BTC: 3 })
+            expect(res.body.data.defaultThreshold).toBe(5)
+        })
+
+        it('PUT merges new overrides without clobbering existing ones', async () => {
+            await request(app)
+                .put('/api/notifications/alerts/thresholds')
+                .send({ userId: TEST_USER, thresholds: { XLM: 7 } })
+                .expect(200)
+
+            await request(app)
+                .put('/api/notifications/alerts/thresholds')
+                .send({ userId: TEST_USER, thresholds: { ETH: 4 } })
+                .expect(200)
+
+            const res = await request(app)
+                .get('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER })
+                .expect(200)
+
+            expect(res.body.data.thresholds).toEqual({ XLM: 7, ETH: 4 })
+        })
+
+        it('PUT rejects empty thresholds', async () => {
+            const res = await request(app)
+                .put('/api/notifications/alerts/thresholds')
+                .send({ userId: TEST_USER, thresholds: {} })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('PUT rejects non-positive thresholds', async () => {
+            const res = await request(app)
+                .put('/api/notifications/alerts/thresholds')
+                .send({ userId: TEST_USER, thresholds: { XLM: -5 } })
+                .expect(422)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('DELETE removes an override', async () => {
+            await request(app)
+                .put('/api/notifications/alerts/thresholds')
+                .send({ userId: TEST_USER, thresholds: { XLM: 7, BTC: 3 } })
+                .expect(200)
+
+            const del = await request(app)
+                .delete('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER, asset: 'XLM' })
+                .expect(200)
+
+            expect(del.body.success).toBe(true)
+            expect(del.body.data.thresholds).toEqual({ BTC: 3 })
+
+            const res = await request(app)
+                .get('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER })
+                .expect(200)
+
+            expect(res.body.data.thresholds).toEqual({ BTC: 3 })
+        })
+
+        it('DELETE returns 404 when no override exists for the asset', async () => {
+            const res = await request(app)
+                .delete('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER, asset: 'XLM' })
+                .expect(404)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('NOT_FOUND')
+        })
+
+        it('DELETE returns 400 when asset is missing', async () => {
+            const res = await request(app)
+                .delete('/api/notifications/alerts/thresholds')
+                .query({ userId: TEST_USER })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
         })
     })
 

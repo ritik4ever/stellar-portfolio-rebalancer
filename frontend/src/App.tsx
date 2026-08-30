@@ -30,6 +30,7 @@ import {
     onAuthSessionRestored,
 } from './services/authService'
 import DeveloperDrawer from './components/DeveloperDrawer'
+import { ToastContainer } from './components/ui/ToastContainer'
 import { checkApiCompatibility, type ApiCompatibilityResult } from './config/apiCompatibility'
 import {
     detectContractCapabilities,
@@ -39,13 +40,22 @@ import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
 import PortfolioWizard from './pages/PortfolioWizard'
 import Compare from './pages/Compare'
+import AnalyticsPage from './pages/Analytics'
+import TaxReportPage from './pages/TaxReport'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
+import { useNetworkDetection } from './hooks/useNetworkDetection'
+import { NetworkSwitchModal } from './components/NetworkSwitchModal'
 
 function App() {
     const queryClient = useQueryClient()
-    const [currentView, setCurrentView] = useState('landing')
+    const [currentView, setCurrentView] = useState(() => {
+        if (typeof window !== 'undefined' && window.location.pathname === '/visual-test-components') {
+            return 'visual-test-components'
+        }
+        return 'landing'
+    })
     const [publicKey, setPublicKey] = useState<string | null>(null)
     const [pendingConsentPublicKey, setPendingConsentPublicKey] = useState<string | null>(null)
     const [legalDoc, setLegalDoc] = useState<LegalDocType | null>(null)
@@ -55,6 +65,20 @@ function App() {
     const [sessionRecoverySource, setSessionRecoverySource] = useState<string | null>(null)
     const [isRecoveringSession, setIsRecoveringSession] = useState(false)
     const { notices, loadError, loading: readinessLoading, bootReady } = useReadinessReport()
+    
+    // Network detection and confirmation
+    const {
+        walletNetwork,
+        pendingWalletNetwork,
+        confirmNetworkSwitch,
+        cancelNetworkSwitch
+    } = useNetworkDetection()
+    
+    const handleConfirmNetworkSwitch = async () => {
+        confirmNetworkSwitch()
+        await queryClient.invalidateQueries()
+    }
+    
     const [apiCompatibility, setApiCompatibility] = useState<ApiCompatibilityResult | null>(null)
     const [apiCompatibilityDismissed, setApiCompatibilityDismissed] = useState(false)
     const [apiCompatibilityLoading, setApiCompatibilityLoading] = useState(true)
@@ -307,12 +331,7 @@ function App() {
     return (
         <div className={`App min-h-screen ${contentTopPad}`}>
             <RealtimeStatusBanner />
-            <BackendCapabilitiesBanner
-                notices={notices}
-                loadError={loadError}
-                loading={readinessLoading}
-                belowRealtimeBar={false}
-            />
+            <BackendCapabilitiesBanner belowRealtimeBar={false} />
             {showApiCompatibilityBanner && apiCompatibility ? (
                 <div
                     className={`fixed left-0 right-0 z-40 border-b px-4 py-3 text-sm ${
@@ -358,6 +377,14 @@ function App() {
                     }
                 }}
             />
+            {pendingWalletNetwork && walletNetwork && (
+                <NetworkSwitchModal
+                    currentNetwork={walletNetwork}
+                    pendingNetwork={pendingWalletNetwork}
+                    onConfirm={handleConfirmNetworkSwitch}
+                    onCancel={cancelNetworkSwitch}
+                />
+            )}
             <Onboarding />
             <OnboardingChecklist publicKey={publicKey} onNavigate={handleNavigate} />
             {sessionRecovery ? (
@@ -417,6 +444,7 @@ function App() {
                 </div>
             )}
 
+            <ToastContainer />
             {pendingConsentPublicKey ? (
                 legalDoc ? (
                     <Legal doc={legalDoc} onBack={() => setLegalDoc(null)} />
@@ -510,12 +538,30 @@ function App() {
                         publicKey={publicKey}
                     />
                 </ErrorBoundary>
+            ) : currentView === 'analytics' ? (
+                <ErrorBoundary fallbackTitle="Portfolio Analytics">
+                    <AnalyticsPage
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
+            ) : currentView === 'tax-report' ? (
+                <ErrorBoundary fallbackTitle="Tax Report">
+                    <TaxReportPage
+                        onNavigate={handleNavigate}
+                        publicKey={publicKey}
+                    />
+                </ErrorBoundary>
             ) : currentView === 'settings' ? (
                 <ErrorBoundary fallbackTitle="Settings">
                     <Settings
                         onNavigate={handleNavigate}
                         onDirtyChange={(dirty) => { settingsDirtyRef.current = dirty }}
                     />
+                </ErrorBoundary>
+            ) : currentView === 'visual-test-components' ? (
+                <ErrorBoundary fallbackTitle="Visual Tests">
+                    <VisualTestComponents />
                 </ErrorBoundary>
             ) : null}
         </div>

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { getPortfolioCheckQueue, getAutoRebalanceCheckQueue, getAnalyticsSnapshotQueue, getAnalyticsCompactionQueue, getIdempotencyCleanupQueue, getQueueByName, getPriceHistorySnapshotQueue, getPriceHistoryPruneQueue } from './queues.js'
+import { getPortfolioCheckQueue, getAutoRebalanceCheckQueue, getAnalyticsSnapshotQueue, getAnalyticsCompactionQueue, getIdempotencyCleanupQueue, getQueueByName, getPriceHistorySnapshotQueue, getPriceHistoryPruneQueue, getScheduledExportQueue } from './queues.js'
 import { logger } from '../utils/logger.js'
 import { setPortfolioCheckSchedulerRegistered } from './workers/portfolioCheckWorker.js'
 import { setAutoRebalanceSchedulerRegistered } from '../jobs/autoRebalance.js'
@@ -7,6 +7,7 @@ import { setAnalyticsSnapshotSchedulerRegistered } from './workers/analyticsSnap
 import { setAnalyticsCompactionSchedulerRegistered } from './workers/analyticsCompactionWorker.js'
 import { setIdempotencyCleanupSchedulerRegistered } from './workers/idempotencyCleanupWorker.js'
 import { setUserAlertsSchedulerRegistered } from './workers/userAlertsWorker.js'
+import { setScheduledExportSchedulerRegistered } from './workers/scheduledExportWorker.js'
 import { notificationService } from '../services/notificationService.js'
 import { sendDigests } from '../notifications/digest.js'
 
@@ -18,6 +19,7 @@ const IDEMPOTENCY_CLEANUP_CRON = '15 * * * *'  // every 60 minutes (quarter past
 const PRICE_HISTORY_SNAPSHOT_CRON = '*/5 * * * *'  // every 5 minutes
 const PRICE_HISTORY_PRUNE_CRON = '0 2 * * *'       // daily at 02:00
 const USER_ALERTS_CRON = '*/5 * * * *';
+const SCHEDULED_EXPORT_CRON = '0 6 * * 1'    // every Monday at 06:00 UTC
 
 // Job recovery configuration
 interface JobRecoveryConfig {
@@ -93,6 +95,7 @@ function calculateMissedExecutions(cronPattern: string, since: Date, now: Date):
         '15 * * * *': 60 * 60 * 1000,
         '0 2 * * *': 24 * 60 * 60 * 1000,
         '0 2 * * 0': 7 * 24 * 60 * 60 * 1000,
+        '0 6 * * 1': 7 * 24 * 60 * 60 * 1000,
     }
 
     const interval = intervalMs[cronPattern] || 60 * 60 * 1000
@@ -280,6 +283,17 @@ export async function startQueueScheduler(): Promise<void> {
         setUserAlertsSchedulerRegistered(true);
     }
 
+    // ── Weekly emailed portfolio exports (Mondays 06:00 UTC) ────────────────
+    const scheduledExportQueue = getScheduledExportQueue()
+    if (scheduledExportQueue) {
+        await scheduledExportQueue.add(
+            'scheduled-portfolio-export',
+            { triggeredBy: 'scheduler', correlationId: generateSchedulerCorrelationId('export') },
+            { repeat: { pattern: SCHEDULED_EXPORT_CRON }, jobId: 'repeatable-scheduled-export' }
+        )
+        setScheduledExportSchedulerRegistered(true)
+    }
+
     logger.info('[SCHEDULER] Repeatable jobs registered', {
         portfolioCheck: PORTFOLIO_CHECK_CRON,
         autoRebalance: AUTO_REBALANCE_CRON,
@@ -289,6 +303,7 @@ export async function startQueueScheduler(): Promise<void> {
         priceHistorySnapshot: PRICE_HISTORY_SNAPSHOT_CRON,
         priceHistoryPrune: PRICE_HISTORY_PRUNE_CRON,
         userAlertsCheck: USER_ALERTS_CRON,
+        scheduledExport: SCHEDULED_EXPORT_CRON,
     })
 
     try {
@@ -370,7 +385,14 @@ export async function stopQueueScheduler(): Promise<void> {
     const idempotencyCleanupQueue = getIdempotencyCleanupQueue()
     const userAlertsQueue = getQueueByName('user-alerts')
 
-
+    for (const queue of [
+        portfolioCheckQueue,
+        autoRebalanceCheckQueue,
+        analyticsSnapshotQueue,
+        analyticsCompactionQueue,
+        idempotencyCleanupQueue,
+        userAlertsQueue,
+    ]) {
         if (queue) {
             const repeatableJobs = await queue.getRepeatableJobs()
             for (const job of repeatableJobs) {

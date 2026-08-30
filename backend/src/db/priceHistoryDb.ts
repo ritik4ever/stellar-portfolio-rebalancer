@@ -17,6 +17,43 @@ export async function insertPriceSnapshot(asset: string, price: number): Promise
     )
 }
 
+/**
+ * Inserts historical price snapshots with explicit `recorded_at` timestamps.
+ * Used by the price-history backfill job so historical points keep the same
+ * schema as live snapshots while storing their original timestamps.
+ * Inserts are batched to stay within Postgres parameter limits.
+ */
+export async function insertPriceSnapshotsAt(
+    asset: string,
+    points: Array<{ timestamp: number; price: number }>,
+): Promise<number> {
+    const pool = getPool()
+    if (!pool || points.length === 0) return 0
+
+    const BATCH_SIZE = 500
+    let inserted = 0
+
+    for (let start = 0; start < points.length; start += BATCH_SIZE) {
+        const batch = points.slice(start, start + BATCH_SIZE)
+        const values: unknown[] = []
+        const placeholders: string[] = []
+
+        batch.forEach((point, idx) => {
+            const base = idx * 3
+            placeholders.push(`($${base + 1}, $${base + 2}, to_timestamp($${base + 3}))`)
+            values.push(asset, point.price, point.timestamp)
+        })
+
+        const result = await pool.query(
+            `INSERT INTO price_history (asset, price, recorded_at) VALUES ${placeholders.join(', ')}`,
+            values,
+        )
+        inserted += result.rowCount ?? 0
+    }
+
+    return inserted
+}
+
 export async function getPriceHistory(
     asset: string,
     since: Date,
