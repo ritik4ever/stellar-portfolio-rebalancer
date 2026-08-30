@@ -5116,3 +5116,407 @@ fn test_create_portfolio_from_unknown_template_rejected() {
     );
     assert_eq!(result, Err(Ok(Error::TemplateNotFound)));
 }
+
+// ── Two-step admin transfer (propose / accept) ───────────────────────────
+
+/// Register and initialize the contract with a known admin *without* leaning
+/// on `env.mock_all_auths()`, so the admin-transfer tests below can mock auth
+/// per-address and prove who is actually allowed to call what.
+///
+/// Returns `(contract_id, admin)`; callers build their own client so each test
+/// keeps control of the auth entries it mocks.
+fn init_with_scoped_auth(env: &Env) -> (Address, Address) {
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    (contract_id, admin)
+}
+
+#[test]
+fn test_two_step_admin_transfer_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.get_pending_admin(), None, "no transfer in flight yet");
+
+    // Step 1: propose. The incumbent is still the admin at this point.
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    assert_eq!(
+        client.get_admin(),
+        admin,
+        "proposing must not hand over admin rights on its own"
+    );
+
+    // Step 2: accept. Only now does the admin actually change.
+    client.accept_admin();
+    assert_eq!(client.get_admin(), new_admin);
+    assert_eq!(
+        client.get_pending_admin(),
+        None,
+        "pending nomination is cleared once accepted"
+    );
+}
+
+#[test]
+fn test_two_step_admin_transfer_emits_events_at_each_step() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    client.propose_admin(&new_admin);
+
+    let proposed = all_events(&env)
+        .into_iter()
+        .rev()
+        .find(|(_, topics, _)| match topics.first() {
+            Some(topic) => match Symbol::try_from_val(&env, &topic) {
+                Ok(sym) => sym == Symbol::new(&env, "admin_proposed"),
+                Err(_) => false,
+            },
+            None => false,
+        })
+        .expect("propose_admin emits admin_proposed");
+    assert_eq!(
+        Address::try_from_val(&env, &proposed.1.get(1).unwrap()).unwrap(),
+        admin,
+        "admin_proposed is topic-indexed by the proposing admin"
+    );
+    let proposed_data: Address = proposed.2.into_val(&env);
+    assert_eq!(proposed_data, new_admin);
+
+    client.accept_admin();
+
+    let transferred = all_events(&env)
+        .into_iter()
+        .rev()
+        .find(|(_, topics, _)| match topics.first() {
+            Some(topic) => match Symbol::try_from_val(&env, &topic) {
+                Ok(sym) => sym == Symbol::new(&env, "admin_transferred"),
+                Err(_) => false,
+            },
+            None => false,
+        })
+        .expect("accept_admin emits admin_transferred");
+    assert_eq!(
+        Address::try_from_val(&env, &transferred.1.get(1).unwrap()).unwrap(),
+        admin,
+        "admin_transferred is topic-indexed by the outgoing admin"
+    );
+    let transferred_data: Address = transferred.2.into_val(&env);
+    assert_eq!(transferred_data, new_admin);
+}
+
+#[test]
+fn test_propose_admin_overwrites_pending_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let first_candidate = Address::generate(&env);
+    let second_candidate = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    client.propose_admin(&first_candidate);
+    client.propose_admin(&second_candidate);
+
+    assert_eq!(
+        client.get_pending_admin(),
+        Some(second_candidate.clone()),
+        "the newest proposal replaces the one in flight"
+    );
+
+    // The superseded candidate can no longer claim the role; the live one can.
+    client.accept_admin();
+    assert_eq!(client.get_admin(), second_candidate);
+}
+
+#[test]
+#[should_panic]
+fn test_superseded_candidate_cannot_accept_admin() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let first_candidate = Address::generate(&env);
+    let second_candidate = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&first_candidate,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&first_candidate);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&second_candidate,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&second_candidate);
+
+    // `accept_admin` requires auth from the *stored* pending admin, which the
+    // second proposal overwrote, so the superseded candidate cannot finalize.
+    client
+        .mock_auths(&[MockAuth {
+            address: &first_candidate,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+}
+
+#[test]
+#[should_panic]
+fn test_accept_admin_by_non_pending_address_rejected() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&new_admin,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&new_admin);
+
+    // Only the nominated address can finalize: `accept_admin` calls
+    // `require_auth()` on the address read from `DataKey::PendingAdmin`, so an
+    // auth entry signed by anyone else fails the invocation.
+    client
+        .mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+}
+
+#[test]
+#[should_panic]
+fn test_propose_admin_by_non_admin_rejected() {
+    let env = Env::default();
+
+    let (contract_id, _admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    let attacker_pick = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&attacker_pick,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&attacker_pick);
+}
+
+#[test]
+fn test_accept_admin_without_pending_proposal_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+fn test_accept_admin_is_not_replayable() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    client.propose_admin(&new_admin);
+    client.accept_admin();
+
+    // The nomination was consumed, so a replay finds nothing pending rather
+    // than re-running the handover.
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_propose_admin_rejects_current_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(
+        client.try_propose_admin(&admin),
+        Err(Ok(Error::InvalidAdminProposal))
+    );
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+#[test]
+fn test_admin_rights_move_to_new_admin_after_transfer() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&new_admin,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&new_admin);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+
+    assert_eq!(client.get_admin(), new_admin);
+
+    // The new admin can exercise an admin-only entrypoint...
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_emergency_stop",
+                args: vec![&env, true.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_emergency_stop(&true);
+}
+
+#[test]
+#[should_panic]
+fn test_previous_admin_loses_rights_after_transfer() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&new_admin,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&new_admin);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+
+    // ...and the outgoing admin can no longer: admin-gated entrypoints read
+    // `DataKey::Admin`, which now holds `new_admin`.
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_emergency_stop",
+                args: vec![&env, true.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_emergency_stop(&true);
+}

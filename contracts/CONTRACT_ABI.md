@@ -35,6 +35,36 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Notes:**
   - External clients can use this to confirm the configured governance/admin address before invoking privileged actions.
 
+### `propose_admin(env: Env, new_admin: Address) -> Result<(), Error>`
+
+- **Purpose:** Step 1 of the two-step admin transfer — nominates `new_admin` as the pending admin and emits `admin_proposed`.
+- **Auth:** Requires auth from the current admin (`DataKey::Admin`).
+- **Parameters:**
+  - `new_admin`: address nominated to take over the admin role.
+- **Errors:**
+  - `InvalidAdminProposal` (39) when `new_admin` is already the current admin.
+- **Notes:**
+  - Nomination alone grants nothing: every admin-gated entrypoint keeps reading `DataKey::Admin`, which is only rewritten by `accept_admin`.
+  - Calling it again **replaces** a proposal still in flight, so the current admin can retarget — or effectively cancel — a mistaken nomination by proposing a different address.
+  - This is the only path that changes the admin after `initialize`; there is no single-call `set_admin`.
+
+### `accept_admin(env: Env) -> Result<(), Error>`
+
+- **Purpose:** Step 2 of the two-step admin transfer — the pending admin claims the role. Rewrites `DataKey::Admin`, clears `DataKey::PendingAdmin`, and emits `admin_transferred`.
+- **Auth:** Requires auth from the address stored by `propose_admin`; any other caller fails the invocation. Requiring the incoming admin to sign is what proves the key is controllable, so a handover can never complete against a typo'd or unusable address.
+- **Errors:**
+  - `NoPendingAdmin` (38) when no transfer is in flight (never proposed, or already accepted).
+- **Notes:**
+  - The previous admin loses every admin right the moment this returns.
+  - Not replayable — the nomination is consumed, so a second call returns `NoPendingAdmin`.
+
+### `get_pending_admin(env: Env) -> Option<Address>`
+
+- **Purpose:** Reads the address nominated by `propose_admin` and still awaiting its `accept_admin` call.
+- **Returns:** `Some(address)` while a transfer is in flight, `None` otherwise.
+- **Notes:**
+  - Lets clients and monitoring surface a pending governance handover before it takes effect.
+
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
 
 - **Purpose:** Creates a new user portfolio (with default `StrategyType::Threshold` strategy) and emits a `("portfolio","created")` event.
@@ -359,6 +389,8 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `31` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
 | `32` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
 | `33` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | There is no delete entrypoint. Repurpose an existing template's allocations via `update_template` instead of creating a new one. |
+| `38` | `NoPendingAdmin` | `accept_admin` was called while no admin transfer is in flight. | Have the current admin call `propose_admin` first, or check `get_pending_admin` before accepting. |
+| `39` | `InvalidAdminProposal` | `propose_admin` was called with the address that is already the current admin. | Propose a different address; re-proposing the incumbent would be a no-op transfer. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 

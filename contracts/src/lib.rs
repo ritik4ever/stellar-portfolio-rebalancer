@@ -110,6 +110,63 @@ impl PortfolioRebalancer {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
+    /// Step 1 of the two-step admin transfer: nominate `new_admin`.
+    ///
+    /// Admin-only. Nomination alone grants `new_admin` nothing — every
+    /// admin-gated entrypoint keeps checking `DataKey::Admin`, which is only
+    /// rewritten once `new_admin` calls [`accept_admin`] itself. This makes
+    /// an admin handover impossible to complete against an address that
+    /// cannot sign (a typo, a contract with no auth path, a lost key).
+    ///
+    /// Calling this again replaces any proposal still in flight, so the
+    /// current admin can retarget or effectively cancel a mistaken nomination
+    /// by proposing a different address.
+    pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        if new_admin == admin {
+            return Err(Error::InvalidAdminProposal);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_admin_proposed(&env, &admin, &new_admin);
+        Ok(())
+    }
+
+    /// Step 2 of the two-step admin transfer: the pending admin claims the role.
+    ///
+    /// Callable only by the address stored by [`propose_admin`] — it must
+    /// authorize this call itself, which is what proves the incoming admin
+    /// controls the key. On success `DataKey::Admin` is rewritten, the
+    /// pending nomination is cleared, and the previous admin loses every
+    /// admin right immediately.
+    ///
+    /// Returns [`Error::NoPendingAdmin`] when no transfer is in flight.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoPendingAdmin)?;
+        pending_admin.require_auth();
+
+        let previous_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        env.storage().instance().set(&DataKey::Admin, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        events::emit_admin_transferred(&env, &previous_admin, &pending_admin);
+        Ok(())
+    }
+
+    /// The address nominated by [`propose_admin`] and still awaiting its
+    /// [`accept_admin`] call, or `None` when no transfer is in flight.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
     pub fn create_portfolio(
         env: Env,
         user: Address,
