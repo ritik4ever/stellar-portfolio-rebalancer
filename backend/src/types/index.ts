@@ -400,4 +400,6 @@ export interface ExecutionExplanation {
     skippedAlternatives: string[]
     rationale: string
     failureReason?: string
+    partialFill?: boolean
+    filledAmount?: number
 }
