@@ -15,6 +15,13 @@ pub fn check_volatility(
         
         let records = (config.window_seconds / 60) as u32;
         
+        // An empty price history (records == 0) would otherwise lead to a
+        // divide-by-zero when averaging TWAP samples. Guard explicitly so we
+        // fail safely instead of panicking/returning an invalid ratio.
+        if records == 0 {
+            return Err(Error::InvalidThreshold);
+        }
+        
         if let Some(historical_price) = client.twap(&crate::reflector::Asset::Stellar(asset.clone()), &records) {
             if historical_price > 0 {
                 let diff = current_price - historical_price;
