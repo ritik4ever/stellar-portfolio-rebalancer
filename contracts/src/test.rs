@@ -3332,11 +3332,15 @@ fn test_circuit_breaker_boundary_just_above_threshold_trips_with_exact_reason() 
     assert_ne!(pause_reason, PauseReason::AdminEmergency);
     assert_ne!(pause_reason, PauseReason::UserPaused);
     assert_ne!(pause_reason, PauseReason::CooldownActive);
-    // NOTE: check_volatility() only persists ContractPauseReason — it does not
-    // flip DataKey::EmergencyStop, which is the only flag execute_rebalance
-    // actually checks. So this attempt is not currently blocked by the trip.
-    // Flagging this as a pre-existing gap rather than asserting a false pass.
-    let _ = client.try_execute_rebalance(&pid, &Map::new(&env));
+    // check_volatility() now flips DataKey::EmergencyStop alongside
+    // ContractPauseReason, so the trip actually blocks further calls —
+    // not just records a reason nothing else checks.
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(
+        result,
+        Err(Ok(Error::EmergencyStop)),
+        "a circuit breaker trip must actually block execute_rebalance, not just record a reason"
+    );
 }
 
 #[test]
