@@ -11,6 +11,7 @@ import { getRebalanceLockConfig } from '../config/rebalanceLockConfig.js'
 export class RebalanceLockService {
     private redis: Redis | null = null
     private fallbackLocks: Map<string, number> = new Map()
+    private fallbackHeartbeats: Map<string, number> = new Map()
     private isInitialized: boolean = false
     private useRedis: boolean = false
     private static instance: RebalanceLockService | null = null
@@ -173,6 +174,81 @@ export class RebalanceLockService {
 
     private getLockKey(portfolioId: string): string {
         return `lock:rebalance:${portfolioId}`
+    }
+
+    private getHeartbeatKey(portfolioId: string): string {
+        return `lock:heartbeat:${portfolioId}`
+    }
+
+    public async updateHeartbeat(portfolioId: string, timestamp: number = Date.now()): Promise<void> {
+        if (!this.isInitialized) await this.init()
+        const heartbeatKey = this.getHeartbeatKey(portfolioId)
+        this.fallbackHeartbeats.set(heartbeatKey, timestamp)
+        if (this.useRedis && this.redis) {
+            try {
+                await this.redis.set(heartbeatKey, timestamp.toString(), 'PX', 60000)
+            } catch (error) {
+                logger.error(`[LOCK_SERVICE] Failed to update Redis heartbeat for ${portfolioId}`, {
+                    error: error instanceof Error ? error.message : String(error)
+                })
+            }
+        }
+    }
+
+    public async getLastHeartbeat(portfolioId: string): Promise<number | null> {
+        if (!this.isInitialized) await this.init()
+        const heartbeatKey = this.getHeartbeatKey(portfolioId)
+        if (this.useRedis && this.redis) {
+            try {
+                const val = await this.redis.get(heartbeatKey)
+                if (val) return parseInt(val, 10)
+            } catch {}
+        }
+        return this.fallbackHeartbeats.get(heartbeatKey) ?? null
+    }
+
+    /**
+     * Forcibly releases a lock for a portfolio if it is stale or missing a recent heartbeat.
+     * Rejects forced release if the lock holder is actively updating its heartbeat within maxStaleMs.
+     */
+    public async forceReleaseLock(
+        portfolioId: string,
+        maxStaleMs: number = 30000
+    ): Promise<{ released: boolean; reason: string }> {
+        if (!this.isInitialized) await this.init()
+
+        const locked = await this.isLocked(portfolioId)
+        if (!locked) {
+            return { released: true, reason: 'NOT_LOCKED' }
+        }
+
+        const lastHeartbeat = await this.getLastHeartbeat(portfolioId)
+        const now = Date.now()
+
+        if (lastHeartbeat && (now - lastHeartbeat) < maxStaleMs) {
+            logger.warn(`[LOCK_SERVICE] Force release rejected — lock for ${portfolioId} is active`, {
+                portfolioId,
+                lastHeartbeat,
+                ageMs: now - lastHeartbeat,
+                maxStaleMs
+            })
+            return { released: false, reason: 'LOCK_ACTIVE' }
+        }
+
+        await this.releaseLock(portfolioId)
+        const heartbeatKey = this.getHeartbeatKey(portfolioId)
+        this.fallbackHeartbeats.delete(heartbeatKey)
+        if (this.useRedis && this.redis) {
+            try { await this.redis.del(heartbeatKey) } catch {}
+        }
+
+        logger.info(`[LOCK_SERVICE] Force released lock for ${portfolioId}`, {
+            portfolioId,
+            lastHeartbeat,
+            reason: 'STALE_LOCK_RELEASED'
+        })
+
+        return { released: true, reason: 'STALE_LOCK_RELEASED' }
     }
 
     private acquireMemoryLock(lockKey: string, ttlMs: number): boolean {
