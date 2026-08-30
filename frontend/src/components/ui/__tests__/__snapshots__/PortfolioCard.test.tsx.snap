@@ -1,0 +1,148 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PortfolioCard snapshot > renders negative change 1`] = `
+<div>
+  <div
+    class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+  >
+    <div
+      class="flex items-start justify-between"
+    >
+      <div>
+        <p
+          class="text-sm text-gray-500 dark:text-gray-400"
+        >
+          Total Value
+        </p>
+        <p
+          class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"
+        >
+          $5,000.00
+        </p>
+      </div>
+      <div
+        class="flex items-center gap-2"
+      >
+        <span
+          class="text-xs font-medium text-red-700 dark:text-red-400"
+        >
+          -2.1
+          %
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`PortfolioCard snapshot > renders with actions 1`] = `
+<div>
+  <div
+    class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+  >
+    <div
+      class="flex items-start justify-between"
+    >
+      <div>
+        <p
+          class="text-sm text-gray-500 dark:text-gray-400"
+        >
+          Total Value
+        </p>
+        <p
+          class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"
+        >
+          $10,000.00
+        </p>
+      </div>
+      <div
+        class="flex items-center gap-2"
+      >
+        <span
+          class="text-xs font-medium text-green-700 dark:text-green-400"
+        >
+          +
+          1.5
+          %
+        </span>
+        <div
+          class="ml-3"
+        >
+          <button>
+            Export
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`PortfolioCard snapshot > renders with all props 1`] = `
+<div>
+  <div
+    class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+  >
+    <div
+      class="flex items-start justify-between"
+    >
+      <div>
+        <p
+          class="text-sm text-gray-500 dark:text-gray-400"
+        >
+          Total Value
+        </p>
+        <p
+          class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"
+        >
+          $10,000.00
+        </p>
+        <p
+          class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+        >
+          Last rebalanced 2 hours ago
+        </p>
+      </div>
+      <div
+        class="flex items-center gap-2"
+      >
+        <span
+          class="text-xs font-medium text-green-700 dark:text-green-400"
+        >
+          +
+          3.4
+          %
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`PortfolioCard snapshot > renders without change 1`] = `
+<div>
+  <div
+    class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+  >
+    <div
+      class="flex items-start justify-between"
+    >
+      <div>
+        <p
+          class="text-sm text-gray-500 dark:text-gray-400"
+        >
+          Total Value
+        </p>
+        <p
+          class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"
+        >
+          $5,000.00
+        </p>
+      </div>
+      <div
+        class="flex items-center gap-2"
+      />
+    </div>
+  </div>
+</div>
+`;

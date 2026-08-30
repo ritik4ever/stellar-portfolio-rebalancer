@@ -1,5 +1,9 @@
 import { browserPriceService } from '../services/browserPriceService'
-import { getAccessToken, refresh } from '../services/authService'
+import {
+    announceAuthSessionExpired,
+    getAccessToken,
+    refresh,
+} from '../services/authService'
 import {
     debugLog,
     getFrontendDebugConfig,
@@ -37,6 +41,12 @@ export class ApiClientError extends Error {
         this.code = code
         this.details = details
     }
+}
+
+function getErrorCode(body: unknown): string | undefined {
+    if (!body || typeof body !== 'object') return undefined
+    const error = (body as { error?: { code?: unknown } }).error
+    return typeof error?.code === 'string' ? error.code : undefined
 }
 
 const getBaseUrl = (): string => {
@@ -114,24 +124,39 @@ export const API_CONFIG = {
     ENDPOINTS: {
         HEALTH: '/health',
         READINESS: '/readiness',
+        READINESS_HISTORY: '/readiness/history',
         ROOT: '/',
         /** Versionless auth namespace (matches backend `app.use('/api/auth', authRouter)`) */
         AUTH_LOGIN: '/api/auth/login',
         AUTH_REFRESH: '/api/auth/refresh',
         AUTH_LOGOUT: '/api/auth/logout',
         PORTFOLIO: `${API_RESOURCE_ROOT}/portfolio`,
+        PORTFOLIO_IMPORT: `${API_RESOURCE_ROOT}/portfolio/import`,
         USER_PORTFOLIOS: (address: string) => `${API_RESOURCE_ROOT}/user/${address}/portfolios`,
         PORTFOLIO_DETAIL: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}`,
         PORTFOLIO_EXPORT: (id: string, format: 'json' | 'csv' | 'pdf') =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/export?format=${format}`,
         PORTFOLIO_REBALANCE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance`,
         PORTFOLIO_REBALANCE_ESTIMATE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-estimate`,
+        PORTFOLIO_REBALANCE_PLAN: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-plan`,
+        PORTFOLIO_COST_SUMMARY: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/cost-summary`,
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
+        PORTFOLIO_SHARE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/share`,
+        PORTFOLIO_SHARE_VIEW: (hash: string) => `${API_RESOURCE_ROOT}/portfolio/share/${hash}`,
         PORTFOLIO_ANALYTICS: (id: string, days: number) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
+        PORTFOLIO_COMPARE: (ids: string[], from?: string, to?: string) => {
+            const params = new URLSearchParams({ ids: ids.join(',') })
+            if (from) params.set('from', from)
+            if (to) params.set('to', to)
+            return `${API_RESOURCE_ROOT}/portfolios/compare?${params.toString()}`
+        },
         PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/performance-summary`,
+        TAX_REPORT: (year?: number) =>
+            `${API_RESOURCE_ROOT}/portfolio/tax-report${year ? `?year=${year}` : ''}`,
         PRICES: `${API_RESOURCE_ROOT}/prices`,
+        MARKET_MOVERS: `${API_RESOURCE_ROOT}/market/movers`,
         PRICES_ENHANCED: `${API_RESOURCE_ROOT}/prices/enhanced`,
         MARKET_DETAILS: (asset: string) => `${API_RESOURCE_ROOT}/market/${asset}/details`,
         PRICE_CHART: (asset: string) => `${API_RESOURCE_ROOT}/market/${asset}/chart`,
@@ -143,8 +168,14 @@ export const API_CONFIG = {
         RISK_CHECK: (portfolioId: string) => `${API_RESOURCE_ROOT}/risk/check/${portfolioId}`,
         NOTIFICATIONS_PREFERENCES: `${API_RESOURCE_ROOT}/notifications/preferences`,
         NOTIFICATIONS_SUBSCRIBE: `${API_RESOURCE_ROOT}/notifications/subscribe`,
-        NOTIFICATIONS_UNSUBSCRIBE: (userId: string) =>
-            `${API_RESOURCE_ROOT}/notifications/unsubscribe?userId=${encodeURIComponent(userId)}`,
+        NOTIFICATIONS_UNSUBSCRIBE: (userId: string, reason?: string) => {
+            const params = new URLSearchParams({ userId })
+            const trimmedReason = reason?.trim()
+            if (trimmedReason) {
+                params.set('reason', trimmedReason)
+            }
+            return `${API_RESOURCE_ROOT}/notifications/unsubscribe?${params.toString()}`
+        },
         NOTIFICATIONS_TEST: `${API_RESOURCE_ROOT}/notifications/test`,
         NOTIFICATIONS_TEST_ALL: `${API_RESOURCE_ROOT}/notifications/test-all`,
         TEST_CORS: '/test/cors',
@@ -199,13 +230,6 @@ export const apiRequest = async <T>(
         try {
             const payload = await browserPriceService.getCurrentPrices()
             return payload as unknown as T
-            const prices = await browserPriceService.getCurrentPrices()
-            // Source information is embedded in each price entry via the 'source' field
-            debugLog('Price source: Browser (CoinGecko API or fallback)', {
-                assets: Object.keys(prices),
-                sourceSample: prices[Object.keys(prices)[0]]?.source
-            })
-            return prices as unknown as T
         } catch (error) {
             console.error('Browser price service failed, falling back to backend:', error)
             debugLog('Price fallback triggered: Attempting backend API')
@@ -287,15 +311,22 @@ export const apiRequest = async <T>(
             })
         }
 
-        if (response.status === 401 && retryCount === 0 && isApiRequest) {
-            const refreshed = await refresh()
-            if (refreshed) {
-                return apiRequest<T>(endpoint, options, retryCount + 1)
-            }
-        }
-
         if (isApiRequest) {
             const envelope = body as ApiEnvelope<T>
+
+            if (response.status === 401 && retryCount === 0) {
+                const refreshed = await refresh()
+                if (refreshed) {
+                    return apiRequest<T>(endpoint, options, retryCount + 1)
+                }
+
+                announceAuthSessionExpired({
+                    message: envelope.error?.message || 'Your session expired. Sign in again to continue.',
+                    source: endpoint,
+                    status: response.status,
+                    code: envelope.error?.code || getErrorCode(body) || 'UNAUTHORIZED',
+                })
+            }
 
             if (!response.ok || !envelope.success || envelope.data === null) {
                 const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`
@@ -381,6 +412,12 @@ export const downloadPortfolioExport = async (
     if (res.status === 401) {
         const refreshed = await refresh()
         if (refreshed) return downloadPortfolioExport(portfolioId, format)
+        announceAuthSessionExpired({
+            message: 'Your session expired while exporting. Sign in again to retry.',
+            source: `export:${portfolioId}`,
+            status: 401,
+            code: 'UNAUTHORIZED',
+        })
         throw new ApiClientError('Unauthorized', 401, 'UNAUTHORIZED')
     }
 

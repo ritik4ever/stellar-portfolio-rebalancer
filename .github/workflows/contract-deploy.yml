@@ -1,0 +1,101 @@
+name: Contract Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target
+        required: true
+        type: choice
+        default: testnet
+        options:
+          - testnet
+          - staging
+          - mainnet
+
+concurrency:
+  group: contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-contract:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}
+    env:
+      DEPLOYMENT_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}
+      STELLAR_NETWORK: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'mainnet' || 'testnet' }}
+      SOROBAN_RPC_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'https://soroban-mainnet.stellar.org' || 'https://soroban-testnet.stellar.org' }}
+      SOROBAN_NETWORK_PASSPHRASE: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'Public Global Stellar Network ; September 2015' || 'Test SDF Network ; September 2015' }}
+      CONTRACT_ENV_FILE: ${{ runner.temp }}/contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}.env
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo and Soroban
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.soroban
+            contracts/target
+          key: contract-deploy-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            contract-deploy-${{ runner.os }}-
+
+      - name: Install Soroban CLI
+        run: cargo install --locked soroban-cli
+
+      - name: Validate deployment inputs
+        run: |
+          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
+            echo "::error::Missing STELLAR_SECRET_KEY in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
+            exit 1
+          fi
+
+          if [ -z "${REFLECTOR_ADDRESS:-}" ]; then
+            echo "::error::Missing REFLECTOR_ADDRESS in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
+            exit 1
+          fi
+
+      - name: Deploy contract
+        run: bash deployment/contract-deploy.sh
+
+      - name: Export deployment metadata
+        run: cat "$CONTRACT_ENV_FILE" >> "$GITHUB_ENV"
+
+      - name: Summarize deployment
+        run: |
+          {
+            echo "## Contract deployment"
+            echo ""
+            echo "- Environment: \`$DEPLOYMENT_ENVIRONMENT\`"
+            echo "- Network: \`$STELLAR_NETWORK\`"
+            echo "- Contract ID: \`$CONTRACT_ID\`"
+            echo "- Reflector address: \`$REFLECTOR_ADDRESS\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-deploy-${{ env.DEPLOYMENT_ENVIRONMENT }}
+          path: ${{ env.CONTRACT_ENV_FILE }}
+          if-no-files-found: error

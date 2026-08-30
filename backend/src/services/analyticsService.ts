@@ -1,6 +1,7 @@
 import { portfolioStorage } from './portfolioStorage.js'
 import { ReflectorService } from './reflector.js'
 import { logger } from '../utils/logger.js'
+import { dbCompactAnalyticsSnapshots, type CompactionStats } from '../db/analyticsDb.js'
 
 interface PortfolioSnapshot {
     portfolioId: string
@@ -116,9 +117,93 @@ class AnalyticsService {
         })
     }
 
+    getAnalyticsInRange(portfolioId: string, from: string, to: string): PortfolioSnapshot[] {
+        const snapshots = this.snapshots.get(portfolioId) || []
+        const fromDate = new Date(from)
+        const toDate = new Date(to)
+
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+            return []
+        }
+
+        return snapshots
+            .filter(snapshot => {
+                const snapshotDate = new Date(snapshot.timestamp)
+                return snapshotDate >= fromDate && snapshotDate <= toDate
+            })
+            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    }
+
+    getAggregatedAnalytics(portfolioId: string, interval: 'daily' | 'weekly' | 'monthly', days: number = 30): PortfolioSnapshot[] {
+        const snapshots = this.getAnalytics(portfolioId, days)
+        if (snapshots.length === 0) return []
+
+        const sorted = [...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        const aggregated: PortfolioSnapshot[] = []
+        
+        const getBucketTime = (date: Date): number => {
+            const d = new Date(date)
+            d.setUTCHours(0, 0, 0, 0) // Midnight UTC
+            if (interval === 'weekly') {
+                const day = d.getUTCDay()
+                const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1) // Start on Monday
+                d.setUTCDate(diff)
+            } else if (interval === 'monthly') {
+                d.setUTCDate(1)
+            }
+            return d.getTime()
+        }
+
+        const incrementBucket = (time: number): number => {
+            const d = new Date(time)
+            if (interval === 'daily') d.setUTCDate(d.getUTCDate() + 1)
+            else if (interval === 'weekly') d.setUTCDate(d.getUTCDate() + 7)
+            else if (interval === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1)
+            return d.getTime()
+        }
+
+        const startDate = new Date(sorted[0].timestamp)
+        const endDate = new Date(sorted[sorted.length - 1].timestamp)
+        
+        let bucketTime = getBucketTime(startDate)
+        const endTime = getBucketTime(endDate)
+
+        let snapshotIndex = 0
+        let lastKnownSnapshot = sorted[0]
+
+        while (bucketTime <= endTime) {
+            const nextBucketTime = incrementBucket(bucketTime)
+            
+            while (snapshotIndex < sorted.length) {
+                const t = new Date(sorted[snapshotIndex].timestamp).getTime()
+                if (t < nextBucketTime) {
+                    lastKnownSnapshot = sorted[snapshotIndex]
+                    snapshotIndex++
+                } else {
+                    break
+                }
+            }
+
+            const totalValue = Math.max(0, lastKnownSnapshot.totalValue)
+
+            aggregated.push({
+                ...lastKnownSnapshot,
+                totalValue,
+                timestamp: new Date(bucketTime).toISOString()
+            })
+
+            bucketTime = nextBucketTime
+        }
+
+        return aggregated
+    }
+
     calculatePerformanceMetrics(portfolioId: string): PerformanceMetrics {
         const snapshots = this.getAnalytics(portfolioId, 90)
+        return this.computeMetricsFromSnapshots(snapshots)
+    }
 
+    computeMetricsFromSnapshots(snapshots: PortfolioSnapshot[]): PerformanceMetrics {
         if (snapshots.length < 2) {
             return {
                 totalReturn: 0,
@@ -210,6 +295,87 @@ class AnalyticsService {
             dataPoints: snapshots.length,
             period: '30 days',
             lastUpdated: snapshots.length > 0 ? snapshots[snapshots.length - 1].timestamp : null,
+        }
+    }
+
+    /**
+     * Compact analytics snapshots for a single portfolio.
+     * Preserves recent high-frequency data while rolling up older data to daily snapshots.
+     * 
+     * @param portfolioId - Portfolio to compact
+     * @param cutoffDays - Delete all snapshots older than this (default: 90)
+     * @param recentDays - Keep high-frequency data for this period (default: 7)
+     */
+    async compactAnalyticsForPortfolio(
+        portfolioId: string,
+        cutoffDays: number = 90,
+        recentDays: number = 7
+    ): Promise<CompactionStats> {
+        try {
+            if (cutoffDays < recentDays) {
+                throw new Error(`cutoffDays (${cutoffDays}) must be >= recentDays (${recentDays})`)
+            }
+
+            const stats = await dbCompactAnalyticsSnapshots(portfolioId, cutoffDays, recentDays)
+            
+            logger.info('Analytics snapshots compacted for portfolio', {
+                portfolioId,
+                deletedCount: stats.deletedCount,
+                retainedCount: stats.retainedCount,
+                cutoffDays,
+                recentDays,
+            })
+
+            return stats
+        } catch (error) {
+            logger.error('Failed to compact analytics snapshots for portfolio', {
+                portfolioId,
+                error,
+            })
+            throw error
+        }
+    }
+
+    /**
+     * Compact analytics snapshots for all portfolios.
+     * Called by the analytics-compaction BullMQ worker.
+     */
+    async compactAllPortfolios(
+        cutoffDays: number = 90,
+        recentDays: number = 7
+    ): Promise<CompactionStats[]> {
+        try {
+            const portfolios = portfolioStorage.getAllPortfolios()
+            const results: CompactionStats[] = []
+
+            logger.info('Starting analytics compaction for all portfolios', {
+                portfolioCount: portfolios.length,
+                cutoffDays,
+                recentDays,
+            })
+
+            for (const portfolio of portfolios) {
+                const stats = await this.compactAnalyticsForPortfolio(
+                    portfolio.id,
+                    cutoffDays,
+                    recentDays
+                )
+                results.push(stats)
+            }
+
+            const totalDeleted = results.reduce((sum, r) => sum + r.deletedCount, 0)
+            const totalRetained = results.reduce((sum, r) => sum + r.retainedCount, 0)
+
+            logger.info('Analytics compaction cycle complete', {
+                portfoliosProcessed: results.length,
+                totalSnapshotsDeleted: totalDeleted,
+                totalSnapshotsRetained: totalRetained,
+            })
+
+            return results
+        } catch (error) {
+            logger.error('Failed to compact analytics snapshots for all portfolios', { error })
+            throw error
         }
     }
 

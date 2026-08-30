@@ -1,22 +1,25 @@
-import { Worker, Job } from 'bullmq'
-import { getConnectionOptions } from '../connection.js'
-import { analyticsService } from '../../services/analyticsService.js'
-import { logger } from '../../utils/logger.js'
-import type { AnalyticsSnapshotJobData } from '../queues.js'
+import { Worker, Job } from "bullmq";
+import { randomUUID } from "node:crypto";
+import { runWithRequestContext } from "../../utils/requestContext.js";
+import { getConnectionOptions } from "../connection.js";
+import { analyticsService } from "../../services/analyticsService.js";
+import { logger } from "../../utils/logger.js";
+import type { AnalyticsSnapshotJobData } from "../queues.js";
 import {
-    createWorkerRuntimeStatus,
-    markWorkerFailed,
-    markWorkerJobCompleted,
-    markWorkerJobFailed,
-    markWorkerReady,
-    markWorkerStarting,
-    markWorkerStopped,
-    snapshotWorkerRuntimeStatus,
-    type WorkerRuntimeStatus,
-} from './workerRuntime.js'
+  createWorkerRuntimeStatus,
+  markWorkerFailed,
+  markWorkerJobCompleted,
+  markWorkerJobFailed,
+  markWorkerReady,
+  markWorkerStarting,
+  markWorkerStopped,
+  snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
+  type WorkerRuntimeStatus,
+} from "./workerRuntime.js";
 
-let worker: Worker | null = null
-const runtimeStatus = createWorkerRuntimeStatus('analytics-snapshot', 1)
+let worker: Worker | null = null;
+const runtimeStatus = createWorkerRuntimeStatus("analytics-snapshot", 1);
 
 /**
  * Core processor: triggers a snapshot of all portfolios.
@@ -25,15 +28,21 @@ const runtimeStatus = createWorkerRuntimeStatus('analytics-snapshot', 1)
 export async function processAnalyticsSnapshotJob(
   job: Job<AnalyticsSnapshotJobData>,
 ): Promise<void> {
-  logger.info("[WORKER:analytics-snapshot] Capturing portfolio snapshots", {
-    jobId: job.id,
-    triggeredBy: job.data.triggeredBy ?? "scheduler",
-  });
+  const correlationId = (job.data as AnalyticsSnapshotJobData).correlationId;
+  const requestId = correlationId ?? randomUUID();
 
-  await analyticsService.captureAllPortfolios();
+  return runWithRequestContext({ requestId }, async () => {
+    logger.info("[WORKER:analytics-snapshot] Capturing portfolio snapshots", {
+      jobId: job.id,
+      triggeredBy: job.data.triggeredBy ?? "scheduler",
+      correlationId,
+    });
 
-  logger.info("[WORKER:analytics-snapshot] Snapshot cycle complete", {
-    jobId: job.id,
+    await analyticsService.captureAllPortfolios();
+
+    logger.info("[WORKER:analytics-snapshot] Snapshot cycle complete", {
+      jobId: job.id,
+    });
   });
 }
 
@@ -43,67 +52,73 @@ export async function processAnalyticsSnapshotJob(
 export function startAnalyticsSnapshotWorker(): Worker | null {
   if (worker) return worker;
 
-    try {
-        markWorkerStarting(runtimeStatus)
-        worker = new Worker(
-            'analytics-snapshot',
-            processAnalyticsSnapshotJob,
-            {
-                connection: getConnectionOptions(),
-                concurrency: 1,
-            }
-        )
-    } catch (err) {
-        markWorkerFailed(runtimeStatus, err)
-        logger.warn('[WORKER:analytics-snapshot] Failed to start – Redis may be unavailable', {
-            error: err instanceof Error ? err.message : String(err),
-        })
-        return null
-    }
+  try {
+    markWorkerStarting(runtimeStatus);
+    worker = new Worker("analytics-snapshot", processAnalyticsSnapshotJob, {
+      connection: getConnectionOptions(),
+      concurrency: 1,
+    });
+  } catch (err) {
+    markWorkerFailed(runtimeStatus, err);
+    logger.warn(
+      "[WORKER:analytics-snapshot] Failed to start – Redis may be unavailable",
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
+    return null;
+  }
 
-    void worker.waitUntilReady()
-        .then(() => {
-            markWorkerReady(runtimeStatus)
-            logger.info('[WORKER:analytics-snapshot] Worker ready')
-        })
-        .catch((err) => {
-            markWorkerFailed(runtimeStatus, err)
-            logger.error('[WORKER:analytics-snapshot] Worker failed readiness check', {
-                error: err instanceof Error ? err.message : String(err),
-            })
-        })
-
-    worker.on('completed', (job) => {
-        markWorkerJobCompleted(runtimeStatus)
-        logger.info('[WORKER:analytics-snapshot] Job completed', { jobId: job.id })
+  void worker
+    .waitUntilReady()
+    .then(() => {
+      markWorkerReady(runtimeStatus);
+      logger.info("[WORKER:analytics-snapshot] Worker ready");
     })
+    .catch((err) => {
+      markWorkerFailed(runtimeStatus, err);
+      logger.error(
+        "[WORKER:analytics-snapshot] Worker failed readiness check",
+        {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
+    });
 
-    worker.on('failed', (job, err) => {
-        markWorkerJobFailed(runtimeStatus, err)
-        logger.error('[WORKER:analytics-snapshot] Job failed', {
-            jobId: job?.id,
-            error: err.message,
-            attemptsMade: job?.attemptsMade,
-        })
-    })
+  worker.on("completed", (job) => {
+    markWorkerJobCompleted(runtimeStatus);
+    logger.info("[WORKER:analytics-snapshot] Job completed", { jobId: job.id });
+  });
+
+  worker.on("failed", (job, err) => {
+    markWorkerJobFailed(runtimeStatus, err);
+    logger.error("[WORKER:analytics-snapshot] Job failed", {
+      jobId: job?.id,
+      error: err.message,
+      attemptsMade: job?.attemptsMade,
+    });
+    void handleFinalFailure(job, err);
+  });
 
   logger.info("[WORKER:analytics-snapshot] Worker started");
   return worker;
 }
 
 export async function stopAnalyticsSnapshotWorker(): Promise<void> {
-    if (worker) {
-        await worker.close()
-        worker = null
-        markWorkerStopped(runtimeStatus)
-        logger.info('[WORKER:analytics-snapshot] Worker stopped')
-    }
+  if (worker) {
+    await worker.close();
+    worker = null;
+    markWorkerStopped(runtimeStatus);
+    logger.info("[WORKER:analytics-snapshot] Worker stopped");
+  }
 }
 
 export function getAnalyticsSnapshotWorkerStatus(): WorkerRuntimeStatus {
-    return snapshotWorkerRuntimeStatus(runtimeStatus)
+  return snapshotWorkerRuntimeStatus(runtimeStatus);
 }
 
-export function setAnalyticsSnapshotSchedulerRegistered(registered: boolean): void {
-    runtimeStatus.schedulerRegistered = registered
+export function setAnalyticsSnapshotSchedulerRegistered(
+  registered: boolean,
+): void {
+  runtimeStatus.schedulerRegistered = registered;
 }

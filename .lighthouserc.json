@@ -14,6 +14,24 @@
               {
                 "resourceType": "script",
                 "budget": 300
+              },
+              {
+                "resourceType": "total",
+                "budget": 650
+              }
+            ],
+            "timings": [
+              {
+                "metric": "largest-contentful-paint",
+                "budget": 2500
+              },
+              {
+                "metric": "total-blocking-time",
+                "budget": 200
+              },
+              {
+                "metric": "cumulative-layout-shift",
+                "budget": 0.1
               }
             ]
           }
@@ -22,20 +40,30 @@
     },
     "assert": {
       "assertions": {
-        "first-contentful-paint": [
-          "error",
-          {
-            "maxNumericValue": 2000
-          }
-        ],
         "largest-contentful-paint": [
           "error",
           {
-            "maxNumericValue": 3000
+            "maxNumericValue": 2500
+          }
+        ],
+        "total-blocking-time": [
+          "error",
+          {
+            "maxNumericValue": 200
+          }
+        ],
+        "cumulative-layout-shift": [
+          "error",
+          {
+            "maxNumericValue": 0.1
           }
         ],
         "performance-budget": "error"
       }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": "./lighthouse-results"
     }
   }
 }

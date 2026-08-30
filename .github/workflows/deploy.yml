@@ -2,19 +2,110 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [staging, main]
 
 jobs:
-  deploy:
+  zap-security-gate:
+    name: Security Gate (ZAP)
+    uses: ./.github/workflows/zap-scan.yml
+
+  deploy-staging:
+    if: github.ref == 'refs/heads/staging'
+    needs: zap-security-gate
     runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.stellar-portfolio.example.com
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js for deployment metadata checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve Sentry release metadata
+        run: node scripts/sentry-metadata.mjs --deployment staging >> "$GITHUB_ENV"
+
+      - name: Validate Sentry release metadata
+        run: node scripts/sentry-metadata.mjs --validate
+
       - name: Build Docker images
         run: docker compose -f deployment/docker-compose.yml build
 
-      - name: Validate health-checked compose startup
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Terraform init
         run: |
-          docker compose -f deployment/docker-compose.yml up -d --wait backend
-          docker compose -f deployment/docker-compose.yml down -v
+          cd deployment/terraform
+          terraform init
+          terraform workspace select staging || terraform workspace new staging
+
+      - name: Terraform plan
+        run: |
+          cd deployment/terraform
+          terraform plan -var-file=staging.tfvars -out=tfplan
+
+      - name: Terraform apply
+        run: |
+          cd deployment/terraform
+          terraform apply tfplan
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    needs: zap-security-gate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://stellar-portfolio.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js for deployment metadata checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve Sentry release metadata
+        run: node scripts/sentry-metadata.mjs --deployment production >> "$GITHUB_ENV"
+
+      - name: Validate Sentry release metadata
+        run: node scripts/sentry-metadata.mjs --validate
+
+      - name: Build Docker images
+        run: docker compose -f deployment/docker-compose.yml build
+
+      - name: Validate local observability bootstrap
+        run: bash scripts/bootstrap-observability.sh
+
+      - name: Tear down observability stack
+        if: always()
+        run: docker compose -f deployment/docker-compose.yml --profile monitoring down -v
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Terraform init
+        run: |
+          cd deployment/terraform
+          terraform init
+          terraform workspace select production || terraform workspace new production
+
+      - name: Terraform plan
+        run: |
+          cd deployment/terraform
+          terraform plan -var-file=production.tfvars -out=tfplan
+
+      - name: Terraform apply
+        run: |
+          cd deployment/terraform
+          terraform apply tfplan

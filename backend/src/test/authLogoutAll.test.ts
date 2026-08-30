@@ -17,7 +17,29 @@ vi.mock('../services/authService.js', () => ({
     getAuthConfig: () => ({ enabled: true }),
     issueTokens: vi.fn(),
     refreshTokens: vi.fn(),
+    revokeDeviceSession: vi.fn(),
+    issueChallenge: vi.fn(),
+    verifyWalletSignature: vi.fn(),
     verifyAccessToken: verifyAccessTokenMock,
+}))
+
+vi.mock('../middleware/requireJwt.js', () => ({
+    requireJwt: (req: any, res: any, next: any) => {
+        const authHeader = req.headers.authorization
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return failMock(res, 401, 'UNAUTHORIZED', 'Missing or invalid Authorization header')
+        }
+        const token = authHeader.slice(7)
+        if (token === 'invalid-token') {
+            return failMock(res, 401, 'UNAUTHORIZED', 'Invalid access token')
+        }
+        const decoded = verifyAccessTokenMock(token)
+        if (!decoded) {
+            return failMock(res, 401, 'UNAUTHORIZED', 'Invalid access token')
+        }
+        req.user = { address: decoded.sub }
+        next()
+    }
 }))
 
 async function buildApp(): Promise<Express> {
