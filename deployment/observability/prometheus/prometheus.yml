@@ -34,3 +34,26 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
+
+  # Synthetic uptime probe for the WebSocket endpoint. The backend attaches a
+  # WebSocketServer to the root HTTP server, so the root URL is the externally
+  # reachable WS entrypoint and needs no authentication to complete a handshake.
+  # Probed on its own 30s interval rather than the 15s global default to keep
+  # handshake churn on the socket low while still detecting an outage inside one
+  # alert evaluation window.
+  - job_name: portfolio-websocket
+    scrape_interval: 30s
+    scrape_timeout: 15s
+    metrics_path: /probe
+    params:
+      module: [websocket]
+    static_configs:
+      - targets:
+          - http://backend:3001/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

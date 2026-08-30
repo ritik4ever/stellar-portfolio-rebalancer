@@ -7,8 +7,42 @@ This repository now includes a baseline observability stack for production debug
 - Prometheus for metrics scraping
 - Grafana for dashboards
 - Loki + Promtail for centralized log aggregation
-- Blackbox Exporter for uptime probes
+- Blackbox Exporter for uptime probes and WebSocket handshake validation
 - Alertmanager for alert routing
+
+## Blackbox uptime probes
+Prometheus scrapes the Blackbox Exporter to validate externally visible availability across the main public surfaces.
+The current deployment probes:
+
+- `http://frontend:80/` — frontend application root
+- `http://backend:3001/readiness` — backend deep readiness check
+- `http://backend:3001/health` — backend process liveness
+- `http://backend:3001/` via WebSocket handshake using `Upgrade: websocket`
+
+The blackbox configuration is stored in `deployment/observability/blackbox/blackbox.yml`, and Prometheus scrape jobs are defined in `deployment/observability/prometheus/prometheus.yml`.
+
+### Synthetic WebSocket probe
+
+WebSocket availability is measured directly rather than inferred from HTTP metrics. The `websocket` module in `blackbox.yml` issues a real RFC 6455 opening handshake — `Connection: Upgrade`, `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and a fixed `Sec-WebSocket-Key` — and only records success when the server:
+
+1. answers with status `101 Switching Protocols`,
+2. echoes an `Upgrade: websocket` response header, and
+3. returns the `Sec-WebSocket-Accept` digest derived from the probe's key.
+
+Checking the accept digest matters because a `101` alone only proves something in front of the backend agreed to switch protocols. The digest is `SHA1(key + RFC 6455 GUID)` base64-encoded, so a correct value proves the peer that answered is a real WebSocket server that read the probe's key — not a proxy or load balancer echoing a status line.
+
+The probe target is the backend root URL. `backend/src/index.ts` attaches a `WebSocketServer` to the root HTTP server, so the root URL is the externally reachable WS entrypoint and needs no authentication to complete a handshake.
+
+The `portfolio-websocket` scrape job runs the probe every 30s with a 15s timeout — its own interval rather than the 15s global default, to keep handshake churn on the socket low while still detecting an outage inside one alert evaluation window.
+
+Failures feed the existing Prometheus/Alertmanager pipeline through two rules in `prometheus/alerts.yml`:
+
+| Alert | Fires when | Severity | Notes |
+| --- | --- | --- | --- |
+| `WebSocketHandshakeFailed` | `probe_success == 0` for 5m | critical | paging route; suppressed while `BackendDown` is firing |
+| `WebSocketProbeStalled` | no `probe_success` sample for 10m | warning | warning route |
+
+`WebSocketProbeStalled` covers the blind spot where the exporter itself is down: without it, a missing probe looks identical to a healthy one.
 
 ## Backend
 
@@ -65,6 +99,7 @@ Prometheus alerts are preconfigured for:
 - backend metrics endpoint down
 - backend readiness failures
 - frontend uptime failures
+- WebSocket handshake failures and a stalled WebSocket probe
 - elevated backend 5xx rate
 - failed rebalance queue jobs
 - stale Reflector price rows observed in the last 15 minutes

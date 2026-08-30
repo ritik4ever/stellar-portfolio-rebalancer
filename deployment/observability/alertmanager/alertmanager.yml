@@ -3,10 +3,19 @@ global:
 
 route:
   receiver: default
-  group_by: ['alertname', 'service']
+  group_by: ['alertname', 'service', 'severity']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
+
+# Suppression rules: keep one incident to one page.
+inhibit_rules:
+  # The backend process being down is the root cause of every blackbox probe
+  # failure aimed at it. Page for BackendDown only, not for each dependent probe.
+  - source_matchers:
+      - alertname = BackendDown
+    target_matchers:
+      - alertname =~ "BackendReadinessFailed|WebSocketHandshakeFailed"
 
 receivers:
   - name: default
