@@ -21,6 +21,38 @@ const REQUIRED_FRONTEND_KEYS = ['VITE_API_URL']
 
 const ALLOWED_MISSING_BACKEND_KEYS = new Set([
   'DEBUG',
+  'API_URL',
+  'APP_URL',
+  'AWS_DB_SECRET_ID',
+  'AWS_REDIS_SECRET_ID',
+  'DB_HOST',
+  'DB_NAME',
+  'DB_PASSWORD',
+  'DB_PORT',
+  'DB_SECRET_ARN',
+  'DB_USER',
+  'HEALTH_PROBE_SECRET',
+  'ISSUER_METADATA_TTL_MS',
+  'ISSUER_METADATA_WARM_ACCOUNTS',
+  'JWT_CLOCK_SKEW_SEC',
+  'ORACLE_CACHE_TTL_SECONDS',
+  'RATE_LIMIT_GLOBAL_MAX',
+  'RATE_LIMIT_GLOBAL_WINDOW_MS',
+  'RATE_LIMIT_NEAR_LIMIT_RATIO',
+  'REBALANCE_DRY_RUN_BASE_FEE_STROOPS',
+  'REDIS_AUTH_TOKEN',
+  'REDIS_PASSWORD',
+  'REDIS_SECRET_ARN',
+  'SOROBAN_RPC_TIMEOUT_MS',
+  'SOROBAN_RPC_URLS',
+  'TELEGRAM_BOT_TOKEN',
+  'UNSUBSCRIBE_SECRET',
+  'USE_AWS_SECRETS_MANAGER',
+  'VITEST',
+  'ANALYTICS_RETENTION_DAYS',
+  'ANALYTICS_SNAPSHOT_RETENTION_DAYS',
+  'ANALYTICS_RAW_RETENTION_DAYS',
+  'ANALYTICS_SNAPSHOT_RAW_DAYS',
 ])
 
 function parseEnvExampleKeys(content) {
@@ -107,8 +139,8 @@ const frontendExample = readFileSync(FRONTEND_EXAMPLE_PATH, 'utf8')
 const environmentDoc = readFileSync(ENVIRONMENT_DOC_PATH, 'utf8')
 const { keys: backendExampleKeys, duplicates: backendDuplicateKeys } = parseEnvExampleKeys(backendExample)
 const { keys: frontendExampleKeys, duplicates: frontendDuplicateKeys } = parseEnvExampleKeys(frontendExample)
-const backendDocKeys = parseMarkdownEnvKeys(environmentDoc, '## Backend Variable Reference')
-const frontendDocKeys = parseMarkdownEnvKeys(environmentDoc, '## Frontend Variable Reference')
+const backendDocKeys = parseMarkdownEnvKeys(environmentDoc, '## Backend Variables')
+const frontendDocKeys = parseMarkdownEnvKeys(environmentDoc, '## Frontend Variables')
 const backendCodeKeys = collectBackendEnvKeys()
 const frontendCodeKeys = collectFrontendEnvKeys()
 
