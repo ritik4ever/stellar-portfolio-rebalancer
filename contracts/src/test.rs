@@ -2176,7 +2176,7 @@ fn test_admin_force_rebalance_bypasses_cooldown() {
     });
 
     let actual_balances = Map::new(&env);
-    client.admin_force_rebalance(&pid, &actual_balances);
+    client.admin_force_rebalance(&admin, &pid, &actual_balances);
 
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.last_rebalance, 10010);
@@ -2207,11 +2207,11 @@ fn test_admin_force_rebalance_non_admin_rejected() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "admin_force_rebalance",
-                args: (pid, actual_balances.clone()).into_val(&env),
+                args: (unauthorized.clone(), pid, actual_balances.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .admin_force_rebalance(&pid, &actual_balances);
+        .admin_force_rebalance(&unauthorized, &pid, &actual_balances);
 }
 
 #[test]
@@ -2234,7 +2234,162 @@ fn test_admin_force_rebalance_admin_success() {
     // `admin_force_rebalance` and the portfolio user auth required by the
     // inner `execute_rebalance_internal`.
     let actual_balances = Map::new(&env);
-    client.admin_force_rebalance(&pid, &actual_balances);
+    client.admin_force_rebalance(&admin, &pid, &actual_balances);
+}
+
+// ── Issue #1377: operator role, scoped to admin_force_rebalance ─────────
+
+#[test]
+fn test_operator_can_force_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert!(!client.is_operator(&operator));
+    client.add_operator(&operator);
+    assert!(client.is_operator(&operator));
+
+    let mut allocations = Map::new(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10010;
+    });
+
+    // Operator can force-rebalance without holding admin rights.
+    let actual_balances = Map::new(&env);
+    client.admin_force_rebalance(&operator, &pid, &actual_balances);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10010);
+}
+
+#[test]
+fn test_revoked_operator_rejected_from_force_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.add_operator(&operator);
+    client.remove_operator(&operator);
+    assert!(!client.is_operator(&operator));
+
+    let actual_balances = Map::new(&env);
+    let result = client.try_admin_force_rebalance(&operator, &pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn test_non_operator_rejected_from_force_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let actual_balances = Map::new(&env);
+    let result = client.try_admin_force_rebalance(&stranger, &pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+#[should_panic]
+fn test_operator_rejected_from_admin_only_upgrade() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let operator = Address::generate(&env);
+    client.add_operator(&operator);
+
+    let new_wasm_hash = env.deployer().upload_contract_wasm(&[0u8; 0] as &[u8]);
+
+    // Operators are scoped to `admin_force_rebalance` only: `queue_upgrade`
+    // still fetches the real Admin from storage and requires auth from
+    // exactly that address, so an operator-only auth mock fails here.
+    client
+        .mock_auths(&[MockAuth {
+            address: &operator,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "queue_upgrade",
+                args: (new_wasm_hash.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .queue_upgrade(&new_wasm_hash);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_rejected_from_admin_only_set_fee_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let operator = Address::generate(&env);
+    client.add_operator(&operator);
+
+    let config = FeeConfig {
+        platform_name: String::from_str(&env, "test"),
+        fee_bps: 25,
+        fee_recipient: Address::generate(&env),
+        enabled: true,
+    };
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &operator,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_fee_config",
+                args: (config.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_fee_config(&config);
 }
 
 #[test]
@@ -3586,6 +3741,102 @@ fn test_timelock_upgrade_post_delay_success() {
         })
         .collect();
     assert!(!upgrade_events.is_empty(), "upgraded event should be emitted");
+}
+
+// ── Issue #1378: schema-version-aware migrate_storage() in upgrade() ────
+
+#[test]
+fn test_fresh_initialize_starts_at_current_schema_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.storage_schema_version(), CURRENT_STORAGE_SCHEMA_VERSION);
+}
+
+#[test]
+fn test_execute_upgrade_migrates_legacy_portfolio_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Simulate a contract that predates both the strategy-aware portfolio
+    // schema and storage-schema versioning: downgrade the just-created
+    // PortfolioV2 entry to the old LegacyPortfolio shape under the old key,
+    // and reset SchemaVersion to "never migrated".
+    env.as_contract(&contract_id, || {
+        let current: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PortfolioV2(pid))
+            .unwrap();
+        let legacy = LegacyPortfolio {
+            user: current.user,
+            target_allocations: current.target_allocations,
+            current_balances: current.current_balances,
+            asset_decimals: current.asset_decimals,
+            rebalance_threshold: current.rebalance_threshold,
+            slippage_tolerance: current.slippage_tolerance,
+            slippage_policy_version: current.slippage_policy_version,
+            last_rebalance: current.last_rebalance,
+            total_value: current.total_value,
+            is_active: current.is_active,
+            pause_reason: current.pause_reason,
+            circuit_breaker_config: current.circuit_breaker_config,
+            global_max_slippage_bps: current.global_max_slippage_bps,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(pid), &legacy);
+        env.storage().persistent().remove(&DataKey::PortfolioV2(pid));
+        env.storage().instance().remove(&DataKey::SchemaVersion);
+    });
+
+    assert_eq!(client.storage_schema_version(), 0);
+
+    // Queue + execute an upgrade -- migrate_storage() should run as part of
+    // execute_upgrade, before any new functionality is exposed.
+    let new_wasm_hash = env.deployer().upload_contract_wasm(&[0u8; 0] as &[u8]);
+    client.queue_upgrade(&new_wasm_hash);
+    env.ledger().with_mut(|li| {
+        li.timestamp = TIMELOCK_DELAY_SECONDS + 1;
+    });
+    client.execute_upgrade();
+
+    // schema_version is incremented and persisted post-migration.
+    assert_eq!(client.storage_schema_version(), CURRENT_STORAGE_SCHEMA_VERSION);
+
+    // Old-format data was migrated and is readable post-upgrade -- checked
+    // directly against storage (not via a getter that itself lazily
+    // migrates on read) to prove migrate_storage() did the work eagerly.
+    env.as_contract(&contract_id, || {
+        assert!(
+            !env.storage().persistent().has(&DataKey::Portfolio(pid)),
+            "legacy key should have been removed by migration"
+        );
+        let migrated: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PortfolioV2(pid))
+            .expect("PortfolioV2 should exist after migration");
+        assert_eq!(migrated.user, user);
+        assert_eq!(migrated.strategy, StrategyType::Threshold);
+    });
 }
 
 #[test]

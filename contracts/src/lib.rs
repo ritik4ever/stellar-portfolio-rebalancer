@@ -17,6 +17,7 @@ mod slippage;
 mod stop_loss;
 mod strategies;
 mod templates;
+mod upgrade;
 #[cfg(all(test, feature = "testutils"))]
 mod test;
 #[cfg(all(test, feature = "testutils"))]
@@ -90,7 +91,19 @@ impl PortfolioRebalancer {
             .instance()
             .set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
+        // A freshly initialized contract has no legacy storage to migrate,
+        // so it starts on the current schema directly.
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &CURRENT_STORAGE_SCHEMA_VERSION);
         Ok(())
+    }
+
+    /// Currently persisted storage schema version (see
+    /// `CURRENT_STORAGE_SCHEMA_VERSION`), advanced automatically by
+    /// `execute_upgrade` via `migrate_storage`.
+    pub fn storage_schema_version(env: Env) -> u32 {
+        upgrade::current_schema_version(&env)
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -468,14 +481,57 @@ impl PortfolioRebalancer {
         Ok(results)
     }
 
+    /// Force-rebalance a portfolio, bypassing the cooldown. Callable by the
+    /// contract Admin or by any registered Operator (see `add_operator`) --
+    /// `caller` must be one of the two, and must authorize the call itself.
     pub fn admin_force_rebalance(
         env: Env,
+        caller: Address,
         portfolio_id: u64,
         actual_balances: Map<Address, i128>,
     ) -> Result<(), Error> {
+        caller.require_auth();
+
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(admin))
+        if caller != admin && !Self::is_operator(env.clone(), caller.clone()) {
+            return Err(Error::Unauthorized);
+        }
+
+        Self::execute_rebalance_internal(&env, portfolio_id, actual_balances, true, Some(caller))
+    }
+
+    /// Admin-only: register `operator` as a scoped operator, allowed to call
+    /// `admin_force_rebalance` but nothing else that's admin-only (e.g.
+    /// `upgrade`, `set_fee_config` remain Admin-only).
+    pub fn add_operator(env: Env, operator: Address) {
+        require_admin(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Operator(operator.clone()), &true);
+        env.events().publish(
+            (Symbol::new(&env, "operator_added"),),
+            operator,
+        );
+    }
+
+    /// Admin-only: revoke a previously registered operator.
+    pub fn remove_operator(env: Env, operator: Address) {
+        require_admin(&env);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Operator(operator.clone()));
+        env.events().publish(
+            (Symbol::new(&env, "operator_removed"),),
+            operator,
+        );
+    }
+
+    /// Whether `address` is currently a registered operator.
+    pub fn is_operator(env: Env, address: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Operator(address))
+            .unwrap_or(false)
     }
 
     pub fn set_emergency_stop(env: Env, stop: bool) {
@@ -769,7 +825,11 @@ impl PortfolioRebalancer {
             .instance()
             .set(&DataKey::WasmHash, &queued.new_wasm_hash);
         env.storage().instance().remove(&DataKey::QueuedUpgrade);
-        
+
+        // Bring storage up to the current schema before any new
+        // functionality introduced by this upgrade is exposed.
+        upgrade::migrate_storage(&env);
+
         env.events().publish(
             ("portfolio", "upgraded"),
             UpgradeEvent {
