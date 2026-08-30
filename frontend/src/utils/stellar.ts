@@ -4,15 +4,23 @@ declare global {
             requestAccess(): Promise<{ publicKey: string }>
             signTransaction(xdr: string, options?: any): Promise<{ signedTxXdr: string }>
             isConnected(): Promise<boolean>
+            getNetworkDetails(): Promise<{ network: string; networkPassphrase: string }>
         }
         rabet?: {
             connect(): Promise<{ publicKey: string }>
             sign(xdr: string, network?: string): Promise<{ signedXDR: string }>
             isConnected(): Promise<boolean>
+            getNetwork(): Promise<string | { network: string; networkPassphrase?: string }>
         }
         xBull?: {
             connect(): Promise<{ publicKey: string }>
             signTransaction(xdr: string): Promise<{ signedXDR: string }>
+            getNetwork(): Promise<string | { network: string; networkPassphrase?: string }>
+        }
+        lobstr?: {
+            requestAccess(): Promise<{ publicKey: string }>
+            signTransaction(xdr: string, opts?: { networkPassphrase?: string }): Promise<string>
+            isConnected(): Promise<boolean>
         }
     }
 }

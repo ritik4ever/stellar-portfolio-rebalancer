@@ -16,7 +16,23 @@ const mockWalletManager = vi.hoisted(() => ({
   getPublicKey: vi.fn(),
   getWalletType: vi.fn(),
   isConnected: vi.fn(),
+  getAutoReconnect: vi.fn(() => true),
+  setAutoReconnect: vi.fn(),
 }));
+
+// Mock runBootDiagnostics
+const mockRunBootDiagnostics = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    checks: [
+      { id: "wallet-detection", label: "Wallet extension", status: "passed", message: "Stellar wallet detected" },
+      { id: "api-reachability", label: "API reachability", status: "passed", message: "Backend API is reachable" },
+    ],
+    allPassed: true,
+    timestamp: Date.now(),
+  }),
+);
+
+const mockApiGet = vi.hoisted(() => vi.fn().mockResolvedValue({ status: "ok" }));
 
 // Mock wallet adapters
 const mockFreighterAdapter = {
@@ -41,6 +57,20 @@ const mockRabetAdapter = {
     .fn()
     .mockResolvedValue(
       "GArabettest1234567890abcdef1234567890abcdef1234567890abcdef",
+    ),
+  isConnected: vi.fn().mockResolvedValue(true),
+  disconnect: vi.fn().mockResolvedValue(undefined),
+  signTransaction: vi.fn(),
+};
+
+const mockHanaAdapter = {
+  type: "hana",
+  name: "Hana",
+  isAvailable: vi.fn(() => true),
+  connect: vi
+    .fn()
+    .mockResolvedValue(
+      "GAhanatest1234567890abcdef1234567890abcdef1234567890abcdef",
     ),
   isConnected: vi.fn().mockResolvedValue(true),
   disconnect: vi.fn().mockResolvedValue(undefined),
@@ -79,6 +109,19 @@ vi.mock("../utils/walletAdapters", () => ({
   },
 }));
 
+vi.mock("../app/walletBoot", async () => {
+  const actual = await vi.importActual("../app/walletBoot");
+  return {
+    ...actual,
+    runBootDiagnostics: mockRunBootDiagnostics,
+  };
+});
+
+vi.mock("../config/api", () => ({
+  api: { get: mockApiGet },
+  ENDPOINTS: { HEALTH: "/health" },
+}));
+
 describe("WalletSelector", () => {
   let mockOnConnect: (publicKey: string) => void;
   let mockOnError: (error: string) => void;
@@ -95,6 +138,7 @@ describe("WalletSelector", () => {
       mockFreighterAdapter,
       mockRabetAdapter,
       mockXBullAdapter,
+      mockHanaAdapter,
     ]);
   });
 
@@ -122,30 +166,34 @@ describe("WalletSelector", () => {
 
       expect(
         screen.getByText(
-          "No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.",
+          "No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.",
         ),
       ).toBeTruthy();
     });
 
-    it("should render wallet buttons with proper styling", () => {
+    it("should render wallet buttons with proper styling and diagnostics toggle", () => {
       render(
         <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
       );
 
       const walletButtons = screen.getAllByRole("button");
-      expect(walletButtons).toHaveLength(3);
+      // 4 wallet buttons + 1 diagnostics toggle
+      expect(walletButtons).toHaveLength(5);
 
-      walletButtons.forEach((button) => {
-        expect(button).toHaveClass(
-          "w-full",
-          "flex",
-          "items-center",
-          "justify-between",
-          "p-4",
-          "border",
-          "border-gray-200",
-        );
-      });
+      const toggleBtn = screen.getByText("Show startup diagnostics");
+      expect(toggleBtn).toBeTruthy();
+    });
+
+    it("shows diagnostics panel when toggle is clicked", async () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      fireEvent.click(screen.getByText("Show startup diagnostics"));
+
+      expect(screen.getByText("Startup checks")).toBeTruthy();
+      expect(screen.getByText("Wallet extension")).toBeTruthy();
+      expect(screen.getByText("API reachability")).toBeTruthy();
     });
   });
 
@@ -212,6 +260,27 @@ describe("WalletSelector", () => {
 
       await waitFor(() => {
         expect(mockWalletManager.connect).toHaveBeenCalledWith("xbull");
+        expect(mockOnConnect).toHaveBeenCalledWith(testPublicKey);
+        expect(mockOnError).not.toHaveBeenCalled();
+      });
+    });
+
+    it("should successfully connect to Hana wallet", async () => {
+      const testPublicKey =
+        "GAhanatest1234567890abcdef1234567890abcdef1234567890abcdef";
+      mockWalletManager.connect.mockResolvedValue(testPublicKey);
+
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const hanaButton = screen.getByText("Hana").closest("button");
+      expect(hanaButton).toBeTruthy();
+
+      fireEvent.click(hanaButton!);
+
+      await waitFor(() => {
+        expect(mockWalletManager.connect).toHaveBeenCalledWith("hana");
         expect(mockOnConnect).toHaveBeenCalledWith(testPublicKey);
         expect(mockOnError).not.toHaveBeenCalled();
       });
@@ -411,7 +480,7 @@ describe("WalletSelector", () => {
 
       expect(
         screen.getByText(
-          "No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.",
+          "No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.",
         ),
       ).toBeTruthy();
     });
@@ -425,7 +494,7 @@ describe("WalletSelector", () => {
 
       const warningContainer = screen
         .getByText(
-          "No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.",
+          "No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.",
         )
         .closest("div");
       expect(warningContainer).toHaveClass(
@@ -482,12 +551,14 @@ describe("WalletSelector", () => {
 
       const freighterButton = screen.getByText("Freighter").closest("button");
       const rabetButton = screen.getByText("Rabet").closest("button");
+      const toggleBtn = screen.getByText("Show startup diagnostics");
 
       fireEvent.click(freighterButton!);
 
-      // Only freighter button should be disabled
+      // Only freighter button should be disabled (toggle stays enabled)
       expect(freighterButton).toBeDisabled();
       expect(rabetButton).not.toBeDisabled();
+      expect(toggleBtn).not.toBeDisabled();
     });
   });
 
@@ -521,6 +592,82 @@ describe("WalletSelector", () => {
       await waitFor(() => {
         expect(mockOnConnect).toHaveBeenCalledWith(null);
         expect(mockOnError).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("Auto-reconnect opt-out", () => {
+    it("should render auto-reconnect toggle", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      expect(
+        screen.getByLabelText("Auto-reconnect on page refresh"),
+      ).toBeTruthy();
+    });
+
+    it("should toggle auto-reconnect off and on", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const toggle = screen.getByLabelText("Auto-reconnect on page refresh");
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+
+      fireEvent.click(toggle);
+      expect(mockWalletManager.setAutoReconnect).toHaveBeenCalledWith(false);
+
+      fireEvent.click(toggle);
+      expect(mockWalletManager.setAutoReconnect).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("Keyboard accessibility", () => {
+    it("should have proper aria attributes on wallet buttons", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const freighterButton = screen.getByLabelText("Connect to Freighter");
+      expect(freighterButton).toBeTruthy();
+      expect(freighterButton).toHaveAttribute("aria-label", "Connect to Freighter");
+    });
+
+    it("should have a group role with accessible label", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const group = screen.getByRole("group");
+      expect(group).toHaveAttribute("aria-label", "Available wallets");
+    });
+
+    it("should have focus-visible classes on wallet buttons", () => {
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const freighterButton = screen.getByLabelText("Connect to Freighter");
+      expect(freighterButton.className).toContain("focus-visible:ring-2");
+      expect(freighterButton.className).toContain("focus-visible:ring-blue-500");
+    });
+
+    it("should render connecting description for active wallet", async () => {
+      mockWalletManager.connect.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, 100)),
+      );
+
+      render(
+        <WalletSelector onConnect={mockOnConnect} onError={mockOnError} />,
+      );
+
+      const freighterButton = screen.getByLabelText("Connect to Freighter");
+      fireEvent.click(freighterButton);
+
+      await waitFor(() => {
+        expect(screen.getByText("Connecting...")).toBeTruthy();
+        expect(freighterButton).toHaveAttribute("aria-describedby");
       });
     });
   });

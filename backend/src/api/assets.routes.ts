@@ -4,41 +4,55 @@ import {
     AssetRegistryConflictError,
     AssetRegistryValidationError
 } from '../services/assetRegistryValidation.js'
-import { rateLimitMonitor } from '../services/rateLimitMonitor.js'
+import { rateLimitMonitor, type RateLimitDashboardQuery } from '../services/rateLimitMonitor.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { adminRateLimiter } from '../middleware/rateLimit.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest } from '../middleware/validate.js'
-import { adminAddAssetSchema, adminPatchAssetSchema } from './validation.js'
+import {
+    adminAddAssetSchema,
+    adminPatchAssetSchema,
+    assetsListQuerySchema,
+    assetVerificationDecisionSchema,
+    submitUnlistedAssetSchema
+} from './validation.js'
+import { AssetVerificationError } from '../services/assetRegistryService.js'
+import { requireJwt } from '../middleware/requireJwt.js'
 import { logger, logAudit } from '../utils/logger.js'
-import { getErrorObject, getErrorMessage, parseOptionalBoolean } from '../utils/helpers.js'
+import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
+import { schedulePriceHistoryBackfill } from '../queue/workers/priceHistoryWorker.js'
 
 export const assetsRouter = Router()
 
-/** Public: list enabled assets for portfolio setup and frontend */
+/**
+ * Public: browse the asset catalog with pagination, sorting, and
+ * issuer/symbol filtering. Defaults to enabled assets only, sorted by symbol.
+ */
 assetsRouter.get('/assets', (req: Request, res: Response) => {
     try {
-        const enabledOnly = parseOptionalBoolean(req.query.enabledOnly) !== false
-        const queryCode = typeof req.query.code === 'string' ? req.query.code.trim().toUpperCase() : ''
-        const querySearch = typeof req.query.search === 'string' ? req.query.search.trim().toUpperCase() : ''
-        const queryQ = typeof req.query.q === 'string' ? req.query.q.trim().toUpperCase() : ''
-        const term = queryCode || querySearch || queryQ
-        const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1)
-        const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '20'), 10) || 20))
-
-        let assets = assetRegistryService.list(enabledOnly)
-        if (term) {
-            assets = assets.filter(asset =>
-                asset.symbol.includes(term) || asset.name.toUpperCase().includes(term)
-            )
+        const parsed = assetsListQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+            const message = parsed.error.issues
+                .map(issue => `${issue.path.join('.') || 'query'}: ${issue.message}`)
+                .join('; ')
+            logger.warn('[WARN] List assets rejected invalid query', { query: req.query, message })
+            return fail(res, 400, 'VALIDATION_ERROR', message)
         }
 
-        const total = assets.length
-        const start = (page - 1) * limit
-        const pagedAssets = assets.slice(start, start + limit)
+        const { enabledOnly, code, search, q, issuer, sortBy, order, page, limit } = parsed.data
 
-        return ok(res, { assets: pagedAssets, page, limit, total })
+        const result = assetRegistryService.query({
+            enabledOnly: enabledOnly !== false,
+            search: code || search || q,
+            issuer,
+            sortBy,
+            order,
+            page,
+            limit
+        })
+
+        return ok(res, result)
     } catch (error) {
         logger.error('[ERROR] List assets failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
@@ -60,6 +74,94 @@ assetsRouter.get('/assets/:id', (req: Request, res: Response) => {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
+
+// ── issuer verification workflow (#1412) ──────────────────────────────────────
+
+/**
+ * User: submit an unlisted asset for issuer verification.
+ * The asset is created pending and disabled — never silently trusted.
+ */
+assetsRouter.post(
+    '/assets/submissions',
+    requireJwt,
+    validateRequest(submitUnlistedAssetSchema),
+    async (req: Request, res: Response) => {
+        try {
+            const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
+            const asset = await assetRegistryService.submitForVerification(symbol, name, {
+                contractAddress,
+                issuerAccount,
+                coingeckoId,
+                submittedBy: req.user?.address
+            })
+
+            logAudit('asset_verification_submitted', {
+                symbol: asset.symbol,
+                issuerAccount: asset.issuerAccount,
+                submittedBy: req.user?.address
+            })
+
+            return ok(res, { asset }, { status: 201 })
+        } catch (error) {
+            if (error instanceof AssetRegistryConflictError) {
+                return fail(res, 409, 'CONFLICT', getErrorMessage(error))
+            }
+            if (error instanceof AssetRegistryValidationError) {
+                return fail(res, 400, 'VALIDATION_ERROR', getErrorMessage(error))
+            }
+            logger.error('[ERROR] Asset verification submission failed', { error: getErrorObject(error) })
+            return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        }
+    }
+)
+
+/** Admin: list submissions awaiting a verification decision. */
+assetsRouter.get('/admin/assets/submissions', requireAdmin, (_req: Request, res: Response) => {
+    try {
+        const submissions = assetRegistryService.listPendingVerifications()
+        return ok(res, { submissions, count: submissions.length })
+    } catch (error) {
+        logger.error('[ERROR] Listing asset submissions failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: approve or reject a pending submission. */
+assetsRouter.post(
+    '/admin/assets/:symbol/verification',
+    requireAdmin,
+    validateRequest(assetVerificationDecisionSchema),
+    (req: Request, res: Response) => {
+        try {
+            const { decision, notes } = req.body as { decision: 'approve' | 'reject'; notes?: string }
+            const reviewer = req.adminPublicKey ?? 'unknown'
+
+            const asset = decision === 'approve'
+                ? assetRegistryService.approveVerification(req.params.symbol, reviewer, notes)
+                : assetRegistryService.rejectVerification(req.params.symbol, reviewer, notes)
+
+            logAudit(`asset_verification_${decision}d`, {
+                symbol: asset.symbol,
+                reviewedBy: reviewer,
+                notes
+            })
+
+            return ok(res, { asset })
+        } catch (error) {
+            if (error instanceof AssetVerificationError) {
+                const notFound = getErrorMessage(error).includes('not found')
+                return fail(
+                    res,
+                    notFound ? 404 : 409,
+                    notFound ? 'NOT_FOUND' : 'CONFLICT',
+                    getErrorMessage(error)
+                )
+            }
+            logger.error('[ERROR] Asset verification decision failed', { error: getErrorObject(error) })
+            return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        }
+    }
+)
 
 /** Admin: list all assets (including disabled) */
 assetsRouter.get('/admin/assets', requireAdmin, (req: Request, res: Response) => {
@@ -93,11 +195,54 @@ assetsRouter.get('/admin/rate-limits/metrics', requireAdmin, (req: Request, res:
     }
 })
 
+/**
+ * Admin: combined per-IP + per-API-key rate limit dashboard.
+ *
+ * Query params:
+ *   type     — ip | apiKey | all           (default: all)
+ *   status   — throttled | near-limit | ok | at-risk | all  (default: all)
+ *   search   — substring match on the identifier
+ *   page     — 1-based page number         (default: 1)
+ *   pageSize — 1..200                      (default: 25)
+ *
+ * Throttled and near-limit identifiers are also surfaced in `attention`
+ * regardless of the current page.
+ */
+assetsRouter.get('/admin/rate-limits/dashboard', requireAdmin, (req: Request, res: Response) => {
+    try {
+        const type = (req.query.type as string | undefined)?.toLowerCase()
+        const status = (req.query.status as string | undefined)?.toLowerCase()
+
+        const VALID_TYPES = ['ip', 'apikey', 'all']
+        const VALID_STATUSES = ['ok', 'near-limit', 'throttled', 'at-risk', 'all']
+
+        if (type && !VALID_TYPES.includes(type)) {
+            return fail(res, 400, 'VALIDATION_ERROR', `Invalid type. Use one of: ip, apiKey, all.`)
+        }
+        if (status && !VALID_STATUSES.includes(status)) {
+            return fail(res, 400, 'VALIDATION_ERROR', `Invalid status. Use one of: ${VALID_STATUSES.join(', ')}.`)
+        }
+
+        const dashboard = rateLimitMonitor.getRateLimitDashboard({
+            type: type === 'apikey' ? 'apiKey' : (type as 'ip' | 'all' | undefined),
+            status: status as RateLimitDashboardQuery['status'],
+            search: req.query.search as string | undefined,
+            page: req.query.page ? Number(req.query.page) : undefined,
+            pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+        })
+
+        return ok(res, dashboard)
+    } catch (error) {
+        logger.error('[ERROR] Admin rate limit dashboard failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
 /** Admin: add asset */
-assetsRouter.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
+assetsRouter.post('/admin/assets', requireAdmin, idempotencyMiddleware, validateRequest(adminAddAssetSchema), async (req: Request, res: Response) => {
     try {
         const { symbol, name, contractAddress, issuerAccount, coingeckoId } = req.body
-        assetRegistryService.add(
+        await assetRegistryService.add(
             symbol,
             name,
             {
@@ -108,6 +253,9 @@ assetsRouter.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMi
         )
         const parsedSymbol =
             typeof symbol === 'string' ? symbol.trim().toUpperCase() : ''
+        if (parsedSymbol) {
+            void schedulePriceHistoryBackfill(parsedSymbol)
+        }
         const asset = assetRegistryService.getBySymbol(parsedSymbol)
         if (asset) {
             const auditFields: Record<string, unknown> = {
@@ -136,7 +284,7 @@ assetsRouter.post('/admin/assets', requireAdmin, adminRateLimiter, idempotencyMi
 })
 
 /** Admin: remove asset */
-assetsRouter.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+assetsRouter.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
         if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
@@ -163,16 +311,16 @@ assetsRouter.delete('/admin/assets/:symbol', requireAdmin, adminRateLimiter, asy
     }
 })
 
-/** Admin: enable/disable asset */
-assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idempotencyMiddleware, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
+/** Admin: patch asset attributes */
+assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
     try {
         const symbol = req.params.symbol
-        const { enabled } = req.body
+        const { enabled, quarantined } = req.body
         const prior = assetRegistryService.getBySymbol(symbol)
-        const updated = assetRegistryService.setEnabled(symbol, enabled)
-        if (!updated) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
-        const asset = assetRegistryService.getBySymbol(symbol)
-        if (prior) {
+        if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        if (enabled !== undefined) {
+            assetRegistryService.setEnabled(symbol, enabled)
             logAudit('asset_registry_asset_updated', {
                 domain: 'asset_registry',
                 actorPublicKey: req.adminPublicKey,
@@ -182,9 +330,65 @@ assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, idem
                 newValue: enabled
             })
         }
+
+        if (quarantined !== undefined) {
+            assetRegistryService.setQuarantined(symbol, quarantined)
+            logAudit('asset_registry_asset_updated', {
+                domain: 'asset_registry',
+                actorPublicKey: req.adminPublicKey,
+                symbol: prior.symbol,
+                field: 'quarantined',
+                previousValue: prior.isQuarantined,
+                newValue: quarantined
+            })
+        }
+
+        const asset = assetRegistryService.getBySymbol(symbol)
         return ok(res, { asset })
     } catch (error) {
-        logger.error('[ERROR] Admin set asset enabled failed', { error: getErrorObject(error) })
+        logger.error('[ERROR] Admin set asset attributes failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: refresh specific asset source */
+assetsRouter.post('/admin/assets/:symbol/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const symbol = req.params.symbol
+        const prior = assetRegistryService.getBySymbol(symbol)
+        if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
+
+        const success = await assetRegistryService.refreshAssetSource(symbol)
+        const asset = assetRegistryService.getBySymbol(symbol)
+
+        logAudit('asset_registry_source_refreshed', {
+            domain: 'asset_registry',
+            actorPublicKey: req.adminPublicKey,
+            symbol,
+            success
+        })
+
+        return ok(res, { symbol, success, asset })
+    } catch (error) {
+        logger.error('[ERROR] Admin refresh asset failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Admin: batch refresh all asset sources */
+assetsRouter.post('/admin/assets/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        const results = await assetRegistryService.refreshAllAssetSources()
+
+        logAudit('asset_registry_batch_refreshed', {
+            domain: 'asset_registry',
+            actorPublicKey: req.adminPublicKey,
+            count: Object.keys(results).length
+        })
+
+        return ok(res, { results })
+    } catch (error) {
+        logger.error('[ERROR] Admin batch refresh failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

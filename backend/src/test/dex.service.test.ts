@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Horizon, Asset, Networks } from "@stellar/stellar-sdk";
+import { Horizon, Asset, Account, Networks, Keypair } from "@stellar/stellar-sdk";
+
+vi.mock("../utils/logger.js", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 import {
   StellarDEXService,
   DEXTradeRequest,
   DEXTradeExecutionResult,
 } from "../services/dex.js";
 import { Dec } from "../utils/decimal.js";
+import { logger } from "../utils/logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock types and helpers
@@ -535,7 +541,205 @@ describe("StellarDEXService", () => {
     });
   });
 
-  // ── Price limit calculation tests ────────────────────────────────────────
+  // ── ExecutionExplanation tests ───────────────────────────────────────────
+
+  describe("ExecutionExplanation in executeRebalanceTrades", () => {
+    const MOCK_KEYPAIR = Keypair.random();
+
+    function setupOrderbookMock(spreadBps: number, liquidityAmount: number) {
+      const bid = 0.185;
+      const ask = bid / (1 - spreadBps / 10000);
+      const orderbook = createOrderbook(
+        [{ price: bid, amount: liquidityAmount }],
+        [{ price: ask, amount: liquidityAmount }],
+      );
+      const mockCall = vi.fn().mockResolvedValue(orderbook);
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: mockCall,
+      } as any);
+    }
+
+    it("happy path: explanation has correct shape and rationale", async () => {
+      setupOrderbookMock(50, 5000);
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
+        id: MOCK_KEYPAIR.publicKey(),
+        sequence: "1",
+        incrementSequenceNumber: () => {},
+      } as any);
+      vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({ hash: "abc123" } as any);
+      vi.spyOn(service["server"], "offers").mockReturnValue({
+        forAccount: () => ({ limit: () => ({ call: vi.fn().mockResolvedValue({ records: [] }) }) }),
+      } as any);
+      vi.spyOn(service as any, "tryGetAverageTradePrice").mockResolvedValue(0.185);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "t1", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { rollbackOnFailure: false }
+      );
+
+      expect(result.explanation).toBeDefined();
+      expect(typeof result.explanation.routeLength).toBe("number");
+      expect(typeof result.explanation.estimatedSlippage).toBe("number");
+      expect(Array.isArray(result.explanation.skippedAlternatives)).toBe(true);
+      expect(result.explanation.rationale.length).toBeGreaterThan(0);
+    });
+
+    it("failure case: explanation includes failureReason when spread exceeds max", async () => {
+      setupOrderbookMock(2000, 5000); // 2000 bps spread
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "t1", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { maxSpreadBps: 100, rollbackOnFailure: false }
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.explanation.failureReason).toBeDefined();
+      expect(result.explanation.failureReason).toContain("bps");
+      expect(result.explanation.rationale).toBeTruthy();
+    });
+  });
+
+  // ── Rollback on partial multi-leg failure (#1380) ────────────────────────
+
+  describe("Rollback on partial multi-leg failure", () => {
+    const MOCK_KEYPAIR = Keypair.random();
+
+    function tightOrderbook() {
+      return createOrderbook(
+        [{ price: 0.185, amount: 5000 }],
+        [{ price: 0.1855, amount: 5000 }],
+      );
+    }
+
+    function wideOrderbook() {
+      return createOrderbook(
+        [{ price: 0.00002, amount: 1000 }],
+        [{ price: 0.00005, amount: 1000 }],
+      );
+    }
+
+    function setupCommonMocks() {
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+      vi.spyOn(service["server"], "loadAccount").mockImplementation(
+        async () => new Account(MOCK_KEYPAIR.publicKey(), "1") as any,
+      );
+      vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({
+        hash: "tx-hash",
+      } as any);
+      vi.spyOn(service["server"], "offers").mockReturnValue({
+        forAccount: () => ({
+          limit: () => ({ call: vi.fn().mockResolvedValue({ records: [] }) }),
+        }),
+      } as any);
+      vi.spyOn(service as any, "tryGetAverageTradePrice").mockResolvedValue(
+        undefined,
+      );
+    }
+
+    // Every pair resolves to a healthy orderbook, except USDC->BTC which is
+    // deliberately too wide to clear `maxSpreadBps` -- simulating the second
+    // leg of a three-leg rebalance failing after the first already executed.
+    function mockPerPairOrderbook() {
+      vi.spyOn(service["server"], "orderbook").mockImplementation(((
+        selling: Asset,
+        buying: Asset,
+      ) => {
+        const sellCode = selling.isNative() ? "XLM" : selling.getCode();
+        const buyCode = buying.isNative() ? "XLM" : buying.getCode();
+        const isWideLeg = sellCode === "USDC" && buyCode === "BTC";
+        return {
+          call: vi
+            .fn()
+            .mockResolvedValue(isWideLeg ? wideOrderbook() : tightOrderbook()),
+        } as any;
+      }) as any);
+    }
+
+    it("rolls back the successfully executed first leg when the second of three legs fails", async () => {
+      setupCommonMocks();
+      mockPerPairOrderbook();
+
+      const trades: DEXTradeRequest[] = [
+        { tradeId: "leg-1", fromAsset: "XLM", toAsset: "USDC", amount: 100 },
+        { tradeId: "leg-2", fromAsset: "USDC", toAsset: "BTC", amount: 50 },
+        { tradeId: "leg-3", fromAsset: "BTC", toAsset: "XLM", amount: 1 },
+      ];
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        trades,
+        { maxSpreadBps: 200 },
+      );
+
+      expect(result.status).toBe("failed");
+      // The loop stops at the first failure, so the third leg is never attempted.
+      expect(result.executedTrades.map((t) => t.tradeId)).toEqual(["leg-1"]);
+      expect(result.failedTrades.map((t) => t.tradeId)).toEqual(["leg-2"]);
+
+      // Compensation ran for the leg that had already succeeded, rather than
+      // leaving the portfolio silently partially rebalanced.
+      expect(result.rollback.attempted).toBe(true);
+      expect(result.rollback.success).toBe(true);
+      expect(result.rollback.rolledBackTrades).toBe(1);
+      expect(result.executedTrades[0].rolledBack).toBe(true);
+      expect(result.executedTrades[0].rollbackTxHash).toBeDefined();
+    });
+
+    it("logs rebalance_partial_failure capturing which legs succeeded and which failed", async () => {
+      setupCommonMocks();
+      mockPerPairOrderbook();
+
+      const trades: DEXTradeRequest[] = [
+        { tradeId: "leg-1", fromAsset: "XLM", toAsset: "USDC", amount: 100 },
+        { tradeId: "leg-2", fromAsset: "USDC", toAsset: "BTC", amount: 50 },
+      ];
+
+      await service.executeRebalanceTrades(MOCK_KEYPAIR.publicKey(), trades, {
+        maxSpreadBps: 200,
+      });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        "[DEX] rebalance_partial_failure",
+        expect.objectContaining({
+          succeededLegs: expect.arrayContaining([
+            expect.objectContaining({ tradeId: "leg-1" }),
+          ]),
+          failedLegs: expect.arrayContaining([
+            expect.objectContaining({ tradeId: "leg-2" }),
+          ]),
+        }),
+      );
+    });
+
+    it("does not attempt rollback or log a partial failure when the single leg that fails never executed anything", async () => {
+      setupCommonMocks();
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: vi.fn().mockResolvedValue(wideOrderbook()),
+      } as any);
+      (logger.warn as any).mockClear();
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "leg-1", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { maxSpreadBps: 200 },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.executedTrades).toEqual([]);
+      expect(result.rollback.attempted).toBe(false);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        "[DEX] rebalance_partial_failure",
+        expect.anything(),
+      );
+    });
+  });
 
   describe("Price limit calculations", () => {
     it("should calculate correct price limit for various slippage tolerances", () => {
@@ -564,6 +768,74 @@ describe("StellarDEXService", () => {
       const referencePrice = 0.185;
       const limit = Dec.priceLimit(referencePrice, 10000);
       expect(limit).toBeCloseTo(0, 7);
+    });
+  });
+
+  // ── Rebalance dry-run assessment (assessRebalanceTrades) ─────────────────
+
+  describe("assessRebalanceTrades", () => {
+    const healthyOrderbook = createOrderbook(
+      [{ price: 0.185, amount: 5000 }],
+      [{ price: 0.186, amount: 4000 }],
+    );
+
+    beforeEach(() => {
+      const mockOrderbookCall = vi.fn().mockResolvedValue(healthyOrderbook);
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: mockOrderbookCall,
+      } as any);
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+    });
+
+    it("returns executable trades and fee estimate for valid requests", async () => {
+      const trades: DEXTradeRequest[] = [
+        {
+          tradeId: "dry-run-1",
+          fromAsset: "XLM",
+          toAsset: "USDC",
+          amount: 100,
+        },
+      ];
+
+      const result = await service.assessRebalanceTrades(trades, {
+        maxSpreadBps: 500,
+        minLiquidityCoverage: 0.5,
+      });
+
+      expect(result.status).toBe("success");
+      expect(result.executableTrades).toHaveLength(1);
+      expect(result.skippedTrades).toHaveLength(0);
+      expect(result.executableTrades[0]?.status).toBe("executable");
+      expect(result.executableTrades[0]?.estimatedReceivedAmount).toBeGreaterThan(0);
+      expect(result.totalEstimatedFeeXLM).toBeGreaterThanOrEqual(0);
+    });
+
+    it("skips trades when spread exceeds tolerance", async () => {
+      const wideSpread = createOrderbook(
+        [{ price: 0.17, amount: 1000 }],
+        [{ price: 0.2, amount: 1000 }],
+      );
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: vi.fn().mockResolvedValue(wideSpread),
+      } as any);
+
+      const result = await service.assessRebalanceTrades(
+        [{ tradeId: "dry-run-2", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { maxSpreadBps: 100 },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.executableTrades).toHaveLength(0);
+      expect(result.skippedTrades).toHaveLength(1);
+      expect(result.skippedTrades[0]?.skipReason).toMatch(/spread/i);
+    });
+
+    it("skips zero-amount trades with actionable reason", async () => {
+      const result = await service.assessRebalanceTrades([
+        { tradeId: "dry-run-3", fromAsset: "XLM", toAsset: "USDC", amount: 0 },
+      ]);
+
+      expect(result.skippedTrades[0]?.skipReason).toMatch(/greater than zero/i);
     });
   });
 

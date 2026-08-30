@@ -1,0 +1,21 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  check-issue-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check PR body links to an issue or provides rationale
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if echo "$PR_BODY" | grep -qiE 'Fixes #[0-9]+|Rationale for no issue'; then
+            echo "PR links to an issue or provides rationale."
+          else
+            echo "ERROR: This PR must link to an issue (e.g. 'Fixes #123') or provide a rationale in the 'Rationale for no issue' section."
+            exit 1
+          fi

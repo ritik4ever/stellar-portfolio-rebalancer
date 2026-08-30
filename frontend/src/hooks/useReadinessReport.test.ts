@@ -91,6 +91,7 @@ describe('useReadinessReport hook', () => {
         await waitFor(() => expect(result.current.loading).toBe(false))
         expect(result.current.report?.status).toBe('ready')
         expect(result.current.loadError).toBe(false)
+        expect(result.current.bootReady).toBe(true)
         expect(result.current.notices.filter(n => n.kind !== 'disabled')).toHaveLength(0)
     })
 

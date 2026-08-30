@@ -1,8 +1,16 @@
 import { databaseService } from './databaseService.js'
+import { issuerMetadataService } from './issuerMetadataService.js'
 import {
     AssetRegistryConflictError,
     parseAssetCreatePayload
 } from './assetRegistryValidation.js'
+import { logger } from '../utils/logger.js'
+import { getFeatureFlags } from '../config/featureFlags.js'
+
+const STALE_POLICY_MS = 5 * 60 * 1000
+const QUARANTINE_POLICY_MS = 30 * 60 * 1000
+
+export type AssetVerificationStatus = 'pending' | 'verified' | 'rejected'
 
 export interface AssetRecord {
     symbol: string
@@ -11,23 +19,143 @@ export interface AssetRecord {
     issuerAccount?: string
     coingeckoId?: string
     enabled: boolean
+    lastRefreshedAt?: string
+    isQuarantined: boolean
+    stale: boolean
+    /** Issuer-verification state (#1412). Assets predating the workflow read as 'verified'. */
+    verificationStatus: AssetVerificationStatus
+    verificationNotes?: string
+    submittedBy?: string
+    reviewedBy?: string
+    reviewedAt?: string
 }
 
+/** Raised when a verification transition is not allowed from the asset's current state. */
+export class AssetVerificationError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'AssetVerificationError'
+    }
+}
+
+
+
 export const assetRegistryService = {
+    isAssetStale(lastRefreshedAt?: string): boolean {
+        if (!lastRefreshedAt) return true
+        const elapsed = Date.now() - new Date(lastRefreshedAt).getTime()
+        return elapsed > STALE_POLICY_MS
+    },
+
+    isAssetQuarantineExpired(lastRefreshedAt?: string): boolean {
+        if (!lastRefreshedAt) return true
+        const elapsed = Date.now() - new Date(lastRefreshedAt).getTime()
+        return elapsed > QUARANTINE_POLICY_MS
+    },
+
+    checkAndApplyAutoQuarantine(asset: any): AssetRecord {
+        const stale = this.isAssetStale(asset.lastRefreshedAt)
+        let isQuarantined = asset.isQuarantined
+
+        if (!isQuarantined && this.isAssetQuarantineExpired(asset.lastRefreshedAt)) {
+            logger.warn(`[QUARANTINE] Asset ${asset.symbol} has not been refreshed since ${asset.lastRefreshedAt ?? 'never'}. Automatically quarantining.`);
+            databaseService.setAssetFreshness(asset.symbol, asset.lastRefreshedAt ?? new Date(0).toISOString(), true);
+            isQuarantined = true;
+        }
+
+        return {
+            symbol: asset.symbol,
+            name: asset.name,
+            contractAddress: asset.contractAddress,
+            issuerAccount: asset.issuerAccount,
+            coingeckoId: asset.coingeckoId,
+            enabled: asset.enabled,
+            lastRefreshedAt: asset.lastRefreshedAt,
+            isQuarantined,
+            stale,
+            verificationStatus: asset.verificationStatus ?? 'verified',
+            verificationNotes: asset.verificationNotes,
+            submittedBy: asset.submittedBy,
+            reviewedBy: asset.reviewedBy,
+            reviewedAt: asset.reviewedAt
+        }
+    },
+
     list(enabledOnly: boolean = true): AssetRecord[] {
-        return databaseService.listAssets(enabledOnly)
+        const rawAssets = databaseService.listAssets(false)
+        const mapped = rawAssets.map(a => this.checkAndApplyAutoQuarantine(a))
+        
+        if (enabledOnly) {
+            return mapped.filter(a => a.enabled && !a.isQuarantined)
+        }
+        return mapped
+    },
+
+    /**
+     * Filter, sort, and paginate the asset catalog. Centralises the catalog
+     * browsing logic so routes stay thin and the behaviour is unit-testable.
+     */
+    query(options: AssetQueryOptions = {}): AssetQueryResult {
+        const {
+            enabledOnly = true,
+            search,
+            issuer,
+            sortBy = 'symbol',
+            order = 'asc',
+            page = 1,
+            limit = DEFAULT_PAGE_SIZE
+        } = options
+
+        let assets = databaseService.listAssets(enabledOnly)
+
+        const term = search?.trim().toUpperCase()
+        if (term) {
+            assets = assets.filter(asset =>
+                asset.symbol.includes(term) || asset.name.toUpperCase().includes(term)
+            )
+        }
+
+        const issuerTerm = issuer?.trim().toUpperCase()
+        if (issuerTerm) {
+            assets = assets.filter(asset =>
+                (asset.issuerAccount ?? '').toUpperCase().includes(issuerTerm)
+            )
+        }
+
+        const direction = order === 'desc' ? -1 : 1
+        const sorted = [...assets].sort((a, b) => {
+            let cmp: number
+            if (sortBy === 'name') cmp = a.name.localeCompare(b.name)
+            else if (sortBy === 'enabled') cmp = Number(a.enabled) - Number(b.enabled)
+            else cmp = a.symbol.localeCompare(b.symbol)
+            return cmp * direction
+        })
+
+        const total = sorted.length
+        const safePage = Math.max(1, Math.trunc(page) || 1)
+        const safeLimit = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(limit) || DEFAULT_PAGE_SIZE))
+        const start = (safePage - 1) * safeLimit
+
+        return {
+            assets: sorted.slice(start, start + safeLimit),
+            page: safePage,
+            limit: safeLimit,
+            total
+        }
     },
 
     getBySymbol(symbol: string): AssetRecord | undefined {
-        return databaseService.getAssetBySymbol(symbol)
+        const asset = databaseService.getAssetBySymbol(symbol)
+        if (!asset) return undefined
+        return this.checkAndApplyAutoQuarantine(asset)
     },
 
     getSymbols(enabledOnly: boolean = true): string[] {
-        return databaseService.listAssets(enabledOnly).map(a => a.symbol)
+        return this.list(enabledOnly).map(a => a.symbol)
     },
 
     getCoingeckoIdMap(): Record<string, string> {
-        const assets = databaseService.listAssets(true)
+        const assets = this.list(true)
         const map: Record<string, string> = {}
         for (const a of assets) {
             if (a.coingeckoId) map[a.symbol] = a.coingeckoId
@@ -35,7 +163,7 @@ export const assetRegistryService = {
         return map
     },
 
-    add(
+    async add(
         symbol: unknown,
         name: unknown,
         options: {
@@ -43,16 +171,108 @@ export const assetRegistryService = {
             issuerAccount?: unknown
             coingeckoId?: unknown
         } = {}
-    ): void {
+    ): Promise<void> {
         const parsed = parseAssetCreatePayload(symbol, name, options)
         if (databaseService.getAssetBySymbol(parsed.symbol)) {
             throw new AssetRegistryConflictError(`An asset with symbol ${parsed.symbol} already exists`)
         }
+        const flags = getFeatureFlags()
+        const metadata = (flags.enableIssuerMetadata && parsed.issuerAccount)
+            ? await issuerMetadataService.getMetadata(parsed.issuerAccount)
+            : undefined;
         databaseService.addAsset(parsed.symbol, parsed.name, {
             contractAddress: parsed.contractAddress,
             issuerAccount: parsed.issuerAccount,
-            coingeckoId: parsed.coingeckoId
+            coingeckoId: parsed.coingeckoId,
+            issuerMetadata: metadata
         })
+    },
+
+    // ── issuer-verification workflow (#1412) ──────────────────────────────────
+
+    /**
+     * User submission of an unlisted asset. The asset is created in `pending`
+     * state and disabled, so it is visible for review but cannot be traded until
+     * an admin approves it — unlisted issuers are never silently trusted.
+     */
+    async submitForVerification(
+        symbol: unknown,
+        name: unknown,
+        options: {
+            contractAddress?: unknown
+            issuerAccount?: unknown
+            coingeckoId?: unknown
+            submittedBy?: string
+        } = {}
+    ): Promise<AssetRecord> {
+        const parsed = parseAssetCreatePayload(symbol, name, options)
+        if (databaseService.getAssetBySymbol(parsed.symbol)) {
+            throw new AssetRegistryConflictError(`An asset with symbol ${parsed.symbol} already exists`)
+        }
+
+        const flags = getFeatureFlags()
+        const metadata = (flags.enableIssuerMetadata && parsed.issuerAccount)
+            ? await issuerMetadataService.getMetadata(parsed.issuerAccount)
+            : undefined
+
+        databaseService.addAsset(parsed.symbol, parsed.name, {
+            contractAddress: parsed.contractAddress,
+            issuerAccount: parsed.issuerAccount,
+            coingeckoId: parsed.coingeckoId,
+            issuerMetadata: metadata,
+            verificationStatus: 'pending',
+            submittedBy: options.submittedBy
+        })
+
+        logger.info('[ASSET-REGISTRY] Unlisted asset submitted for verification', {
+            symbol: parsed.symbol,
+            issuerAccount: parsed.issuerAccount,
+            submittedBy: options.submittedBy
+        })
+
+        return this.getBySymbol(parsed.symbol)!
+    },
+
+    /** Assets awaiting an admin decision, oldest submission first. */
+    listPendingVerifications(): AssetRecord[] {
+        return databaseService
+            .listAssetsByVerificationStatus('pending')
+            .map(a => this.checkAndApplyAutoQuarantine(a))
+    },
+
+    /**
+     * Approve a pending submission: marks it verified and enables it.
+     * Only pending assets can be approved.
+     */
+    approveVerification(symbol: string, reviewedBy: string, notes?: string): AssetRecord {
+        const asset = this.requirePending(symbol, 'approved')
+        databaseService.setAssetVerification(asset.symbol, 'verified', { reviewedBy, notes })
+        logger.info('[ASSET-REGISTRY] Asset issuer verified', { symbol: asset.symbol, reviewedBy })
+        return this.getBySymbol(asset.symbol)!
+    },
+
+    /**
+     * Reject a pending submission: marks it rejected and keeps it disabled.
+     * Only pending assets can be rejected.
+     */
+    rejectVerification(symbol: string, reviewedBy: string, notes?: string): AssetRecord {
+        const asset = this.requirePending(symbol, 'rejected')
+        databaseService.setAssetVerification(asset.symbol, 'rejected', { reviewedBy, notes })
+        logger.warn('[ASSET-REGISTRY] Asset issuer rejected', { symbol: asset.symbol, reviewedBy, notes })
+        return this.getBySymbol(asset.symbol)!
+    },
+
+    requirePending(symbol: string, decision: string): AssetRecord {
+        const asset = this.getBySymbol(symbol)
+        if (!asset) {
+            throw new AssetVerificationError(`Asset ${symbol.toUpperCase()} not found`)
+        }
+        if (asset.verificationStatus !== 'pending') {
+            throw new AssetVerificationError(
+                `Asset ${asset.symbol} cannot be ${decision}: it is already ${asset.verificationStatus}`
+            )
+        }
+        return asset
     },
 
     remove(symbol: string): boolean {
@@ -61,5 +281,84 @@ export const assetRegistryService = {
 
     setEnabled(symbol: string, enabled: boolean): boolean {
         return databaseService.setAssetEnabled(symbol, enabled)
+    },
+
+    setQuarantined(symbol: string, quarantined: boolean): boolean {
+        return databaseService.setAssetQuarantined(symbol, quarantined)
+    },
+
+    async refreshAssetSource(symbol: string): Promise<boolean> {
+        const asset = databaseService.getAssetBySymbol(symbol)
+        if (!asset) {
+            logger.error(`[ASSET-REGISTRY] Cannot refresh non-existent asset: ${symbol}`)
+            return false
+        }
+
+        try {
+            logger.info(`[ASSET-REGISTRY] Refreshing source for asset: ${symbol}`)
+
+            if (asset.coingeckoId) {
+                const apiKey = process.env.COINGECKO_API_KEY || ''
+                const baseUrl = apiKey && apiKey.trim()
+                    ? 'https://pro-api.coingecko.com/api/v3'
+                    : 'https://api.coingecko.com/api/v3'
+                
+                const headers: Record<string, string> = {
+                    'Accept': 'application/json',
+                    'User-Agent': 'StellarPortfolioRebalancer/1.0'
+                }
+                if (apiKey && apiKey.trim()) {
+                    headers['x-cg-pro-api-key'] = apiKey.trim()
+                }
+
+                const url = `${baseUrl}/simple/price?ids=${asset.coingeckoId}&vs_currencies=usd`
+                const response = await fetch(url, { headers, method: 'GET' })
+
+                if (!response.ok) {
+                    throw new Error(`CoinGecko ping failed: ${response.status} ${response.statusText}`)
+                }
+
+                const data = (await response.json()) as Record<string, any>
+                if (!data || !data[asset.coingeckoId]) {
+                    throw new Error(`CoinGecko ID ${asset.coingeckoId} not found in response`)
+                }
+            }
+
+            databaseService.setAssetFreshness(symbol, new Date().toISOString(), false)
+            logger.info(`[ASSET-REGISTRY] Successfully refreshed source for asset: ${symbol}`)
+            return true
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            logger.error(`[ASSET-REGISTRY] Failed to refresh source for ${symbol}: ${errorMsg}`)
+
+            const lastRefreshed = asset.lastRefreshedAt
+            const isQuarantineExpired = this.isAssetQuarantineExpired(lastRefreshed)
+
+            if (isQuarantineExpired) {
+                logger.warn(`[ASSET-REGISTRY] Quarantining asset ${symbol} due to failed refresh and expired freshness policy.`)
+                databaseService.setAssetFreshness(symbol, lastRefreshed ?? new Date(0).toISOString(), true)
+            }
+
+            return false
+        }
+    },
+
+    async refreshAllAssetSources(): Promise<Record<string, { success: boolean; error?: string }>> {
+        const assets = databaseService.listAssets(false)
+        const results: Record<string, { success: boolean; error?: string }> = {}
+
+        for (const a of assets) {
+            try {
+                const ok = await this.refreshAssetSource(a.symbol)
+                results[a.symbol] = { success: ok }
+            } catch (err) {
+                results[a.symbol] = { 
+                    success: false, 
+                    error: err instanceof Error ? err.message : String(err) 
+                }
+            }
+        }
+
+        return results
     }
 }

@@ -1,0 +1,40 @@
+[package]
+name = "portfolio-rebalancer-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.portfolio-rebalancer]
+path = ".."
+features = ["testutils"]
+
+[dependencies.soroban-sdk]
+version = "21.0.0"
+features = ["testutils"]
+
+[[bin]]
+name = "fuzz_rebalance"
+path = "fuzz_targets/fuzz_rebalance.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_oracle_prices"
+path = "fuzz_targets/fuzz_oracle_prices.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_allocations"
+path = "fuzz_targets/fuzz_allocations.rs"
+test = false
+doc = false
+bench = false

@@ -4,7 +4,7 @@
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const spec: Record<string, any> = {
-    openapi: '3.0.3',
+    openapi: '3.1.0',
     info: {
         title: 'Stellar Portfolio Rebalancer API',
         description: 'Intelligent portfolio rebalancing service for the Stellar ecosystem using Reflector oracles. Create portfolios, fetch prices, execute rebalances, and manage risk.',
@@ -190,7 +190,7 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Event recorded', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -207,6 +207,102 @@ const spec: Record<string, any> = {
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
+        },
+        '/api/rebalance/summary/{portfolioId}': {
+            get: {
+                tags: ['Rebalance history'],
+                summary: 'Get rebalance readiness summary',
+                description: 'Single-call summary of all preconditions for manual rebalance: system readiness, drift, slippage, risk, and data freshness. Provides actionable guidance before execution.',
+                parameters: [{ name: 'portfolioId', in: 'path', required: true, schema: { type: 'string' }, description: 'Portfolio ID to check' }],
+                responses: {
+                    '200': {
+                        description: 'Readiness summary with all preconditions',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolioId: { type: 'string' },
+                                                timestamp: { type: 'string', format: 'date-time' },
+                                                readiness: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        systemReady: { type: 'boolean' },
+                                                        canExecute: { type: 'boolean' },
+                                                        status: { type: 'string', enum: ['ready', 'not_ready'] },
+                                                        checks: { type: 'object' }
+                                                    }
+                                                },
+                                                drift: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        needsRebalance: { type: 'boolean' },
+                                                        maxDriftPercent: { type: 'number' },
+                                                        threshold: { type: 'number' },
+                                                        exceedsThreshold: { type: 'boolean' }
+                                                    }
+                                                },
+                                                slippage: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        maxSlippagePercent: { type: 'number' },
+                                                        estimatedSlippageBps: { type: 'integer' }
+                                                    }
+                                                },
+                                                risk: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        allowed: { type: 'boolean' },
+                                                        reasonCode: { type: 'string' },
+                                                        overallRiskLevel: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+                                                        alerts: { type: 'array' }
+                                                    }
+                                                },
+                                                dataFreshness: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        ageSeconds: { type: 'integer' },
+                                                        isStale: { type: 'boolean' },
+                                                        priceCount: { type: 'integer' }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                        meta: {
+                                            type: 'object',
+                                            properties: {
+                                                canExecute: { type: 'boolean' },
+                                                needsRebalance: { type: 'boolean' },
+                                                riskLevel: { type: 'string' }
+                                            }
+                                        }
+                                    }
+                                },
+                                example: {
+                                    success: true,
+                                    data: {
+                                        portfolioId: 'pf-123',
+                                        readiness: { systemReady: true, canExecute: true, status: 'ready' },
+                                        drift: { needsRebalance: true, maxDriftPercent: 6.2, threshold: 5, exceedsThreshold: true },
+                                        slippage: { maxSlippagePercent: 1, estimatedSlippageBps: 100 },
+                                        risk: { allowed: true, reasonCode: 'OK', overallRiskLevel: 'low', alerts: [] },
+                                        dataFreshness: { ageSeconds: 45, isStale: false, priceCount: 4 }
+                                    },
+                                    meta: { canExecute: true, needsRebalance: true, riskLevel: 'low' }
+                                }
+                            }
+                        }
+                    },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+                }
+            }
         },
         '/api/portfolio': {
             post: {
@@ -264,7 +360,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -302,6 +398,91 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/portfolios': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'List all portfolios',
+                description: 'Get all portfolios, optionally filtered by user address query parameter.',
+                parameters: [{ name: 'userAddress', in: 'query', required: false, schema: { type: 'string' } }],
+                responses: {
+                    '200': {
+                        description: 'List of portfolios',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolios: {
+                                                    type: 'array',
+                                                    items: { $ref: '#/components/schemas/Portfolio' },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/clone': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Clone portfolio',
+                description: 'Create a new portfolio cloning the allocations, threshold, and strategy of an existing portfolio.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: false,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    name: { type: 'string', description: 'Optional new name for cloned portfolio' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '201': {
+                        description: 'Portfolio cloned',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolioId: { type: 'string' },
+                                                portfolio: { $ref: '#/components/schemas/Portfolio' },
+                                                status: { type: 'string', example: 'created' },
+                                                mode: { type: 'string', enum: ['demo', 'onchain'] },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/user/{address}/portfolios': {
             get: {
                 tags: ['Portfolio'],
@@ -331,7 +512,46 @@ const spec: Record<string, any> = {
                     },
                     '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolios/summary': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Multi-portfolio dashboard summary',
+                description: 'Get a compact summary of every portfolio belonging to one address in a single request, instead of one call per portfolio. Prices are read once from the oracle cache and shared across every portfolio in the response. Returns an empty array when the address has no portfolios. When JWT auth is enabled, only the authenticated user (token subject) may summarise their own address.',
+                parameters: [{ name: 'userAddress', in: 'query', required: true, schema: { type: 'string' }, description: 'Stellar address whose portfolios are summarised.' }],
+                security: [{ adminAuth: [] }],
+                responses: {
+                    '200': {
+                        description: 'Portfolio summaries',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolios: {
+                                                    type: 'array',
+                                                    items: { $ref: '#/components/schemas/PortfolioSummary' },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -340,7 +560,7 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Portfolio'],
                 summary: 'Get rebalance plan',
-                description: 'Get total value, slippage, and current prices for planning.',
+                description: 'Get the full read-only rebalance plan, including per-asset buy/sell amounts, estimated fees, estimated slippage, projected allocations, and current prices. This endpoint does not execute trades.',
                 parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': {
@@ -358,7 +578,41 @@ const spec: Record<string, any> = {
                                                 totalValue: { type: 'number' },
                                                 maxSlippagePercent: { type: 'number' },
                                                 estimatedSlippageBps: { type: 'integer' },
+                                                estimatedFees: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        xlm: { type: 'number' },
+                                                        usd: { type: 'number' },
+                                                        perTradeXlm: { type: 'number' },
+                                                        tradeCount: { type: 'integer' },
+                                                    },
+                                                },
+                                                assets: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            asset: { type: 'string' },
+                                                            action: { type: 'string', enum: ['buy', 'sell', 'hold'] },
+                                                            currentBalance: { type: 'number' },
+                                                            currentValue: { type: 'number' },
+                                                            currentAllocationPercent: { type: 'number' },
+                                                            targetAllocationPercent: { type: 'number' },
+                                                            targetValue: { type: 'number' },
+                                                            driftPercent: { type: 'number' },
+                                                            buyAmount: { type: 'number' },
+                                                            sellAmount: { type: 'number' },
+                                                            tradeValue: { type: 'number' },
+                                                            projectedBalance: { type: 'number' },
+                                                            projectedValue: { type: 'number' },
+                                                            projectedAllocationPercent: { type: 'number' },
+                                                            price: { type: 'number' },
+                                                        },
+                                                    },
+                                                },
+                                                projectedAllocations: { type: 'object', additionalProperties: { type: 'number' } },
                                                 prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
+                                                priceFeedMeta: { type: 'object' },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
@@ -368,6 +622,109 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/rebalance/dry-run': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Dry-run rebalance',
+                description: 'Return the full rebalance plan without executing trades. This dry-run performs no database writes and makes no contract call; use POST /api/portfolio/{id}/rebalance for live execution.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                responses: {
+                    '200': {
+                        description: 'Dry-run plan data. The response data schema is identical to GET /api/portfolio/{id}/rebalance-plan.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolioId: { type: 'string' },
+                                                totalValue: { type: 'number' },
+                                                maxSlippagePercent: { type: 'number' },
+                                                estimatedSlippageBps: { type: 'integer' },
+                                                estimatedFees: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        xlm: { type: 'number' },
+                                                        usd: { type: 'number' },
+                                                        perTradeXlm: { type: 'number' },
+                                                        tradeCount: { type: 'integer' },
+                                                    },
+                                                },
+                                                assets: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            asset: { type: 'string' },
+                                                            action: { type: 'string', enum: ['buy', 'sell', 'hold'] },
+                                                            currentBalance: { type: 'number' },
+                                                            currentValue: { type: 'number' },
+                                                            currentAllocationPercent: { type: 'number' },
+                                                            targetAllocationPercent: { type: 'number' },
+                                                            targetValue: { type: 'number' },
+                                                            driftPercent: { type: 'number' },
+                                                            buyAmount: { type: 'number' },
+                                                            sellAmount: { type: 'number' },
+                                                            tradeValue: { type: 'number' },
+                                                            projectedBalance: { type: 'number' },
+                                                            projectedValue: { type: 'number' },
+                                                            projectedAllocationPercent: { type: 'number' },
+                                                            price: { type: 'number' },
+                                                        },
+                                                    },
+                                                },
+                                                projectedAllocations: { type: 'object', additionalProperties: { type: 'number' } },
+                                                prices: { type: 'object', additionalProperties: { $ref: '#/components/schemas/PriceData' } },
+                                                priceFeedMeta: { type: 'object' },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/rebalance/dry-run': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Dry-run rebalance',
+                description: 'Preview likely rebalance outcome (estimated trades, skipped assets, guardrails) without executing trades or writing rebalance history.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    options: {
+                                        type: 'object',
+                                        properties: {
+                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Dry-run preview', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
@@ -452,6 +809,32 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Performance summary', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/tax-report': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get tax report',
+                description:
+                    'Realized gain/loss tax report for a tax year. Lots are matched using the selected ' +
+                    'cost-basis method (FIFO by default). `format=turbotax` returns a TurboTax-importable ' +
+                    'CSV with the columns: Currency Name, Purchase Date, Cost Basis, Date Sold, Proceeds.',
+                parameters: [
+                    { name: 'year', in: 'query', schema: { type: 'integer', minimum: 2000, maximum: 2100, description: 'Tax year (defaults to the current year)' } },
+                    { name: 'format', in: 'query', schema: { type: 'string', enum: ['json', 'csv', 'turbotax'], default: 'json' } },
+                    { name: 'costBasisMethod', in: 'query', schema: { type: 'string', enum: ['fifo', 'lifo', 'hifo'], default: 'fifo', description: 'Lot-matching method used to determine cost basis' } },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Tax report summary (JSON) or CSV download (format=csv or format=turbotax)',
+                        content: {
+                            'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } },
+                            'text/csv': { schema: { type: 'string' } },
+                        },
+                    },
+                    '400': { description: 'Invalid year or costBasisMethod', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -552,6 +935,59 @@ const spec: Record<string, any> = {
                         },
                     },
                     '503': { description: 'Price feeds unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/prices/ohlcv': {
+            get: {
+                tags: ['Prices & market'],
+                summary: 'Get OHLCV candles',
+                description: 'Returns OHLCV (open, high, low, close) candles computed from stored price snapshots. Missing intervals are filled with the previous close. Results are cached for 10 minutes.',
+                parameters: [
+                    { name: 'asset', in: 'query', required: true, schema: { type: 'string', example: 'XLM' }, description: 'Asset symbol, e.g. XLM, BTC, ETH, USDC' },
+                    { name: 'interval', in: 'query', required: true, schema: { type: 'string', enum: ['1h', '4h', '1d'] }, description: 'Candle interval' },
+                    { name: 'from', in: 'query', required: true, schema: { type: 'string', format: 'date-time' }, description: 'Start of time range (ISO 8601)' },
+                    { name: 'to', in: 'query', required: true, schema: { type: 'string', format: 'date-time' }, description: 'End of time range (ISO 8601)' },
+                ],
+                responses: {
+                    '200': {
+                        description: 'OHLCV candle array',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                asset: { type: 'string' },
+                                                interval: { type: 'string' },
+                                                candles: {
+                                                    type: 'array',
+                                                    items: {
+                                                        type: 'object',
+                                                        properties: {
+                                                            timestamp: { type: 'number', description: 'Unix ms of interval start' },
+                                                            open: { type: 'number' },
+                                                            high: { type: 'number' },
+                                                            low: { type: 'number' },
+                                                            close: { type: 'number' },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Database unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -709,6 +1145,38 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/auto-rebalancer/dry-run/{portfolioId}': {
+            post: {
+                tags: ['Auto-rebalancer'],
+                summary: 'Dry-run a portfolio rebalance',
+                description: 'Preview auto-rebalancer execution for one portfolio without submitting trades or writing history. Admin only.',
+                parameters: [{ name: 'portfolioId', in: 'path', required: true, schema: { type: 'string' } }],
+                security: [{ adminAuth: [] }],
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    options: {
+                                        type: 'object',
+                                        properties: {
+                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Dry-run result', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '401': { description: 'Unauthorized' },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/auto-rebalancer/history': {
             get: {
                 tags: ['Auto-rebalancer'],
@@ -787,7 +1255,7 @@ const spec: Record<string, any> = {
                 },
                 responses: {
                     '200': { description: 'Preferences saved', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -800,7 +1268,7 @@ const spec: Record<string, any> = {
                 parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Preferences or null', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -813,7 +1281,65 @@ const spec: Record<string, any> = {
                 parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Unsubscribed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
-                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/notifications/alerts/thresholds': {
+            get: {
+                tags: ['Notifications'],
+                summary: 'Get price alert thresholds',
+                description: 'Get per-asset price alert threshold overrides and the global default threshold for a user.',
+                parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
+                responses: {
+                    '200': { description: 'Alert thresholds', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            put: {
+                tags: ['Notifications'],
+                summary: 'Set price alert thresholds',
+                description: 'Set or merge per-asset price alert threshold overrides for a user.',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['thresholds'],
+                                properties: {
+                                    userId: { type: 'string', description: 'Required when auth is disabled' },
+                                    thresholds: {
+                                        type: 'object',
+                                        additionalProperties: { type: 'number', minimum: 1 },
+                                        description: 'Map of asset code to threshold percentage',
+                                        example: { XLM: 7, BTC: 3 },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Updated alert thresholds', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            delete: {
+                tags: ['Notifications'],
+                summary: 'Delete price alert threshold',
+                description: 'Remove a single per-asset price alert threshold override for a user.',
+                parameters: [
+                    { name: 'userId', in: 'query', required: true, schema: { type: 'string' } },
+                    { name: 'asset', in: 'query', required: true, schema: { type: 'string' }, description: 'Asset code (e.g. XLM)' },
+                ],
+                responses: {
+                    '200': { description: 'Threshold removed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'userId or asset required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '404': { description: 'No override found for asset', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -877,10 +1403,99 @@ const spec: Record<string, any> = {
                 description: 'Admin API key or bearer token',
             },
         },
+        examples: {
+            ValidationError: {
+                summary: 'Validation error',
+                value: {
+                    success: false,
+                    data: null,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Invalid request payload',
+                        details: [
+                            { field: 'allocations', message: 'Allocations must sum to 100%' },
+                        ],
+                    },
+                    timestamp: '2025-01-01T00:00:00.000Z',
+                },
+            },
+            QueryValidationError: {
+                summary: 'Query parameter validation error',
+                value: {
+                    success: false,
+                    data: null,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Invalid query parameters',
+                        details: [
+                            { field: 'limit', message: 'Number must be less than or equal to 500' },
+                        ],
+                    },
+                    timestamp: '2025-01-01T00:00:00.000Z',
+                },
+            },
+        },
         schemas: {
-            ApiEnvelope: { type: 'object' },
-            ApiError: { type: 'object' },
+            ApiEnvelope: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: true },
+                    data: { nullable: true },
+                    error: { nullable: true, $ref: '#/components/schemas/ApiErrorBody' },
+                    timestamp: { type: 'string', format: 'date-time' },
+                    meta: { type: 'object', additionalProperties: true },
+                },
+            },
+            ApiErrorBody: {
+                type: 'object',
+                required: ['code', 'message'],
+                properties: {
+                    code: { type: 'string', example: 'VALIDATION_ERROR' },
+                    message: { type: 'string', example: 'Invalid request payload' },
+                    details: {
+                        nullable: true,
+                        oneOf: [
+                            {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        field: { type: 'string' },
+                                        message: { type: 'string' },
+                                    },
+                                },
+                            },
+                            { type: 'object' },
+                        ],
+                    },
+                },
+            },
+            ApiError: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: false },
+                    data: { nullable: true, example: null },
+                    error: { $ref: '#/components/schemas/ApiErrorBody' },
+                    timestamp: { type: 'string', format: 'date-time' },
+                },
+            },
             Portfolio: { type: 'object' },
+            PortfolioSummary: {
+                type: 'object',
+                required: ['id', 'name', 'total_value_usd', 'drift_status', 'last_rebalanced'],
+                properties: {
+                    id: { type: 'string', example: 'portfolio-abc123' },
+                    name: { type: 'string', nullable: true, description: 'Null when the portfolio was never named.', example: 'Core holdings' },
+                    total_value_usd: { type: 'number', description: 'Current USD value of all holdings. An asset with no available price contributes zero.', example: 10000 },
+                    drift_status: {
+                        type: 'string',
+                        enum: ['ok', 'warning', 'critical'],
+                        description: 'Largest allocation drift measured against the portfolio\'s own rebalance threshold: critical past the threshold, warning from half the threshold up to it, otherwise ok.',
+                        example: 'warning',
+                    },
+                    last_rebalanced: { type: 'string', format: 'date-time', nullable: true, example: '2026-01-02T00:00:00.000Z' },
+                },
+            },
             PriceData: { type: 'object' },
             RiskMetrics: { type: 'object' },
             RebalanceResult: { type: 'object' },
@@ -904,6 +1519,8 @@ const spec: Record<string, any> = {
                     webhookEnabled: { type: 'boolean' },
                     webhookUrl: { type: 'string', format: 'uri', pattern: '^https?://', description: 'Required when webhookEnabled is true. Must use http or https.' },
                     events: { $ref: '#/components/schemas/NotificationEventsInput' },
+                    digestMode: { type: 'string', enum: ['immediate','daily','weekly'], description: 'Delivery mode for notifications: immediate (per-event), daily digest, or weekly digest.' },
+                    priceAlertThresholds: { type: 'object', additionalProperties: { type: 'number', minimum: 1 }, description: 'Per-asset price alert threshold overrides keyed by asset code (e.g. XLM).', example: { XLM: 7, BTC: 3 } },
                 },
             },
         },

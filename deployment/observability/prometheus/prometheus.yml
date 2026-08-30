@@ -26,6 +26,9 @@ scrape_configs:
       - targets:
           - http://backend:3001/readiness
           - http://backend:3001/health
+          - http://backend:3001/
+          - http://backend:3001/api-docs
+          - http://backend:3001/api-docs.json
           - http://frontend:80/
     relabel_configs:
       - source_labels: [__address__]
@@ -35,12 +38,10 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
-  # Synthetic uptime probe for the WebSocket endpoint. The backend attaches a
-  # WebSocketServer to the root HTTP server, so the root URL is the externally
-  # reachable WS entrypoint and needs no authentication to complete a handshake.
-  # Probed on its own 30s interval rather than the 15s global default to keep
-  # handshake churn on the socket low while still detecting an outage inside one
-  # alert evaluation window.
+  # Synthetic uptime probe for the WebSocket endpoint. The backend upgrades any
+  # non-/ws/portfolio/ path onto the robust broadcast socket, so the root URL is
+  # the externally reachable WS entrypoint. Probed on its own 30s interval rather
+  # than the 15s global default to keep handshake churn on the socket low.
   - job_name: portfolio-websocket
     scrape_interval: 30s
     scrape_timeout: 15s

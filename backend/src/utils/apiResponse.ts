@@ -1,4 +1,5 @@
 import type { Response } from 'express'
+import { getRequestId, getCorrelationId, getTraceId } from './requestContext.js'
 
 export interface ApiErrorBody {
     code: string
@@ -45,6 +46,9 @@ export function fail(
     details?: unknown,
     options: ResponseOptions = {}
 ): Response<ApiResponseEnvelope<null>> {
+    const requestId = getRequestId()
+    const correlationId = getCorrelationId()
+    const traceId = getTraceId()
     const payload: ApiResponseEnvelope<null> = {
         success: false,
         data: null,
@@ -56,6 +60,10 @@ export function fail(
         timestamp: nowIso(),
         ...(options.meta ? { meta: options.meta } : {})
     }
+
+    if (requestId) res.setHeader('X-Request-Id', requestId)
+    if (correlationId) res.setHeader('X-Correlation-Id', correlationId)
+    if (traceId) res.setHeader('X-Trace-Id', traceId)
 
     return res.status(status).json(payload)
 }

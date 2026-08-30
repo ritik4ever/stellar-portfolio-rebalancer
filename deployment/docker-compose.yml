@@ -38,7 +38,8 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=3001
       - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I}
-      - REFLECTOR_ADDRESS=${REFLECTOR_ADDRESS:-}
+      - REFLECTOR_ADDRESS=${REFLECTOR_ADDRESS:-CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO}
+      - REFLECTOR_SERVICE_URL=${REFLECTOR_SERVICE_URL:-http://reflector-mock:8080}
       - STELLAR_NETWORK=${STELLAR_NETWORK:-testnet}
       - STELLAR_HORIZON_URL=${STELLAR_HORIZON_URL:-https://horizon-testnet.stellar.org}
       - ENABLE_AUTO_REBALANCER=${ENABLE_AUTO_REBALANCER:-false}
@@ -77,6 +78,28 @@ services:
         limits:
           cpus: '1.0'
           memory: 512M
+
+  reflector-mock:
+    build:
+      context: ./reflector-mock
+      dockerfile: Dockerfile
+    container_name: portfolio-reflector-mock
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MOCK_PRICE_XLM=${MOCK_PRICE_XLM:-0.354}
+      - MOCK_PRICE_BTC=${MOCK_PRICE_BTC:-110000}
+      - MOCK_PRICE_ETH=${MOCK_PRICE_ETH:-4200}
+      - MOCK_PRICE_USDC=${MOCK_PRICE_USDC:-1.0}
+      - ENABLE_RANDOMIZATION=${ENABLE_RANDOMIZATION:-false}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
 
   redis:
     image: redis:7-alpine
@@ -191,6 +214,7 @@ services:
       - observability
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./observability/alertmanager/oncall-secrets:/etc/alertmanager/secrets:ro
       - alertmanager_data:/alertmanager
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -283,6 +307,77 @@ services:
           cpus: '0.25'
           memory: 64M
 
+  # Jaeger — OpenTelemetry trace collector and UI.
+  # Start with: docker compose --profile observability up
+  # Access Jaeger UI at http://localhost:16686
+  # OTLP HTTP endpoint at http://localhost:4318 for backend tracing.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: portfolio-jaeger
+    restart: unless-stopped
+    profiles:
+      - observability
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_HTTP_PORT=4318
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Self-hosted Umami analytics — privacy-respecting, cookie-free.
+  # Start with: docker compose --profile analytics up
+  # Access dashboard at http://localhost:3004 (default login: admin / umami)
+  # After first login, create a website and set the site ID in VITE_ANALYTICS_SITE_ID.
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: portfolio-umami
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      - DATABASE_URL=postgresql://umami:umami@umami-db:5432/umami
+      - DATABASE_TYPE=postgresql
+      - APP_SECRET=${UMAMI_APP_SECRET:-change-me-in-production}
+    ports:
+      - "3004:3000"
+    depends_on:
+      - umami-db
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  umami-db:
+    image: postgres:15-alpine
+    container_name: portfolio-umami-db
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      - POSTGRES_DB=umami
+      - POSTGRES_USER=umami
+      - POSTGRES_PASSWORD=umami
+    volumes:
+      - umami_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
 volumes:
   backend_data:
   redis_data:
@@ -292,6 +387,7 @@ volumes:
   loki_data:
   alertmanager_data:
   frontend_logs:
+  umami_data:
 
 networks:
   default:
