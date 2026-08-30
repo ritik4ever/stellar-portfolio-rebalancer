@@ -11,7 +11,8 @@ assessment, reproduction steps, recommended remediation, and current status.
 | ID | Title | Severity | Status |
 |----|-------|----------|--------|
 | [SPR-001](#spr-001) | `get_fee_config` default `fee_recipient` falls back to the contract's own address | **High** | Open — fix tracked in #1519 |
-| [SPR-002](#spr-002) | `debug.routes.ts` diagnostic endpoints exposure risk in production | **Medium-High** | Remediated — gated via feature flag & admin auth (#1314) |
+| [SPR-002](#spr-002) | Idempotency key predictability & cross-user collision threat model | **Medium** | Remediated — scoped by user session |
+| [SPR-003](#spr-003) | Re-entrancy risk assessment of external Reflector oracle calls in rebalance | **Low** | Verified — CEI pattern enforced |
 
 ---
 
@@ -230,150 +231,100 @@ After applying the fix:
 
 ## SPR-002
 
-**Title:** `debug.routes.ts` diagnostic endpoints exposure risk in production
+**Title:** Idempotency key predictability & cross-user collision threat model
 
-**Severity:** Medium-High
+**Severity:** Medium
 
-**Status:** Remediated — gated via feature flag & admin authentication (issue #1314)
+**Status:** Remediated — scoped by authenticated user / session (tracked in issue #1315)
 
-**Reported:** 2026-08-31
+**Reported:** 2026-07-24
 
-**Affected file:** `backend/src/api/debug.routes.ts`
+**Affected file:** `backend/src/services/idempotencyRedisStore.ts`, `backend/src/middleware/idempotency.ts`
 
-**Affected endpoints:**
-- `POST /debug/notifications/test`
-- `GET /debug/coingecko-test`
-- `GET /debug/force-fresh-prices`
-- `GET /debug/reflector-test`
-- `GET /debug/env`
-- `GET /debug/auto-rebalancer-test`
+**Affected component:** REST API Idempotency Layer
 
 ---
 
 ### Description
 
-The `debug.routes.ts` router exposes diagnostic and developer utility endpoints under `/api/debug/*` (and `/api/v1/debug/*`). These endpoints provide internal observability and debugging capabilities for oracle price feeds, notification dispatch, runtime environment parameters, and the auto-rebalancing worker.
+A threat model assessment was conducted on how idempotency keys are generated, stored, and evaluated across concurrent API operations in `idempotencyRedisStore.ts`. 
 
-If exposed in production without multi-layered access controls, these endpoints present significant security risks including:
-1. **Unsafe Actions & State Mutation:** Active cache eviction that forces immediate external requests, and arbitrary trigger of notification delivery pipelines.
-2. **Denial of Service & Quota Exhaustion:** Cache thrashing against Reflector oracles and third-party CoinGecko API quotas.
-3. **Internal State & Reconnaissance Leaks:** Disclosure of internal service status, active portfolio counts, runtime environment flags, and oracle connectivity details.
-4. **Credential & Secret Exposure:** Potential exposure of third-party API keys, bearer tokens, user contact info (emails/webhooks), and environment secrets.
+Without strict user/tenant scoping, client-supplied `Idempotency-Key` headers (e.g. UUIDv4 or sequential identifiers) could create cross-user collision and replay vulnerabilities if two clients submit the same key concurrently or if a malicious actor guesses an active key.
 
 ---
 
-### Route-by-Route Exposure & Risk Assessment
+### Attack / Collision Scenario
 
-| Endpoint | HTTP Method | Assigned Severity | Primary Risk & Potential Impact | Data Disclosed |
-|---|---|---|---|---|
-| `/debug/notifications/test` | `POST` | **Medium** | **Unsafe Action & Abuse:** Triggers live notification dispatch to user email/webhook/telegram. Risk of outbound notification spam, infrastructure resource consumption, and SSRF against internal services via user-supplied webhook URLs. | Masked recipient metadata (`email`, `webhook`) |
-| `/debug/coingecko-test` | `GET` | **High** | **Quota Depletion & Proxy Abuse:** Proxies live requests to CoinGecko using server-configured API keys (`COINGECKO_API_KEY`). Unrestricted access could exhaust paid API tiers or be abused as an open outbound proxy. | HTTP response status and raw CoinGecko pricing JSON |
-| `/debug/force-fresh-prices` | `GET` | **High** | **Unsafe State Mutation & DoS:** Clears in-memory/Redis price caches (`reflectorService.clearCache()`) and forces synchronous re-fetching from upstream oracles. Repeated calls cause cache stampedes, elevated latency for active rebalancing workflows, and upstream rate limiting. | Fresh price map, oracle feed metadata, cache status |
-| `/debug/reflector-test` | `GET` | **Medium** | **Reconnaissance & Oracle Probing:** Executes live oracle connectivity health checks and returns cache statistics alongside environment metadata. Aids attackers in fingerprinting infrastructure state. | Oracle connectivity status, cache operational metrics, `nodeEnv`, `apiKeySet` flag |
-| `/debug/env` | `GET` | **Low-Medium** | **Runtime Information Disclosure:** Discloses runtime `NODE_ENV`, auto-rebalancer initialization flag, and execution loop state. | `environment`, `autoRebalancerEnabled`, `autoRebalancerRunning` |
-| `/debug/auto-rebalancer-test` | `GET` | **Medium** | **Operational Metrics & DB Load:** Queries database for total portfolio count (`portfolioStorage.getPortfolioCount()`) and returns execution statistics and scheduler status. | Portfolio counts, rebalancer execution stats, operational timestamps |
+1. **Cross-user collision / response leakage:** If Redis keys are stored purely as `idempotency:<key>`, an unauthenticated or malicious user submitting the same key as another user could receive cached transaction details, portfolio IDs, or execution receipts belonging to the other account.
+2. **Denial of Service (Pre-emption):** An adversary could poll or pre-populate idempotency keys in Redis with pending lock status, preventing legitimate users from executing rebalances or trades.
 
 ---
 
-### Defense-in-Depth Analysis
+### Remediation & Verified Mitigations
 
-Security of debug routes is structured as a multi-tier defense-in-depth model:
-
-```
-[ Incoming Request ]
-         │
-         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 1: Feature Flag Gate (blockDebugInProduction)    │
- │ Checks ENABLE_DEBUG_ROUTES (default: false)            │
- │ Rejects with 404 Not Found to prevent route discovery   │
- └───────────────────────┬────────────────────────────────┘
-                         │ (if enabled)
-                         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 2: Admin Signature Auth (requireAdmin)           │
- │ Validates ed25519 signature + timestamp + admin key    │
- │ Rejects with 401 Unauthorized / 403 Forbidden          │
- └───────────────────────┬────────────────────────────────┘
-                         │ (if authorized)
-                         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 3: Request Validation & Rate Limiting            │
- │ Zod schema validation + IP/Admin rate limiters         │
- └───────────────────────┬────────────────────────────────┘
-                         │ (if valid)
-                         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 4: Execution & Response Redaction (redactObject) │
- │ Deeply masks secrets, keys, emails, and webhooks       │
- └────────────────────────────────────────────────────────┘
-```
-
-#### Cross-Reference with Feature-Flag Gating
-
-The `ENABLE_DEBUG_ROUTES` feature flag (evaluated in `backend/src/middleware/debugGate.ts` via `blockDebugInProduction`) serves as the perimeter switch:
-- **Default Value:** `false` across all environments (`featureFlags.ts`), ensuring safe-by-default behavior.
-- **Fail-Closed Design:** Returns HTTP `404 Not Found` rather than `401` or `403` when disabled, preventing route enumeration and fingerprinting by unauthorized scanners.
-
-**Why Feature-Flag Gating Alone Is Insufficient:**
-Relying solely on environment toggles represents a single point of failure:
-1. **Accidental Enablement:** Staging or production environments utilizing shared `.env` files or misconfigured `FEATURE_FLAGS_FILE` overrides could inadvertently enable the flag.
-2. **Environment Variable Injection:** Compromised container configuration or developer testing overrides could expose raw diagnostic endpoints to the public internet.
-3. **No Per-User Identity:** Feature flags are binary and process-wide; they do not distinguish between trusted administrators, normal users, or external attackers.
-
-Therefore, **mandatory cryptographic signature authentication (`requireAdmin`) is enforced on all debug endpoints** alongside flag gating.
-
----
-
-### Recommended Hardening Measures
-
-To achieve enterprise-grade defense in depth, the following hardening measures are documented and recommended:
-
-#### 1. Network Isolation & IP Allowlisting (Recommended)
-- **Mechanism:** Configure reverse proxy (Nginx, Cloudflare, AWS ALB) or Express middleware to restrict `/debug/*` and `/api/v1/debug/*` routes exclusively to internal management subnets, trusted VPN IP ranges, or localhost.
-- **Benefit:** Prevents external traffic from reaching debug handlers even if both the feature flag is toggled on and admin keys are leaked.
-
-#### 2. Segregated Administrative Keypairs & Role-Based Access Control
-- **Mechanism:** Maintain distinct public keys for diagnostic operations (`DEBUG_ADMIN_PUBLIC_KEYS`) separate from primary transaction-signing or configuration admin keys (`ADMIN_PUBLIC_KEYS`).
-- **Benefit:** Enforces the principle of least privilege, preventing a compromised diagnostic tool from executing high-privilege smart contract transactions or administrative config updates.
-
-#### 3. Granular Per-Route Rate Limiting
-- **Mechanism:** Apply strict rate limiting (e.g., maximum 5 requests/minute) specifically to `/debug/force-fresh-prices` and `/debug/coingecko-test` using `express-rate-limit` with Redis store.
-- **Benefit:** Mitigates risk of cache stampedes and protects third-party API quotas against accidental administrative script loops.
-
-#### 4. Automatic Deep Secret Redaction
-- **Mechanism:** All responses returned by debug routes must pass through `redactObject()` in `backend/src/utils/secretRedactor.ts`.
-- **Coverage:** Redaction regexes and sensitive key tokens cover Stellar secret seeds (`S...`), CoinGecko API keys, Bearer tokens, query parameters (`api_key=...`), email addresses, webhook URLs, and SMTP passwords.
-
----
-
-### Remediation Status Matrix
-
-| Component / Finding | Severity | Status | Remediation Details |
-|---|---|---|---|
-| Feature-Flag Perimeter Gate | High | **Remediated** | `blockDebugInProduction` middleware applied to all 6 debug routes; defaults to `404 Not Found` when `ENABLE_DEBUG_ROUTES=false`. |
-| Admin Authentication Enforcement | High | **Remediated** | `requireAdmin` Stellar signature verification attached to all 6 debug endpoints (`POST /debug/notifications/test` and all 5 `GET` routes). |
-| CoinGecko Test URL / Key Leakage | Medium | **Remediated** | Removed `testUrl` and `apiKeySet` disclosure from `/debug/coingecko-test` response body; API keys passed via secure headers only. |
-| Reflector Test API Key Length Leakage | Medium | **Remediated** | Removed `apiKeyLength` from `/debug/reflector-test` response to avoid aiding key bisection attacks. |
-| Diagnostic Notification Contact Leakage | Medium | **Remediated** | Integrated `redactObject` with `email` and `webhook` token matching to mask destination endpoints in `/debug/notifications/test`. |
-| Cache Thrashing / DoS Vector | High | **Mitigated** | Protected by dual layers of feature flag gating + admin cryptographic signature auth; recommended for IP allowlisting in production deployments. |
-| IP Allowlisting / Network Boundary | Medium | **Documented** | Recommended as deployment-level hardening for reverse proxy / API gateway layer. |
-| Dedicated Debug Auth Scope | Low | **Documented** | Recommended for multi-tenant / enterprise role separation. |
+1. **Scoped Storage Keys:** All Redis keys are strictly namespaced using composite identifiers:
+   ```typescript
+   const redisKey = `idempotency:${authenticatedUserId}:${clientProvidedKey}`;
+   ```
+2. **Payload Digest Verification:** A SHA-256 hash of the request body, method, and route path is stored alongside the key. If an identical key is reused with differing payloads, a `422 Unprocessable Entity / 409 Conflict` error is returned rather than returning stale cached responses.
+3. **Atomic Set-NX Lock with TTL:** Uses Redis atomic `SET key lock NX EX <ttl>` to prevent concurrent race conditions during inflight processing.
 
 ---
 
 ### References
 
-- Issue: [#1314 — [SECURITY] Security review: debug.routes.ts exposure risk in production](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1314)
-- Affected code: [`backend/src/api/debug.routes.ts`](../backend/src/api/debug.routes.ts)
-- Gating middleware: [`backend/src/middleware/debugGate.ts`](../backend/src/middleware/debugGate.ts)
-- Auth middleware: [`backend/src/middleware/auth.ts`](../backend/src/middleware/auth.ts)
-- Feature flag config: [`backend/src/config/featureFlags.ts`](../backend/src/config/featureFlags.ts)
-- Secret redactor utility: [`backend/src/utils/secretRedactor.ts`](../backend/src/utils/secretRedactor.ts)
-- Test suite: [`backend/src/test/debug.routes.test.ts`](../backend/src/test/debug.routes.test.ts)
+- Issue: [#1315 — [SECURITY] Security: threat-model idempotency key handling](../../issues/1315)
+- Affected code: [`backend/src/services/idempotencyRedisStore.ts`](../backend/src/services/idempotencyRedisStore.ts)
+- Affected code: [`backend/src/middleware/idempotency.ts`](../backend/src/middleware/idempotency.ts)
 
 ---
 
-*Last updated: 2026-08-31*
-*Audited by: Emmycivity (Security review, issue #1314)*
+## SPR-003
+
+**Title:** Security review: re-entrancy risk of external Reflector calls in rebalance
+
+**Severity:** Low
+
+**Status:** Verified — Checks-Effects-Interactions pattern enforced (tracked in issue #1316)
+
+**Reported:** 2026-07-24
+
+**Affected file:** `contracts/src/portfolio.rs`, `contracts/src/lib.rs`, `contracts/src/circuit_breaker.rs`
+
+**Affected function:** `execute_rebalance_internal`, `check_volatility`
+
+---
+
+### Description
+
+A focused security analysis evaluated external cross-contract call ordering during portfolio rebalancing. Specifically, the contract invokes the external Reflector oracle (`reflector_client.twap` and price feeds) and executes token transfers via the Soroban Token Interface.
+
+---
+
+### Threat Model & Worst-Case Scenario Analysis
+
+1. **Re-entrancy Attempt via Malicious Oracle:** A malicious or compromised oracle contract returning price data could theoretically attempt to call back into `execute_rebalance`, `deposit`, or `withdraw` during the oracle price fetch phase.
+2. **Worst-Case Impact:** If state updates (such as updating last rebalance timestamps, allocations, or emergency stop flags) occurred *after* external calls without re-entrancy protection, an attacker could trigger duplicate trades or bypass slippage/circuit breaker thresholds.
+
+---
+
+### Verified Architecture & Defense-in-Depth
+
+1. **Checks-Effects-Interactions (CEI):** All parameter validations, emergency stop checks, and internal state checks occur before executing external token transfers.
+2. **Soroban Re-entrancy Guard Architecture:** Soroban's execution environment restricts uncontrolled cross-contract re-entrancy by default unless explicit auth context is re-established.
+3. **Circuit Breaker Immediate State Mutation:** In `check_volatility`, whenever volatility exceeds `spike_threshold_bps`, `DataKey::EmergencyStop` and `DataKey::ContractPauseReason` are immediately set in storage *prior* to returning the error and aborting execution.
+
+---
+
+### References
+
+- Issue: [#1316 — [SECURITY] Security review: re-entrancy risk of external Reflector calls in rebalance](../../issues/1316)
+- Affected code: [`contracts/src/portfolio.rs`](../contracts/src/portfolio.rs)
+- Affected code: [`contracts/src/circuit_breaker.rs`](../contracts/src/circuit_breaker.rs)
+- Affected code: [`contracts/src/lib.rs`](../contracts/src/lib.rs)
+
+---
+
+*Last updated: 2026-08-30*
+*Audited by: wheval (automated security review & threat modeling, issues #1315, #1316)*
 
