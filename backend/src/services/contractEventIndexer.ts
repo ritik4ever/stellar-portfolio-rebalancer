@@ -7,6 +7,7 @@ import {
   BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
   checkContractEventSchemaVersion,
 } from "../config/contractEventSchema.js";
+import { recordIndexerLag, recordIndexerError } from "../observability/metrics.js";
 
 const INDEXER_CURSOR_KEY = "soroban_event_indexer.cursor";
 const INDEXER_LATEST_LEDGER_KEY = "soroban_event_indexer.latest_ledger";
@@ -537,11 +538,14 @@ export class ContractEventIndexerService {
             const storedCursor = databaseService.getIndexerState(INDEXER_CURSOR_KEY)
             const storedLatestLedger = Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || undefined
 
+            const rpcLatest = await this.rpcExecute((s) => s.getLatestLedger())
+            const lag = rpcLatest.sequence - (storedLatestLedger || rpcLatest.sequence)
+            recordIndexerLag(Math.max(0, lag))
+
             let cursor = storedCursor
             let startLedger: number | undefined
             if (!cursor) {
-                const latest = await this.rpcExecute((s) => s.getLatestLedger())
-                const floorLedger = Math.max(1, latest.sequence - this.bootstrapWindowLedgers)
+                const floorLedger = Math.max(1, rpcLatest.sequence - this.bootstrapWindowLedgers)
                 startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
             }
 
@@ -639,6 +643,7 @@ export class ContractEventIndexerService {
             this.status.lastError = message
             this.consecutiveFailures++
             this.pushRecentError(`[${now}] ${message}`)
+            recordIndexerError()
             logger.error('[CHAIN-INDEXER] Sync failed', {
                 error: message,
                 consecutiveFailures: this.consecutiveFailures
