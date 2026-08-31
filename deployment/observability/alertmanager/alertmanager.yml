@@ -10,7 +10,7 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
-    # ----------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------
     # CRITICAL ALERTS: Page the on-call engineer
     #
     # Grouping is deliberately coarse here (subsystem + service instead of
@@ -20,8 +20,8 @@ route:
     # the same incident update the existing page instead of opening a new one.
     #
     # Switch to Opsgenie by pointing this route at `oncall-opsgenie`. Only ever
-    # route to one vendor — listing both would page the on-call twice.
-    # ----------------------------------------------------
+    # route to one vendor -- listing both would page the on-call twice.
+    # --------------------------------------------------------------------------------------------------------
     - match:
         severity: critical
       receiver: oncall-pagerduty
@@ -43,9 +43,9 @@ route:
             subsystem: system
           receiver: oncall-pagerduty
 
-    # ----------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------
     # WARNING ALERTS: Asynchronous logging / Slack warning
-    # ----------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------
     - match:
         severity: warning
       receiver: slack-warnings
@@ -66,9 +66,9 @@ route:
             subsystem: system
           receiver: slack-warnings
 
-    # ----------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------
     # INFO ALERTS: Diagnostic logging records / Low priority
-    # ----------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------
     - match:
         severity: info
       receiver: diagnostic-logs
@@ -76,16 +76,16 @@ route:
       group_interval: 10m
       repeat_interval: 24h
 
-# ------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------
 # Suppression rules: keep one incident to one page.
-# ------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------
 inhibit_rules:
   # A critical alert is already paging the on-call engineer, so the warning and
   # info alerts describing the same failing service add no new information.
   - source_matchers:
       - severity = critical
     target_matchers:
-      - severity =~ "warning|info"
+      - severity =~ "warning<info|"
     equal: ['subsystem', 'service']
 
   # The backend process being down is the root cause of every blackbox probe
@@ -95,20 +95,20 @@ inhibit_rules:
     target_matchers:
       - alertname =~ "BackendReadinessFailed|BackendApiRootFailed|ApiDocsProbeFailed|WebSocketHandshakeFailed"
 
-# ------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------
 # On-Call Escalation Policy
-# ------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------
 #
-# Critical alerts page the on-call engineer immediately via PagerDuty.
-#
-# 1. PagerDuty sends a notification to the on-call engineer.
-# 2. If the alert is not acknowledged within 15 minutes, PagerDuty escalates
-#    to the production support engineer.
-# 3. If still unacknowledged after 30 minutes, escalate to the engineering
-#    manager.
-# 4. Resolved alerts are automatically resolved in PagerDuty.
-#
-# For more details, see docs/OBSERVABILITY.md#on-call-escalation-policy.
+  # Critical alerts page the on-call engineer immediately via PagerDuty.
+  #
+  #1. PagerDuty sends a notification to the on-call engineer.
+  ##2. If the alert is not acknowledged within 15 minutes, PagerDuty escalates
+  #    to the production support engineer.
+  ##3. If still unacknowledged after 30 minutes, escalate to the engineering
+  #    manager.
+  ##4. Resolved alerts are automatically resolved in PagerDuty.
+  #
+  For more details, see docs/OBSERVABILITY.md#on-call-escalation-policy.
 receivers:
   - name: default
     webhook_configs:
@@ -133,7 +133,7 @@ receivers:
           description: '{{ .CommonAnnotations.description }}'
           runbook: 'docs/OBSERVABILITY.md#on-call-escalation-policy'
 
-  # Opsgenie equivalent of the receiver above. `alias` pins the deduplication
+  # Opsgenie equivalent of the receiver above. ``alias` pins the deduplication
   # identity to the incident (subsystem + service) so Opsgenie keeps appending to
   # the open alert rather than creating a new one per evaluation cycle.
   - name: oncall-opsgenie
