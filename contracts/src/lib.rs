@@ -1148,6 +1148,10 @@ impl PortfolioRebalancer {
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
         portfolio.user.require_auth();
+
+        if spike_threshold_bps == 0 || spike_threshold_bps > 10000 {
+            return Err(Error::InvalidAssetThreshold);
+        }
         
         portfolio.circuit_breaker_config = CircuitBreakerConfig {
             spike_threshold_bps,
@@ -1367,8 +1371,16 @@ impl PortfolioRebalancer {
             if let Some(reason) = preview.skip_reasons.get(asset) {
                 match reason {
                     AssetSkipReason::MissingPrice => return Err(Error::MissingPrice),
-                    AssetSkipReason::StalePrice => return Err(Error::StaleData),
+                    AssetSkipReason::StalePrice => return Err(Error::StaleOraclePrice),
                     _ => {}
+                }
+            }
+        }
+
+        for (asset, _) in portfolio.target_allocations.iter() {
+            if let Some(decision) = preview.threshold_decisions.get(asset.clone()) {
+                if decision.drift > ALLOCATION_DENOMINATOR / 2 {
+                    return Err(Error::ExcessiveDrift);
                 }
             }
         }
@@ -1452,7 +1464,7 @@ impl PortfolioRebalancer {
             }
         }
 
-        let mut total_fee_paid: i128 = 0;
+
         let contract_address = env.current_contract_address();
         for (asset, amount) in trades.iter() {
             let abs_amount = amount.abs();
@@ -1530,6 +1542,45 @@ impl PortfolioRebalancer {
 
     pub fn get_nav_history(env: Env, portfolio_id: u64, limit: u32) -> Result<Vec<NavSnapshot>, Error> {
         nav::get_nav_history(&env, portfolio_id, limit)
+    }
+
+    pub fn sweep_dust(env: Env, portfolio_id: u64) -> Result<(), Error> {
+        require_admin(&env);
+
+        let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
+        let fee_config = Self::get_fee_config(env.clone());
+        let destination = fee_config.fee_recipient;
+
+        let mut swept_amounts: Map<Address, i128> = Map::new(&env);
+        let mut dust_assets: Vec<Address> = Vec::new(&env);
+
+        for (asset, balance) in portfolio.current_balances.iter() {
+            if balance > 0 && balance < MIN_TRADE_AMOUNT_STROOPS {
+                let token_client = TokenClient::new(&env, &asset);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &destination,
+                    &balance,
+                );
+                swept_amounts.set(asset.clone(), balance);
+                dust_assets.push_back(asset.clone());
+            }
+        }
+
+        for asset in dust_assets.iter() {
+            portfolio.current_balances.remove(asset.clone());
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+
+        env.events().publish(
+            (Symbol::new(&env, "dust_swept"),),
+            (portfolio_id, swept_amounts, destination),
+        );
+
+        Ok(())
     }
 
     pub fn close_portfolio(env: Env, portfolio_id: u64) -> Result<(), Error> {

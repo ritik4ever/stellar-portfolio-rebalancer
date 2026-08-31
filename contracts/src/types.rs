@@ -351,6 +351,47 @@ pub struct DCAConfig {
 }
 
 
+/// Contract error variants.
+///
+/// Every variant has at least one call site returning it:
+/// - `InvalidAllocation` — allocation sum != 10000 bps (create, update, template)
+/// - `RebalanceNotNeeded` — no candidate trades when portfolio has positive value
+/// - `EmergencyStop` — contract-level emergency stop is active
+/// - `CooldownActive` — rebalance attempted before cooldown elapses
+/// - `StaleData` — NAV or DCA staleness, portfolio value calculation failure
+/// - `ExcessiveDrift` — any asset drift exceeds 50% (safety guard)
+/// - `AlreadyInitialized` — initialize called on an already-initialized contract
+/// - `InvalidThreshold` — rebalance threshold or circuit breaker window out of range
+/// - `InvalidSlippageTolerance` — slippage tolerance out of allowed range
+/// - `SlippageExceeded` — per-asset, contract-level, or global slippage cap breached
+/// - `TooManyAssets` — portfolio or template exceeds MAX_PORTFOLIO_ASSETS
+/// - `StaleOraclePrice` — oracle price data is stale (AssetSkipReason::StalePrice)
+/// - `InvalidAssetThreshold` — per-portfolio circuit breaker spike threshold out of range
+/// - `InvariantViolation` — portfolio invariant check failed
+/// - `InvalidAssetDecimals` — asset decimals missing or out of range
+/// - `UnsupportedSlippagePolicyVersion` — unknown slippage policy version
+/// - `InvalidWithdrawAmount` — deposit or withdraw amount <= 0
+/// - `PortfolioPaused` — portfolio is inactive (user-paused or emergency)
+/// - `InsufficientBalance` — withdraw amount exceeds current balance
+/// - `MissingPrice` — oracle has no price for a required asset
+/// - `PortfolioNotFound` — portfolio_id does not exist in storage
+/// - `PortfolioStorageFootprintTooLarge` — portfolio XDR exceeds storage limit
+/// - `PreviewUnavailable` — rebalance preview or queued config not available
+/// - `InvalidCooldown` — DCA cooldown or interval validation failure
+/// - `AssetNotSupported` — asset not in portfolio's asset_decimals map
+/// - `InvalidAmount` — DCA amount validation failure
+/// - `InvalidAllocationSum` — stored allocations do not sum to 10000 bps
+/// - `BatchTooLarge` — batch_rebalance exceeds MAX_BATCH_REBALANCE_PORTFOLIOS
+/// - `InvalidOracleAddress` — reflector address does not implement Reflector interface
+/// - `TimelockNotElapsed` — timelocked operation attempted before delay expires
+/// - `InvalidSlippageLimit` — asset slippage limit exceeds MAX_ASSET_SLIPPAGE_BPS
+/// - `InvalidPrice` — expected price <= 0 in slippage check
+/// - `TemplateNotFound` — template name does not exist in registry
+/// - `TemplateAlreadyExists` — template name already registered
+/// - `TooManyTemplates` — template registry at MAX_TEMPLATES limit
+/// - `Unauthorized` — caller is neither admin nor registered operator
+/// - `NoPendingAdmin` — accept_admin called with no pending nomination
+/// - `InvalidAdminProposal` — proposed admin is the current admin
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -381,7 +422,6 @@ pub enum Error {
     InvalidCooldown = 24,
     AssetNotSupported = 25,
     InvalidAmount = 26,
-    WithdrawFailed = 27,
     InvalidAllocationSum = 28,
     BatchTooLarge = 29,
     InvalidOracleAddress = 30,
