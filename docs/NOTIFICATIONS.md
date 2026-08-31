@@ -12,7 +12,7 @@ The Stellar Portfolio Rebalancer includes a comprehensive notification system th
 - **SMS Notifications**: Send text message alerts via Twilio
 - **Event Filtering**: Subscribe to specific event types
 - **User Preferences**: Per-user notification configuration
-- **Configurable backoff**: Provider-specific retry timing for email and webhooks (max attempts, initial delay, exponential multiplier, cap)
+- **Configurable backoff**: Provider-specific retry timing for email, webhooks, Slack, and SMS (max attempts, initial delay, exponential multiplier, cap)
 - **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
 - **Non-blocking**: Notification failures don't affect core operations
 
@@ -533,10 +533,6 @@ GET /api/notifications/preferences?userId=GXXXXXXX...
     "emailAddress": "user@example.com",
     "webhookEnabled": true,
     "webhookUrl": "https://your-domain.com/webhook",
-    "slackEnabled": true,
-    "slackWebhookUrl": "<your-slack-incoming-webhook-url>",
-    "smsEnabled": true,
-    "smsPhoneNumber": "+15559876543",
     "events": {
       "rebalance": true,
       "circuitBreaker": true,
@@ -583,9 +579,7 @@ X-Signature: <base64_signature_of_message>
   "message": "Test notification sent successfully",
   "sentTo": {
     "email": "user@example.com",
-    "webhook": "https://your-domain.com/webhook",
-    "slack": "<your-slack-incoming-webhook-url>",
-    "sms": "+15559876543"
+    "webhook": "https://your-domain.com/webhook"
   },
   "eventType": "rebalance",
   "timestamp": "2024-02-20T10:30:00.000Z"
