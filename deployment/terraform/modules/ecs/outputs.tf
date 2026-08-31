@@ -14,7 +14,7 @@ output "green_target_group_arn" {
 
 output "codedeploy_app_name" {
   description = "Name of the CodeDeploy application (if blue/green enabled)"
-  value       = try(aws_ecodedeploy_app.main[0].name, null)
+  value       = try(aws_codedeploy_app.main[0].name, null)
 }
 
 output "deployment_group_name" {
