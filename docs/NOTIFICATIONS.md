@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Stellar Portfolio Rebalancer includes a comprehensive notification system that alerts users about important portfolio events via email and webhooks.
+The Stellar Portfolio Rebalancer includes a comprehensive notification system that alerts users about important portfolio events via email, webhooks, Slack, and SMS.
 
 ## Features
 
@@ -533,6 +533,10 @@ GET /api/notifications/preferences?userId=GXXXXXXX...
     "emailAddress": "user@example.com",
     "webhookEnabled": true,
     "webhookUrl": "https://your-domain.com/webhook",
+    "slackEnabled": true,
+    "slackWebhookUrl": "<your-slack-incoming-webhook-url>",
+    "smsEnabled": true,
+    "smsPhoneNumber": "+15559876543",
     "events": {
       "rebalance": true,
       "circuitBreaker": true,
@@ -579,7 +583,9 @@ X-Signature: <base64_signature_of_message>
   "message": "Test notification sent successfully",
   "sentTo": {
     "email": "user@example.com",
-    "webhook": "https://your-domain.com/webhook"
+    "webhook": "https://your-domain.com/webhook",
+    "slack": "<your-slack-incoming-webhook-url>",
+    "sms": "+15559876543"
   },
   "eventType": "rebalance",
   "timestamp": "2024-02-20T10:30:00.000Z"
