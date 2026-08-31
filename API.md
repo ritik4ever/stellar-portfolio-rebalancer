@@ -291,14 +291,14 @@ USDC,35
 BTC,25
 ```
 
-> Send with `Content-Type: text/csv`. Headers must include `asset` and `allocation_pct`.
+> Send with `Content-Type: text/csv`. Headers must include `asset` and `allocation_pct`. When no JWT is used, provide `userAddress` as a query parameter.
 
 #### Request Schema
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `allocations` | `AllocationInputRow[]` | Yes | Array of `{ asset, allocation_pct }`. May also be the top-level body for JSON. |
-| `userAddress` | `string` | Yes | Stellar public key. Required in body or via JWT auth. |
+| `userAddress` | `string` | Yes | Stellar public key. Required in JSON body, as a query parameter, or via JWT auth. |
 | `name` | `string` | No | Portfolio display name. |
 | `description` | `string` | No | Portfolio description. |
 
