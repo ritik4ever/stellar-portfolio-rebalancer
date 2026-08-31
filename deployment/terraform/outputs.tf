@@ -10,6 +10,10 @@ output "frontend_url" {
   value = module.s3_cloudfront.cloudfront_domain_name
 }
 
+output "cloudfront_distribution_id" {
+  value = module.s3_cloudfront.cloudfront_distribution_id
+}
+
 output "db_secret_arn" {
   value       = module.rds.db_secret_arn
   description = "ARN of the Secrets Manager secret containing RDS credentials"
