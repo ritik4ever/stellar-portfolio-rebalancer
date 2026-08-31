@@ -1,10 +1,18 @@
 name: Dependency Audit Policy
 
 # This workflow enforces high/critical severity audit gates for npm and Cargo dependencies.
-# Exceptions for accepted risk must be added to the baseline files:
+# Exceptions for accepted risk (waivers) must be documented in the baseline files:
 #   - security/npm-audit-baseline.json for npm audits
 #   - security/cargo-audit-baseline.txt for cargo audits
 # A scheduled daily run catches newly disclosed advisories independent of code changes.
+#
+# Waiver process:
+#   1. Open an issue tracking the advisory and the remediation plan.
+#   2. Add the advisory ID to the corresponding baseline file with a comment that
+#      references the issue and the reason for the accepted risk.
+#   3. The daily scheduled scan will continue to emit a notification for waived
+#      advisories until the issue is resolved, ensuring waivers remain auditable
+#      via the baseline file's comment history in git.
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -58,8 +66,8 @@ jobs:
       - name: Notify Slack on Failure
         if: failure() && github.ref == 'refs/heads/main'
         run: |
-          curl -X POST -H 'Content-type: application/json'
-          --data "{\"text\":\"Security Scan / npm Audit Failure on main!\n\Repo\"R: ${#{ github.repository }}\n\Branch\": ${#{ github.ref_name }}\n\Failing Step\": ${#{ github.job }}\n\Link\": ${#{github.server_url }}/${#{ github.repository }}/actions/runs/${#{ github.run_id }}\"}"
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"Security Scan / npm Audit Failure on main!\nRepo: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nFailing Step: ${{ github.job }}\nLink: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
             "${{ secrets.SLACK_WEBHOOK_URL }}"
 
   cargo-audit-policy:
@@ -94,6 +102,6 @@ jobs:
       - name: Notify Slack on Failure
         if: failure() && github.ref == 'refs/heads/main'
         run: |
-          curl -X POST -H 'Content-type: application/json'
-          --data "{\"text\":\"Security Scan / Cargo Audit Failure on main!\n^Repo\": ${#{github.repository }}\n\Branch\": ${#{ github.ref_name }}\n\Failing Step\": ${#{ github.job }}\n\Link\": ${#{github.server_url }}/${#{ github.repository }}/actions/runs/${#{ github.run_id }}\"}"
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"Security Scan / Cargo Audit Failure on main!\nRepo: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nFailing Step: ${{ github.job }}\nLink: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
             "${{ secrets.SLACK_WEBHOOK_URL }}"
