@@ -830,6 +830,26 @@ If an incident cannot be resolved using this runbook:
 1.  **Notify Core Maintainers**: Reference contacts in [docs/TRIAGE.md](TRIAGE.md#escalation-process).
 2.  **Security Incidents**: For vulnerabilities or funds compromise, follow the private escalation channel details in [docs/TRIAGE.md](TRIAGE.md#security-triage) instead of public issue trackers.
 3.  **Stellar Network Inquiries**: If issues stem from upstream Stellar network failures, consult the official [Stellar Status Dashboard](https://status.stellar.org/).
+
+---
+
+## 8. Secondary Region (Disaster Recovery) Provisioning & Failover
+
+This repository includes a Terraform module to provision a secondary-region DR environment mirroring core infrastructure (ECS cluster, RDS read-replica, Redis placeholder, and S3 replica buckets) at `deployment/terraform/modules/secondary-region`.
+
+Provisioning notes:
+- The module intentionally creates minimal destination resources. Production deployments should supply VPC, subnet groups, parameter groups, KMS keys, and IAM roles consistent with your account security policy.
+- RDS cross-region replication is created by setting `replicate_source_db` to your primary DB identifier/ARN. Ensure network connectivity and permissions are in place.
+
+Manual failover (high level):
+1. Promote the read-replica in the DR region to a standalone primary (see `deployment/terraform/scripts/failover.sh`).
+2. Update application configuration / Route53 to point to the new DB endpoint.
+3. Repoint any S3-backed assets to the replicated buckets in the DR region, and verify Redis availability or promote Global Datastore as required.
+4. After validation, optionally reconfigure the original primary as a replica or rebuild it per your recovery plan.
+
+CI Validation:
+- The repository contains a GitHub Actions workflow `/.github/workflows/terraform-dr.yml` which runs `terraform fmt`, `terraform validate` and `terraform plan` against the new module for PRs and pushes that touch `deployment/terraform/**` to catch drift and validate changes.
+
 4.  **AWS Support**: For infrastructure-level issues, open a support case with AWS. Reference the Severity levels defined in your AWS Support plan.
 
 ---

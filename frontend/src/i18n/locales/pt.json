@@ -24,6 +24,7 @@
     "rebalanceNeeded": "Rebalanceamento necessário",
     "driftMessage": "Sua carteira desviou da alocação alvo",
     "estimatedGas": "Gas estimado: {{xlm}} XLM (~${{usd}})",
+    "estimatedTrades": "{{count}} operação{{plural}} estimada{{plural}} @ {{perTrade}} XLM cada",
     "estimatedTrades_one": "1 operação estimada @ {{perTrade}} XLM cada",
     "estimatedTrades_other": "{{count}} operações estimadas @ {{perTrade}} XLM cada",
     "highGasWarning": "O gas estimado é maior que o normal (> 0.5 XLM). Considere menos operações.",
@@ -99,7 +100,9 @@
     "label": "Idioma",
     "english": "Inglês",
     "spanish": "Espanhol",
-    "portuguese": "Português"
+    "portuguese": "Português",
+    "french": "Francês",
+    "german": "Alemão"
   },
   "portfolioSetup": {
     "title": "Criar Carteira",

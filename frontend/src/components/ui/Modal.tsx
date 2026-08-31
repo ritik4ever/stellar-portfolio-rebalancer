@@ -49,20 +49,41 @@ export const Modal: React.FC<ModalProps> = ({ open, title, description, onClose,
       if (e.key !== 'Tab') return
 
       const focusableElements = getFocusableElements()
-      if (focusableElements.length === 0) return
-
       const firstElement = focusableElements[0]
       const lastElement = focusableElements[focusableElements.length - 1]
 
+      // If there are no focusable elements inside the modal, keep focus on the
+      // modal container itself and prevent focus from escaping to the page.
+      if (focusableElements.length === 0) {
+        e.preventDefault()
+        modal.focus()
+        return
+      }
+
+      const active = document.activeElement as HTMLElement | null
+
+      // If focus is not on a focusable element inside the modal (for example
+      // the modal container was focused on open), move focus into the modal.
+      const activeIndex = active ? focusableElements.indexOf(active) : -1
+      if (activeIndex === -1) {
+        e.preventDefault()
+        if (e.shiftKey) {
+          lastElement.focus()
+        } else {
+          firstElement.focus()
+        }
+        return
+      }
+
       if (e.shiftKey) {
         // Shift+Tab: if focus is on first element, move to last
-        if (document.activeElement === firstElement) {
+        if (active === firstElement) {
           e.preventDefault()
           lastElement.focus()
         }
       } else {
         // Tab: if focus is on last element, move to first
-        if (document.activeElement === lastElement) {
+        if (active === lastElement) {
           e.preventDefault()
           firstElement.focus()
         }
