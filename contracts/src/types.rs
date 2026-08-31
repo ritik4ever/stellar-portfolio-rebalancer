@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, Map, String, Vec};
 
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
 pub const ALLOCATION_DENOMINATOR: u32 = 10_000;
@@ -15,6 +15,13 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 pub const CONTRACT_VERSION: u32 = 2;
 /// Contract event schema version matching backend expected schema version.
 pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
+/// Persistent storage schema version. Tracked separately from
+/// `CONTRACT_EVENT_SCHEMA_VERSION` (which only versions emitted event
+/// shapes): this one versions the on-chain storage layout itself and is
+/// advanced by `upgrade::migrate_storage`, which runs automatically as part
+/// of `execute_upgrade`. A contract with no stored value is treated as
+/// version 0 (pre-versioning / legacy storage).
+pub const CURRENT_STORAGE_SCHEMA_VERSION: u32 = 1;
 /// Maximum number of assets allowed in a single portfolio (#296).
 ///
 /// Soroban persistent storage entries are bounded by ledger entry size limits.
@@ -26,6 +33,8 @@ pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
 /// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
+pub const MAX_PORTFOLIOS_PER_USER: u32 = 10;
+pub const DEFAULT_REBALANCE_HISTORY_CAPACITY: u32 = 10;
 pub const MAX_PORTFOLIO_STORAGE_BYTES: u32 = 3_072;
 pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
 pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
@@ -274,6 +283,62 @@ pub enum DataKey {
     AssetSlippage(Address),
     Template(String),
     TemplateNames,
+    /// Persisted storage schema version; see `CURRENT_STORAGE_SCHEMA_VERSION`.
+    SchemaVersion,
+    /// Marks `Address` as a registered operator (scoped permission distinct
+    /// from full Admin rights) when present and `true`.
+    Operator(Address),
+    /// Address nominated by the current admin via `propose_admin`, pending
+    /// its own `accept_admin` call. Cleared once the transfer completes.
+    /// Absence of this key means no admin transfer is in flight.
+    PendingAdmin,
+    /// Fixed-capacity ring buffer storing rebalance history per portfolio.
+    RebalanceHistory(u64),
+    /// Stored admin-configurable max assets limit per portfolio.
+    MaxPortfolioAssets,
+    /// Stored admin-configurable max portfolios limit per user.
+    MaxPortfoliosPerUser,
+    /// Portfolio count per user address.
+    UserPortfolioCount(Address),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebalanceRecord {
+    pub timestamp: u64,
+    pub trades: Map<Address, i128>,
+    pub fee_paid: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebalanceHistoryBuffer {
+    pub records: Vec<RebalanceRecord>,
+    pub capacity: u32,
+}
+
+impl RebalanceHistoryBuffer {
+    pub fn new(env: &Env, capacity: u32) -> Self {
+        Self {
+            records: Vec::new(env),
+            capacity,
+        }
+    }
+
+    pub fn push(&mut self, record: RebalanceRecord) {
+        self.records.push_back(record);
+        if self.capacity > 0 && self.records.len() > self.capacity {
+            self.records = self.records.slice(1..self.records.len());
+        }
+    }
+
+    pub fn len(&self) -> u32 {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
 }
 
 #[contracttype]
@@ -286,6 +351,47 @@ pub struct DCAConfig {
 }
 
 
+/// Contract error variants.
+///
+/// Every variant has at least one call site returning it:
+/// - `InvalidAllocation` — allocation sum != 10000 bps (create, update, template)
+/// - `RebalanceNotNeeded` — no candidate trades when portfolio has positive value
+/// - `EmergencyStop` — contract-level emergency stop is active
+/// - `CooldownActive` — rebalance attempted before cooldown elapses
+/// - `StaleData` — NAV or DCA staleness, portfolio value calculation failure
+/// - `ExcessiveDrift` — any asset drift exceeds 50% (safety guard)
+/// - `AlreadyInitialized` — initialize called on an already-initialized contract
+/// - `InvalidThreshold` — rebalance threshold or circuit breaker window out of range
+/// - `InvalidSlippageTolerance` — slippage tolerance out of allowed range
+/// - `SlippageExceeded` — per-asset, contract-level, or global slippage cap breached
+/// - `TooManyAssets` — portfolio or template exceeds MAX_PORTFOLIO_ASSETS
+/// - `StaleOraclePrice` — oracle price data is stale (AssetSkipReason::StalePrice)
+/// - `InvalidAssetThreshold` — per-portfolio circuit breaker spike threshold out of range
+/// - `InvariantViolation` — portfolio invariant check failed
+/// - `InvalidAssetDecimals` — asset decimals missing or out of range
+/// - `UnsupportedSlippagePolicyVersion` — unknown slippage policy version
+/// - `InvalidWithdrawAmount` — deposit or withdraw amount <= 0
+/// - `PortfolioPaused` — portfolio is inactive (user-paused or emergency)
+/// - `InsufficientBalance` — withdraw amount exceeds current balance
+/// - `MissingPrice` — oracle has no price for a required asset
+/// - `PortfolioNotFound` — portfolio_id does not exist in storage
+/// - `PortfolioStorageFootprintTooLarge` — portfolio XDR exceeds storage limit
+/// - `PreviewUnavailable` — rebalance preview or queued config not available
+/// - `InvalidCooldown` — DCA cooldown or interval validation failure
+/// - `AssetNotSupported` — asset not in portfolio's asset_decimals map
+/// - `InvalidAmount` — DCA amount validation failure
+/// - `InvalidAllocationSum` — stored allocations do not sum to 10000 bps
+/// - `BatchTooLarge` — batch_rebalance exceeds MAX_BATCH_REBALANCE_PORTFOLIOS
+/// - `InvalidOracleAddress` — reflector address does not implement Reflector interface
+/// - `TimelockNotElapsed` — timelocked operation attempted before delay expires
+/// - `InvalidSlippageLimit` — asset slippage limit exceeds MAX_ASSET_SLIPPAGE_BPS
+/// - `InvalidPrice` — expected price <= 0 in slippage check
+/// - `TemplateNotFound` — template name does not exist in registry
+/// - `TemplateAlreadyExists` — template name already registered
+/// - `TooManyTemplates` — template registry at MAX_TEMPLATES limit
+/// - `Unauthorized` — caller is neither admin nor registered operator
+/// - `NoPendingAdmin` — accept_admin called with no pending nomination
+/// - `InvalidAdminProposal` — proposed admin is the current admin
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -316,7 +422,6 @@ pub enum Error {
     InvalidCooldown = 24,
     AssetNotSupported = 25,
     InvalidAmount = 26,
-    WithdrawFailed = 27,
     InvalidAllocationSum = 28,
     BatchTooLarge = 29,
     InvalidOracleAddress = 30,
@@ -330,6 +435,17 @@ pub enum Error {
     CannotMergeSamePortfolio = 38,
     PortfolioOwnerMismatch = 39,
     ArithmeticOverflow = 40,
+    /// Caller authenticated successfully but is neither the contract admin
+    /// nor a registered operator for an operator-eligible entrypoint.
+    Unauthorized = 37,
+    /// `accept_admin` was called while no admin transfer is in flight
+    /// (`propose_admin` has never run, or the transfer already completed).
+    NoPendingAdmin = 38,
+    /// A proposed admin is required to differ from the current admin;
+    /// re-proposing the incumbent would be a no-op transfer.
+    InvalidAdminProposal = 39,
+    /// Portfolio creation failed because the user reached the maximum allowed portfolios.
+    TooManyPortfolios = 40,
 }
 
 #[contracttype]

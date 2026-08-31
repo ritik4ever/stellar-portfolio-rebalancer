@@ -81,7 +81,6 @@
   },
   {
     "file": "010_consent_audit_lifecycle.down.sql",
- #391-Introduce-contract-version-read-method-for-safer-client-compatibility-checks-FIX
     "sha256": "d8977398dde3e54341c838307c620d8533b4ee7c6e73e50910edd8612e705806"
   },
   {
@@ -105,20 +104,59 @@
     "sha256": "3e274ed8c8f411aa538dc1ceb39240b74ae56c9febe7d920680607f3c072816c"
   },
   {
+    "file": "011_rebalance_cost_metrics.down.sql",
+    "sha256": "5760434f3e48c47c28e4be090296ec9b02b9f5822ead2fb8a337a3f4ba2be8b5"
+  },
+  {
+    "file": "011_rebalance_cost_metrics.up.sql",
+    "sha256": "81de13521ba61016090ca7d20bdb97f758bdb1814a3f52507acb526df7b20776"
+  },
+  {
     "file": "012_portfolio_search.down.sql",
     "sha256": "7fb1ce8ae9d0065870b3d42c23f5d3a5a385134725d6522b39439c76ec8c4c06"
   },
   {
     "file": "012_portfolio_search.up.sql",
     "sha256": "98cb9682b01ba4ae16ef965dd72c0269de9549c73060065dd297150ebe5b79ab"
-
-    "sha256": "351bae86974db75abfb7508e0cadf3b5695f3c223b93b68a1a6bf97dc3f85caf"
+  },
+  {
+    "file": "013_api_keys.down.sql",
+    "sha256": "8303e0821404167bd37611b8b511e8abb02fe4e7d13851439931bfe3db9d8bfb"
+  },
+  {
+    "file": "013_api_keys.up.sql",
+    "sha256": "a94d3942cc2e0983a363b72a6228865e86380b6fa1d4af384e336f9f106c47e1"
+  },
+  {
+    "file": "013_user_alerts.down.sql",
+    "sha256": "1ea35f7df4d921a2ab57704d18e16840c9247a42024e506710e6ecc9b00fb9d9"
+  },
+  {
+    "file": "013_user_alerts.up.sql",
+    "sha256": "2b4a4260697ba352cd1529e275f128ca3cbcb6cdfc6f60f6f1c1298826fb441c"
+  },
+  {
+    "file": "013_user_preferences.down.sql",
+    "sha256": "7699eb3709ac6ae6e5fa7cbe44931346d911ea70765b55be8e0938c8e9724251"
   },
   {
     "file": "013_user_preferences.up.sql",
     "sha256": "ae290645224918c9648dfdd032443ae4ae6dfe620299e41151ab40d81ae38b8a"
   },
   {
-
+    "file": "014_portfolio_archiving.down.sql",
+    "sha256": "ffbe0cde67191b08f24d8069154da6144d8c95de231f8aaf137aa2603444ca70"
+  },
+  {
+    "file": "014_portfolio_archiving.up.sql",
+    "sha256": "037549ecb119bd14e002f5c80c87a296a7e52f85350dc68cdfe83eed789ebf3f"
+  },
+  {
+    "file": "015_refresh_token_families.down.sql",
+    "sha256": "83a856187b8949bcf888a351d71fe95a2712e576d80c37b766988d7a6a6d073f"
+  },
+  {
+    "file": "015_refresh_token_families.up.sql",
+    "sha256": "4f01f574b0e668c46352c1cb85f8c2da6c3c68576b3cf686c29e8441f6e0dadb"
   }
 ]

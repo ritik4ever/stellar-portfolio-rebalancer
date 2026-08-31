@@ -817,20 +817,24 @@ const spec: Record<string, any> = {
             get: {
                 tags: ['Portfolio'],
                 summary: 'Get tax report',
-                description: 'Realized gain/loss tax report computed with FIFO cost basis for a tax year.',
+                description:
+                    'Realized gain/loss tax report for a tax year. Lots are matched using the selected ' +
+                    'cost-basis method (FIFO by default). `format=turbotax` returns a TurboTax-importable ' +
+                    'CSV with the columns: Currency Name, Purchase Date, Cost Basis, Date Sold, Proceeds.',
                 parameters: [
                     { name: 'year', in: 'query', schema: { type: 'integer', minimum: 2000, maximum: 2100, description: 'Tax year (defaults to the current year)' } },
-                    { name: 'format', in: 'query', schema: { type: 'string', enum: ['json', 'csv'], default: 'json' } },
+                    { name: 'format', in: 'query', schema: { type: 'string', enum: ['json', 'csv', 'turbotax'], default: 'json' } },
+                    { name: 'costBasisMethod', in: 'query', schema: { type: 'string', enum: ['fifo', 'lifo', 'hifo'], default: 'fifo', description: 'Lot-matching method used to determine cost basis' } },
                 ],
                 responses: {
                     '200': {
-                        description: 'Tax report summary (JSON) or CSV download (format=csv)',
+                        description: 'Tax report summary (JSON) or CSV download (format=csv or format=turbotax)',
                         content: {
                             'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } },
                             'text/csv': { schema: { type: 'string' } },
                         },
                     },
-                    '400': { description: 'Invalid year', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '400': { description: 'Invalid year or costBasisMethod', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },

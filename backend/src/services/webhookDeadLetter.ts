@@ -61,6 +61,24 @@ class WebhookDeadLetterQueue {
         })
     }
 
+    /**
+     * Re-queue a previously replayed item after delivery failed again.
+     * Persists the incremented attempt count so operators can see how many
+     * times the payload has been replayed while sitting in the dead-letter.
+     */
+    async requeue(item: DeadLetterItem): Promise<void> {
+        await this.push({
+            ...item,
+            attemptsExhausted: item.attemptsExhausted + 1,
+        })
+        logger.warn('[DLQ] Failed replay re-queued with incremented attempts', {
+            itemId: item.id,
+            userId: item.userId,
+            eventType: item.eventType,
+            attempts: item.attemptsExhausted + 1,
+        })
+    }
+
     async list(): Promise<DeadLetterItem[]> {
         if (!this.initialized) await this.init()
 
@@ -137,3 +155,124 @@ class WebhookDeadLetterQueue {
 }
 
 export const webhookDeadLetterQueue = new WebhookDeadLetterQueue()
+
+// ── replay helpers (#1393) ───────────────────────────────────────────────────
+
+/**
+ * Filter + paginate the dead-letter queue. Keeps the admin listing usable once
+ * a broken endpoint has produced thousands of entries.
+ */
+export interface DeadLetterQuery {
+    userId?: string
+    eventType?: string
+    search?: string
+    page?: number
+    pageSize?: number
+}
+
+export interface DeadLetterListing {
+    items: DeadLetterItem[]
+    count: number
+    summary: {
+        total: number
+        byEventType: Record<string, number>
+        oldestTimestamp?: string
+        newestTimestamp?: string
+    }
+    pagination: {
+        page: number
+        pageSize: number
+        total: number
+        totalPages: number
+        hasMore: boolean
+    }
+}
+
+const DEFAULT_DLQ_PAGE_SIZE = 50
+const MAX_DLQ_PAGE_SIZE = 500
+
+export function queryDeadLetterItems(
+    all: DeadLetterItem[],
+    query: DeadLetterQuery = {},
+): DeadLetterListing {
+    const search = query.search?.trim().toLowerCase()
+
+    const filtered = all.filter((item) => {
+        if (query.userId && item.userId !== query.userId) return false
+        if (query.eventType && item.eventType !== query.eventType) return false
+        if (search) {
+            const haystack = `${item.id} ${item.userId} ${item.eventType} ${item.webhookUrl} ${item.errorMessage}`.toLowerCase()
+            if (!haystack.includes(search)) return false
+        }
+        return true
+    })
+
+    const pageSize = clampPageSize(query.pageSize)
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+    const page = Math.min(Math.max(1, Math.trunc(query.page ?? 1) || 1), totalPages)
+    const start = (page - 1) * pageSize
+    const items = filtered.slice(start, start + pageSize)
+
+    const byEventType: Record<string, number> = {}
+    for (const item of filtered) {
+        byEventType[item.eventType] = (byEventType[item.eventType] ?? 0) + 1
+    }
+
+    const timestamps = filtered.map((i) => i.timestamp).filter(Boolean).sort()
+
+    return {
+        items,
+        count: items.length,
+        summary: {
+            total: filtered.length,
+            byEventType,
+            oldestTimestamp: timestamps[0],
+            newestTimestamp: timestamps[timestamps.length - 1],
+        },
+        pagination: {
+            page,
+            pageSize,
+            total: filtered.length,
+            totalPages,
+            hasMore: start + items.length < filtered.length,
+        },
+    }
+}
+
+function clampPageSize(value: unknown): number {
+    const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10)
+    if (isNaN(parsed)) return DEFAULT_DLQ_PAGE_SIZE
+    return Math.min(MAX_DLQ_PAGE_SIZE, Math.max(1, Math.trunc(parsed)))
+}
+
+/**
+ * POST one dead-letter payload back to its webhook URL.
+ *
+ * Extracted so the single-item and batch replay endpoints share one definition
+ * of what a replay *is* — previously the whole request/timeout closure was
+ * duplicated between them and could drift apart.
+ */
+export async function postDeadLetterPayload(
+    item: DeadLetterItem,
+    timeoutMs: number,
+): Promise<void> {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+        const response = await fetch(item.webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Webhook-Event': item.eventType,
+                'X-Webhook-Replay': 'true',
+            },
+            body: JSON.stringify(item.payload),
+            signal: controller.signal,
+        })
+        if (!response.ok) {
+            throw new Error(`Webhook responded with status ${response.status}`)
+        }
+    } finally {
+        clearTimeout(timeoutId)
+    }
+}

@@ -377,7 +377,8 @@ export const requestMonitoringMiddleware = (
   res: import("express").Response,
   next: import("express").NextFunction,
 ): void => {
-  rateLimitMonitor.recordRequest();
+  // Passing the request also feeds the per-IP / per-API-key consumption dashboard.
+  rateLimitMonitor.recordRequest(req);
   next();
 };
 

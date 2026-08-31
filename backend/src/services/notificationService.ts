@@ -9,11 +9,19 @@ import {
   dbSaveDigestEvent,
   dbGetAndDeleteDigestEventsBefore,
   dbInitDefaultNotificationPreferences,
+  dbGetPortfolioNotificationOverride,
+  dbSavePortfolioNotificationOverride,
+  dbListPortfolioNotificationOverrides,
+  dbDeletePortfolioNotificationOverride,
+  type PortfolioNotificationOverride,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
-import { normalizeNotificationPreferences } from "./notificationPreferences.js";
+import {
+  normalizeNotificationPreferences,
+  resolvePortfolioNotificationPreferences,
+} from "./notificationPreferences.js";
 import { databaseService } from "./databaseService.js";
 import {
   getNotificationDeliveryConfig,
@@ -26,8 +34,17 @@ import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter
 // Types
 // ─────────────────────────────────────────────
 
+/** Nodemailer-compatible attachment (used by the scheduled CSV export, #1411). */
+export interface EmailAttachment {
+  filename: string;
+  content: string | Buffer;
+  contentType?: string;
+}
+
 export interface NotificationPayload {
   userId: string;
+  /** When set, portfolio-level preference overrides apply to this delivery (#1395). */
+  portfolioId?: string;
   eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
   message: string;
@@ -259,7 +276,13 @@ class EmailProvider implements NotificationProvider {
     );
   }
 
-  async sendRaw(options: { to: string; subject: string; html: string; text: string }): Promise<void> {
+  async sendRaw(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    attachments?: EmailAttachment[];
+  }): Promise<void> {
     if (!this.transporter) {
       logger.warn("Cannot send raw email - transporter not available");
       return;
@@ -271,6 +294,7 @@ class EmailProvider implements NotificationProvider {
       subject: options.subject,
       text: options.text,
       html: options.html,
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     };
 
     const info = await this.transporter.sendMail(mailOptions);
@@ -388,6 +412,54 @@ export class NotificationService {
   }
 
   /**
+   * Preferences that actually apply to one portfolio: global settings with any
+   * portfolio-level override layered on top (#1395). Falls back to the global
+   * preferences unchanged when no override exists.
+   */
+  getPreferencesForPortfolio(
+    userId: string,
+    portfolioId?: string,
+  ): NotificationPreferences & { overrideApplied: boolean } {
+    const global = this.getPreferences(userId);
+    if (!portfolioId) return { ...global, overrideApplied: false };
+
+    const override = dbGetPortfolioNotificationOverride(userId, portfolioId);
+    return resolvePortfolioNotificationPreferences(global, override);
+  }
+
+  /** Create or update a portfolio-level override. */
+  setPortfolioOverride(
+    override: PortfolioNotificationOverride,
+  ): PortfolioNotificationOverride {
+    const saved = dbSavePortfolioNotificationOverride(override);
+    logger.info('[NOTIFICATION] Portfolio preference override saved', {
+      userId: override.userId,
+      portfolioId: override.portfolioId,
+    });
+    return saved;
+  }
+
+  getPortfolioOverride(
+    userId: string,
+    portfolioId: string,
+  ): PortfolioNotificationOverride | undefined {
+    return dbGetPortfolioNotificationOverride(userId, portfolioId);
+  }
+
+  listPortfolioOverrides(userId: string): PortfolioNotificationOverride[] {
+    return dbListPortfolioNotificationOverrides(userId);
+  }
+
+  /** Remove an override so the portfolio falls back to global preferences. */
+  deletePortfolioOverride(userId: string, portfolioId: string): boolean {
+    const deleted = dbDeletePortfolioNotificationOverride(userId, portfolioId);
+    if (deleted) {
+      logger.info('[NOTIFICATION] Portfolio preference override removed', { userId, portfolioId });
+    }
+    return deleted;
+  }
+
+  /**
    * Get per-asset price alert threshold overrides for a user.
    */
   getPriceAlertThresholds(userId: string): Record<string, number> {
@@ -463,7 +535,10 @@ export class NotificationService {
    * Send notification to user
    */
   async notify(payload: NotificationPayload): Promise<void> {
-    const preferences = this.getPreferences(payload.userId);
+    const preferences = this.getPreferencesForPortfolio(
+      payload.userId,
+      payload.portfolioId,
+    );
 
     const eventKey = payload.eventType as keyof typeof preferences.events;
     if (!preferences.events[eventKey]) {
@@ -559,7 +634,13 @@ export class NotificationService {
    * wrapping it in a NotificationPayload. Used by the digest module
    * for portfolio summary emails.
    */
-  async sendRawEmail(options: { to: string; subject: string; html: string; text: string }): Promise<void> {
+  async sendRawEmail(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    attachments?: EmailAttachment[];
+  }): Promise<void> {
     const emailProvider = this.providers.find(
       (p) => p instanceof EmailProvider
     ) as EmailProvider | undefined;
@@ -567,6 +648,31 @@ export class NotificationService {
     if (!emailProvider) {
       logger.warn("Email provider not available for raw email");
       return;
+    }
+
+    await emailProvider.sendRaw(options);
+  }
+
+  /**
+   * Send an email with file attachments, failing loudly when email is not
+   * configured. Scheduled exports (#1411) must surface a delivery failure so the
+   * schedule can record it, rather than silently doing nothing.
+   */
+  async sendEmailWithAttachment(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    attachments: EmailAttachment[];
+  }): Promise<void> {
+    const emailProvider = this.providers.find(
+      (p) => p instanceof EmailProvider
+    ) as EmailProvider | undefined;
+
+    if (!emailProvider?.isAvailable()) {
+      throw new Error(
+        "Email transport is not configured — set SMTP_HOST, SMTP_USER and SMTP_PASS",
+      );
     }
 
     await emailProvider.sendRaw(options);

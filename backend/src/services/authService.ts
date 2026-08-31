@@ -10,6 +10,13 @@ import {
   deleteAllRefreshTokensForUser,
   generateRefreshTokenId,
   touchRefreshToken,
+  advanceRefreshTokenFamily,
+  createRefreshTokenFamily,
+  findRotatedRefreshToken,
+  generateRefreshTokenFamilyId,
+  getRefreshTokenFamily,
+  recordRotatedRefreshToken,
+  revokeRefreshTokenFamily,
 } from "../db/refreshTokenDb.js";
 import { logger, logAudit } from "../utils/logger.js";
 import { recordAuthSecurityEvent } from "../observability/metrics.js";
@@ -108,44 +115,60 @@ export function generateAccessToken(address: string): string {
   );
 }
 
+/**
+ * Issue a fresh access/refresh pair.
+ *
+ * When `family` is omitted a brand-new token family is opened (a new login).
+ * `refreshTokens` passes the existing family so a rotation stays inside the
+ * chain it belongs to.
+ */
 export async function issueTokens(
   address: string,
   metadata?: RefreshTokenMetadata | null,
+  family?: { familyId: string; generation: number },
 ): Promise<AuthTokens> {
- interface TokenCreationResult extends AuthTokens {
-   refreshId: string;
- }
+  const isNewFamily = !family;
+  const familyId = family?.familyId ?? generateRefreshTokenFamilyId();
+  const generation = family?.generation ?? 0;
 
- async function createTokensForUser(address: string): Promise<TokenCreationResult> {
-   const accessToken = generateAccessToken(address);
-   const refreshId = generateRefreshTokenId();
-   const refreshToken = jwt.sign(
-     { sub: address, type: "refresh", jti: refreshId } as TokenPayload & {
-       jti: string;
-     },
-     getJwtSecret(),
-     { expiresIn: REFRESH_EXPIRY_SEC },
-   );
-   const expiresAt = new Date(Date.now() + REFRESH_EXPIRY_SEC * 1000);
-   await createRefreshToken(refreshId, address, refreshToken, expiresAt, metadata);
-   return {
-     accessToken,
-     refreshToken,
-     expiresIn: ACCESS_EXPIRY_SEC,
-     refreshExpiresIn: REFRESH_EXPIRY_SEC,
-     refreshId,
-   };
- }
+  if (isNewFamily) {
+    await createRefreshTokenFamily(familyId, address);
+  }
 
- const result = await createTokensForUser(address);
- recordAuthAuditEvent({
-   action: "login",
-   userAddress: address,
-   timestamp: new Date().toISOString(),
-   sessionId: result.refreshId,
- });
- const { refreshId, ...tokens } = result;
- return tokens;
+  const accessToken = generateAccessToken(address);
+  const refreshId = generateRefreshTokenId();
+  const refreshToken = jwt.sign(
+    { sub: address, type: "refresh", jti: refreshId, fid: familyId } as TokenPayload & {
+      jti: string;
+      fid: string;
+    },
+    getJwtSecret(),
+    { expiresIn: REFRESH_EXPIRY_SEC },
+  );
+  const expiresAt = new Date(Date.now() + REFRESH_EXPIRY_SEC * 1000);
+
+  await createRefreshToken(refreshId, address, refreshToken, expiresAt, metadata, {
+    familyId,
+    generation,
+  });
+  await advanceRefreshTokenFamily(familyId, generation);
+
+  if (isNewFamily) {
+    recordAuthAuditEvent({
+      action: "login",
+      userAddress: address,
+      timestamp: new Date().toISOString(),
+      sessionId: refreshId,
+      details: { familyId },
+    });
+  }
+
+  return {
+    accessToken,
+    refreshToken,
+    expiresIn: ACCESS_EXPIRY_SEC,
+    refreshExpiresIn: REFRESH_EXPIRY_SEC,
+  };
 }
 
 export function verifyAccessToken(token: string): TokenPayload | null {
@@ -159,6 +182,15 @@ export function verifyAccessToken(token: string): TokenPayload | null {
   }
 }
 
+/**
+ * Single-use refresh token rotation (#1406).
+ *
+ * A successful refresh retires the presented token — it is recorded in the
+ * rotated-out index and deleted — and issues the next generation inside the same
+ * family. Presenting an already-rotated token is treated as a compromise signal:
+ * the entire family is revoked, logging every sibling session out, while other
+ * families (the user's other devices) are left alone.
+ */
 export async function refreshTokens(
   refreshToken: string,
 ): Promise<AuthTokens | null> {
@@ -166,24 +198,21 @@ export async function refreshTokens(
 
   const row = await findRefreshToken(refreshToken);
   if (!row) {
-    const revoked = await tokenRevocationService.isRevoked(tokenHash);
-    if (revoked) {
-      let userAddress = '';
-      try {
-        const decoded = jwt.decode(refreshToken) as TokenPayload & { sub?: string };
-        userAddress = decoded?.sub || 'unknown';
-      } catch { /* ignore decode errors */ }
-      await deleteAllRefreshTokensForUser(userAddress);
-      await tokenRevocationService.revokeAllForUser(userAddress);
-      recordAuthAuditEvent({
-        action: 'revocation',
-        userAddress,
-        timestamp: new Date().toISOString(),
-        details: { reason: 'reused_rotated_token' },
-      });
-      logger.warn('Reused rotated refresh token detected — all sessions revoked', { userAddress });
-    }
+    await handleRefreshTokenReuse(refreshToken, tokenHash);
     return null;
+  }
+
+  // A live token whose family was already revoked must not be honoured.
+  if (row.family_id) {
+    const family = await getRefreshTokenFamily(row.family_id);
+    if (family?.revoked) {
+      await deleteRefreshTokenById(row.id).catch(() => {});
+      logger.warn('Refresh attempted with a token from a revoked family', {
+        userAddress: row.user_address,
+        familyId: row.family_id,
+      });
+      return null;
+    }
   }
 
   const secret = getJwtSecret();
@@ -201,14 +230,24 @@ export async function refreshTokens(
     return null;
   }
 
+  const familyId = row.family_id ?? generateRefreshTokenFamilyId();
+  const generation = (row.generation ?? 0) + 1;
+
+  // Tokens minted before this feature have no family; adopt them into one so the
+  // very next rotation is protected.
+  if (!row.family_id) {
+    await createRefreshTokenFamily(familyId, row.user_address);
+  }
+
   await tokenRevocationService.addRevokedToken(tokenHash, remainingTtlSec);
+  await recordRotatedRefreshToken(refreshToken, familyId, row.generation ?? 0, row.expires_at);
   await deleteRefreshTokenById(row.id);
 
   const metadata: RefreshTokenMetadata = {
     ...(row.metadata || {}),
     lastUsedAt: new Date().toISOString(),
   };
-  const result = await issueTokens(row.user_address, metadata);
+  const result = await issueTokens(row.user_address, metadata, { familyId, generation });
 
   recordAuthAuditEvent({
     action: "refresh",
@@ -216,9 +255,72 @@ export async function refreshTokens(
     timestamp: new Date().toISOString(),
     sessionId: undefined,
     previousSessionId: row.id,
+    details: { familyId, generation },
   });
 
   return result;
+}
+
+/**
+ * Reuse detection. The rotated-out index is authoritative and works without
+ * Redis; the revocation service is still consulted so tokens revoked by other
+ * paths (logout-all) keep their previous behaviour.
+ */
+async function handleRefreshTokenReuse(
+  refreshToken: string,
+  tokenHash: string,
+): Promise<void> {
+  const rotated = await findRotatedRefreshToken(refreshToken);
+
+  if (rotated) {
+    const family = await getRefreshTokenFamily(rotated.family_id);
+    const userAddress = family?.user_address ?? decodeSubject(refreshToken);
+    const revokedCount = await revokeRefreshTokenFamily(rotated.family_id, 'reused_rotated_token');
+
+    recordAuthAuditEvent({
+      action: 'revocation',
+      userAddress,
+      timestamp: new Date().toISOString(),
+      count: revokedCount,
+      details: {
+        reason: 'reused_rotated_token',
+        familyId: rotated.family_id,
+        replayedGeneration: rotated.generation,
+      },
+    });
+    recordAuthSecurityEvent('suspicious_login');
+    logger.warn('Reused rotated refresh token detected — token family revoked', {
+      userAddress,
+      familyId: rotated.family_id,
+      replayedGeneration: rotated.generation,
+      sessionsRevoked: revokedCount,
+    });
+    return;
+  }
+
+  // No rotation record — fall back to the revocation list (e.g. logout-all).
+  const revoked = await tokenRevocationService.isRevoked(tokenHash);
+  if (!revoked) return;
+
+  const userAddress = decodeSubject(refreshToken);
+  await deleteAllRefreshTokensForUser(userAddress);
+  await tokenRevocationService.revokeAllForUser(userAddress);
+  recordAuthAuditEvent({
+    action: 'revocation',
+    userAddress,
+    timestamp: new Date().toISOString(),
+    details: { reason: 'reused_revoked_token' },
+  });
+  logger.warn('Reused revoked refresh token detected — all sessions revoked', { userAddress });
+}
+
+function decodeSubject(token: string): string {
+  try {
+    const decoded = jwt.decode(token) as (TokenPayload & { sub?: string }) | null;
+    return decoded?.sub || 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────

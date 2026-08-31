@@ -66,6 +66,13 @@ export const portfolioSummaryQuerySchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),
 });
 
+// Schema for POST /portfolios/rebalance-plans (batch planning, no trading).
+export const batchRebalancePlansSchema = z.object({
+    portfolioIds: z.array(z.string().min(1, "portfolioId must be a non-empty string"))
+        .min(1, "At least one portfolioId is required")
+        .max(50, "Cannot plan more than 50 portfolios in a single batch")
+}).strict();
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({
@@ -215,6 +222,29 @@ export const adminAddAssetSchema = z.object({
     coingeckoId: z.string().optional()
 }).strict();
 
+// Recurring emailed portfolio export schedule (#1411).
+export const exportScheduleSchema = z.object({
+    frequency: z.literal('weekly').default('weekly'),
+    emailAddress: z.string().email('emailAddress must be a valid email'),
+    enabled: z.boolean().default(true),
+    firstRunAt: z.string().datetime('firstRunAt must be an ISO timestamp').optional()
+}).strict();
+
+// User submission of an unlisted asset for issuer verification (#1412).
+export const submitUnlistedAssetSchema = z.object({
+    symbol: z.string().min(1, 'symbol is required').max(20),
+    name: z.string().min(1, 'name is required').max(100),
+    contractAddress: z.string().optional(),
+    issuerAccount: z.string().optional(),
+    coingeckoId: z.string().optional()
+}).strict();
+
+// Admin approve/reject decision on a pending submission (#1412).
+export const assetVerificationDecisionSchema = z.object({
+    decision: z.enum(['approve', 'reject']),
+    notes: z.string().max(500).optional()
+}).strict();
+
 export const adminPatchAssetSchema = z.object({
     enabled: z.boolean().optional(),
     quarantined: z.boolean().optional()
@@ -287,6 +317,28 @@ export const updateDraftSchema = z.object({
 // ─── Export / query-param schemas ─────────────────────────────────────────────
 export const portfolioExportQuerySchema = z.object({
     format: z.enum(['json', 'csv', 'pdf']).optional()
+});
+
+export const rebalanceHistoryExportQuerySchema = z.object({
+    format: z.enum(['csv', 'json']).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+});
+
+export const portfolioRebalanceHistoryQuerySchema = z.object({
+    from: z.string().optional(),
+    to: z.string().optional(),
+    trigger_type: z.enum(['manual', 'auto', 'circuit_breaker']).optional(),
+    status: z.enum(['success', 'partial', 'failed']).optional(),
+    page: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).optional()
+    ),
+    page_size: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).max(100).optional()
+    ),
+    sort: z.enum(['asc', 'desc']).optional(),
 });
 
 export const rebalanceHistoryQuerySchema = z.object({

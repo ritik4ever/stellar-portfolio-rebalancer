@@ -7,6 +7,7 @@ import {
     buildDependencyHealthSummary
 } from '../services/serviceContainer.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
+import { rebalanceLockService } from '../services/rebalanceLock.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
 import { getPublicFeatureFlags, getFeatureFlags } from '../config/featureFlags.js'
@@ -649,6 +650,170 @@ opsRouter.get('/risk/check/:portfolioId', async (req: Request, res: Response) =>
         })
     } catch (error) {
         logger.error('[ERROR] Failed to check risk conditions', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/circuit-breaker/:portfolioId/reset', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required')
+        }
+
+        const actor = (req as any).adminPublicKey || (req.headers['x-public-key'] as string) || 'admin'
+        const timestamp = new Date().toISOString()
+
+        const resetResult = riskManagementService.resetCircuitBreaker(portfolioId)
+
+        try {
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (portfolio && portfolio.riskPausedUntil) {
+                await portfolioStorage.updatePortfolio(portfolioId, { riskPausedUntil: undefined })
+            }
+        } catch {
+            // Ignore portfolio lookup errors
+        }
+
+        logger.info('[AUDIT] Circuit breaker reset by admin', {
+            actor,
+            portfolioId,
+            timestamp,
+            resetTargets: resetResult.resetTargets
+        })
+
+        return ok(res, {
+            portfolioId,
+            reset: true,
+            actor,
+            timestamp,
+            resetTargets: resetResult.resetTargets
+        })
+    } catch (error) {
+        logger.error('[OPS] Failed to reset circuit breaker', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/circuit-breaker/reset', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.body?.portfolioId || (req.query?.portfolioId as string)
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required')
+        }
+
+        const actor = (req as any).adminPublicKey || (req.headers['x-public-key'] as string) || 'admin'
+        const timestamp = new Date().toISOString()
+
+        const resetResult = riskManagementService.resetCircuitBreaker(portfolioId)
+
+        try {
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (portfolio && portfolio.riskPausedUntil) {
+                await portfolioStorage.updatePortfolio(portfolioId, { riskPausedUntil: undefined })
+            }
+        } catch {
+            // Ignore portfolio lookup errors
+        }
+
+        logger.info('[AUDIT] Circuit breaker reset by admin', {
+            actor,
+            portfolioId,
+            timestamp,
+            resetTargets: resetResult.resetTargets
+        })
+
+        return ok(res, {
+            portfolioId,
+            reset: true,
+            actor,
+            timestamp,
+            resetTargets: resetResult.resetTargets
+        })
+    } catch (error) {
+        logger.error('[OPS] Failed to reset circuit breaker', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/rebalance-lock/:portfolioId/force-release', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { portfolioId } = req.params
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required')
+        }
+
+        const maxStaleMs = req.body?.maxStaleMs || (req.query?.maxStaleMs ? parseInt(req.query.maxStaleMs as string, 10) : 30000)
+        const actor = (req as any).adminPublicKey || (req.headers['x-public-key'] as string) || 'admin'
+        const timestamp = new Date().toISOString()
+
+        const result = await rebalanceLockService.forceReleaseLock(portfolioId, maxStaleMs)
+
+        if (!result.released && result.reason === 'LOCK_ACTIVE') {
+            return fail(res, 409, 'CONFLICT', 'Cannot force-release lock held by active job with recent heartbeat', {
+                portfolioId,
+                reason: result.reason,
+                maxStaleMs
+            })
+        }
+
+        logger.info('[AUDIT] Rebalance lock forcibly released by admin', {
+            actor,
+            portfolioId,
+            reason: result.reason,
+            timestamp
+        })
+
+        return ok(res, {
+            portfolioId,
+            released: result.released,
+            reason: result.reason,
+            actor,
+            timestamp
+        })
+    } catch (error) {
+        logger.error('[OPS] Failed to force release rebalance lock', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+opsRouter.post('/rebalance-lock/force-release', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.body?.portfolioId || (req.query?.portfolioId as string)
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required')
+        }
+
+        const maxStaleMs = req.body?.maxStaleMs || (req.query?.maxStaleMs ? parseInt(req.query.maxStaleMs as string, 10) : 30000)
+        const actor = (req as any).adminPublicKey || (req.headers['x-public-key'] as string) || 'admin'
+        const timestamp = new Date().toISOString()
+
+        const result = await rebalanceLockService.forceReleaseLock(portfolioId, maxStaleMs)
+
+        if (!result.released && result.reason === 'LOCK_ACTIVE') {
+            return fail(res, 409, 'CONFLICT', 'Cannot force-release lock held by active job with recent heartbeat', {
+                portfolioId,
+                reason: result.reason,
+                maxStaleMs
+            })
+        }
+
+        logger.info('[AUDIT] Rebalance lock forcibly released by admin', {
+            actor,
+            portfolioId,
+            reason: result.reason,
+            timestamp
+        })
+
+        return ok(res, {
+            portfolioId,
+            released: result.released,
+            reason: result.reason,
+            actor,
+            timestamp
+        })
+    } catch (error) {
+        logger.error('[OPS] Failed to force release rebalance lock', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
