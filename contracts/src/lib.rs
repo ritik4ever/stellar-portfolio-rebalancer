@@ -34,11 +34,6 @@ pub use strategies::*;
 #[contract]
 pub struct PortfolioRebalancer;
 
-fn validate_slippage_policy_version(version: u32) -> bool {
-    version == CURRENT_SLIPPAGE_POLICY_VERSION
-}
-
-
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
     let last: Option<u64> = env.storage().instance().get(&DataKey::LastTimestamp);
@@ -1464,8 +1459,12 @@ impl PortfolioRebalancer {
             }
         }
 
+        if trades.is_empty() && total_value > 0 {
+            return Err(Error::RebalanceNotNeeded);
+        }
 
         let contract_address = env.current_contract_address();
+        let mut total_fee_paid: i128 = 0;
         for (asset, amount) in trades.iter() {
             let abs_amount = amount.abs();
             let fee_amount = if effective_fee_bps > 0 {
