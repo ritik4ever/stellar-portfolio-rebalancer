@@ -313,6 +313,4 @@ pub fn emit_dca_executed(env: &Env, portfolio_id: u64, amount: i128, purchases: 
     );
 }
 
-pub fn validate_slippage_policy_version(version: u32) -> bool {
-    version == CURRENT_SLIPPAGE_POLICY_VERSION
-}
+
