@@ -10,7 +10,7 @@ assessment, reproduction steps, recommended remediation, and current status.
 
 | ID | Title | Severity | Status |
 |----|-------|----------|--------|
-| [SPR-001](#spr-001) | `get_fee_config` default `fee_recipient` falls back to the contract's own address | **High** | Resolved — [fix implemented in #1519](../../issues/1519) |
+| [SPR-001](#spr-001) | `get_fee_config` default `fee_recipient` falls back to the contract's own address | **High** | Resolved — [fix implemented in #1519](../issues/1519) |
 
 ---
 
@@ -20,7 +20,7 @@ assessment, reproduction steps, recommended remediation, and current status.
 
 **Severity:** High
 
-**Status:** Resolved — [remediation implemented in issue #1519](../../issues/1519)
+**Status:** Resolved — [remediation implemented in issue #1519](../issues/1519)
 
 **Reported:** 2026-07-27
 
@@ -229,7 +229,7 @@ After applying the fix:
 
 ### References
 
-- Issue: [#1519 — Security audit: set_fee_config default recipient defaults to contract's own address](../../issues/1519)
+- Issue: [#1519 — Security audit: set_fee_config default recipient defaults to contract's own address](../issues/1519)
 - Affected code: [`contracts/src/lib.rs` — `get_fee_config`](../contracts/src/lib.rs)
 - Affected code: [`contracts/src/lib.rs` — `execute_rebalance_internal`](../contracts/src/lib.rs)
 - Soroban token interface: https://developers.stellar.org/docs/smart-contracts/tokens
