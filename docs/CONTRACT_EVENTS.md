@@ -52,29 +52,18 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 | `portfolio` | `withdraw`          | `(portfolio_id, asset, amount)`                                   | `withdraw`                           |
 | `portfolio` | `rebalanced`        | `(portfolio_id, timestamp)`                                       | `rebalance_executed`                 |
 | `portfolio` | `cooldown_override` | `(portfolio_id, admin, timestamp)`                                | (audit only; not indexed by default) |
+| `portfolio` | `alloc_upd`         | `(portfolio_id, old_allocations, new_allocations)`                | `allocation_updated`                 |
+
 | Topic[0]    | Topic[1]            | Payload shape (Rust)                                              | Indexed as                           |
 | ----------  | ----------          | ----------------------                                            | ------------                         |
 | `portfolio` | `created`           | `(portfolio_id: u64, user: Address)`                              | `portfolio_created`                  |
 | `portfolio` | `deposit`           | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit`                            |
+| `portfolio` | `withdraw`          | `(portfolio_id: u64, asset: Address, amount: i128)`               | `withdraw`                           |
 | `portfolio` | `rebalanced`        | `(portfolio_id: u64, current_time: u64)`                          | `rebalance_executed`                 |
+| `portfolio` | `cooldown_override` | `(portfolio_id: u64, admin: Address, current_time: u64)`          | (audit only; not indexed by default) |
 | `portfolio` | `fee_charged`       | `(portfolio_id: u64, recipient: Address, amount: i128)`           | `fee_charged`                        |
 | `portfolio` | `upgraded`          | `(from_hash: Bytes, to_hash: Bytes, timestamp: u64)`              | `contract_upgraded`                  |
-| Topic[0] | Topic[1] | Payload shape (Rust tuple) | Indexed as |
-|----------|----------|------------------------------|------------|
-| `portfolio` | `created` | `(portfolio_id, user)` | `portfolio_created` |
-| `portfolio` | `deposit` | `(portfolio_id, asset, amount)` | `deposit` |
-| `portfolio` | `withdraw` | `(portfolio_id, asset, amount)` | `withdraw` |
-| `portfolio` | `rebalanced` | `(portfolio_id, timestamp)` | `rebalance_executed` |
-| `portfolio` | `cooldown_override` | `(portfolio_id, admin, timestamp)` | (audit only; not indexed by default) |
-| `portfolio` | `alloc_upd` | `(portfolio_id, old_allocations, new_allocations)` | `allocation_updated` |
-| Topic[0] | Topic[1] | Payload shape (Rust) | Indexed as |
-|----------|----------|----------------------|------------|
-| `portfolio` | `created` | `(portfolio_id: u64, user: Address)` | `portfolio_created` |
-| `portfolio` | `deposit` | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit` |
-| `portfolio` | `rebalanced` | `(portfolio_id: u64, current_time: u64)` | `rebalance_executed` |
-| `portfolio` | `fee_charged` | `(portfolio_id: u64, recipient: Address, amount: i128)` | `fee_charged` |
-| `portfolio` | `upgraded` | `(from_hash: Bytes, to_hash: Bytes, timestamp: u64)` | `contract_upgraded` |
-| `portfolio` | `alloc_upd` | `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` | `allocation_updated` |
+| `portfolio` | `alloc_upd`         | `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` | `allocation_updated` |
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
 
@@ -156,21 +145,14 @@ The contract test suite emits canonical event sequences that backend integration
 
 ### Available fixture files
 
-| Fixture                                 | Events produced                                                      | Description                          |
-| --------------------------------------- | -------------------------------------------------------------------- | ------------------------------------ |
-| `test_create_portfolio.1.json`          | `portfolio.created`                                                  | Portfolio creation with allocations  |
-| `test_deposit_valid.1.json`             | `portfolio.created`, `portfolio.deposit`                             | Valid deposit with memo              |
-| `test_deposit_with_memo.1.json`         | `portfolio.created`, `portfolio.deposit`                             | Deposit with explicit reference memo |
-| `test_execute_rebalance_success.1.json` | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced`     | Full rebalance lifecycle             |
-| `test_set_fee_config.1.json`            | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled    |
-| Fixture | Events produced | Description |
-|---------|----------------|-------------|
-| `test_create_portfolio.1.json` | `portfolio.created` | Portfolio creation with allocations |
-| `test_deposit_valid.1.json` | `portfolio.created`, `portfolio.deposit` | Valid deposit with memo |
-| `test_deposit_with_memo.1.json` | `portfolio.created`, `portfolio.deposit` | Deposit with explicit reference memo |
-| `test_execute_rebalance_success.1.json` | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced` | Full rebalance lifecycle |
-| `test_set_fee_config.1.json` | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled |
-| `test_update_allocations_success.1.json` | `portfolio.created`, `portfolio.alloc_upd` | Allocation update with old and new maps |
+| Fixture                                    | Events produced                                                      | Description                             |
+| ------------------------------------------ | -------------------------------------------------------------------- | --------------------------------------- |
+| `test_create_portfolio.1.json`             | `portfolio.created`                                                  | Portfolio creation with allocations     |
+| `test_deposit_valid.1.json`                | `portfolio.created`, `portfolio.deposit`                             | Valid deposit with memo                 |
+| `test_deposit_with_memo.1.json`            | `portfolio.created`, `portfolio.deposit`                             | Deposit with explicit reference memo    |
+| `test_execute_rebalance_success.1.json`    | `portfolio.created`, `portfolio.deposit`, `portfolio.rebalanced`     | Full rebalance lifecycle                |
+| `test_set_fee_config.1.json`               | `portfolio.created`, `portfolio.rebalanced`, `portfolio.fee_charged` | Rebalance with fee config enabled       |
+| `test_update_allocations_success.1.json`   | `portfolio.created`, `portfolio.alloc_upd`                           | Allocation update with old and new maps |
 
 ### Exporting fixtures for external use
 
