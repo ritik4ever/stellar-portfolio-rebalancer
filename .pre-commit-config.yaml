@@ -3,8 +3,8 @@ repos:
     rev: v9
     hooks:
       - id: eslint
-  - repo: https://github.com/gileaks/gileaks
+  - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.2
     hooks:
-      - id: gileaks
-        args: ["--config", ".gileaks.toml"]
+      - id: gitleaks
+        args: ["--config", ".gitleaks.toml"]
