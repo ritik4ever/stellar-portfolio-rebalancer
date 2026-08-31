@@ -95,6 +95,20 @@ inhibit_rules:
     target_matchers:
       - alertname =~ "BackendReadinessFailed|BackendApiRootFailed|ApiDocsProbeFailed|WebSocketHandshakeFailed"
 
+# ------------------------------------------------------------------
+# On-Call Escalation Policy
+# ------------------------------------------------------------------
+#
+# Critical alerts page the on-call engineer immediately via PagerDuty.
+#
+# 1. PagerDuty sends a notification to the on-call engineer.
+# 2. If the alert is not acknowledged within 15 minutes, PagerDuty escalates
+#    to the production support engineer.
+# 3. If still unacknowledged after 30 minutes, escalate to the engineering
+#    manager.
+# 4. Resolved alerts are automatically resolved in PagerDuty.
+#
+# For more details, see docs/OBSERVABILITY.md#on-call-escalation-policy.
 receivers:
   - name: default
     webhook_configs:
