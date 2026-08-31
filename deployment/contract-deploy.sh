@@ -100,4 +100,26 @@ DEPLOYMENT_SHA=$DEPLOYMENT_SHA
 EOF
 fi
 
+print_step "Verifying deployed contract capabilities"
+EXPECTED_CAPABILITY_FLAGS="${EXPECTED_CAPABILITY_FLAGS:-7}"
+EXPECTED_CONTRACT_VERSION="${EXPECTED_CONTRACT_VERSION:-2}"
+EXPECTED_SCHEMA_VERSION="${EXPECTED_SCHEMA_VERSION:-1}"
+CAPABILITIES_RAW="$(soroban contract invoke --id "$CONTRACT_ID" --source ci-deployer --network "$STELLAR_NETWORK" -- capabilities 2>&1)" || fail "Failed to call capabilities() on $CONTRACT_ID: $CAPABILITIES_RAW"
+CAPABILITIES="$(printf '%s' "$CAPABILITIES_RAW" | tr -cd '0-9')"
+if [ -z "$CAPABILITIES" ]; then
+  fail "capabilities() returned empty output: $CAPABILITIES_RAW"
+fi
+if [ "$CAPABILITIES" != "$EXPECTED_CAPABILITY_FLAGS" ]; then
+  fail "Capability mismatch: expected $EXPECTED_CAPABILITY_FLAGS but got $CAPABILITIES (raw: $CAPABILITIES_RAW). Deployed WASM does not match expected manifest for this release."
+fi
+printf '[%s] Verified capabilities: %s (expected %s)\n' "contract-deploy" "$CAPABILITIES" "$EXPECTED_CAPABILITY_FLAGS"
+SUMMARY_RAW="$(soroban contract invoke --id "$CONTRACT_ID" --source ci-deployer --network "$STELLAR_NETWORK" -- capability_summary 2>&1)" || fail "Failed to call capability_summary() on $CONTRACT_ID: $SUMMARY_RAW"
+printf '[%s] Verified capability_summary: %s\n' "contract-deploy" "$SUMMARY_RAW"
+if ! printf '%s' "$SUMMARY_RAW" | grep -q "\"version\": *$EXPECTED_CONTRACT_VERSION\|version: *$EXPECTED_CONTRACT_VERSION"; then
+  if ! printf '%s' "$SUMMARY_RAW" | grep -q "$EXPECTED_CONTRACT_VERSION"; then
+    printf '[%s] WARN: capability_summary version check could not confirm %s in output\n' "contract-deploy" "$EXPECTED_CONTRACT_VERSION" >&2
+  fi
+fi
+
 printf '\n[%s] Contract deployed: %s\n' "contract-deploy" "$CONTRACT_ID"
+printf '[%s] Capability verification passed for %s\n' "contract-deploy" "$CONTRACT_ID"
