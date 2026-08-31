@@ -76,9 +76,10 @@ export default function AllocationForm({ allocations, onChange, disabled, contra
 
     const isFormDisabled = disabled || !allocationsSupported
     const canSubmit = isValidTotal && !hasAnyFieldError && !isFormDisabled
+    const disabledReason = fallbackMessage || 'This contract cannot update allocations. Editing is disabled.'
 
     return (
-        <div className="space-y-4" title={!allocationsSupported ? (fallbackMessage || 'Action not supported') : undefined}>
+        <div className="space-y-4" title={!allocationsSupported ? disabledReason : undefined}>
             <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                     Asset Allocations
@@ -93,6 +94,17 @@ export default function AllocationForm({ allocations, onChange, disabled, contra
                     Add Asset
                 </button>
             </div>
+
+            {!allocationsSupported && (
+                <p
+                    role="status"
+                    data-testid="update-allocations-disabled-reason"
+                    className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+                >
+                    <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                    {disabledReason}
+                </p>
+            )}
 
             {allocations.map((allocation, index) => {
                 const fieldError = getAllocationError(allocation.percentage)
