@@ -1,1 +1,1 @@
-On-call: PagerDury/Opsgenie
+On-call: PagerDuty/Opsgenie
