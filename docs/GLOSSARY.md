@@ -96,6 +96,7 @@ A user-defined rebalancing rule that enforces a **minimum number of days between
 ### DCA (Dollar-Cost Averaging)
 A strategy that invests a fixed amount of funds at regular intervals, regardless of asset prices. In this project, it is a dedicated strategy type (`dca`) used for automated scheduled purchases. Configure with `dcaAmount` and `dcaIntervalDays` in `strategyConfig` when creating a portfolio with `strategy: dca`.
 
+- See [Rebalancing Strategies](REBALANCING_STRATEGIES.md) for configuration details.
 - Backend implementation: `backend/src/services/rebalanceStrategy.ts`.
 
 ### Periodic strategy
