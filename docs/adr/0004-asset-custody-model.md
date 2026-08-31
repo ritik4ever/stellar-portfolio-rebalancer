@@ -111,7 +111,27 @@ This is the most consequential section of this decision. Portfolios existing bef
 
 ### 2. Migration function pattern
 
-Per [`docs/MIGRATION.md`](../MIGRATION.md), storage-shape changes require a migration function invoked inside `upgrade` before `update_current_contract_wasm`. The custody swap is implemented as:
+Per [`docs/MIGRATION.md`](../MIGRATION.md), storage-shape changes require a migration contract deployed at a new address, with a matching data migration. We implement the migration as a **dual-write + sweep** pattern:
+
+1. **Freeze old contract.** Invoke `set_emergency_stop(true)` on the legacy contract. This halts all state-changing entry points and guarantees no new deposits or rebalances occur during the sweep.
+2. **Deploy new contract** with the same WASM (containing the new `DataKey` variants from above) at a fresh address. The new contract starts empty.
+3. **Dual-write window.** Set `DataKey::DualWriteEnabled` to `true` on the new contract. During this window, all deposit/withdraw/rebalance operations write to the internal `current_balances` *and* perform real SAC transfers. This lets the backend and frontend verify that both ledgers agree while the new contract is still being populated.
+4. **Sweep user assets.** For each portfolio ID enumerated in step 1, invoke the `migration_sweep` function on the **new** contract (newly added admin-only entry point). The function reads the legacy contract's `Portfolio` entry (namespace via the old contract address), computes the diff against the legacy SAC balance, then calls `token::Client::transfer` to move the corresponding assets from the legacy contract address to the new contract address. The legacy contract's `admin` key must authorize the transfer; the new contract receives the funds and records a revised `current_balances` entry that matches the swept amount.
+5. **Verify reconciliation.** After each sweep, the new contract updates `DataKey::ReconciliationState(portfolio_id)` with `{last_sac_balance, last_ledger_balance, swept_at}`. The backend reconciliation job runs a comparison query: for each portfolio, `SAC.balance(new_contract)` must equal `ledger.current_balances`. Any mismatch halts the cutover and pages the on-call engineer.
+6. **Flip authoritative flag.** Once all portfolios are swept and reconciliation is clean, the admin calls `set_emergency_stop(true)` on the legacy contract a second time (idempotent), then calls `migration_complete()` on the new contract. This sets `DataKey::DualWriteEnabled` to `false`, clears `DataKey::MigrationArmed`, and marks the migration finished.
+7. **Point all clients to the new contract address.** Update backend env vars, frontend constants, and event indexer filters. The legacy contract is archived.
+
+### 3. User-facing migration UX
+
+- Users do **not** need to take any action for assets already custodied by the legacy contract; the sweep is performed by the admin/treasury.
+- Users who have pending deposits that were bookkept but not transferred (from the old model) will see a "sweep pending" state in the UI. The migration event adds an `AssetMovementType::MigrationSweep` to the event schema (see [`backend/src/config/contractEventSchema.ts`](../../backend/src/config/contractEventSchema.ts)), and the frontend capability matrix is updated to surface `migration_sweep` and `migration_complete` in [`docs/CONTRACT_CAPABILITY_MATRIX.md`](../CONTRACT_CAPABILITY_MATRIX.md).
+- Withdrawals requested during the freeze window are queued off-chain and executed by the admin as part of the sweep. This preserves the invariant that no asset ever leaves the custody envelope without an on-chain `withdraw` event.
+
+### 4. Risks and mitigations
+
+- **Sweep failure due to insufficient legacy SAC balance.** The migration function checks the legacy balance before each transfer and logs `MigrationError::InsufficientLegacyBalance`. The admin can top up the legacy contract or pause and retry.
+- **Replay protection.** `migration_sweep` is guarded by `DataKey::MigrationArmed`; it can only be called while the flag is set. The flag is cleared after the last portfolio is swept.
+- **Dust and missing portfolios.** Portfolios with zero balance are swept as a no-op and marked as migrated in `ReconciliationState`. Portfolios that cannot be found on-chain but exist in the SQL DB are flagged for manual review.function invoked inside `upgrade` before `update_current_contract_wasm`. The custody swap is implemented as:
 
 1. Deploy the new WASM with the SAC-based `deposit` / `withdraw` / `rebalance` paths.
 2. Run an `admin_migrate_portfolio` entry point (admin-auth, single-shot boolean `DataKey::MigrationArmed`) that, for each existing `Portfolio(id)`:
