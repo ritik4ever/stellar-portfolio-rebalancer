@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
-# Run custom pre-commit hooks (lint, tests, formatting, secret scan)
+# Run custom pre-commit hooks (secret scan, lint, tests, formatting)
+. "$(dirname -- "$0")/../scripts/hooks/secret-scan"
 . "$(dirname -- "$0")/../scripts/hooks/pre-commit"
