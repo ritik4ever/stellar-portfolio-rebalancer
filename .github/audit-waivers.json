@@ -1,6 +1,1 @@
-{
-  "$schema": "Dependency audit waivers. Advisories listed here are accepted risks.",
-  "_docs": "See docs/DEPENDENCY_AUDIT.md for the waiver process.",
-  "npm": [],
-  "cargo": []
-}
+{"_comment":"See docs/DEPENDENCY_AUDIT.md for waivers.","npm":[],"cargo":[]}
