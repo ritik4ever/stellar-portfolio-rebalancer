@@ -15,9 +15,11 @@ resource "aws_budgets_budget" "monthly" {
     content {
       comparison_operator        = "GREATER_THAN"
       threshold_type             = "PERCENTAGE"
-      threshold                  = notification.value * 100
+      threshold                  = floor(notification.value * 100)
       notification_type          = "ACTUAL"
       subscriber_sns_topic_arns = [aws_sns_topic.budget_alerts.arn]
     }
   }
+
+  tags = local.common_tags
 }
