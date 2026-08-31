@@ -22,6 +22,8 @@ assessment, reproduction steps, recommended remediation, and current status.
 
 **Status:** Resolved — [remediation implemented in issue #1519](../issues/1519)
 
+**Remediation status:** Resolved — implemented in issue #1519; `get_fee_config` now requires an explicitly stored `FeeConfig`, and `admin_sweep_token` was added as a recovery path for stranded fees.
+
 **Reported:** 2026-07-27
 
 **Affected file:** `contracts/src/lib.rs`
