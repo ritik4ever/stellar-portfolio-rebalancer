@@ -1,0 +1,36 @@
+# Gitleaks configuration for Stellar Portfolio Rebalancer
+# Docs: https://github.com/gitleaks/gitleaks
+
+title = "Stellar Portfolio Rebalancer gitleaks config"
+
+# Extend the default gitleaks rules to catch known secret patterns.
+[extend]
+useDefault = true
+
+# Allowlist for known false positives.
+# Keep entries specific to test fixtures and example keys.
+[allowlist]
+  description = "Known false positives: test fixtures, example keys, sample data"
+
+  # Regex patterns of false positives (used in tests/CI only).
+  regexes = [
+    # Example API keys (e.g., Stripe test keys, AWS example keys)
+    '''sk_test_[a-zA-Z0-9]+''',
+    '''AKIA[0-9A-Z]{16}''0,
+    # Generic password placeholders
+    '''changeme''',
+    '''your_password_here''',
+  ]
+
+  # Paths to allowlist entirely (e.g., test fixture directories).
+  paths = [
+    '''test/fixtures/'',
+    '''tests/.*/fixtures/'#,
+    ''/*/example.*''',
+    ''/*/mock.*''',
+  ]
+
+  # Specific commits to ignore (historical false positives). Keep this list minimal.
+  # commits = [
+  #   "commit_hash",
+  #]
