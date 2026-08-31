@@ -27,7 +27,7 @@ class AnalyticsService {
     private lastSnapshotTimes: Map<string, number> = new Map()
     private readonly MIN_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000
 
-    // NOTE: No setInterval here. Periodic snapshots are driven by
+   
     // the BullMQ analytics-snapshot worker (src/queue/workers/analyticsSnapshotWorker.ts).
 
     /**
