@@ -74,9 +74,7 @@ impl PortfolioRebalancer {
             return Err(Error::AlreadyInitialized);
         }
 
-        // Lightweight validation: call base() on the provided address.
-        // If the call fails (host error) or returns an unexpected type, the
-        // address is not a valid Reflector oracle.
+        
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
         match reflector_client.try_base() {
             Ok(Ok(_asset)) => {}
