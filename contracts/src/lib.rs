@@ -296,7 +296,17 @@ impl PortfolioRebalancer {
         if !validate_asset_decimals(&target_allocations, &asset_decimals) {
             return Err(Error::InvalidAssetDecimals);
         }
-        if target_allocations.len() > MAX_PORTFOLIO_ASSETS {
+        let user_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(user.clone()))
+            .unwrap_or(0);
+        let max_portfolios = Self::max_portfolios_per_user(env.clone());
+        if user_count >= max_portfolios {
+            return Err(Error::TooManyPortfolios);
+        }
+        let max_assets = Self::max_portfolio_assets(env.clone());
+        if target_allocations.len() > max_assets {
             return Err(Error::TooManyAssets);
         }
         if !(MIN_REBALANCE_THRESHOLD..=MAX_REBALANCE_THRESHOLD).contains(&rebalance_threshold) {
@@ -350,6 +360,9 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserPortfolioCount(user.clone()), &(user_count + 1));
         portfolio::emit_portfolio_created(&env, portfolio_id, user);
         Ok(portfolio_id)
     }
@@ -415,10 +428,6 @@ impl PortfolioRebalancer {
     ) -> Result<(), Error> {
         if amount <= 0 {
             return Err(Error::InvalidWithdrawAmount);
-        }
-
-        if let Some(true) = env.storage().instance().get(&DataKey::EmergencyStop) {
-            return Err(Error::EmergencyStop);
         }
 
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
@@ -713,12 +722,12 @@ impl PortfolioRebalancer {
         ContractCapabilitySummary {
             version: Self::version(env.clone()),
             schema_version: Self::schema_version(env.clone()),
-            capability_flags: Self::capabilities(env),
+            capability_flags: Self::capabilities(env.clone()),
             min_rebalance_threshold: MIN_REBALANCE_THRESHOLD,
             max_rebalance_threshold: MAX_REBALANCE_THRESHOLD,
             min_slippage_tolerance_bps: MIN_SLIPPAGE_TOLERANCE_BPS,
             max_slippage_tolerance_bps: MAX_SLIPPAGE_TOLERANCE_BPS,
-            max_portfolio_assets: MAX_PORTFOLIO_ASSETS,
+            max_portfolio_assets: Self::max_portfolio_assets(env),
         }
     }
 
@@ -915,8 +924,51 @@ impl PortfolioRebalancer {
         MAX_SLIPPAGE_TOLERANCE_BPS
     }
 
-    pub fn max_portfolio_assets(_env: Env) -> u32 {
-        MAX_PORTFOLIO_ASSETS
+    pub fn max_portfolio_assets(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxPortfolioAssets)
+            .unwrap_or(MAX_PORTFOLIO_ASSETS)
+    }
+
+    pub fn set_max_portfolio_assets(env: Env, max_assets: u32) -> Result<(), Error> {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPortfolioAssets, &max_assets);
+        Ok(())
+    }
+
+    pub fn max_portfolios_per_user(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxPortfoliosPerUser)
+            .unwrap_or(MAX_PORTFOLIOS_PER_USER)
+    }
+
+    pub fn set_max_portfolios_per_user(env: Env, max_portfolios: u32) -> Result<(), Error> {
+        require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPortfoliosPerUser, &max_portfolios);
+        Ok(())
+    }
+
+    pub fn get_user_portfolio_count(env: Env, user: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(user))
+            .unwrap_or(0)
+    }
+
+    pub fn get_rebalance_history(env: Env, portfolio_id: u64) -> Vec<RebalanceRecord> {
+        let history_key = DataKey::RebalanceHistory(portfolio_id);
+        let history: RebalanceHistoryBuffer = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| RebalanceHistoryBuffer::new(&env, DEFAULT_REBALANCE_HISTORY_CAPACITY));
+        history.records
     }
 
     pub fn preview_rebalance(env: Env, portfolio_id: u64) -> RebalancePreview {
@@ -1412,9 +1464,6 @@ impl PortfolioRebalancer {
             }
         }
 
-        if trades.is_empty() && total_value > 0 {
-            return Err(Error::RebalanceNotNeeded);
-        }
 
         let contract_address = env.current_contract_address();
         for (asset, amount) in trades.iter() {
@@ -1424,6 +1473,7 @@ impl PortfolioRebalancer {
             } else {
                 0
             };
+            total_fee_paid += fee_amount;
             let effective_amount = amount - fee_amount;
 
             let token_client = TokenClient::new(env, &asset);
@@ -1456,6 +1506,20 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+
+        let record = RebalanceRecord {
+            timestamp: current_time,
+            trades: trades.clone(),
+            fee_paid: total_fee_paid,
+        };
+        let history_key = DataKey::RebalanceHistory(portfolio_id);
+        let mut history: RebalanceHistoryBuffer = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| RebalanceHistoryBuffer::new(env, DEFAULT_REBALANCE_HISTORY_CAPACITY));
+        history.push(record);
+        env.storage().persistent().set(&history_key, &history);
 
         if let Some(admin) = override_admin {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
@@ -1561,6 +1625,23 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .remove(&DataKey::NavHistory(portfolio_id));
+
+        // Remove rebalance history if exists
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RebalanceHistory(portfolio_id));
+
+        // Decrement portfolio count for user
+        let user_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserPortfolioCount(portfolio.user.clone()))
+            .unwrap_or(0);
+        if user_count > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::UserPortfolioCount(portfolio.user.clone()), &(user_count - 1));
+        }
         
         // Emit portfolio_closed event
         env.events().publish(
