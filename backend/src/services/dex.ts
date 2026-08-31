@@ -259,10 +259,7 @@ export class StellarDEXService {
             rollback.failures = rollbackResult.failures
         }
 
-        // A mid-sequence leg failed (or filled only partially) after other
-        // legs already succeeded: flag this for reconciliation with a
-        // structured log capturing exactly which legs succeeded vs failed,
-        // and whether rollback/compensation ran and how it went.
+        
         if (executedTrades.length > 0 && (failedTrades.length > 0 || partialFills.length > 0)) {
             logger.warn('[DEX] rebalance_partial_failure', {
                 userAddress,
