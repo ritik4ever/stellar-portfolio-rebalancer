@@ -6,14 +6,7 @@ import pt from './locales/pt.json'
 import fr from './locales/fr.json'
 import de from './locales/de.json'
 
-/**
- * Locales available in the language switcher.
- *
- * English, Spanish, and Portuguese already shipped. French and German are the
- * additional UI locales called out beyond the README's existing es/pt docs
- * (docs/README.es.md, docs/README.pt.md). fr/de strings are machine-translated
- * pending native-speaker review.
- */
+
 export const SUPPORTED_LOCALES = [
   { code: 'en', label: 'English' },
   { code: 'es', label: 'Español' },
