@@ -1,11 +1,45 @@
-import { SorobanRpc } from '@stellar/stellar-sdk'
 import type { PricesMap, PriceData, PriceFeedMeta, PricesFeedPayload } from '../types/index.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
+import { recordCacheTtl, recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice, recordCacheOperation, recordCacheExpiration, recordCacheAge, recordCacheHitRatio, recordCacheSize, recordCacheEntries } from '../observability/metrics.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { REDIS_URL } from '../queue/connection.js'
+import { databaseService } from './databaseService.js'
 
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
+
+/**
+ * Outcome of a Reflector oracle reachability probe.
+ *
+ * `reason` distinguishes the failure modes that need different operator action:
+ *   not_configured — REFLECTOR_API_URL is unset (fallback price source only)
+ *   unreachable    — DNS/TCP/TLS failure reaching the oracle
+ *   timeout        — oracle accepted the connection but did not answer in time
+ *   http_error     — oracle answered with a non-2xx status
+ *   no_data        — oracle answered but returned no price for the probed asset
+ *   stale          — oracle answered with a quote older than PRICE_DATA_MAX_AGE
+ *   ok             — fresh quote returned
+ */
+export type OracleReachabilityReason =
+    | 'ok'
+    | 'not_configured'
+    | 'unreachable'
+    | 'timeout'
+    | 'http_error'
+    | 'no_data'
+    | 'stale'
+
+export interface OracleReachabilityResult {
+    reachable: boolean
+    reason: OracleReachabilityReason
+    asset: string
+    endpoint?: string
+    latencyMs?: number
+    httpStatus?: number
+    quoteTimestamp?: number
+    error?: string
+}
 
 const DEFAULT_SYMBOLS = ['XLM', 'BTC', 'ETH', 'USDC']
 const DEFAULT_COIN_IDS: Record<string, string> = {
@@ -24,16 +58,23 @@ export class ReflectorService {
     private readonly CACHE_DURATION = process.env.NODE_ENV === 'production' ? 600000 : 300000 // 10 min vs 5 min
     private lastRequestTime = 0
     private readonly MIN_REQUEST_INTERVAL = 90000 // Increased to 1.5 minutes for Pro API
+    private readonly oracleCacheTtlSeconds: number
 
     // Cache metrics tracking
     private cacheStats: Map<string, { hits: number; misses: number; lastAgeMs: number }> = new Map()
     private cacheMetricsReportInterval: NodeJS.Timer | null = null
+    private redisCache: Awaited<ReturnType<typeof import('ioredis').default>> | null = null
+    private redisAvailable: boolean = false
+    private readonly ORACLE_CACHE_KEY = 'oracle:prices'
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
         this.priceCache = new Map()
         this.coinGeckoIds = { ...DEFAULT_COIN_IDS }
         this.reflectorApiUrl = process.env.REFLECTOR_API_URL || ''
+
+        const rawTtl = Number.parseInt(process.env.ORACLE_CACHE_TTL_SECONDS || '30', 10)
+        this.oracleCacheTtlSeconds = Number.isFinite(rawTtl) && rawTtl >= 0 ? rawTtl : 30
 
         // Initialize cache metrics reporting
         this.startCacheMetricsReporting()
@@ -54,18 +95,30 @@ export class ReflectorService {
         return Object.keys(map).length > 0 ? map : { ...DEFAULT_COIN_IDS }
     }
 
+    /** CoinGecko / Reflector API base URL (supports REFLECTOR_SERVICE_URL for offline dev) */
+    private getBaseUrl(): string {
+        const customUrl = process.env.REFLECTOR_SERVICE_URL || process.env.COINGECKO_BASE_URL
+        if (customUrl && customUrl.trim()) {
+            return customUrl.trim().replace(/\/$/, '')
+        }
+        const apiKey = this.coinGeckoApiKey
+        return apiKey && apiKey.trim()
+            ? 'https://pro-api.coingecko.com/api/v3'
+            : 'https://api.coingecko.com/api/v3'
+    }
+
     async getCurrentPrices(): Promise<PricesMap> {
-        const { map } = await this.resolvePricesInternal()
+        const { map, hint, cacheStatus } = await this.resolvePricesWithRedisCache()
         return this.applyQuoteAges(map)
     }
 
     async getCurrentPricesWithMeta(): Promise<PricesFeedPayload> {
-        const { map, hint } = await this.resolvePricesInternal()
+        const { map, hint, cacheStatus } = await this.resolvePricesWithRedisCache()
         const prices = this.applyQuoteAges(map)
-        return { prices, feedMeta: this.buildFeedMeta(prices, hint) }
+        return { prices, feedMeta: this.buildFeedMeta(prices, hint, cacheStatus) }
     }
 
-    buildFeedMeta(prices: PricesMap, hint: PriceResolutionHint): PriceFeedMeta {
+    buildFeedMeta(prices: PricesMap, hint: PriceResolutionHint, cacheStatus?: PriceFeedMeta['cacheStatus']): PriceFeedMeta {
         const entries = Object.values(prices)
         const degraded =
             hint === 'synthetic_fallback'
@@ -79,10 +132,92 @@ export class ReflectorService {
             degraded,
             staleOrLimited,
             resolutionHint: hint,
-            assetsCount: Object.keys(prices).length
+            assetsCount: Object.keys(prices).length,
+            cacheStatus
         }
         recordPriceFeedResolution(meta)
         return meta
+    }
+
+    private async getRedisCache() {
+        if (this.redisCache) return this.redisCache
+        try {
+            const { default: IORedis } = await import('ioredis')
+            this.redisCache = new IORedis(REDIS_URL, {
+                lazyConnect: true,
+                connectTimeout: 2000,
+                maxRetriesPerRequest: 1,
+                enableReadyCheck: false,
+                retryStrategy: () => null
+            })
+            this.redisCache.on('error', () => {})
+            await this.redisCache.connect()
+            await this.redisCache.ping()
+            this.redisAvailable = true
+        } catch {
+            this.redisAvailable = false
+            this.redisCache = null
+        }
+        return this.redisCache
+    }
+
+    private async readFromRedisCache(): Promise<{ map: PricesMap; cacheStatus: PriceFeedMeta['cacheStatus'] } | null> {
+        if (this.oracleCacheTtlSeconds === 0) return null
+        try {
+            const redis = await this.getRedisCache()
+            if (!redis) return { map: {}, cacheStatus: 'redis_unavailable' }
+            const raw = await redis.get(this.ORACLE_CACHE_KEY)
+            if (!raw) return { map: {}, cacheStatus: 'redis_miss' }
+            const map = JSON.parse(raw) as PricesMap
+            if (typeof map === 'object' && map !== null && Object.keys(map).length > 0) {
+                return { map, cacheStatus: 'redis_hit' }
+            }
+            return { map: {}, cacheStatus: 'redis_miss' }
+        } catch {
+            return { map: {}, cacheStatus: 'redis_unavailable' }
+        }
+    }
+
+    private async writeToRedisCache(map: PricesMap): Promise<void> {
+        if (this.oracleCacheTtlSeconds === 0 || Object.keys(map).length === 0) return
+        try {
+            const redis = await this.getRedisCache()
+            if (!redis) return
+            const stripped: PricesMap = {}
+            for (const [asset, data] of Object.entries(map)) {
+                stripped[asset] = {
+                    price: data.price,
+                    change: data.change,
+                    timestamp: data.timestamp,
+                    source: data.source,
+                    volume: data.volume
+                }
+            }
+            await redis.set(this.ORACLE_CACHE_KEY, JSON.stringify(stripped), 'EX', this.oracleCacheTtlSeconds)
+        } catch {
+            // Redis write failed — graceful degradation
+        }
+    }
+
+    private async resolvePricesWithRedisCache(): Promise<{ map: PricesMap; hint: PriceResolutionHint; cacheStatus: PriceFeedMeta['cacheStatus'] }> {
+        if (this.oracleCacheTtlSeconds === 0) {
+            const result = await this.resolvePricesInternal()
+            return { ...result, cacheStatus: 'redis_bypassed' }
+        }
+
+        const redisResult = await this.readFromRedisCache()
+        if (redisResult?.cacheStatus === 'redis_hit' && Object.keys(redisResult.map).length > 0) {
+            return { map: redisResult.map, hint: 'cached_only', cacheStatus: 'redis_hit' }
+        }
+
+        const resolved = await this.resolvePricesInternal()
+        const cacheStatus: PriceFeedMeta['cacheStatus'] = redisResult?.cacheStatus === 'redis_unavailable' ? 'redis_unavailable' : 'redis_miss'
+
+        if (Object.keys(resolved.map).length > 0) {
+            await this.writeToRedisCache(resolved.map)
+        }
+
+        return { ...resolved, cacheStatus }
     }
 
     private async resolvePricesInternal(): Promise<{ map: PricesMap; hint: PriceResolutionHint }> {
@@ -309,9 +444,7 @@ export class ReflectorService {
 
         try {
             const apiKey = this.coinGeckoApiKey
-
-            // FIXED: Use correct API endpoints
-            const baseUrl = 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
             logger.info('[DEBUG] Using API', { api: apiKey ? 'CoinGecko Pro' : 'CoinGecko Free' })
             logger.info('[DEBUG] Base URL', { baseUrl })
 
@@ -449,9 +582,7 @@ export class ReflectorService {
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -510,9 +641,7 @@ export class ReflectorService {
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -624,12 +753,122 @@ export class ReflectorService {
         return result
     }
 
+    /**
+     * Lightweight, read-only reachability probe for the Reflector oracle itself
+     * (distinct from testApiConnectivity, which exercises the CoinGecko fallback).
+     *
+     * Fetches a single asset price and reports a machine-readable `reason` so
+     * callers — the startup self-test in particular — can tell an unconfigured
+     * oracle from an unreachable one, an HTTP error, or a stale feed.
+     */
+    async testOracleReachability(
+        options: { timeoutMs?: number; asset?: string } = {},
+    ): Promise<OracleReachabilityResult> {
+        const timeoutMs = options.timeoutMs ?? 5000
+        const asset = options.asset || this.getAssetList()[0] || DEFAULT_SYMBOLS[0]
+        const endpoint = this.reflectorApiUrl.replace(/\/$/, '')
+
+        if (!endpoint) {
+            return {
+                reachable: false,
+                reason: 'not_configured',
+                asset,
+                error: 'REFLECTOR_API_URL is not set',
+            }
+        }
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+        const startedAt = Date.now()
+
+        try {
+            const response = await fetch(
+                `${endpoint}/prices?assets=${encodeURIComponent(asset)}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        Accept: 'application/json',
+                        'User-Agent': 'StellarPortfolioRebalancer/1.0',
+                    },
+                    signal: controller.signal,
+                },
+            )
+
+            const latencyMs = Date.now() - startedAt
+
+            if (!response.ok) {
+                return {
+                    reachable: false,
+                    reason: 'http_error',
+                    asset,
+                    endpoint,
+                    latencyMs,
+                    httpStatus: response.status,
+                    error: `Reflector API responded ${response.status}`,
+                }
+            }
+
+            const payload = await response.json() as
+                | { prices?: Record<string, { price?: unknown; timestamp?: number }> }
+                | Record<string, { price?: unknown; timestamp?: number }>
+            const rows = ('prices' in payload && payload.prices) ? payload.prices : payload
+            const row = (rows as Record<string, { price?: unknown; timestamp?: number }>)?.[asset]
+
+            if (!row || row.price === undefined || row.price === null) {
+                return {
+                    reachable: false,
+                    reason: 'no_data',
+                    asset,
+                    endpoint,
+                    latencyMs,
+                    httpStatus: response.status,
+                    error: `Reflector returned no price for ${asset}`,
+                }
+            }
+
+            if (typeof row.timestamp === 'number' && this.isPriceStale(row.timestamp)) {
+                return {
+                    reachable: true,
+                    reason: 'stale',
+                    asset,
+                    endpoint,
+                    latencyMs,
+                    httpStatus: response.status,
+                    quoteTimestamp: row.timestamp,
+                    error: `Reflector price for ${asset} is older than ${this.PRICE_DATA_MAX_AGE}s`,
+                }
+            }
+
+            return {
+                reachable: true,
+                reason: 'ok',
+                asset,
+                endpoint,
+                latencyMs,
+                httpStatus: response.status,
+                quoteTimestamp: row.timestamp,
+            }
+        } catch (error) {
+            const aborted = error instanceof Error && error.name === 'AbortError'
+            return {
+                reachable: false,
+                reason: aborted ? 'timeout' : 'unreachable',
+                asset,
+                endpoint,
+                latencyMs: Date.now() - startedAt,
+                error: aborted
+                    ? `Reflector oracle did not respond within ${timeoutMs}ms`
+                    : error instanceof Error ? error.message : String(error),
+            }
+        } finally {
+            clearTimeout(timeoutId)
+        }
+    }
+
     async testApiConnectivity(): Promise<{ success: boolean, error?: string, data?: any }> {
         try {
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',

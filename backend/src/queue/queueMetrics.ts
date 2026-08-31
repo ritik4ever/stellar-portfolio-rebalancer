@@ -36,8 +36,6 @@ export interface FailedJobsResult {
 }
 
 
-}
-
 /**
  * Returns queue depth metrics for all three queues.
  */

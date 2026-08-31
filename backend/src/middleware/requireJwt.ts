@@ -57,7 +57,8 @@ function verifyAccessTokenWithRotation(token: string):
         return { ok: false, reason: 'invalid' }
     }
 
-    const currentResult = verifyWithSecret(token, currentSecret)
+    const skewSec = getJwtClockSkewSec()
+    const currentResult = verifyWithSecret(token, currentSecret, skewSec)
     if (currentResult.ok) return currentResult
     if (currentResult.reason === 'expired') return currentResult
 
@@ -66,14 +67,14 @@ function verifyAccessTokenWithRotation(token: string):
         return currentResult
     }
 
-    return verifyWithSecret(token, previousSecret as string)
+    return verifyWithSecret(token, previousSecret as string, skewSec)
 }
 
-function verifyWithSecret(token: string, secret: string):
+function verifyWithSecret(token: string, secret: string, skewSec = 0):
     | { ok: true; payload: AccessJwtPayload }
     | { ok: false; reason: 'expired' | 'invalid' } {
     try {
-        const decoded = jwt.verify(token, secret)
+        const decoded = jwt.verify(token, secret, { clockTolerance: skewSec })
         if (!isAccessPayload(decoded)) {
             return { ok: false, reason: 'invalid' }
         }
@@ -93,6 +94,12 @@ function isAccessPayload(payload: string | jwt.JwtPayload): payload is AccessJwt
         typeof payload.sub === 'string' &&
         payload.type === 'access'
     )
+}
+
+function getJwtClockSkewSec(): number {
+    const raw = (process.env.JWT_CLOCK_SKEW_SEC || '0').trim()
+    const parsed = Number.parseInt(raw, 10)
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0
 }
 
 function isPreviousSecretWithinGracePeriod(previousSecret: string | undefined): boolean {
@@ -122,7 +129,8 @@ export function verifyAccessTokenForWebSocket(token: string):
         return { ok: false, reason: 'missing_secret', message: 'JWT secret not configured' }
     }
 
-    const currentResult = verifyWithSecretAndExp(token, currentSecret)
+    const skewSec = getJwtClockSkewSec()
+    const currentResult = verifyWithSecretAndExp(token, currentSecret, skewSec)
     if (currentResult.ok) return currentResult
     if (currentResult.reason === 'expired') return currentResult
 
@@ -131,14 +139,14 @@ export function verifyAccessTokenForWebSocket(token: string):
         return currentResult
     }
 
-    return verifyWithSecretAndExp(token, previousSecret as string)
+    return verifyWithSecretAndExp(token, previousSecret as string, skewSec)
 }
 
-function verifyWithSecretAndExp(token: string, secret: string):
+function verifyWithSecretAndExp(token: string, secret: string, skewSec = 0):
     | { ok: true; payload: AccessJwtPayload; expiresAt: Date }
     | { ok: false; reason: 'expired' | 'invalid'; message: string } {
     try {
-        const decoded = jwt.verify(token, secret) as jwt.JwtPayload
+        const decoded = jwt.verify(token, secret, { clockTolerance: skewSec }) as jwt.JwtPayload
         if (!isAccessPayload(decoded)) {
             return { ok: false, reason: 'invalid', message: 'Invalid token payload' }
         }

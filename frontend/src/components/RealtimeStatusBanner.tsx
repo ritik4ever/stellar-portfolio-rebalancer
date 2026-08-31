@@ -1,5 +1,11 @@
+import React from 'react'
+import { Radio, WifiOff, RefreshCw } from 'lucide-react'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
+import ReadinessDrilldown from './ReadinessDrilldown'
 
+const RealtimeStatusBanner: React.FC = () => {
+    const { state, reconnect, reconnectInfo, report, readinessLoading, readinessError } = useRealtimeConnection()
+    const showDrilldown = false
 
     if (state === 'connected') {
         return (
@@ -26,11 +32,11 @@ import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
 
     const label =
         state === 'connecting'
-            ? 'Connecting to live updates…'
+            ? 'Connecting to live updates\u2026'
             : state === 'reconnecting'
               ? reconnectInfo
-                  ? `Reconnecting (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})…`
-                  : 'Reconnecting to live updates…'
+                  ? `Reconnecting (${reconnectInfo.attempt}/${reconnectInfo.maxAttempts})\u2026`
+                  : 'Reconnecting to live updates\u2026'
               : state === 'paused'
                 ? 'Live updates paused'
                 : 'Live updates disconnected'
@@ -53,8 +59,21 @@ import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
             : 'bg-white/85 text-amber-900 ring-amber-200 dark:bg-amber-900/40 dark:text-amber-50 dark:ring-amber-700'
 
     return (
-        <div
-
+        <div className={`fixed top-3 right-3 z-40 rounded-2xl border px-3 py-2 text-xs shadow-sm ${barClass}`} role="alert" aria-live="assertive">
+            <div className="flex items-center gap-2">
+                <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="font-medium">{label}</span>
+                {retrySeconds != null && (
+                    <span className="opacity-70">retrying in about {retrySeconds}s</span>
+                )}
+                <button
+                    type="button"
+                    onClick={reconnect}
+                    className={`ml-1 inline-flex items-center gap-1 rounded-lg px-2 py-1 ring-1 transition-colors hover:brightness-110 ${buttonClass}`}
+                >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry
+                </button>
             </div>
             {showDrilldown && (
                 <ReadinessDrilldown
@@ -66,3 +85,5 @@ import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
         </div>
     )
 }
+
+export default RealtimeStatusBanner

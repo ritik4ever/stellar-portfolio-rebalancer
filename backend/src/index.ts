@@ -7,6 +7,7 @@ import cors from 'cors'
 import swaggerUi from 'swagger-ui-express'
 import { WebSocketServer } from 'ws'
 import { validateStartupConfigOrThrow, buildStartupSummary, logStartupSubsystems } from './config/startupConfig.js'
+import { getFeatureFlags } from './config/featureFlags.js'
 import { logger } from './utils/logger.js'
 import { apiErrorHandler } from './middleware/apiErrorHandler.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
@@ -38,7 +39,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     initializeSentry()
     setupProcessErrorHandlers()
 
-    const redisAvailable = await probeRedis()
+    const redisAvailable = await probeRedis(config)
     const { mountApiRoutes, mountLegacyNonApiRedirects } = await import('./http/mountApiRoutes.js')
     const { initRobustWebSocket } = await import('./services/websocket.service.js')
     const { startQueueScheduler } = await import('./queue/scheduler.js')
@@ -47,7 +48,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     const app = express()
 
-    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins)
+    const corsOptions: cors.CorsOptions = buildCorsOptions(config.corsOrigins, config.nodeEnv)
 
     app.use(enforceCorsOriginAllowlist(config.corsOrigins))
     app.use(cors(corsOptions))
@@ -55,12 +56,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     app.use(requestContextMiddleware)
     app.use(metricsMiddleware)
     app.use(express.json({ limit: '10mb' }))
+    app.use(express.text({ type: ['text/csv', 'application/csv'], limit: '25mb' }))
     app.use(express.urlencoded({ extended: true, limit: '10mb' }))
     app.set('trust proxy', 1)
 
     const sendReadiness = async (_req: Request, res: Response) => {
         const report = await buildReadinessReport()
-        res.status(report.status === 'ready' ? 200 : 503).json(report)
+        res.status((report as any).status === 'ready' ? 200 : 503).json(report)
     }
 
     app.get('/readiness', sendReadiness)
@@ -92,11 +94,32 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     mountApiRoutes(app)
     mountLegacyNonApiRedirects(app)
 
+    // Stage-warm the issuer metadata cache so deployments don't serve stale or
+    // missing metadata immediately after rollout. Fire-and-forget: failures are
+    // logged and skipped without delaying startup.
+    const flags = getFeatureFlags()
+    const warmAccounts = (process.env.ISSUER_METADATA_WARM_ACCOUNTS || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    if (flags.enableIssuerMetadata && warmAccounts.length > 0) {
+        import('./services/issuerMetadataService.js').then(({ warmIssuerMetadataCache }) =>
+            warmIssuerMetadataCache(warmAccounts).then((warmed) => {
+                logger.info('[ISSUER-METADATA] Cache warm-up complete', { requested: warmAccounts.length, warmed })
+            })
+        )
+    }
+
     app.get('/health', (_req: Request, res: Response) => {
         res.status(200).type('text/plain').send('ok')
     })
 
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
+
+    const enableApiDocs = process.env.ENABLE_API_DOCS || (config.nodeEnv !== 'production' ? 'true' : 'false')
+    if (enableApiDocs === 'true') {
+        app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(spec as Record<string, unknown>))
+    }
 
     const serveOpenApiJson = (_req: Request, res: Response) => {
         res.setHeader('Content-Type', 'application/json')
@@ -109,13 +132,33 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     app.use(apiErrorHandler)
 
     const server = createServer(app)
-    const wss = new WebSocketServer({ server })
+    const wss = new WebSocketServer({ noServer: true })
     initRobustWebSocket(wss)
 
+    const { initPortfolioFeedWebSocket } = await import('./ws/portfolioFeed.js')
+    const portfolioWss = new WebSocketServer({ noServer: true })
+    initPortfolioFeedWebSocket(portfolioWss)
+
+    server.on('upgrade', (request, socket, head) => {
+        const pathname = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`).pathname
+
+        if (pathname.startsWith('/ws/portfolio/')) {
+            portfolioWss.handleUpgrade(request, socket as any, head, (ws) => {
+                portfolioWss.emit('connection', ws, request)
+            })
+        } else {
+            wss.handleUpgrade(request, socket as any, head, (ws) => {
+                wss.emit('connection', ws, request)
+            })
+        }
+    })
+
+    const rateLimitStore = getRateLimitStoreType()
+    logger.info('[STARTUP] Config fingerprint', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)
+    logStartupSubsystems(config, redisAvailable, rateLimitStore)
+
     server.listen(config.port, () => {
-        const rateLimitStore = getRateLimitStoreType()
-        logger.info('[SERVER] Listening', buildStartupSummary(config, redisAvailable) as Record<string, unknown>)
-        logStartupSubsystems(config, redisAvailable, rateLimitStore)
+        logger.info('[SERVER] Listening on port ' + config.port)
         logger.info('[SERVER] WebSocket robust mode active (heartbeat, protocol validation, inactive cleanup)')
 
         if (redisAvailable) {

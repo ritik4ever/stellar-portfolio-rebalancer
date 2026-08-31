@@ -13,6 +13,7 @@ Single reference for backend and frontend switches that change runtime behavior.
 | `ENABLE_DEMO_DB_SEED` | follows `DEMO_MODE` | follows `DEMO_MODE` | Seed demo rows when DB is empty (`databaseService`). |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | `false` | `false` | Allow unauthenticated listing of user portfolios in demo contexts. |
 | `ENABLE_DEBUG_ROUTES` | `false` | `false` | Mount `/api/v1/debug/*` (and legacy `/api/debug/*`). Keep off in shared/staging unless you trust the network. |
+| `ENABLE_ISSUER_METADATA` | `true` | `true` | When true, resolves and caches issuer metadata (e.g. org_name, org_url) from the home domain's stellar.toml. |
 
 **Indexer / contract alignment**
 
@@ -30,6 +31,17 @@ Public copies of the main booleans are exposed on `GET /api/v1/system/status` un
 | `VITE_DEMO_MODE` | Present in `.env.example`; not all UI paths read it (some demo state is local). |
 | `VITE_ENABLE_API_DEBUG_LOGS` | Verbose API logging via `frontend/src/utils/debug.ts`. |
 | `API_CONFIG.USE_BROWSER_PRICES` | **Code flag** in `frontend/src/config/api.ts` (currently `true`): GET `/prices` uses `browserPriceService` in the browser instead of the backend envelope. |
+
+## Planned Flags (Not Yet Implemented)
+
+The following flags do not exist in code yet — no environment variable is currently read for them. They are documented here ahead of implementation so the naming and rollout plan are agreed before the toggles are wired up. Update this section (move entries into [Backend](#backend-node--api)) once each flag lands in `backend/src/config/featureFlags.ts`.
+
+| Planned variable | Default (non‑prod) | Default (production) | Effect once implemented |
+|----------|-------------------|----------------------|--------|
+| `ENABLE_DCA_STRATEGY` | `false` | `false` | Would gate DCA (dollar-cost averaging) rebalance strategy support described conceptually in [`docs/REBALANCING_STRATEGIES.md`](REBALANCING_STRATEGIES.md). No DCA strategy code exists yet — the flag is a placeholder for the eventual rollout. |
+| `ENABLE_BULK_IMPORT` | `true` | `false` | Would gate the portfolio bulk import endpoint (`POST /api/v1/portfolio/import`, implemented in `backend/src/api/portfolioImportRoutes.ts` / `backend/src/services/portfolioImportService.ts`). Today this endpoint is **always enabled** and reads no feature flag; this entry documents the intended flag name for adding a kill switch. |
+
+**Local toggling (once implemented):** set the variable in `backend/.env` (or `config/feature-flags.staging.json` via `FEATURE_FLAGS_FILE`, see [File-Based Overrides](#file-based-overrides-staging--local)) the same way as any other backend boolean flag, then restart the backend.
 
 ## Safe combinations
 

@@ -11,7 +11,7 @@
  * 2. Add to walletAdapters array
  * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
  */
-export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'mock'
+
 
 export interface WalletAdapter {
     readonly name: string
@@ -21,6 +21,7 @@ export interface WalletAdapter {
     isConnected(): Promise<boolean>
     disconnect(): Promise<void>
     signTransaction(xdr: string, network?: string): Promise<string>
+    switchNetwork?(network: string): Promise<void>
 }
 
 export class WalletError extends Error {
@@ -52,6 +53,10 @@ function normalizeError(error: unknown, walletType: WalletType): WalletError {
 
     if (msg.includes('timeout') || msg.includes('timed out')) {
         return new WalletError('Connection timed out. Please try again', 'TIMEOUT', walletType)
+    }
+
+    if (msg.includes('popup') || msg.includes('blocked')) {
+        return new WalletError('Popup was blocked by your browser. Please allow popups for this site and try again.', 'POPUP_BLOCKED', walletType)
     }
 
     return new WalletError(err.message || 'Wallet connection failed', 'UNKNOWN_ERROR', walletType)
@@ -246,7 +251,8 @@ export class MockAdapter implements WalletAdapter {
 export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
-    new XBullAdapter()
+    new XBullAdapter(),
+
 ]
 
 // Add the mock adapter if we're in E2E mode

@@ -36,12 +36,16 @@ export class PortfolioStorage {
     async createPortfolio(
         userAddress: string,
         allocations: Record<string, number>,
-        threshold: number
+        threshold: number,
+        name?: string,
+        description?: string
     ): Promise<string> {
         const id = randomUUID()
         const portfolio: Portfolio = {
             id,
             userAddress,
+            name,
+            description,
             allocations,
             threshold,
             balances: {},
@@ -51,7 +55,7 @@ export class PortfolioStorage {
             version: 1
         }
         if (isDbConfigured()) {
-            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0)
+            await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0, 1, 'threshold', {}, name, description)
         }
         this.cacheSet(portfolio)
         return id
@@ -62,13 +66,17 @@ export class PortfolioStorage {
         allocations: Record<string, number>,
         threshold: number,
         currentBalances: Record<string, number>,
-        slippageTolerance: number = 1
+        slippageTolerance: number = 1,
+        name?: string,
+        description?: string
     ): Promise<string> {
         const id = randomUUID()
         const totalValue = Object.values(currentBalances).reduce((sum, bal) => sum + bal, 0)
         const portfolio: Portfolio = {
             id,
             userAddress,
+            name,
+            description,
             allocations,
             threshold,
             slippageTolerance: clampSlippageTolerance(slippageTolerance),
@@ -86,24 +94,58 @@ export class PortfolioStorage {
                 threshold,
                 currentBalances,
                 totalValue,
-                portfolio.slippageTolerance ?? 1
+                portfolio.slippageTolerance ?? 1,
+                'threshold',
+                {},
+                name,
+                description
             )
         }
         this.cacheSet(portfolio)
         return id
     }
 
+    async clonePortfolio(originalId: string, name?: string): Promise<Portfolio | undefined> {
+        const original = await this.getPortfolio(originalId)
+        if (!original) return undefined
+        const id = randomUUID()
+        const now = new Date().toISOString()
+        const cloneName = name !== undefined ? name : original.name
+        const cloned: Portfolio = {
+            ...original,
+            id,
+            name: cloneName,
+            createdAt: now,
+            lastRebalance: now,
+            version: 1
+        }
+        if (isDbConfigured()) {
+            await portfolioDb.dbCreatePortfolio(
+                id,
+                cloned.userAddress,
+                cloned.allocations,
+                cloned.threshold,
+                cloned.balances,
+                cloned.totalValue,
+                cloned.slippageTolerancePercent ?? cloned.slippageTolerance ?? 1
+            )
+        }
+        this.cacheSet(cloned)
+        return cloned
+    }
+
     async getPortfolio(id: string): Promise<Portfolio | undefined> {
         return this.cacheGet(id)
     }
 
-    async getUserPortfolios(userAddress: string): Promise<Portfolio[]> {
+    async getUserPortfolios(userAddress: string, includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
-            const list = await portfolioDb.dbGetUserPortfolios(userAddress)
+            const list = await portfolioDb.dbGetUserPortfolios(userAddress, includeArchived)
             if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
             return list
         }
-        return Array.from(this.portfolios.values()).filter(p => p.userAddress === userAddress)
+        return Array.from(this.portfolios.values())
+            .filter(p => p.userAddress === userAddress && (includeArchived || !p.archivedAt))
     }
 
     async updatePortfolio(id: string, updates: Partial<Portfolio>, expectedVersion?: number): Promise<boolean> {
@@ -120,25 +162,53 @@ export class PortfolioStorage {
         if (isDbConfigured()) {
             const ok = await portfolioDb.dbUpdatePortfolio(id, {
                 userAddress: updates.userAddress,
+                name: updates.name,
+                description: updates.description,
                 allocations: updates.allocations,
                 threshold: updates.threshold,
                 balances: updates.balances,
                 totalValue: updates.totalValue,
                 lastRebalance: updates.lastRebalance
             }, expectedVersion)
-            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance)) return false
+            if (!ok && (updates.balances ?? updates.totalValue ?? updates.lastRebalance ?? updates.name ?? updates.description)) return false
         }
         this.cacheSet(updated)
         return true
     }
 
-    async getAllPortfolios(): Promise<Portfolio[]> {
+    async searchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
-            const list = await portfolioDb.dbGetAllPortfolios()
+            const list = await portfolioDb.dbSearchPortfolios(searchQuery, limit, offset, includeArchived)
             if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
             return list
         }
-        return Array.from(this.portfolios.values())
+        
+        let all = Array.from(this.portfolios.values())
+        if (!includeArchived) {
+            all = all.filter(p => !p.archivedAt)
+        }
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase()
+            all = all.filter(p => 
+                (p.name && p.name.toLowerCase().includes(q)) || 
+                (p.description && p.description.toLowerCase().includes(q))
+            )
+        }
+        all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        return all.slice(offset, offset + limit)
+    }
+
+    async getAllPortfolios(includeArchived = false): Promise<Portfolio[]> {
+        if (isDbConfigured()) {
+            const list = await portfolioDb.dbGetAllPortfolios(includeArchived)
+            if (useCache) list.forEach(p => this.portfolios.set(p.id, p))
+            return list
+        }
+        let all = Array.from(this.portfolios.values())
+        if (!includeArchived) {
+            all = all.filter(p => !p.archivedAt)
+        }
+        return all
     }
 
     async getPortfolioCount(): Promise<number> {
@@ -156,6 +226,78 @@ export class PortfolioStorage {
             return ok
         }
         return this.portfolios.delete(id)
+    }
+
+    async archivePortfolio(id: string): Promise<boolean> {
+        if (isDbConfigured()) {
+            const ok = await portfolioDb.dbArchivePortfolio(id)
+            if (ok) {
+                const p = await this.getPortfolio(id)
+                if (p) {
+                    p.archivedAt = new Date().toISOString()
+                    this.cacheSet(p)
+                }
+            }
+            return ok
+        }
+        const p = this.portfolios.get(id)
+        if (!p) return false
+        p.archivedAt = new Date().toISOString()
+        return true
+    }
+
+    async restorePortfolio(id: string): Promise<boolean> {
+        if (isDbConfigured()) {
+            const ok = await portfolioDb.dbRestorePortfolio(id)
+            if (ok) {
+                const p = await this.getPortfolio(id)
+                if (p) {
+                    p.archivedAt = undefined
+                    this.cacheSet(p)
+                }
+            }
+            return ok
+        }
+        const p = this.portfolios.get(id)
+        if (!p) return false
+        p.archivedAt = undefined
+        return true
+    }
+
+    /**
+     * Clone an existing portfolio, optionally overriding fields.
+     * Returns the new portfolio ID.
+     */
+    async clonePortfolio(sourceId: string, overrides: Partial<Portfolio> = {}): Promise<string> {
+        const source = await this.getPortfolio(sourceId)
+        if (!source) throw new Error(`Source portfolio ${sourceId} not found`)
+        const userAddress = overrides.userAddress ?? source.userAddress
+        const allocations = overrides.allocations ?? source.allocations
+        const threshold = overrides.threshold ?? source.threshold
+        const slippageTolerance = overrides.slippageTolerance ?? source.slippageTolerance ?? 1
+        const strategy = overrides.strategy ?? source.strategy
+        const strategyConfig = overrides.strategyConfig ?? source.strategyConfig ?? {}
+        // Preserve balances if they exist
+        if (Object.keys(source.balances).length > 0) {
+            const newId = await this.createPortfolioWithBalances(
+                userAddress,
+                allocations,
+                threshold,
+                source.balances,
+                slippageTolerance,
+            )
+            // Update strategy if provided
+            if (strategy) {
+                await this.updatePortfolio(newId, { strategy, strategyConfig })
+            }
+            return newId
+        } else {
+            const newId = await this.createPortfolio(userAddress, allocations, threshold)
+            if (strategy) {
+                await this.updatePortfolio(newId, { strategy, strategyConfig })
+            }
+            return newId
+        }
     }
 
     clearAll(): void {

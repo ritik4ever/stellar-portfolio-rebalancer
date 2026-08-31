@@ -193,3 +193,15 @@ jobs:
           PGPORT: '5432'
           PGDATABASE: migration_ci
         run: npm run db:migrate -- --dry-run
+
+  slack-notification:
+    name: Notify Slack on failure
+    needs: [openapi-contract, backend-tests, backend-coverage, migration-dry-run]
+    if: always() && contains(needs.*.result, 'failure') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"🚨 CI Failure on main!\n*Repo*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Failing Step*: ${{ github.workflow }}\n*Link*: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}

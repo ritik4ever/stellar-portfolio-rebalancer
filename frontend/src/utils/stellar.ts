@@ -17,6 +17,11 @@ declare global {
             signTransaction(xdr: string): Promise<{ signedXDR: string }>
             getNetwork(): Promise<string | { network: string; networkPassphrase?: string }>
         }
+        lobstr?: {
+            requestAccess(): Promise<{ publicKey: string }>
+            signTransaction(xdr: string, opts?: { networkPassphrase?: string }): Promise<string>
+            isConnected(): Promise<boolean>
+        }
     }
 }
 

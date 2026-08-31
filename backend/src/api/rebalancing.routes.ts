@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
-import { rebalanceHistoryQuerySchema } from './validation.js'
-import { validateQuery } from '../middleware/validate.js'
+import { rebalanceHistoryQuerySchema, recordRebalanceEventSchema, autoRebalancerControlSchema } from './validation.js'
+import { validateRequest, validateQuery } from '../middleware/validate.js'
 import { contractEventIndexerService } from '../services/contractEventIndexer.js'
 import { rebalanceHistoryService, riskManagementService } from '../services/serviceContainer.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
@@ -12,8 +12,9 @@ import { autoRebalancer } from '../services/runtimeServices.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
-import { buildReadinessReport } from '../monitoring/readiness.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
+import { buildReadinessReport } from '../monitoring/readiness.js'
+
 
 export const rebalancingRouter = Router()
 
@@ -34,16 +35,24 @@ const parseHistorySource = (value: unknown): 'offchain' | 'simulated' | 'onchain
     return undefined
 }
 
+const parseDryRunOptions = (body: unknown): { tradeSlippageOverrides?: Record<string, number> } => {
+    const options = (body as { options?: { slippageOverrides?: Record<string, number> } } | undefined)?.options
+    return {
+        tradeSlippageOverrides: options?.slippageOverrides
+    }
+}
+
 rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.query.portfolioId as string | undefined
         const limit = (req.query.limit as unknown as number | undefined) ?? 50
+        const offset = (req.query.offset as unknown as number | undefined) ?? 0
         const source = parseHistorySource(req.query.source)
         const startTimestamp = parseOptionalTimestamp(req.query.startTimestamp)
         const endTimestamp = parseOptionalTimestamp(req.query.endTimestamp)
         const syncOnChain = (req.query.syncOnChain as unknown as boolean | undefined) === true
 
-        logger.info('Rebalance history request', { portfolioId: portfolioId || 'all' })
+        logger.info('Rebalance history request', { portfolioId: portfolioId || 'all', limit, offset })
         if (syncOnChain) {
             await contractEventIndexerService.syncOnce()
         }
@@ -55,7 +64,8 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
                 eventSource: source,
                 startTimestamp,
                 endTimestamp
-            }
+            },
+            offset
         )
 
         return ok(
@@ -63,13 +73,18 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
             {
                 history,
                 portfolioId: portfolioId || undefined,
+                pagination: {
+                    limit,
+                    offset,
+                    count: history.length
+                },
                 filters: {
                     source,
                     startTimestamp,
                     endTimestamp
                 }
             },
-            { meta: { count: history.length } }
+            { meta: { count: history.length, limit, offset } }
         )
 
     } catch (error) {
@@ -79,7 +94,7 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
 })
 
 // Record new rebalance event
-rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, async (req: Request, res: Response) => {
+rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, validateRequest(recordRebalanceEventSchema), async (req: Request, res: Response) => {
     try {
         const eventData = req.body
 
@@ -97,7 +112,7 @@ rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, async (req: 
     }
 })
 
-rebalancingRouter.post('/rebalance/history/sync-onchain', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+rebalancingRouter.post('/rebalance/history/sync-onchain', requireAdmin, async (req: Request, res: Response) => {
     try {
         const result = await contractEventIndexerService.syncOnce()
         return ok(res, {
@@ -166,7 +181,7 @@ rebalancingRouter.get('/rebalance/summary/:portfolioId', async (req: Request, re
 
         // Data freshness
         const now = Date.now()
-        const priceTimestamps = Object.values(prices).map(p => p.timestamp * 1000).filter(Boolean)
+        const priceTimestamps = Object.values(prices).map((p: any) => p.timestamp * 1000).filter(Boolean)
         const latestPriceTime = priceTimestamps.length > 0 ? Math.max(...priceTimestamps) : now
         const dataAgeSeconds = Math.round((now - latestPriceTime) / 1000)
         const isDataStale = dataAgeSeconds > 300 // 5 minutes
@@ -287,7 +302,7 @@ rebalancingRouter.get('/auto-rebalancer/status', async (req: Request, res: Respo
     }
 })
 
-rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -304,7 +319,7 @@ rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, adminRateLimiter,
     }
 })
 
-rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, adminRateLimiter, (req: Request, res: Response) => {
+rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -321,7 +336,7 @@ rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, adminRateLimiter, 
     }
 })
 
-rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, async (req: Request, res: Response) => {
     try {
         if (!autoRebalancer) {
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
@@ -332,6 +347,49 @@ rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, adminRateLi
         return ok(res, { message: 'Force check completed' })
     } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+rebalancingRouter.post('/auto-rebalancer/shadow-check', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        if (!autoRebalancer) {
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
+        }
+
+        const result = await autoRebalancer.shadowCheck()
+        return ok(res, { result })
+    } catch (error) {
+        logger.error('[ERROR] Auto-rebalancer shadow check failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+rebalancingRouter.post('/auto-rebalancer/dry-run/:portfolioId', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
+    try {
+        if (!autoRebalancer) {
+            return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
+        }
+
+        const portfolioId = req.params.portfolioId
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+        }
+
+        const result = await autoRebalancer.dryRunPortfolioRebalance(portfolioId, parseDryRunOptions(req.body))
+        return ok(res, { result })
+    } catch (error) {
+        const message = getErrorMessage(error)
+        const normalized = message.toLowerCase()
+        logger.error('[ERROR] Auto-rebalancer dry-run failed', {
+            portfolioId: req.params.portfolioId,
+            error: getErrorObject(error)
+        })
+
+        if (normalized.includes('not found')) {
+            return fail(res, 404, 'NOT_FOUND', message)
+        }
+
+        return fail(res, 500, 'INTERNAL_ERROR', message)
     }
 })
 

@@ -19,6 +19,7 @@ import {
   markWorkerStarting,
   markWorkerStopped,
   snapshotWorkerRuntimeStatus,
+  handleFinalFailure,
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 
@@ -75,6 +76,20 @@ export async function processPortfolioCheckJob(
 
     const stellarService = new StellarService();
     for (const p of portfolios) {
+      // Skip portfolios that have been auto-paused due to a CVaR/VaR breach
+      if (p.riskPausedUntil && new Date(p.riskPausedUntil) > new Date()) {
+        logger.info(
+          "[WORKER:portfolio-check] Skipping risk-paused portfolio",
+          {
+            jobId: job.id,
+            portfolioId: p.id,
+            riskPausedUntil: p.riskPausedUntil,
+            correlationId,
+          },
+        );
+        continue;
+      }
+
       const needed = await stellarService.checkRebalanceNeeded(p.id);
       if (!needed) continue;
 
@@ -136,6 +151,7 @@ export function startPortfolioCheckWorker(): Worker | null {
       error: err.message,
       attemptsMade: j?.attemptsMade,
     });
+    void handleFinalFailure(j, err);
   });
 
   logger.info("[WORKER:portfolio-check] Worker started");

@@ -17,6 +17,8 @@ export interface PriceFeedMeta {
     staleOrLimited: boolean
     resolutionHint: 'fresh_primary' | 'cached_only' | 'partial_merge' | 'rate_limited_cache' | 'error_recovery_cache' | 'synthetic_fallback'
     assetsCount: number
+    /** Redis oracle cache status for the current request */
+    cacheStatus?: 'redis_hit' | 'redis_miss' | 'redis_unavailable' | 'redis_bypassed'
 }
 
 // Core price data interface
@@ -51,21 +53,37 @@ export interface HistoricalPrice {
 export interface Portfolio {
     id: string
     userAddress: string
+    name?: string
+    description?: string
     allocations: Record<string, number>
     threshold: number
     slippageTolerancePercent?: number
-    slippageTolerance?: number        // Add this for backward compatibility
-    strategy?: RebalanceStrategyType   // Add this
-    strategyConfig?: RebalanceStrategyConfig  // Add this
+    slippageTolerance?: number
+    strategy?: RebalanceStrategyType
+    strategyConfig?: RebalanceStrategyConfig
     balances: Record<string, number>
     totalValue: number
     createdAt: string
     lastRebalance: string
     version: number
+    /** ISO timestamp until which scheduled rebalancing is paused due to a CVaR/VaR breach. */
+    riskPausedUntil?: string
 }
 
+export type RebalanceTrigger = 'auto' | 'manual' | 'system'
+
+export type RebalanceReasonCode =
+    | 'THRESHOLD_EXCEEDED'
+    | 'SCHEDULED_REBALANCE'
+    | 'VOLATILITY_CIRCUIT_BREAKER'
+    | 'MANUAL_USER_REQUEST'
+    | 'RISK_MITIGATION'
+    | 'ON_CHAIN_SYNC'
+    | 'SYSTEM_FORCED'
+    | 'OTHER'
+
 // Rebalance strategy types
-export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom'
+export type RebalanceStrategyType = 'threshold' | 'periodic' | 'volatility' | 'custom' | 'dca'
 
 export interface RebalanceStrategyConfig {
     type?: RebalanceStrategyType
@@ -74,6 +92,8 @@ export interface RebalanceStrategyConfig {
     intervalDays?: number
     volatilityThresholdPct?: number
     minDaysBetweenRebalance?: number
+    dcaAmount?: number
+    dcaIntervalDays?: number
 }
 
 export interface UIAllocation {
@@ -83,6 +103,15 @@ export interface UIAllocation {
     /** Target allocation % when provided by the UI (alias of percentage in some flows) */
     target?: number
     current?: number
+}
+
+// Refresh token session metadata for transparent session management
+export interface RefreshTokenMetadata {
+    device?: string
+    platform?: string
+    userAgent?: string
+    ipAddress?: string
+    lastUsedAt?: string
 }
 
 // Thrown when an update targets a stale portfolio version
@@ -110,6 +139,7 @@ export interface RebalanceEvent {
     portfolioId: string
     timestamp: string
     trigger: string
+    reasonCode?: RebalanceReasonCode
     trades: number
     gasUsed: string
     status: 'completed' | 'failed' | 'pending'
@@ -280,6 +310,27 @@ export interface SystemStatus {
 // Additional utility types
 export type AssetCode = 'XLM' | 'BTC' | 'ETH' | 'USDC'
 
+// Metadata about an asset issuer retrieved from stellar.toml
+export interface IssuerMetadata {
+    org_name?: string
+    description?: string
+    homepage_url?: string
+    cert_url?: string
+    org_url?: string
+    org_logo?: string
+    org_description?: string
+    version?: string
+}
+
+export interface ParsedAssetCreatePayload {
+    symbol: string
+    name: string
+    contractAddress?: string
+    issuerAccount?: string
+    coingeckoId?: string
+    issuerMetadata?: IssuerMetadata
+}
+
 export interface RebalanceRequest {
     portfolioId: string
     userAddress: string
@@ -330,6 +381,17 @@ export interface RebalanceRollback {
     success: boolean
     rolledBackTrades: number
     failures: string[]
+}
+
+export interface IdempotencyRecord {
+    key: string
+    requestHash: string
+    method: string
+    path: string
+    statusCode: number
+    responseBody: string
+    createdAt: string
+    expiresAt: string
 }
 
 export interface ExecutionExplanation {

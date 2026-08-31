@@ -182,7 +182,10 @@ describe('ReflectorService cache metrics and tuning', () => {
             recordCacheEntries: vi.fn(),
             recordCacheOperation: vi.fn(),
             recordCacheTtl: vi.fn(),
-            recordCacheExpiration: vi.fn()
+            recordCacheExpiration: vi.fn(),
+            recordPriceFeedResolution: vi.fn(),
+            recordReflectorFallbackUsage: vi.fn(),
+            recordReflectorStalePrice: vi.fn(),
         }))
     })
 

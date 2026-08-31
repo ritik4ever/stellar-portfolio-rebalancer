@@ -2,6 +2,8 @@
 
 This guide provides step-by-step checklists for deploying the Stellar Portfolio Rebalancer contract to different environments. Use this to avoid mistakes and ensure consistent deployments.
 
+> **Before integrating a frontend:** review the [Contract Capability Matrix & Frontend Compatibility Guide](CONTRACT_CAPABILITY_MATRIX.md) so the app can detect outdated or unsupported deployments before attempting writes.
+
 ## Quick Reference
 
 | Environment    | Network    | RPC                                 | Funding   | Risk | Checklist                            |
@@ -10,6 +12,28 @@ This guide provides step-by-step checklists for deploying the Stellar Portfolio 
 | **Testnet**    | Test SDF   | https://soroban-testnet.stellar.org | Friendbot | Low  | [Testnet](#testnet-deployment)       |
 | **Staging**    | Testnet    | https://soroban-testnet.stellar.org | Friendbot | Low  | [Staging](#staging-deployment)       |
 | **Production** | Mainnet    | https://soroban-mainnet.stellar.org | Real XLM  | High | [Production](#production-deployment) |
+
+---
+
+## Automated Promotion Pipeline
+
+The repository includes a GitHub Actions contract deploy workflow that promotes the same contract build through the three supported environments:
+
+- `push` to `main` deploys to `testnet` automatically after CI passes.
+- Pull requests from `release/**` branches deploy to `staging` for approval and verification.
+- Manual `workflow_dispatch` runs deploy to `mainnet` behind the GitHub environment approval gate.
+
+Each environment should provide the same GitHub environment variable names:
+
+- `STELLAR_SECRET_KEY`
+- `REFLECTOR_ADDRESS`
+
+After deployment, the workflow exports the deployed contract ID into these values for downstream steps and artifact capture:
+
+- `CONTRACT_ID`
+- `STELLAR_CONTRACT_ADDRESS`
+- `CONTRACT_ADDRESS`
+- `VITE_CONTRACT_ADDRESS`
 
 ---
 
@@ -220,6 +244,14 @@ Use this for testing with real Stellar testnet infrastructure.
     --id $CONTRACT_ID \
     --network testnet
   ```
+- [ ] Verify `capability_summary` output matches the expected capability set for this release (see [Capability Summary Verification](#capability-summary-verification)):
+  ```bash
+  soroban contract invoke \
+    --id $CONTRACT_ID \
+    --source deployer \
+    --network testnet \
+    -- capability_summary
+  ```
 
 ### Initialize
 
@@ -347,6 +379,14 @@ Use this for pre-production testing on testnet.
 - [ ] Save staging contract ID:
   ```bash
   export STAGING_CONTRACT_ID=C...
+  ```
+- [ ] Verify `capability_summary` output matches the expected capability set for this release (see [Capability Summary Verification](#capability-summary-verification)):
+  ```bash
+  soroban contract invoke \
+    --id $STAGING_CONTRACT_ID \
+    --source staging-deployer \
+    --network testnet \
+    -- capability_summary
   ```
 
 ### Initialize
@@ -482,6 +522,14 @@ Use this for mainnet deployment. **This is irreversible and uses real XLM.**
     --id $PROD_CONTRACT_ID \
     --network mainnet
   ```
+- [ ] Verify `capability_summary` output matches the expected capability set for this release (see [Capability Summary Verification](#capability-summary-verification)) — **do not proceed to Initialize if this fails**:
+  ```bash
+  soroban contract invoke \
+    --id $PROD_CONTRACT_ID \
+    --source prod-deployer \
+    --network mainnet \
+    -- capability_summary
+  ```
 
 ### Initialize
 
@@ -543,6 +591,38 @@ Use this for mainnet deployment. **This is irreversible and uses real XLM.**
 - [ ] Create incident response runbook
 - [ ] Notify stakeholders of successful deployment
 - [ ] Archive deployment artifacts (WASM, ABI, etc.)
+
+---
+
+## Capability Summary Verification
+
+Every deployment (testnet, staging, and production) must be verified post-deploy by calling the read-only `capability_summary` contract method (`contracts/CONTRACT_ABI.md`) before initialization or traffic cutover. This is the single cheapest way to confirm the deployed WASM matches the intended release — a stale or mismatched deploy is caught here before it reaches `initialize` or the auto-rebalancer.
+
+An automated equivalent of this check is planned for the contract-deploy pipeline (`deployment/contract-deploy.sh`), which would fail the deployment job automatically if `capability_summary` doesn't match expectations after `soroban contract deploy`. Until that automation lands, the manual checklist step above is required for every environment.
+
+### Expected capability set (current release)
+
+| Field                        | Expected value                                                       |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `version`                     | `1` (`CONTRACT_VERSION`, `contracts/src/types.rs`)                     |
+| `schema_version`              | `1` (`CONTRACT_EVENT_SCHEMA_VERSION`, `contracts/src/types.rs`)        |
+| `capability_flags`            | `7` (`PerPortfolioSteward \| DifferentiatedPricing \| EmergencyStop`)  |
+| `min_rebalance_threshold`     | `1`                                                                    |
+| `max_rebalance_threshold`     | `50`                                                                   |
+| `min_slippage_tolerance_bps`  | `10`                                                                   |
+| `max_slippage_tolerance_bps`  | `500`                                                                  |
+| `max_portfolio_assets`        | `10`                                                                   |
+
+> These values are sourced from `contracts/src/types.rs` and `contracts/src/lib.rs` (`capabilities()`). Update this table whenever a contract release changes `CONTRACT_VERSION`, `CONTRACT_EVENT_SCHEMA_VERSION`, adds a `CapabilityFlag` variant, or changes any of the min/max constants.
+
+### Escalation path on verification failure
+
+If `capability_summary` does not match the expected values above:
+
+1. **Do not** proceed to `initialize` or cut over traffic to the new contract ID.
+2. Re-check that the deployed WASM matches the intended release commit (`soroban contract info --wasm <path>` hash vs. the release's recorded hash from `make hash`).
+3. If the mismatch is unexplained, halt the deployment and escalate to the team in the deployment channel/wiki (see [Documentation](#documentation) steps) before retrying.
+4. Once resolved, redeploy and re-verify `capability_summary` before continuing.
 
 ---
 

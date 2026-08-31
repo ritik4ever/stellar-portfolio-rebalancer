@@ -112,7 +112,7 @@ describe("WebSocket JWT authorization hardening (Issue #448)", () => {
         const result = await waitForCloseOrMessage(ws);
 
         expect(result.type).toBe("message");
-        expect(result.data.type).toBe("connection");
+        expect(result.data.type).toBe("CONNECTION_ACK");
         expect(result.data.sessionMetadata).toBeDefined();
         expect(result.data.sessionMetadata.authenticatedAt).toBeDefined();
         expect(result.data.sessionMetadata.tokenExpiresAt).toBeDefined();
@@ -133,7 +133,7 @@ describe("WebSocket JWT authorization hardening (Issue #448)", () => {
         const result = await waitForCloseOrMessage(ws);
 
         expect(result.type).toBe("message");
-        expect(result.data.type).toBe("connection");
+        expect(result.data.type).toBe("CONNECTION_ACK");
         expect(result.data.sessionMetadata).toBeDefined();
 
         ws.close();
@@ -228,18 +228,7 @@ describe("WebSocket JWT authorization hardening (Issue #448)", () => {
         expect(greeting.type).toBe("message");
 
         // Advance time past token expiry (30s heartbeat check)
-        vi.advanceTimersByTime(6 * 60 * 1000 + 30_000); // 6:30 minutes
-
-        // Wait for server to detect expired token and close
-        await new Promise((resolve) => {
-          const checkInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.CLOSED) {
-              clearInterval(checkInterval);
-              resolve(null);
-            }
-          }, 100);
-          setTimeout(() => clearInterval(checkInterval), 2000);
-        });
+        await vi.advanceTimersByTimeAsync(6 * 60 * 1000 + 30_000); // 6:30 minutes
 
         expect(ws.readyState).toBe(WebSocket.CLOSED);
       } finally {
@@ -295,7 +284,7 @@ describe("WebSocket JWT authorization hardening (Issue #448)", () => {
         const result = await waitForCloseOrMessage(ws);
 
         expect(result.type).toBe("message");
-        expect(result.data.type).toBe("connection");
+        expect(result.data.type).toBe("CONNECTION_ACK");
         expect(result.data.sessionMetadata).toBeUndefined();
 
         ws.close();
@@ -313,7 +302,7 @@ describe("WebSocket JWT authorization hardening (Issue #448)", () => {
         const result = await waitForCloseOrMessage(ws);
 
         expect(result.type).toBe("message");
-        expect(result.data.type).toBe("connection");
+        expect(result.data.type).toBe("CONNECTION_ACK");
 
         ws.close();
       } finally {

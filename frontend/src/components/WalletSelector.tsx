@@ -91,6 +91,8 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                 errorMessage = 'Network mismatch. Please check your wallet network settings.'
             } else if (error.code === 'TIMEOUT') {
                 errorMessage = 'Connection timed out. Please try again.'
+            } else if (error.message && error.message.includes('popup')) {
+                errorMessage = 'Popup was blocked by your browser. Please allow popups for this site and try again.'
             } else if (error.message) {
                 errorMessage = error.message
             }
@@ -111,7 +113,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
             <div>
                 <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800" role="alert">
                     <p className="text-yellow-800 dark:text-yellow-300 text-sm">
-                        No Stellar wallets detected. Please install Freighter, Rabet, or xBull wallet extension.
+                        No Stellar wallets detected. Please install Freighter, Rabet, xBull, or Hana wallet extension.
                     </p>
                 </div>
                 <div className="mt-3 border-t border-gray-100 dark:border-gray-700 pt-3">
@@ -140,6 +142,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
                 <NetworkMismatchBanner
                     configuredNetwork={networkMismatch.configured as any}
                     walletNetwork={networkMismatch.detected as any}
+                    walletType={networkMismatch.walletType}
                     onDismiss={() => setNetworkMismatch(null)}
                 />
             )}

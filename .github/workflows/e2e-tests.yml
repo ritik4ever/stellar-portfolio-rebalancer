@@ -59,7 +59,11 @@ jobs:
       working-directory: ./frontend
 
     - name: Setup Backend Database
-      run: npm run db:reset:staging
+      run: npm run db:setup
+      working-directory: ./backend
+
+    - name: Seed E2E data
+      run: npm run db:seed:e2e
       working-directory: ./backend
 
     - name: Start Backend Services

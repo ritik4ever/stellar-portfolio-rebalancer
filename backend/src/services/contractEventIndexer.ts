@@ -1,25 +1,29 @@
-import { Address, SorobanRpc, scValToNative } from '@stellar/stellar-sdk'
-import { createHash } from 'node:crypto'
-import { databaseService } from './databaseService.js'
-import { logger } from '../utils/logger.js'
+import { createHash } from "node:crypto";
+import { Address, SorobanRpc, scValToNative } from "@stellar/stellar-sdk";
+import { databaseService } from "./databaseService.js";
+import { sorobanRpcEndpointPool } from "./stellar.js";
+import { logger } from "../utils/logger.js";
 import {
-    BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
-    checkContractEventSchemaVersion
-} from '../config/contractEventSchema.js'
+  BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
+  checkContractEventSchemaVersion,
+} from "../config/contractEventSchema.js";
 
-type IndexedEventKind = 'portfolio_created' | 'deposit' | 'rebalance_executed'
+const INDEXER_CURSOR_KEY = "soroban_event_indexer.cursor";
+const INDEXER_LATEST_LEDGER_KEY = "soroban_event_indexer.latest_ledger";
+
+type IndexedEventKind = "portfolio_created" | "deposit" | "rebalance_executed";
 
 interface IndexedOnChainEvent {
-    kind: IndexedEventKind
-    portfolioId: string
-    trigger: string
-    timestamp: string
-    trades: number
-    txHash: string
-    ledger: number
-    contractId: string
-    pagingToken: string
-    userAddress?: string
+  kind: IndexedEventKind;
+  portfolioId: string;
+  trigger: string;
+  timestamp: string;
+  trades: number;
+  txHash: string;
+  ledger: number;
+  contractId: string;
+  pagingToken: string;
+  userAddress?: string;
 }
 
 interface ContractEventIndexerStatus {
@@ -45,6 +49,25 @@ interface ContractEventIndexerStatus {
         eventCount: number
         integrityHash: string | undefined
     }
+    gapReplay?: {
+        detected: boolean
+        gapSize: number
+        fromLedger: number | undefined
+        toLedger: number | undefined
+        ingested: number
+        batches: number
+        lastDetectedAt?: string
+    }
+}
+
+interface GapReplayResult {
+    detected: boolean
+    replayed: boolean
+    gapSize: number
+    fromLedger: number | undefined
+    toLedger: number | undefined
+    ingested: number
+    batches: number
 }
 
 interface ReplayValidationResult {
@@ -56,152 +79,339 @@ interface ReplayValidationResult {
     errors: string[]
 }
 
-const INDEXER_CURSOR_KEY = 'soroban_event_indexer.cursor'
-const INDEXER_LATEST_LEDGER_KEY = 'soroban_event_indexer.latest_ledger'
-
-const MAX_RECENT_ERRORS = 10
-const MAX_RPC_RETRIES = 3
-const RPC_BASE_DELAY_MS = 1000
-const RPC_MAX_DELAY_MS = 30000
-const MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF = 5
+const MAX_RECENT_ERRORS = 10;
+const MAX_RPC_RETRIES = 3;
+const RPC_BASE_DELAY_MS = 1000;
+const RPC_MAX_DELAY_MS = 30000;
+const MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF = 5;
 
 export class ContractEventIndexerService {
-    private readonly contractAddress = (process.env.CONTRACT_ADDRESS || process.env.STELLAR_CONTRACT_ADDRESS || '').trim()
-    private readonly stellarNetwork = (process.env.STELLAR_NETWORK || 'testnet').trim().toLowerCase()
-    private readonly defaultRpcUrl = this.stellarNetwork === 'mainnet'
-        ? 'https://soroban-rpc.mainnet.stellar.gateway.fm'
-        : 'https://soroban-testnet.stellar.org'
-    private readonly rpcUrl = (
-        process.env.SOROBAN_RPC_URL
-        || process.env.STELLAR_RPC_URL
-        || this.defaultRpcUrl
-    ).trim()
-    private readonly pollIntervalMs = this.readNumberEnv('SOROBAN_EVENT_INDEXER_INTERVAL_MS', 15000, 3000, 300000)
-    private readonly pageLimit = this.readNumberEnv('SOROBAN_EVENT_INDEXER_LIMIT', 100, 1, 200)
-    private readonly bootstrapWindowLedgers = this.readNumberEnv('SOROBAN_EVENT_INDEXER_BOOTSTRAP_WINDOW', 500, 1, 50000)
-    private readonly maxPagesPerSync = this.readNumberEnv('SOROBAN_EVENT_INDEXER_MAX_PAGES', 10, 1, 100)
-    private readonly rpcServer = new SorobanRpc.Server(this.rpcUrl, { allowHttp: this.rpcUrl.startsWith('http://') })
+  private readonly contractAddress = (
+    process.env.CONTRACT_ADDRESS ||
+    process.env.STELLAR_CONTRACT_ADDRESS ||
+    ""
+  ).trim();
+  private readonly stellarNetwork = (process.env.STELLAR_NETWORK || "testnet")
+    .trim()
+    .toLowerCase();
+  private readonly defaultRpcUrl =
+    this.stellarNetwork === "mainnet"
+      ? "https://soroban-rpc.mainnet.stellar.gateway.fm"
+      : "https://soroban-testnet.stellar.org";
+  private readonly rpcUrl = (
+    process.env.SOROBAN_RPC_URL ||
+    process.env.STELLAR_RPC_URL ||
+    this.defaultRpcUrl
+  ).trim();
+  private readonly pollIntervalMs = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_INTERVAL_MS",
+    15000,
+    3000,
+    300000,
+  );
+  private readonly pageLimit = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_LIMIT",
+    100,
+    1,
+    200,
+  );
+  private readonly bootstrapWindowLedgers = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_BOOTSTRAP_WINDOW",
+    500,
+    1,
+    50000,
+  );
+  private readonly maxPagesPerSync = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_MAX_PAGES",
+    10,
+    1,
+    100,
+  );
+  private readonly gapReplayThreshold = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_GAP_REPLAY_THRESHOLD_LEDGERS",
+    100,
+    1,
+    10_000_000,
+  );
+  private readonly maxGapReplaySyncs = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_GAP_REPLAY_MAX_SYNCS",
+    10,
+    1,
+    1000,
+  );
+  private readonly gapReplayBatchDelayMs = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_GAP_REPLAY_BATCH_DELAY_MS",
+    100,
+    0,
+    300000,
+  );
+  /** Test seam: when set, RPC calls use this server instead of the endpoint pool. */
+  private readonly rpcServer: SorobanRpc.Server | null = null;
 
-    private pollingTimer: NodeJS.Timeout | null = null
-    private isSyncing = false
-    private consecutiveFailures = 0
-    private recentErrors: string[] = []
-    private status: ContractEventIndexerStatus = {
-        enabled: false,
-        running: false,
-        pollIntervalMs: this.pollIntervalMs,
-        lastIngestedCount: 0,
-        consecutiveFailures: 0,
-        recentErrors: [],
-        expectedEventSchemaVersion: BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
-        contractEventSchemaOk: true
+  private pollingTimer: NodeJS.Timeout | null = null;
+  private isSyncing = false;
+  private consecutiveFailures = 0;
+  private recentErrors: string[] = [];
+  private status: ContractEventIndexerStatus = {
+    enabled: false,
+    running: false,
+    pollIntervalMs: this.pollIntervalMs,
+    lastIngestedCount: 0,
+    consecutiveFailures: 0,
+    recentErrors: [],
+    expectedEventSchemaVersion: BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
+    contractEventSchemaOk: true,
+  };
+
+  private readonly seenEventKeys = new Set<string>();
+
+  constructor() {
+    this.status.enabled = this.isEnabled();
+    this.status.contractAddress = this.contractAddress || undefined;
+    this.status.rpcUrl = this.rpcUrl || undefined;
+    const declared = process.env.CONTRACT_EVENT_SCHEMA_VERSION?.trim();
+    if (declared) {
+      const n = parseInt(declared, 10);
+      if (/^\d+$/.test(declared)) this.status.declaredEventSchemaVersion = n;
     }
-    
-    private readonly seenEventKeys = new Set<string>()
+  }
 
-    constructor() {
-        this.status.enabled = this.isEnabled()
-        this.status.contractAddress = this.contractAddress || undefined
-        this.status.rpcUrl = this.rpcUrl || undefined
-        const declared = process.env.CONTRACT_EVENT_SCHEMA_VERSION?.trim()
-        if (declared) {
-            const n = parseInt(declared, 10)
-            if (/^\d+$/.test(declared)) this.status.declaredEventSchemaVersion = n
+  isEnabled(): boolean {
+    return this.contractAddress.length > 0 && this.rpcUrl.length > 0;
+  }
+
+  getStatus(): ContractEventIndexerStatus {
+    return {
+      ...this.status,
+      running: this.pollingTimer !== null,
+      cursor: databaseService.getIndexerState(INDEXER_CURSOR_KEY) ?? this.status.cursor,
+      latestLedger: Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || this.status.latestLedger,
+      consecutiveFailures: this.consecutiveFailures,
+      recentErrors: [...this.recentErrors],
+    };
+  }
+
+  getCursorInfo(): {
+    cursor: string | undefined;
+    latestLedger: number | undefined;
+    lastSuccessfulSyncAt: string | undefined;
+    lastFailedSyncAt: string | undefined;
+    lastError: string | undefined;
+    pollIntervalMs: number;
+    bootstrapWindowLedgers: number;
+    consecutiveFailures: number;
+    recentErrors: string[];
+  } {
+    return {
+      cursor: databaseService.getIndexerState(INDEXER_CURSOR_KEY) ?? this.status.cursor,
+      latestLedger: Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || this.status.latestLedger,
+      lastSuccessfulSyncAt: this.status.lastSuccessfulRunAt,
+      lastFailedSyncAt: this.status.lastFailedRunAt,
+      lastError: this.status.lastError,
+      pollIntervalMs: this.pollIntervalMs,
+      bootstrapWindowLedgers: this.bootstrapWindowLedgers,
+      consecutiveFailures: this.consecutiveFailures,
+      recentErrors: [...this.recentErrors],
+    };
+  }
+
+  resetCursor(fromLedger?: number): void {
+    if (fromLedger !== undefined) {
+      databaseService.setIndexerState(INDEXER_CURSOR_KEY, "");
+      databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(fromLedger));
+    } else {
+      databaseService.setIndexerState(INDEXER_CURSOR_KEY, "");
+      databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, "0");
+    }
+    this.status.cursor = undefined;
+    this.status.latestLedger = fromLedger;
+    this.status.lastSuccessfulRunAt = undefined;
+    this.status.lastFailedRunAt = undefined;
+    this.status.lastError = undefined;
+    logger.info("[CHAIN-INDEXER] Cursor reset", { fromLedger });
+  }
+
+  /**
+   * Last ledger sequence the indexer successfully observed, if any.
+   */
+  private getLastIndexedLedger(): number | undefined {
+    const raw = databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY);
+    const parsed = Number(raw || 0);
+    return parsed > 0 ? parsed : undefined;
+  }
+
+  /**
+   * Detect a downtime gap between the last indexed ledger and the current chain
+   * tip. Returns `null` when there is no prior state or the gap is within the
+   * configured threshold (normal lag that the regular polling catches up on).
+   */
+  async detectGap(): Promise<{
+    fromLedger: number | undefined;
+    toLedger: number;
+    gapSize: number;
+  } | null> {
+    if (!this.isEnabled()) return null;
+    const latest = await this.rpcExecute((server) => server.getLatestLedger());
+    const toLedger = latest.sequence;
+    const fromLedger = this.getLastIndexedLedger();
+    if (fromLedger === undefined) return null;
+    const gapSize = toLedger - fromLedger;
+    if (gapSize <= this.gapReplayThreshold) return null;
+    return { fromLedger, toLedger, gapSize };
+  }
+
+  /**
+   * Replay events missed during downtime, in bounded batches.
+   *
+   * After a long downtime the gap between the last indexed ledger and the chain
+   * tip can be very large. Instead of replaying it in one unbounded sweep, this
+   * rewinds the cursor to the last indexed ledger and runs a series of
+   * `syncOnce()` passes — each pass ingests at most
+   * `maxPagesPerSync × pageLimit` events — so a huge gap cannot overwhelm the
+   * indexer on startup. The remaining range (if the batch cap is hit) is picked
+   * up by the regular polling cycle.
+   */
+  async runStartupGapReplay(): Promise<GapReplayResult> {
+    if (!this.isEnabled() || this.isSyncing) {
+      return { detected: false, replayed: false, gapSize: 0, fromLedger: undefined, toLedger: undefined, ingested: 0, batches: 0 };
+    }
+
+    const gap = await this.detectGap();
+    if (!gap) {
+      return { detected: false, replayed: false, gapSize: 0, fromLedger: this.getLastIndexedLedger(), toLedger: undefined, ingested: 0, batches: 0 };
+    }
+
+    logger.info("[CHAIN-INDEXER] Downtime gap detected, replaying missed events", {
+      fromLedger: gap.fromLedger,
+      toLedger: gap.toLedger,
+      gapSize: gap.gapSize,
+      threshold: this.gapReplayThreshold,
+    });
+
+    this.resetCursor(gap.fromLedger);
+
+    let ingested = 0;
+    let batches = 0;
+    for (let i = 0; i < this.maxGapReplaySyncs; i++) {
+      const result = await this.syncOnce();
+      ingested += result.ingested;
+      batches += 1;
+      if (result.ingested === 0) break;
+      if (this.gapReplayBatchDelayMs > 0 && i < this.maxGapReplaySyncs - 1) {
+        await this.sleep(this.gapReplayBatchDelayMs);
+      }
+    }
+
+    this.status.gapReplay = {
+      detected: true,
+      gapSize: gap.gapSize,
+      fromLedger: gap.fromLedger,
+      toLedger: gap.toLedger,
+      ingested,
+      batches,
+      lastDetectedAt: new Date().toISOString(),
+    };
+
+    logger.info("[CHAIN-INDEXER] Gap replay finished", {
+      ingested,
+      batches,
+      bound: this.maxGapReplaySyncs,
+    });
+
+    return {
+      detected: true,
+      replayed: true,
+      gapSize: gap.gapSize,
+      fromLedger: gap.fromLedger,
+      toLedger: gap.toLedger,
+      ingested,
+      batches,
+    };
+  }
+
+  async start(): Promise<void> {
+    if (!this.isEnabled()) {
+      logger.warn("[CHAIN-INDEXER] Disabled (missing contract or RPC URL)");
+      return;
+    }
+
+    if (this.pollingTimer) return;
+
+    logger.info("[CHAIN-INDEXER] Starting contract event indexer", {
+      contractAddress: this.contractAddress,
+      pollIntervalMs: this.pollIntervalMs,
+      lastIndexedLedger: this.getLastIndexedLedger(),
+    });
+
+    // Catch up on events emitted while the indexer was down, then run a normal
+    // sync only when there was no gap to replay (the replay already advances
+    // the cursor through the missed range in bounded batches).
+    const gapReplay = await this.runStartupGapReplay();
+    if (!gapReplay.detected) {
+      await this.syncOnce();
+    }
+    this.pollingTimer = setInterval(() => {
+      void this.syncWithBackoff();
+    }, this.pollIntervalMs);
+  }
+
+  async stop(): Promise<void> {
+    if (!this.pollingTimer) return;
+    clearInterval(this.pollingTimer);
+    this.pollingTimer = null;
+    logger.info("[CHAIN-INDEXER] Stopped");
+  }
+
+  private async syncWithBackoff(): Promise<void> {
+    if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF) {
+      const backoffMs = Math.min(
+        RPC_BASE_DELAY_MS *
+          Math.pow(
+            2,
+            this.consecutiveFailures - MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF,
+          ),
+        RPC_MAX_DELAY_MS,
+      );
+      logger.warn("[CHAIN-INDEXER] Backing off due to consecutive failures", {
+        consecutiveFailures: this.consecutiveFailures,
+        backoffMs,
+      });
+      await this.sleep(backoffMs);
+    }
+    await this.syncOnce();
+  }
+
+  private async rpcExecute<T>(fn: (server: SorobanRpc.Server) => Promise<T>): Promise<T> {
+    if (this.rpcServer) {
+      return this.rpcCallWithRetry(() => fn(this.rpcServer));
+    }
+    return sorobanRpcEndpointPool.call(fn);
+  }
+
+  private async rpcCallWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= MAX_RPC_RETRIES; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < MAX_RPC_RETRIES) {
+          const delay = Math.min(
+            RPC_BASE_DELAY_MS * Math.pow(2, attempt),
+            RPC_MAX_DELAY_MS,
+          );
+          logger.warn("[CHAIN-INDEXER] RPC call failed, retrying", {
+            attempt: attempt + 1,
+            maxRetries: MAX_RPC_RETRIES,
+            delayMs: delay,
+            error: lastError.message,
+          });
+          await this.sleep(delay);
         }
+      }
     }
-
-    isEnabled(): boolean {
-        return this.contractAddress.length > 0 && this.rpcUrl.length > 0
-    }
-
-    getStatus(): ContractEventIndexerStatus {
-        return {
-            ...this.status,
-            running: this.pollingTimer !== null,
-            consecutiveFailures: this.consecutiveFailures,
-            recentErrors: [...this.recentErrors]
-        }
-    }
-
-    getCursorInfo(): {
-        cursor: string | undefined
-        latestLedger: number | undefined
-        lastSuccessfulSyncAt: string | undefined
-        lastFailedSyncAt: string | undefined
-        lastError: string | undefined
-        pollIntervalMs: number
-        bootstrapWindowLedgers: number
-        consecutiveFailures: number
-        recentErrors: string[]
-    } {
-        const storedCursor = databaseService.getIndexerState(INDEXER_CURSOR_KEY)
-        const storedLatestLedger = Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || undefined
-
-        return {
-            cursor: storedCursor,
-            latestLedger: storedLatestLedger,
-            lastSuccessfulSyncAt: this.status.lastSuccessfulRunAt,
-            lastFailedSyncAt: this.status.lastFailedRunAt,
-            lastError: this.status.lastError,
-            pollIntervalMs: this.pollIntervalMs,
-            bootstrapWindowLedgers: this.bootstrapWindowLedgers,
-            consecutiveFailures: this.consecutiveFailures,
-            recentErrors: [...this.recentErrors]
-        }
-    }
-
-    resetCursor(fromLedger?: number): void {
-        databaseService.setIndexerState(INDEXER_CURSOR_KEY, '')
-        if (fromLedger !== undefined) {
-            databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(fromLedger))
-        } else {
-            databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, '')
-        }
-        this.status.cursor = undefined
-        this.status.latestLedger = fromLedger
-        logger.info('[CHAIN-INDEXER] Cursor reset', { fromLedger })
-    }
-
-    async start(): Promise<void> {
-        if (!this.isEnabled()) {
-            logger.warn('[CHAIN-INDEXER] Disabled (missing contract or RPC URL)')
-            return
-        }
-
-        if (this.pollingTimer) return
-
-        logger.info('[CHAIN-INDEXER] Starting contract event indexer', {
-            contractAddress: this.contractAddress,
-            pollIntervalMs: this.pollIntervalMs
-        })
-
-        await this.syncOnce()
-        this.pollingTimer = setInterval(() => {
-            void this.syncWithBackoff()
-        }, this.pollIntervalMs)
-    }
-
-    async stop(): Promise<void> {
-        if (!this.pollingTimer) return
-        clearInterval(this.pollingTimer)
-        this.pollingTimer = null
-        logger.info('[CHAIN-INDEXER] Stopped')
-    }
-
-    private async syncWithBackoff(): Promise<void> {
-        if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF) {
-            const backoffMs = Math.min(
-                RPC_BASE_DELAY_MS * Math.pow(2, this.consecutiveFailures - MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF),
-                RPC_MAX_DELAY_MS
-            )
-            logger.warn('[CHAIN-INDEXER] Backing off due to consecutive failures', {
-                consecutiveFailures: this.consecutiveFailures,
-                backoffMs
-            })
-            await this.sleep(backoffMs)
-        }
-        await this.syncOnce()
-    }
+    throw lastError;
+  }
 
     computeIngestedEventsHash(): string {
         const hash = createHash('sha256')
@@ -273,7 +483,7 @@ export class ContractEventIndexerService {
         }
 
         if (!ledgerRange) {
-            const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+            const latest = await this.rpcExecute((s) => s.getLatestLedger())
             ledgerRange = {
                 start: Math.max(1, latest.sequence - this.bootstrapWindowLedgers),
                 end: latest.sequence,
@@ -330,7 +540,7 @@ export class ContractEventIndexerService {
             let cursor = storedCursor
             let startLedger: number | undefined
             if (!cursor) {
-                const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+                const latest = await this.rpcExecute((s) => s.getLatestLedger())
                 const floorLedger = Math.max(1, latest.sequence - this.bootstrapWindowLedgers)
                 startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
             }
@@ -340,8 +550,8 @@ export class ContractEventIndexerService {
             let pagesRead = 0
 
             while (pagesRead < this.maxPagesPerSync) {
-                const response = await this.rpcCallWithRetry(() =>
-                    this.rpcServer.getEvents({
+                const response = await this.rpcExecute((s) =>
+                    s.getEvents({
                         cursor,
                         startLedger,
                         limit: this.pageLimit,
@@ -385,6 +595,7 @@ export class ContractEventIndexerService {
                         portfolioId: indexed.portfolioId,
                         timestamp: indexed.timestamp,
                         trigger: indexed.trigger,
+                        reasonCode: 'ON_CHAIN_SYNC',
                         trades: indexed.trades,
                         gasUsed: 'on-chain',
                         status: 'completed',
@@ -438,186 +649,181 @@ export class ContractEventIndexerService {
         }
     }
 
-    private async rpcCallWithRetry<T>(fn: () => Promise<T>): Promise<T> {
-        let lastError: Error | undefined
-        for (let attempt = 0; attempt <= MAX_RPC_RETRIES; attempt++) {
-            try {
-                return await fn()
-            } catch (err) {
-                lastError = err instanceof Error ? err : new Error(String(err))
-                if (attempt < MAX_RPC_RETRIES) {
-                    const delay = Math.min(
-                        RPC_BASE_DELAY_MS * Math.pow(2, attempt),
-                        RPC_MAX_DELAY_MS
-                    )
-                    logger.warn('[CHAIN-INDEXER] RPC call failed, retrying', {
-                        attempt: attempt + 1,
-                        maxRetries: MAX_RPC_RETRIES,
-                        delayMs: delay,
-                        error: lastError.message
-                    })
-                    await this.sleep(delay)
-                }
-            }
-        }
-        throw lastError
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private pushRecentError(message: string): void {
+    this.recentErrors.push(message);
+    if (this.recentErrors.length > MAX_RECENT_ERRORS) {
+      this.recentErrors.splice(0, this.recentErrors.length - MAX_RECENT_ERRORS);
+    }
+  }
+
+  private toIndexedOnChainEvent(
+    event: SorobanRpc.Api.EventResponse,
+  ): IndexedOnChainEvent | null {
+    const contractId = this.contractIdToString(event.contractId);
+    if (!this.isTargetContract(contractId)) return null;
+
+    const topics = event.topic
+      .map((topic) => this.nativeToString(this.safeScValToNative(topic)))
+      .filter(Boolean);
+    if (topics.length < 2) return null;
+
+    const topicRoot = topics[0].toLowerCase();
+    const topicAction = topics[1].toLowerCase();
+    if (topicRoot !== "portfolio") return null;
+
+    const payload = this.safeScValToNative(event.value);
+    const portfolioId = this.extractPortfolioId(payload);
+    if (!portfolioId) return null;
+
+    const kind = this.mapTopicToKind(topicAction);
+    if (!kind) return null;
+
+    let trigger = "On-chain Event";
+    let trades = 0;
+    if (kind === "portfolio_created") trigger = "On-chain Portfolio Created";
+    if (kind === "deposit") trigger = "On-chain Deposit";
+    if (kind === "rebalance_executed") {
+      trigger = "On-chain Rebalance Executed";
+      trades = 1;
     }
 
-    private pushRecentError(summary: string): void {
-        this.recentErrors.push(summary)
-        if (this.recentErrors.length > MAX_RECENT_ERRORS) {
-            this.recentErrors.shift()
-        }
+    return {
+      kind,
+      portfolioId,
+      trigger,
+      trades,
+      timestamp: event.ledgerClosedAt || new Date().toISOString(),
+      txHash: event.txHash,
+      ledger: event.ledger,
+      contractId,
+      pagingToken: event.pagingToken,
+      userAddress: this.extractUserAddress(payload),
+    };
+  }
+
+  private mapTopicToKind(topicAction: string): IndexedEventKind | null {
+    if (topicAction === "created") return "portfolio_created";
+    if (topicAction === "deposit") return "deposit";
+    if (
+      topicAction === "rebalanced" ||
+      topicAction === "rebalance_executed" ||
+      topicAction === "executed"
+    ) {
+      return "rebalance_executed";
     }
+    return null;
+  }
 
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms))
+  private extractPortfolioId(payload: unknown): string | undefined {
+    if (Array.isArray(payload) && payload.length > 0) {
+      const candidate = this.nativeToString(payload[0]);
+      return candidate || undefined;
     }
-
-    private toIndexedOnChainEvent(event: SorobanRpc.Api.EventResponse): IndexedOnChainEvent | null {
-        const contractId = this.contractIdToString(event.contractId)
-        if (!this.isTargetContract(contractId)) return null
-
-        const topics = event.topic.map(topic => this.nativeToString(this.safeScValToNative(topic))).filter(Boolean)
-        if (topics.length < 2) return null
-
-        const topicRoot = topics[0].toLowerCase()
-        const topicAction = topics[1].toLowerCase()
-        if (topicRoot !== 'portfolio') return null
-
-        const payload = this.safeScValToNative(event.value)
-        const portfolioId = this.extractPortfolioId(payload)
-        if (!portfolioId) return null
-
-        const kind = this.mapTopicToKind(topicAction)
-        if (!kind) return null
-
-        let trigger = 'On-chain Event'
-        let trades = 0
-        if (kind === 'portfolio_created') trigger = 'On-chain Portfolio Created'
-        if (kind === 'deposit') trigger = 'On-chain Deposit'
-        if (kind === 'rebalance_executed') {
-            trigger = 'On-chain Rebalance Executed'
-            trades = 1
-        }
-
-        return {
-            kind,
-            portfolioId,
-            trigger,
-            trades,
-            timestamp: event.ledgerClosedAt || new Date().toISOString(),
-            txHash: event.txHash,
-            ledger: event.ledger,
-            contractId,
-            pagingToken: event.pagingToken,
-            userAddress: this.extractUserAddress(payload)
-        }
+    if (payload && typeof payload === "object") {
+      const rec = payload as Record<string, unknown>;
+      const candidate = rec.portfolioId ?? rec.portfolio_id ?? rec.id;
+      const converted = this.nativeToString(candidate);
+      return converted || undefined;
     }
+    return undefined;
+  }
 
-    private mapTopicToKind(topicAction: string): IndexedEventKind | null {
-        if (topicAction === 'created') return 'portfolio_created'
-        if (topicAction === 'deposit') return 'deposit'
-        if (topicAction === 'rebalanced' || topicAction === 'rebalance_executed' || topicAction === 'executed') {
-            return 'rebalance_executed'
-        }
-        return null
+  private extractUserAddress(payload: unknown): string | undefined {
+    if (Array.isArray(payload) && payload.length > 1) {
+      return this.nativeToString(payload[1]) || undefined;
     }
-
-    private extractPortfolioId(payload: unknown): string | undefined {
-        if (Array.isArray(payload) && payload.length > 0) {
-            const candidate = this.nativeToString(payload[0])
-            return candidate || undefined
-        }
-        if (payload && typeof payload === 'object') {
-            const rec = payload as Record<string, unknown>
-            const candidate = rec.portfolioId ?? rec.portfolio_id ?? rec.id
-            const converted = this.nativeToString(candidate)
-            return converted || undefined
-        }
-        return undefined
+    if (payload && typeof payload === "object") {
+      const rec = payload as Record<string, unknown>;
+      const candidate = rec.user ?? rec.userAddress ?? rec.user_address;
+      const converted = this.nativeToString(candidate);
+      return converted || undefined;
     }
+    return undefined;
+  }
 
-    private extractUserAddress(payload: unknown): string | undefined {
-        if (Array.isArray(payload) && payload.length > 1) {
-            return this.nativeToString(payload[1]) || undefined
-        }
-        if (payload && typeof payload === 'object') {
-            const rec = payload as Record<string, unknown>
-            const candidate = rec.user ?? rec.userAddress ?? rec.user_address
-            const converted = this.nativeToString(candidate)
-            return converted || undefined
-        }
-        return undefined
+  private safeScValToNative(value: any): unknown {
+    try {
+      return scValToNative(value);
+    } catch {
+      return undefined;
     }
+  }
 
-    private safeScValToNative(value: any): unknown {
-        try {
-            return scValToNative(value)
-        } catch {
-            return undefined
-        }
+  private nativeToString(value: unknown): string {
+    if (value === undefined || value === null) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    if (typeof value === "bigint") return value.toString();
+    if (typeof value === "object") {
+      if (
+        typeof (value as { toString?: () => string }).toString === "function"
+      ) {
+        const rendered = (value as { toString: () => string }).toString();
+        if (rendered !== "[object Object]") return rendered;
+      }
     }
+    return "";
+  }
 
-    private nativeToString(value: unknown): string {
-        if (value === undefined || value === null) return ''
-        if (typeof value === 'string') return value
-        if (typeof value === 'number') return String(value)
-        if (typeof value === 'bigint') return value.toString()
-        if (typeof value === 'object') {
-            if (typeof (value as { toString?: () => string }).toString === 'function') {
-                const rendered = (value as { toString: () => string }).toString()
-                if (rendered !== '[object Object]') return rendered
-            }
-        }
-        return ''
+  private contractIdToString(contractId: unknown): string {
+    if (!contractId) return "";
+    if (typeof contractId === "string") return contractId;
+
+    const maybeContract = contractId as {
+      contractId?: () => string;
+      toString?: () => string;
+    };
+    if (typeof maybeContract.contractId === "function") {
+      try {
+        return maybeContract.contractId();
+      } catch {
+        // ignore
+      }
     }
-
-    private contractIdToString(contractId: unknown): string {
-        if (!contractId) return ''
-        if (typeof contractId === 'string') return contractId
-
-        const maybeContract = contractId as { contractId?: () => string; toString?: () => string }
-        if (typeof maybeContract.contractId === 'function') {
-            try {
-                return maybeContract.contractId()
-            } catch {
-                // ignore
-            }
-        }
-        if (typeof maybeContract.toString === 'function') {
-            try {
-                return maybeContract.toString()
-            } catch {
-                // ignore
-            }
-        }
-        return ''
+    if (typeof maybeContract.toString === "function") {
+      try {
+        return maybeContract.toString();
+      } catch {
+        // ignore
+      }
     }
+    return "";
+  }
 
-    private isTargetContract(contractId: string): boolean {
-        if (!contractId || !this.contractAddress) return false
-        const expectedAddress = this.contractAddress.toLowerCase()
-        const actual = contractId.toLowerCase()
-        if (actual === expectedAddress) return true
-        return actual === this.contractAddressHex().toLowerCase()
-    }
+  private isTargetContract(contractId: string): boolean {
+    if (!contractId || !this.contractAddress) return false;
+    const expectedAddress = this.contractAddress.toLowerCase();
+    const actual = contractId.toLowerCase();
+    if (actual === expectedAddress) return true;
+    return actual === this.contractAddressHex().toLowerCase();
+  }
 
-    private contractAddressHex(): string {
-        try {
-            return Address.fromString(this.contractAddress).toBuffer().toString('hex')
-        } catch {
-            return ''
-        }
+  private contractAddressHex(): string {
+    try {
+      return Address.fromString(this.contractAddress)
+        .toBuffer()
+        .toString("hex");
+    } catch {
+      return "";
     }
+  }
 
-    private readNumberEnv(name: string, fallback: number, min: number, max: number): number {
-        const raw = process.env[name]
-        if (!raw) return fallback
-        const parsed = Number(raw)
-        if (!Number.isFinite(parsed)) return fallback
-        return Math.max(min, Math.min(max, Math.floor(parsed)))
-    }
+  private readNumberEnv(
+    name: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const raw = process.env[name];
+    if (!raw) return fallback;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, Math.floor(parsed)));
+  }
 }
 
-export const contractEventIndexerService = new ContractEventIndexerService()
+export const contractEventIndexerService = new ContractEventIndexerService();

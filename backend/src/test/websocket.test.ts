@@ -210,18 +210,31 @@ describe("WebSocket protocol", () => {
   });
 
   it("emits application HEARTBEAT events on the interval", async () => {
-    vi.useFakeTimers();
+    // Only fake setInterval/clearInterval so the heartbeat timer is
+    // controllable, while setTimeout-based network I/O still works normally.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
     let localServer: WebSocketServer | null = null;
     const server = createServer();
     localServer = new WebSocketServer({ server });
     initRobustWebSocket(localServer);
+
     try {
       await new Promise<void>((resolve) => server.listen(0, resolve));
       const addr = server.address() as { port: number };
       const { ws } = await connectAndSubscribe(addr.port);
 
+      // Queue the message listener BEFORE advancing timers — the heartbeat
+      // callback fires synchronously inside advanceTimersByTimeAsync.
+      const messagePromise = waitForMessage(ws);
+
+      // Advance the fake interval clock past the heartbeat tick.
       await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS + 1);
-      const heartbeat = await waitForMessage(ws);
+
+      let heartbeat = await messagePromise;
+      if (heartbeat.type === "PRICE_UPDATE") {
+        heartbeat = await waitForMessage(ws);
+      }
       expect(heartbeat.type).toBe("HEARTBEAT");
       expect(heartbeat.payload?.heartbeatIntervalMs).toBe(HEARTBEAT_INTERVAL_MS);
 

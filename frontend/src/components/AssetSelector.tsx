@@ -1,6 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Search, ChevronDown, Check, ExternalLink } from 'lucide-react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
+import { Search, ChevronDown, Check, ExternalLink, Globe } from 'lucide-react'
 import { useAssets } from '../hooks/queries/useAssetsQuery'
+import { AssetVerificationBadge, type AssetVerificationStatus } from './AssetVerificationBadge'
+
+const DEBOUNCE_MS = 250
 
 interface AssetSelectorProps {
     value: string
@@ -16,8 +19,14 @@ interface Asset {
     issuer?: string
     domain?: string
     type?: 'native' | 'credit_alphanum4' | 'credit_alphanum12'
+    verificationStatus?: AssetVerificationStatus
     displayName: string
     searchText: string
+}
+
+interface MatchInfo {
+    matched: boolean
+    reason?: 'code' | 'domain' | 'issuer'
 }
 
 const AssetSelector: React.FC<AssetSelectorProps> = ({
@@ -29,16 +38,58 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
 }) => {
     const [isOpen, setIsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
+    const [debouncedQuery, setDebouncedQuery] = useState('')
     const [highlightedIndex, setHighlightedIndex] = useState(-1)
     const dropdownRef = useRef<HTMLDivElement>(null)
     const searchInputRef = useRef<HTMLInputElement>(null)
+    const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     const { data: assets = [], isLoading } = useAssets()
 
-    // Filter assets based on search query
-    const filteredAssets = assets.filter((asset: Asset) =>
-        asset.searchText.includes(searchQuery.toLowerCase())
-    )
+    // Debounce search query
+    useEffect(() => {
+        if (debounceTimer.current) clearTimeout(debounceTimer.current)
+        debounceTimer.current = setTimeout(() => {
+            setDebouncedQuery(searchQuery.toLowerCase())
+        }, DEBOUNCE_MS)
+        return () => {
+            if (debounceTimer.current) clearTimeout(debounceTimer.current)
+        }
+    }, [searchQuery])
+
+    // Filter assets based on debounced query and track match reason
+    const filteredWithMatch = useMemo(() => {
+        if (!debouncedQuery) return assets.map((a: Asset) => ({ asset: a, match: null as MatchInfo | null }))
+        const q = debouncedQuery
+        return assets
+            .map((asset: Asset) => {
+                const symbolMatch = asset.symbol.toLowerCase().includes(q)
+                const nameMatch = asset.name?.toLowerCase().includes(q)
+                const domainMatch = asset.domain?.toLowerCase().includes(q)
+                const issuerMatch = asset.issuer?.toLowerCase().includes(q)
+
+                if (symbolMatch || nameMatch) {
+                    return { asset, match: { matched: true, reason: 'code' as const } }
+                }
+                if (domainMatch) {
+                    return { asset, match: { matched: true, reason: 'domain' as const } }
+                }
+                if (issuerMatch) {
+                    return { asset, match: { matched: true, reason: 'issuer' as const } }
+                }
+                return { asset, match: null }
+            })
+            .filter((item) => item.match !== null)
+    }, [assets, debouncedQuery])
+
+    const filteredAssets = useMemo(() => filteredWithMatch.map(i => i.asset), [filteredWithMatch])
+    const matchByDomain = useMemo(() => {
+        const map: Record<string, boolean> = {}
+        for (const item of filteredWithMatch) {
+            map[item.asset.symbol] = item.match?.reason === 'domain'
+        }
+        return map
+    }, [filteredWithMatch])
 
     // Find selected asset
     const selectedAsset = assets.find((asset: Asset) => asset.symbol === value)
@@ -230,6 +281,13 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
                                             </span>
                                             {value === asset.symbol && (
                                                 <Check className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                            )}
+                                            <AssetVerificationBadge status={asset.verificationStatus} />
+                                            {matchByDomain[asset.symbol] && (
+                                                <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+                                                    <Globe className="w-3 h-3" />
+                                                    Domain match
+                                                </span>
                                             )}
                                         </div>
                                         {asset.name && (

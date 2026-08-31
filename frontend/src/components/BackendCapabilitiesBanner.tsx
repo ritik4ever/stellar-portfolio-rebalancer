@@ -1,11 +1,10 @@
+import { useRef } from 'react'
 import { Info, AlertTriangle, ExternalLink } from 'lucide-react'
+import { useReadinessQuery } from '../hooks/queries/useReadinessQuery'
 import type { CapabilityNotice } from '../hooks/useReadinessReport'
 
 type Props = {
-    notices: CapabilityNotice[]
-    loadError: boolean
-    loading: boolean
-    belowRealtimeBar: boolean
+    belowRealtimeBar?: boolean
 }
 
 interface NoticeHint {
@@ -40,15 +39,32 @@ const NOTICE_HINTS: Record<string, NoticeHint> = {
     },
 }
 
-export default function BackendCapabilitiesBanner({ notices, loadError, loading, belowRealtimeBar }: Props) {
-    const show = loadError || notices.length > 0
+function noticesEqual(a: CapabilityNotice[], b: CapabilityNotice[]): boolean {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+        if (a[i].id !== b[i].id || a[i].kind !== b[i].kind || a[i].text !== b[i].text) return false
+    }
+    return true
+}
+
+export default function BackendCapabilitiesBanner({ belowRealtimeBar = false }: Props) {
+    const { notices, loadError, loading } = useReadinessQuery()
+    const lastNotices = useRef<CapabilityNotice[]>(notices)
+
+    if (!noticesEqual(notices, lastNotices.current)) {
+        lastNotices.current = notices
+    }
+
+    const stableNotices = lastNotices.current
+    const show = loadError || stableNotices.length > 0
+
     if (!show && !loading) {
         return null
     }
 
     const positionClass = belowRealtimeBar ? 'top-14' : 'top-0'
 
-    if (loadError && notices.length === 0) {
+    if (loadError && stableNotices.length === 0) {
         return (
             <div
                 className={`fixed left-0 right-0 z-[38] border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 ${positionClass}`}
@@ -66,11 +82,11 @@ export default function BackendCapabilitiesBanner({ notices, loadError, loading,
         )
     }
 
-    if (notices.length === 0) {
+    if (stableNotices.length === 0) {
         return null
     }
 
-    const hasLimited = notices.some((n) => n.kind === 'limited')
+    const hasLimited = stableNotices.some((n) => n.kind === 'limited')
 
     return (
         <div
@@ -89,7 +105,7 @@ export default function BackendCapabilitiesBanner({ notices, loadError, loading,
                         : 'A few optional backend features are turned off for this environment. Nothing is wrong with your wallet — this is expected when Redis, workers, or certain flags are not enabled.'}
                 </p>
                 <ul className="space-y-1.5 leading-snug">
-                    {notices.map((n) => {
+                    {stableNotices.map((n) => {
                         const hint = NOTICE_HINTS[n.id]
                         return (
                             <li key={n.id} className="flex gap-2">

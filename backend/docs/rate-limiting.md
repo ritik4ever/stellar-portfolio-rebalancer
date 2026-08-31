@@ -85,6 +85,9 @@ RATE_LIMIT_AUTH_MAX=5               # 5 auth requests per window
 # Critical operations
 RATE_LIMIT_CRITICAL_MAX=3           # 3 critical requests per window
 
+# Admin consumption dashboard
+RATE_LIMIT_NEAR_LIMIT_RATIO=0.8     # flag identifiers at 80% of the limit
+
 # Burst protection
 RATE_LIMIT_BURST_WINDOW_MS=10000    # 10 second burst window
 RATE_LIMIT_BURST_MAX=20             # 20 requests per burst window
@@ -141,6 +144,43 @@ Returns comprehensive rate limiting metrics including:
 - Top offending IPs and users
 - Most throttled endpoints
 - Detailed activity report
+
+### Admin Consumption Dashboard
+
+```
+GET /api/admin/rate-limits/dashboard
+```
+
+Combined view of **current-window** rate-limit consumption per IP *and* per API key,
+aggregated from `rateLimitMonitor`. Every monitored request contributes to its IP
+bucket and — when authenticated with an API key — to that key's bucket (keys are
+identified by key id, never by the raw key).
+
+Query parameters:
+
+| Param      | Values                                          | Default | Notes |
+| ---------- | ----------------------------------------------- | ------- | ----- |
+| `type`     | `ip`, `apiKey`, `all`                           | `all`   | Filter by identifier type |
+| `status`   | `ok`, `near-limit`, `throttled`, `at-risk`, `all` | `all` | `at-risk` = near-limit + throttled |
+| `search`   | substring                                       | —       | Case-insensitive match on the identifier |
+| `page`     | 1-based integer                                 | `1`     | Clamped to the available page count |
+| `pageSize` | 1–200                                           | `25`    | |
+
+Response shape:
+
+- `summary` — window size, limit, near-limit ratio, tracked counts, and how many
+  identifiers are currently throttled or near-limit.
+- `attention` — the throttled and near-limit identifiers surfaced up front (up to 25
+  each), independent of the current page, so problems stay visible with many keys/IPs.
+- `entries` — the filtered, paged list, ordered most-at-risk first (throttled, then
+  by utilization descending). Each entry carries `consumed`, `limit`, `remaining`,
+  `utilization`, `throttledCount`, `status`, and the window timestamps.
+- `pagination` — `page`, `pageSize`, `total`, `totalPages`, `hasMore`.
+
+An identifier is `near-limit` once it reaches `RATE_LIMIT_NEAR_LIMIT_RATIO` (default
+`0.8`) of the configured limit, and `throttled` as soon as it receives a 429 in the
+current window. Records are dropped once their window elapses, so the dashboard always
+reflects live consumption rather than cumulative history.
 
 ## Response Format
 
