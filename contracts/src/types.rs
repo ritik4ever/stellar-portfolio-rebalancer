@@ -268,8 +268,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
-    StopLoss(u64, Address),
     CircuitBreakerConfig,
+    StopLoss(u64, Address),
     /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
     PortfolioV2(u64),
     QueuedFeeConfig,

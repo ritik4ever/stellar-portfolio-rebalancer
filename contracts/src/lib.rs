@@ -18,7 +18,7 @@ mod stop_loss;
 mod strategies;
 mod templates;
 mod upgrade;
-#[cfg(all(test, feature = "testutils"))]
+#[cfg(test)]
 mod test;
 #[cfg(all(test, feature = "testutils"))]
 mod property_tests;
