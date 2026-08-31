@@ -1,4 +1,4 @@
-# Staging workspace configuration
+# Staging workspace configuration (Isolated from production - Issue #1292)
 # Usage: terraform apply -var-file=staging.tfvars --workspace=staging
 
 aws_region   = "us-east-1"
