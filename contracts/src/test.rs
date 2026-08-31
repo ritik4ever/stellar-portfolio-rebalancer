@@ -484,6 +484,211 @@ fn test_batch_rebalance_mixed_success_and_failure() {
     assert_eq!(client.get_portfolio(&success_pid).last_rebalance, 15000);
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// resume_portfolio tests (issue #1334)
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_resume_portfolio_clears_pause_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Pause first
+    client.pause_portfolio(&pid, &PauseReason::UserPaused);
+    let paused = client.get_portfolio(&pid);
+    assert!(!paused.is_active);
+    assert_eq!(paused.pause_reason, PauseReason::UserPaused);
+
+    // Resume clears both flags
+    client.resume_portfolio(&pid);
+    let resumed = client.get_portfolio(&pid);
+    assert!(resumed.is_active);
+    assert_eq!(resumed.pause_reason, PauseReason::None);
+}
+
+#[test]
+fn test_resume_portfolio_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.pause_portfolio(&pid, &PauseReason::VolatilityCircuitBreaker);
+    client.resume_portfolio(&pid);
+
+    let events = all_events(&env);
+    let resumed_event = events.iter().rev().find(|(_, topics, _)| {
+        // The event topics are ("portfolio", "resumed") — look for the
+        // second topic matching the string "resumed".
+        topics.iter().any(|topic| {
+            String::try_from_val(&env, &topic)
+                .ok()
+                .map_or(false, |s| s == String::from_str(&env, "resumed"))
+        })
+    });
+    assert!(resumed_event.is_some(), "PortfolioResumed event must be emitted");
+}
+
+#[test]
+fn test_pause_resume_rebalance_full_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 20_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // 1. Pause — rebalance must fail
+    client.pause_portfolio(&pid, &PauseReason::UserPaused);
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::PortfolioPaused)));
+
+    // 2. Resume — rebalance must succeed
+    client.resume_portfolio(&pid);
+    env.ledger().with_mut(|li| {
+        li.timestamp = 25_000;
+    });
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Ok(Ok(())));
+
+    // Verify last_rebalance was updated
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 25_000);
+    assert!(portfolio.is_active);
+}
+
+#[test]
+#[should_panic]
+fn test_resume_portfolio_unauthorized() {
+    let env = Env::default();
+    // Deliberately do NOT call env.mock_all_auths() so that
+    // un-mocked require_auth() calls will panic.
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    client.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin, &reflector_id).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+
+    let pid = client.mock_auths(&[MockAuth {
+        address: &user,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "create_portfolio",
+            args: (&user, &allocations, &asset_decimals, 5u32, 50u32, CURRENT_SLIPPAGE_POLICY_VERSION).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+
+    // Pause as user (authorized)
+    client.mock_auths(&[MockAuth {
+        address: &user,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "pause_portfolio",
+            args: (&pid, &PauseReason::UserPaused).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).pause_portfolio(&pid, &PauseReason::UserPaused);
+
+    // Resume as stranger — should panic because stranger is not the
+    // stored steward (user).  No mock_auth for user means
+    // `user.require_auth()` fails.
+    client.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "resume_portfolio",
+            args: (&pid,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).resume_portfolio(&pid);
+}
+
+#[test]
+fn test_steward_can_resume_portfolio() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let steward = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Transfer stewardship so the steward can resume
+    client.transfer_stewardship(&pid, &steward);
+
+    // Pause as user
+    client.pause_portfolio(&pid, &PauseReason::UserPaused);
+    assert!(!client.get_portfolio(&pid).is_active);
+
+    // Steward resumes — should succeed
+    client.mock_auths(&[MockAuth {
+        address: &steward,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "resume_portfolio",
+            args: (&pid,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).resume_portfolio(&pid);
+    assert!(client.get_portfolio(&pid).is_active);
+    assert_eq!(client.get_portfolio(&pid).pause_reason, PauseReason::None);
+}
+
 #[test]
 fn test_batch_rebalance_size_limit() {
     let env = Env::default();
@@ -5512,6 +5717,13 @@ fn test_previous_admin_loses_rights_after_transfer() {
 }
 
 #[test]
+fn test_rebalance_not_needed_when_balanced() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
 
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
@@ -5520,7 +5732,28 @@ fn test_previous_admin_loses_rights_after_transfer() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let mut allocations = Map::new(&env);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
+    client.deposit(&pid, &asset1, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100_0000000, &String::from_str(&env, ""));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15000;
+    });
+
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(result, Err(Ok(Error::RebalanceNotNeeded)));
+}
+
+#[test]
+fn test_set_pf_circuit_breaker_rejects_invalid_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
@@ -5528,7 +5761,22 @@ fn test_previous_admin_loses_rights_after_transfer() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
+    let result = client.try_set_pf_circuit_breaker(&pid, &0, &3600);
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+
+    let result = client.try_set_pf_circuit_breaker(&pid, &10001, &3600);
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+}
+
+#[test]
+fn test_sweep_dust_clears_sub_minimum_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
@@ -5536,7 +5784,55 @@ fn test_previous_admin_loses_rights_after_transfer() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let fee_recipient = Address::generate(&env);
+    let fee_config = FeeConfig {
+        platform_name: String::from_str(&env, "Test"),
+        fee_bps: 0,
+        fee_recipient: fee_recipient.clone(),
+        enabled: true,
+    };
+    client.set_fee_config(&fee_config);
+    env.ledger().with_mut(|li| {
+        li.timestamp = TIMELOCK_DELAY_SECONDS + 1;
+    });
+    client.execute_fee_config();
 
+    let dust_amount = MIN_TRADE_AMOUNT_STROOPS - 1;
+    let normal_amount = MIN_TRADE_AMOUNT_STROOPS * 10;
+
+    let asset_dust = create_token_and_mint(&env, &admin, &user, dust_amount);
+    let asset_normal = create_token_and_mint(&env, &admin, &user, normal_amount);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(asset_dust.clone(), 5000);
+    allocations.set(asset_normal.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset_dust, &dust_amount, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset_normal, &normal_amount, &String::from_str(&env, ""));
+
+    let portfolio_before = client.get_portfolio(&pid);
+    assert_eq!(portfolio_before.current_balances.get(asset_dust.clone()).unwrap(), dust_amount);
+    assert_eq!(portfolio_before.current_balances.get(asset_normal.clone()).unwrap(), normal_amount);
+
+    client.sweep_dust(&pid);
+
+    let portfolio_after = client.get_portfolio(&pid);
+    assert!(!portfolio_after.current_balances.contains_key(asset_dust.clone()));
+
+    assert_eq!(portfolio_after.current_balances.get(asset_normal.clone()).unwrap(), normal_amount);
+
+    let token_dust = TokenClient::new(&env, &asset_dust);
+    assert_eq!(token_dust.balance(&fee_recipient), dust_amount);
+    assert_eq!(token_dust.balance(&contract_id), 0);
+
+    let token_normal = TokenClient::new(&env, &asset_normal);
+    assert_eq!(token_normal.balance(&fee_recipient), 0);
+    assert_eq!(token_normal.balance(&contract_id), normal_amount);
+}
+
+#[test]
+fn test_transfer_stewardship_emits_exactly_one_event() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -5547,5 +5843,32 @@ fn test_previous_admin_loses_rights_after_transfer() {
     let user = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
+
+    let events = all_events(&env);
+    let steward_events: std::vec::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            if e.1.len() >= 2 {
+                let topic0 = Symbol::try_from_val(&env, &e.1.get(0).unwrap());
+                let topic1 = Symbol::try_from_val(&env, &e.1.get(1).unwrap());
+                topic0 == Ok(Symbol::new(&env, "portfolio"))
+                    && topic1 == Ok(Symbol::new(&env, "steward_transferred"))
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    assert_eq!(
+        steward_events.len(),
+        1,
+        "exactly one steward_transferred event per transfer"
+    );
 }

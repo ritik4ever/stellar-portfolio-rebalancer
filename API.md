@@ -225,7 +225,8 @@ Idempotency-Key: <uuid>
   "allocations": { "XLM": 40, "BTC": 30, "USDC": 30 },
   "threshold": 5,
   "slippageTolerance": 1,
-  "strategy": "threshold"
+  "strategy": "threshold",
+  "strategyConfig": { "dryRun": true }
 }
 ```
 
@@ -246,6 +247,7 @@ Validation:
 - `threshold`: 1–50%
 - `slippageTolerance`: 0.1–5% (optional, default: 1)
 - `strategy`: `threshold` | `periodic` | `volatility` | `custom` (optional, default: `threshold`)
+- `strategyConfig.dryRun`: optional portfolio-level override for scheduled auto-rebalance dry-run mode. When enabled, the scheduler computes and reports the plan without submitting an on-chain transaction. This value takes precedence over `AUTO_REBALANCE_DRY_RUN`.
 
 ### Bulk Import Portfolio
 
@@ -1131,6 +1133,51 @@ Idempotency-Key: <uuid>
 
 ```bash
 GET /api/v1/consent/audit?userId=GALPHABET...
+```
+
+### Consent Audit-Trail Export
+
+Export full consent history as JSON. Non-admin users can export their own consent trail (`Authorization: Bearer <token>`). Admins can export any user's consent trail by specifying `?userId=<address>`.
+
+```bash
+GET /api/v1/consent/export?userId=GALPHABET...
+Authorization: Bearer <access_token>
+```
+
+Response:
+```json
+{
+  "userId": "GALPHABET...",
+  "exportedAt": "2026-08-28T09:49:26.000Z",
+  "consent": {
+    "active": true,
+    "documentVersion": "66319e1f1025874cd1a7edb6b6f115a0637008723c02b28a428bbb6b05058e67",
+    "termsAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "privacyAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "cookieAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "analyticsAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "marketingAcceptedAt": null,
+    "categories": ["terms", "privacy", "cookies", "analytics"]
+  },
+  "history": [
+    {
+      "id": "cm...",
+      "action": "grant",
+      "timestamp": "2026-08-28T09:49:26.000Z",
+      "documentVersion": "66319e1f1025874cd1a7edb6b6f115a0637008723c02b28a428bbb6b05058e67",
+      "categories": ["terms", "privacy", "cookies", "analytics"],
+      "categoryDetails": {
+        "terms": true,
+        "privacy": true,
+        "cookies": true,
+        "analytics": true,
+        "marketing": false
+      },
+      "ipAddress": "127.0.0.1",
+      "userAgent": "Mozilla/5.0..."
+    }
+  ]
+}
 ```
 
 ### Delete User Data (GDPR Erasure)

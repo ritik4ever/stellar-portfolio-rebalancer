@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import {
     consentAuditQuerySchema,
+    consentExportQuerySchema,
     consentGrantSchema,
     consentStatusQuerySchema,
     consentRevokeSchema,
@@ -13,6 +14,7 @@ import {
 import { validateRequest, validateQuery } from '../middleware/validate.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
+import { isRequestAdmin, authenticateUserOrAdmin } from '../middleware/auth.js'
 
 export const consentRouter = Router()
 
@@ -132,37 +134,91 @@ consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordCons
     }
 })
 
-/** GDPR: Return full consent history export for the current user (consent records + audit events). */
-consentRouter.get('/consent/history', requireJwtWhenEnabled, (req: Request, res: Response) => {
+/** GDPR: Export full consent history and audit trail as JSON. */
+function exportConsentAuditTrail(req: Request, res: Response) {
     try {
-        const userId = resolveConsentUserId(req)
-        if (!userId) return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
-        const consent = databaseService.getConsent(userId)
-        const auditEvents = databaseService.getConsentAudit(userId)
+        const isAdmin = isRequestAdmin(req)
+        const targetUserId = ((req.query.userId ?? req.query.user_id) as string | undefined)?.trim() || req.user?.address || req.adminPublicKey
+
+        if (!targetUserId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
+        }
+
+        // Authorization check: non-admin users cannot export another user's consent trail
+        if (!isAdmin && req.user?.address && req.user.address !== targetUserId) {
+            return fail(res, 403, 'FORBIDDEN', "Non-admin users cannot export another user's consent trail")
+        }
+
+        const consent = databaseService.getConsent(targetUserId)
+        const auditEvents = databaseService.getConsentAudit(targetUserId)
+
+        const activeCategories: string[] = []
+        if (consent?.termsAcceptedAt) activeCategories.push('terms')
+        if (consent?.privacyAcceptedAt) activeCategories.push('privacy')
+        if (consent?.cookieAcceptedAt) activeCategories.push('cookies')
+        if (consent?.analyticsAcceptedAt) activeCategories.push('analytics')
+        if (consent?.marketingAcceptedAt) activeCategories.push('marketing')
+
+        const formattedHistory = auditEvents.map(e => ({
+            id: e.id,
+            action: e.action,
+            timestamp: e.timestamp,
+            documentVersion: e.documentVersion,
+            version: e.documentVersion,
+            categories: e.categories ?? [],
+            category: e.category ?? e.categories ?? [],
+            categoryDetails: e.categoryDetails ?? {
+                terms: (e.categories ?? []).includes('terms'),
+                privacy: (e.categories ?? []).includes('privacy'),
+                cookies: (e.categories ?? []).includes('cookies'),
+                analytics: (e.categories ?? []).includes('analytics'),
+                marketing: (e.categories ?? []).includes('marketing')
+            },
+            ipAddress: e.ipAddress,
+            userAgent: e.userAgent,
+        }))
+
         return ok(res, {
-            userId,
+            userId: targetUserId,
+            exportedAt: new Date().toISOString(),
             consent: consent ? {
                 termsAcceptedAt: consent.termsAcceptedAt,
                 privacyAcceptedAt: consent.privacyAcceptedAt,
                 cookieAcceptedAt: consent.cookieAcceptedAt,
+                analyticsAcceptedAt: consent.analyticsAcceptedAt,
+                marketingAcceptedAt: consent.marketingAcceptedAt,
                 revokedAt: consent.revokedAt,
                 active: consent.active,
                 documentVersion: consent.documentVersion,
+                version: consent.documentVersion,
+                categories: activeCategories,
             } : null,
-            history: auditEvents.map(e => ({
-                id: e.id,
-                action: e.action,
-                timestamp: e.timestamp,
-                ipAddress: e.ipAddress,
-                userAgent: e.userAgent,
-                documentVersion: e.documentVersion,
-            })),
+            currentConsent: consent ? {
+                termsAcceptedAt: consent.termsAcceptedAt,
+                privacyAcceptedAt: consent.privacyAcceptedAt,
+                cookieAcceptedAt: consent.cookieAcceptedAt,
+                analyticsAcceptedAt: consent.analyticsAcceptedAt,
+                marketingAcceptedAt: consent.marketingAcceptedAt,
+                revokedAt: consent.revokedAt,
+                active: consent.active,
+                documentVersion: consent.documentVersion,
+                version: consent.documentVersion,
+                categories: activeCategories,
+            } : null,
+            history: formattedHistory,
+            events: formattedHistory,
+            auditTrail: formattedHistory,
         })
     } catch (error) {
-        logger.error('[ERROR] Consent history failed', { error: getErrorObject(error) })
+        logger.error('[ERROR] Consent export failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
-})
+}
+
+consentRouter.get('/consent/export', authenticateUserOrAdmin, validateQuery(consentExportQuerySchema), exportConsentAuditTrail)
+consentRouter.get('/consent/audit/export', authenticateUserOrAdmin, validateQuery(consentExportQuerySchema), exportConsentAuditTrail)
+consentRouter.get('/consent/audit-trail/export', authenticateUserOrAdmin, validateQuery(consentExportQuerySchema), exportConsentAuditTrail)
+consentRouter.get('/consent/history', authenticateUserOrAdmin, validateQuery(consentExportQuerySchema), exportConsentAuditTrail)
 
 /** GDPR: Purge consent audit events older than the configured retention period. */
 consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, (req: Request, res: Response) => {

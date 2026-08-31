@@ -2,6 +2,12 @@ import { Router, Request, Response } from 'express'
 import { requireAdmin } from '../middleware/auth.js'
 import { databaseService } from '../services/databaseService.js'
 import { issuerMetadataService } from '../services/issuerMetadataService.js'
+import {
+  MAX_VOLATILITY_THRESHOLD_PCT,
+  MIN_VOLATILITY_THRESHOLD_PCT,
+  getVolatilityThresholdPct,
+  setVolatilityThresholdPct,
+} from '../config/volatilityConfig.js'
 import { logger } from '../utils/logger.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
@@ -179,5 +185,55 @@ adminRouter.post('/issuer-metadata/:issuer/refresh', requireAdmin, async (req: R
   } catch (error) {
     logger.warn('[ADMIN] Issuer metadata refresh failed', { error: getErrorMessage(error), issuer: req.params.issuer })
     return fail(res, 502, 'UPSTREAM_ERROR', `Failed to refresh issuer metadata: ${getErrorMessage(error)}`)
+  }
+})
+
+// ── Configurable circuit-breaker volatility threshold ─────────────────────────
+
+adminRouter.get('/config/volatility-threshold', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const thresholdPct = getVolatilityThresholdPct()
+    logAdminAction(req.adminPublicKey ?? 'unknown', 'get_volatility_threshold', null)
+    return ok(res, {
+      thresholdPct,
+      min: MIN_VOLATILITY_THRESHOLD_PCT,
+      max: MAX_VOLATILITY_THRESHOLD_PCT
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to read volatility threshold', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+})
+
+adminRouter.put('/config/volatility-threshold', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { threshold, thresholdPct } = req.body ?? {}
+    const value = typeof thresholdPct === 'number' ? thresholdPct : threshold
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'threshold must be a finite number')
+    }
+    if (value < MIN_VOLATILITY_THRESHOLD_PCT || value > MAX_VOLATILITY_THRESHOLD_PCT) {
+      return fail(
+        res,
+        400,
+        'VALIDATION_ERROR',
+        `threshold must be between ${MIN_VOLATILITY_THRESHOLD_PCT} and ${MAX_VOLATILITY_THRESHOLD_PCT} percent`
+      )
+    }
+
+    const actor = req.adminPublicKey ?? 'unknown'
+    const before = getVolatilityThresholdPct()
+    const updated = setVolatilityThresholdPct(value)
+    logAdminAction(actor, 'update_volatility_threshold', 'circuit_breaker.volatility_threshold_pct', before, updated)
+
+    return ok(res, {
+      thresholdPct: updated,
+      min: MIN_VOLATILITY_THRESHOLD_PCT,
+      max: MAX_VOLATILITY_THRESHOLD_PCT
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to update volatility threshold', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
   }
 })

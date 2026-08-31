@@ -12,13 +12,14 @@ mod events;
 mod nav;
 mod oracle;
 mod portfolio;
+mod portfolio_ops;
 mod reflector;
 mod slippage;
 mod stop_loss;
 mod strategies;
 mod templates;
 mod upgrade;
-#[cfg(all(test, feature = "testutils"))]
+#[cfg(test)]
 mod test;
 #[cfg(all(test, feature = "testutils"))]
 mod property_tests;
@@ -33,11 +34,6 @@ pub use strategies::*;
 
 #[contract]
 pub struct PortfolioRebalancer;
-
-fn validate_slippage_policy_version(version: u32) -> bool {
-    version == CURRENT_SLIPPAGE_POLICY_VERSION
-}
-
 
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
@@ -74,9 +70,7 @@ impl PortfolioRebalancer {
             return Err(Error::AlreadyInitialized);
         }
 
-        // Lightweight validation: call base() on the provided address.
-        // If the call fails (host error) or returns an unexpected type, the
-        // address is not a valid Reflector oracle.
+        
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
         match reflector_client.try_base() {
             Ok(Ok(_asset)) => {}
@@ -369,6 +363,18 @@ impl PortfolioRebalancer {
 
     pub fn get_portfolio(env: Env, portfolio_id: u64) -> Portfolio {
         Self::load_portfolio(&env, portfolio_id).unwrap()
+    }
+
+    /// Move `pct_to_new` percent of every asset into a new portfolio owned by
+    /// the same user. The percentage must be between 1 and 99 (inclusive).
+    pub fn split_portfolio(env: Env, source_id: u64, pct_to_new: u32) -> Result<u64, Error> {
+        portfolio_ops::split_portfolio(&env, source_id, pct_to_new)
+    }
+
+    /// Merge `source_id` into `target_id`, preserving asset balances and
+    /// weighting target allocations by the portfolios' stored values.
+    pub fn merge_portfolios(env: Env, source_id: u64, target_id: u64) -> Result<(), Error> {
+        portfolio_ops::merge_portfolios(&env, source_id, target_id)
     }
 
     pub fn check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error> {
@@ -1464,8 +1470,12 @@ impl PortfolioRebalancer {
             }
         }
 
+        if trades.is_empty() && total_value > 0 {
+            return Err(Error::RebalanceNotNeeded);
+        }
 
         let contract_address = env.current_contract_address();
+        let mut total_fee_paid: i128 = 0;
         for (asset, amount) in trades.iter() {
             let abs_amount = amount.abs();
             let fee_amount = if effective_fee_bps > 0 {

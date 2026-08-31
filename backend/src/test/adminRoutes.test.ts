@@ -434,4 +434,87 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
             expect(res.body.error.code).toBe('UPSTREAM_ERROR')
         })
     })
+
+    // ── GET/PUT /api/admin/config/volatility-threshold (#1386) ─────────────
+
+    describe('GET/PUT /api/admin/config/volatility-threshold', () => {
+        beforeEach(async () => {
+            const { databaseService } = await import('../services/databaseService.js')
+            const { VOLATILITY_THRESHOLD_KV_KEY } = await import('../config/volatilityConfig.js')
+            databaseService.deleteKvValue(VOLATILITY_THRESHOLD_KV_KEY)
+        })
+
+        it('GET returns 401 without admin headers', async () => {
+            const res = await request(app).get('/api/admin/config/volatility-threshold')
+            expect(res.status).toBe(401)
+        })
+
+        it('GET returns 403 for a key not in ADMIN_PUBLIC_KEYS', async () => {
+            const res = await request(app)
+                .get('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(nonAdminKp))
+            expect(res.status).toBe(403)
+        })
+
+        it('GET returns the default threshold with min/max bounds for a valid admin', async () => {
+            const res = await request(app)
+                .get('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(200)
+            expect(res.body.data.thresholdPct).toBe(15)
+            expect(res.body.data.min).toBe(1)
+            expect(res.body.data.max).toBe(50)
+        })
+
+        it('PUT updates the threshold and GET reports the persisted value', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 25 })
+            expect(putRes.status).toBe(200)
+            expect(putRes.body.data.thresholdPct).toBe(25)
+
+            const getRes = await request(app)
+                .get('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+            expect(getRes.status).toBe(200)
+            expect(getRes.body.data.thresholdPct).toBe(25)
+        })
+
+        it('PUT accepts thresholdPct as the body field', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ thresholdPct: 30 })
+            expect(putRes.status).toBe(200)
+            expect(putRes.body.data.thresholdPct).toBe(30)
+        })
+
+        it('PUT rejects thresholds below the 1% minimum', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 0.5 })
+            expect(putRes.status).toBe(400)
+            expect(putRes.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('PUT rejects thresholds above the 50% maximum', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 51 })
+            expect(putRes.status).toBe(400)
+            expect(putRes.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('PUT rejects a non-numeric threshold', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 'twenty' })
+            expect(putRes.status).toBe(400)
+            expect(putRes.body.error.code).toBe('VALIDATION_ERROR')
+        })
+    })
 })

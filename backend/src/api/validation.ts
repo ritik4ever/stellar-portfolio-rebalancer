@@ -10,6 +10,7 @@ const portfolioStrategyConfigSchema = z.object({
     intervalDays: z.number().min(1).max(365).optional(),
     volatilityThresholdPct: z.number().min(1).max(100).optional(),
     minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    dryRun: z.boolean().optional(),
 }).strict()
 
 export const portfolioAllocationsSchema = z.record(z.string(), z.number().min(0).max(100)).refine(
@@ -191,6 +192,11 @@ export const consentAuditQuerySchema = z.object({
     user_id: z.string().min(1).optional()
 });
 
+export const consentExportQuerySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional()
+});
+
 // ─── Notification schemas ─────────────────────────────────────────────────────
 export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
@@ -292,6 +298,7 @@ export const createDraftSchema = z.object({
         intervalDays: z.number().min(1).max(365).optional(),
         volatilityThresholdPct: z.number().min(1).max(100).optional(),
         minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+        dryRun: z.boolean().optional(),
     }).optional(),
 }).strict();
 
@@ -311,6 +318,7 @@ export const updateDraftSchema = z.object({
         intervalDays: z.number().min(1).max(365).optional(),
         volatilityThresholdPct: z.number().min(1).max(100).optional(),
         minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+        dryRun: z.boolean().optional(),
     }).optional(),
 }).strict();
 

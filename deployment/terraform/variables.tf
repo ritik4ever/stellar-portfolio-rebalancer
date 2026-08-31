@@ -25,6 +25,27 @@ variable "db_instance_class" {
   }
 }
 
+variable "backup_retention_period" {
+  description = "Days of RDS automated backups + snapshot retention, per workspace"
+  type        = map(number)
+  default = {
+    staging    = 7
+    production = 14
+  }
+}
+
+variable "secret_rotation_days" {
+  description = "Days between automatic secret rotations"
+  type        = number
+  default     = 30
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = "ARN of the Lambda that rotates DB/Redis secrets (optional; null = AWS managed rotation)"
+  type        = string
+  default     = null
+}
+
 variable "redis_node_type" {
   description = "ElastiCache node type"
   type        = map(string)
@@ -32,6 +53,24 @@ variable "redis_node_type" {
     staging    = "cache.t4g.micro"
     production = "cache.t4g.small"
   }
+}
+
+variable "secret_rotation_days" {
+  description = "Days between automatic secret rotations"
+  type        = number
+  default     = 30
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = "ARN of the Lambda that rotates DB/Redis secrets (optional; null = AWS managed rotation)"
+  type        = string
+  default     = null
+}
+
+variable "snapshot_cleanup_schedule" {
+  description = "EventBridge schedule for the RDS snapshot cleanup Lambda"
+  type        = string
+  default     = "cron(0 21 * * ? *)"
 }
 
 variable "ecs_task_cpu" {
@@ -125,6 +164,9 @@ variable "blue_green_deployment_config" {
     deployment_ready_option = {
       action_on_timeout = "CONTINUE_DEPLOYMENT"
     }
+  }
+}
+
 variable "ecs_min_capacity" {
   description = "Minimum number of ECS tasks"
   type        = map(number)

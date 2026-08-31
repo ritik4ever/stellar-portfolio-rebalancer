@@ -243,6 +243,11 @@ resource "aws_ecs_service" "main" {
 
   depends_on = [aws_lb_listener.http]
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   lifecycle {
     ignore_changes = [desired_count]
   }
@@ -328,35 +333,6 @@ resource "aws_codedeploy_app" "main" {
   compute_platform = "ECS"
 }
 
-resource "aws_ecs_deployment_configuration" "main" {
-  count = var.enable_blue_green ? 1 : 0
-  name  = "${var.name_prefix}-deployment-config"
-
-  deployment_circuit_breaker {
-    enable   = true
-    rollback = true
-  }
-
-  # Blue/Green deployment configuration
-  blue_green_deployment_configuration {
-    deployment_ready_option {
-      action_on_timeout = try(var.blue_green_deployment_config.deployment_ready_option.action_on_timeout, "CONTINUE_DEPLOYMENT")
-    }
-
-    terminate_blue_instances_on_deployment_success {
-      action                           = "TERMINATE"
-      termination_wait_time_in_minutes = try(var.blue_green_deployment_config.termination_wait_time_in_minutes, 30)
-    }
-
-    dynamic "deployment_termination_wait_time_in_minutes" {
-      for_each = var.blue_green_deployment_config.termination_wait_time_in_minutes != null ? [1] : []
-      content {
-        value = var.blue_green_deployment_config.termination_wait_time_in_minutes
-      }
-    }
-  }
-}
-
 resource "aws_codedeploy_deployment_group" "main" {
   count = var.enable_blue_green ? 1 : 0
   app_name              = aws_codedeploy_app.main[0].name
@@ -365,8 +341,8 @@ resource "aws_codedeploy_deployment_group" "main" {
 
   deployment_config_name = "CodeDeployDefault.ECSAllAtOnce"
   deployment_style {
-    deployment_option   = "WITH_TRAFFIC_CONTROL"
-    deployment_type    = "BLUE_GREEN"
+    deployment_option = "WITH_TRAFFIC_CONTROL"
+    deployment_type   = "BLUE_GREEN"
   }
 
   load_balancer_info {
@@ -401,8 +377,8 @@ resource "aws_codedeploy_deployment_group" "main" {
   }
 
   trigger_configuration {
-    trigger_events = ["DeploymentSuccess"]
-    trigger_name   = "${var.name_prefix}-deployment-success"
+    trigger_events     = ["DeploymentSuccess"]
+    trigger_name       = "${var.name_prefix}-deployment-success"
     trigger_target_arn = aws_sns_topic.deployment_notifications[0].arn
   }
 }
@@ -445,8 +421,8 @@ resource "aws_sns_topic" "deployment_notifications" {
 }
 
 resource "aws_sns_topic_policy" "deployment_notifications" {
-  count  = var.enable_blue_green ? 1 : 0
-  arn    = aws_sns_topic.deployment_notifications[0].arn
+  count = var.enable_blue_green ? 1 : 0
+  arn   = aws_sns_topic.deployment_notifications[0].arn
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -464,7 +440,7 @@ resource "aws_sns_topic_policy" "deployment_notifications" {
 
 # CloudWatch alarm for deployment health
 resource "aws_cloudwatch_metric_alarm" "deployment_health" {
-  count = var.enable_blue_green ? 1 : 0
+  count               = var.enable_blue_green ? 1 : 0
   alarm_name          = "${var.name_prefix}-deployment-alarm"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 2
@@ -476,8 +452,7 @@ resource "aws_cloudwatch_metric_alarm" "deployment_health" {
   alarm_description   = "Alarm when healthy hosts drop below threshold during deployment"
   alarm_actions       = [aws_sns_topic.deployment_notifications[0].arn]
 
-  dimensions {
-    name  = "TargetGroup"
-    value = aws_lb_target_group.main.arn
+  dimensions = {
+    TargetGroup = aws_lb_target_group.main.arn_suffix
   }
 }
