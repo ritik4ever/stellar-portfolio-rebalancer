@@ -225,7 +225,8 @@ Idempotency-Key: <uuid>
   "allocations": { "XLM": 40, "BTC": 30, "USDC": 30 },
   "threshold": 5,
   "slippageTolerance": 1,
-  "strategy": "threshold"
+  "strategy": "threshold",
+  "strategyConfig": { "dryRun": true }
 }
 ```
 
@@ -246,6 +247,7 @@ Validation:
 - `threshold`: 1–50%
 - `slippageTolerance`: 0.1–5% (optional, default: 1)
 - `strategy`: `threshold` | `periodic` | `volatility` | `custom` (optional, default: `threshold`)
+- `strategyConfig.dryRun`: optional portfolio-level override for scheduled auto-rebalance dry-run mode. When enabled, the scheduler computes and reports the plan without submitting an on-chain transaction. This value takes precedence over `AUTO_REBALANCE_DRY_RUN`.
 
 ### Bulk Import Portfolio
 

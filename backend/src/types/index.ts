@@ -94,6 +94,8 @@ export interface RebalanceStrategyConfig {
     minDaysBetweenRebalance?: number
     dcaAmount?: number
     dcaIntervalDays?: number
+    /** Override scheduled auto-rebalance dry-run mode for this portfolio. */
+    dryRun?: boolean
 }
 
 export interface UIAllocation {

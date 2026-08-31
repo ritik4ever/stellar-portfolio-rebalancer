@@ -174,6 +174,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `ENABLE_AUTO_REBALANCER` | No | `false` | Enables queue-backed automatic rebalance scheduling. | `true` | |
+| `AUTO_REBALANCE_DRY_RUN` | No | `false` | Computes and reports scheduled rebalance plans without submitting on-chain transactions. A portfolio's `strategyConfig.dryRun` value overrides this global setting. | `true` | |
 | `AUTO_REBALANCE_CHECK_INTERVAL` | No | `3600000` | How often the auto-rebalancer checks all portfolios (ms). | `3600000` | |
 | `MIN_REBALANCE_INTERVAL` | No | `86400000` | Minimum time between successful rebalances per portfolio (ms). | `86400000` | |
 | `MAX_AUTO_REBALANCES_PER_DAY` | No | `3` | Daily cap for automatic rebalances per portfolio. | `3` | |
