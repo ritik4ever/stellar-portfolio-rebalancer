@@ -83,10 +83,7 @@ export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
   });
 }
 
-/**
- * Extract JWT token from WebSocket upgrade request
- * Supports both Authorization header and query parameter (for browsers)
- */
+
 function extractTokenFromRequest(req: any): string | null {
   // Try Authorization header first (standard)
   const authHeader = req.headers.authorization;
