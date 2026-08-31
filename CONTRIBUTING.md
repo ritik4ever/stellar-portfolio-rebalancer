@@ -65,9 +65,9 @@ This repository uses [gitleaks](https://github.com/gitleaks/gitleaks) to prevent
 
 ### Local pre-commit hook
 
-The pre-commit hook runs `gitleaks protect --staged` on every commit. To enable it:
+The pre-commit hook (located at `scripts/hooks/pre-commit`) runs `gitleaks protect --staged` on every commit. To enable it:
 
-1. Install gitleaks (via Homebrew: `brew install gitleaks`, or Go: `no install github.com/gitleaks/gitleaks/v8@latest`)
+1. Install gitleaks (via Homebrew: `brew install gitleaks`, or Go: `go install github.com/gitleaks/gitleaks/v8@latest`)
 2. The hook is automatically installed via [Husky](https://typicode.github.io/husky/) or [pre-commit](https://pre-commit.com/) depending on your setup.
 
 If gitleaks finds a potential secret, the commit will be blocked.
