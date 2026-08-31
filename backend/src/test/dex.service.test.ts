@@ -36,6 +36,20 @@ interface MockTradeRecord {
   counter_amount: string;
 }
 
+interface MockPathRecord {
+  source_asset_type: string;
+  source_amount: string;
+  destination_asset_type: string;
+  destination_asset_code?: string;
+  destination_asset_issuer?: string;
+  destination_amount: string;
+  path: Array<{
+    asset_type: string;
+    asset_code?: string;
+    asset_issuer?: string;
+  }>;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Test fixtures
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,6 +116,32 @@ function createMockOffer(
       asset_code: buying.isNative() ? undefined : buying.getCode(),
       asset_issuer: buying.isNative() ? undefined : buying.getIssuer(),
     },
+  };
+}
+
+function createPathRecord(options: {
+  destinationAmount: number;
+  sourceAmount?: number;
+  path: Array<{ code: string; issuer?: string }>;
+}): MockPathRecord {
+  const path = options.path.map((hop) =>
+    hop.code === "XLM"
+      ? { asset_type: "native" }
+      : {
+          asset_type: "credit_alphanum4",
+          asset_code: hop.code,
+          asset_issuer: hop.issuer ?? "GAXLV64VNE4LBFCVEOZ6PZW2653SNHTU3QKJ63QO7VVL7YV2T3OTRDYD",
+        },
+  );
+
+  return {
+    source_asset_type: "native",
+    source_amount: Dec.formatStellar(options.sourceAmount ?? 1000),
+    destination_asset_type: "credit_alphanum4",
+    destination_asset_code: "USDC",
+    destination_asset_issuer: TEST_ASSETS.USDC.getIssuer(),
+    destination_amount: Dec.formatStellar(options.destinationAmount),
+    path,
   };
 }
 
@@ -899,6 +939,316 @@ describe("StellarDEXService", () => {
       const insufficientLiquidity =
         result.liquidityCoverage < minLiquidityCoverage;
       expect(insufficientLiquidity).toBe(true);
+    });
+  });
+
+  // ── allowPartialFill handling (#1381) ────────────────────────────────────
+
+  describe("allowPartialFill handling (#1381)", () => {
+    const MOCK_KEYPAIR = Keypair.random();
+
+    function setupHealthyMarket() {
+      const orderbook = createOrderbook(
+        [{ price: 0.185, amount: 5000 }],
+        [{ price: 0.1855, amount: 5000 }],
+      );
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: vi.fn().mockResolvedValue(orderbook),
+      } as any);
+    }
+
+    function setupExecutionMocks(remainingAmount: number) {
+      const leftoverOffer =
+        remainingAmount > 0
+          ? createMockOffer("999", remainingAmount, 0.185, TEST_ASSETS.XLM, TEST_ASSETS.USDC)
+          : undefined;
+
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
+        id: MOCK_KEYPAIR.publicKey(),
+        sequence: "1",
+        incrementSequenceNumber: () => {},
+      } as any);
+      vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({
+        hash: "tx-partial",
+      } as any);
+      vi.spyOn(service["server"], "offers").mockReturnValue({
+        forAccount: () => ({
+          limit: () => ({
+            call: vi
+              .fn()
+              .mockResolvedValueOnce({ records: [] })
+              .mockResolvedValueOnce({ records: leftoverOffer ? [leftoverOffer] : [] })
+              .mockResolvedValue({ records: [] }),
+          }),
+        }),
+      } as any);
+      vi.spyOn(service as any, "tryGetAverageTradePrice").mockResolvedValue(0.185);
+    }
+
+    it("records a full fill with partialFill=false and the filled amount", async () => {
+      setupHealthyMarket();
+      setupExecutionMocks(0);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "pf-full", fromAsset: "XLM", toAsset: "USDC", amount: 1000 }],
+        { allowPartialFill: true, rollbackOnFailure: false },
+      );
+
+      expect(result.status).toBe("success");
+      expect(result.explanation.partialFill).toBe(false);
+      expect(result.explanation.filledAmount).toBe(1000);
+      expect(result.executedTrades[0].status).toBe("executed");
+      expect(result.executedTrades[0].remainingAmount).toBe(0);
+    });
+
+    it("accepts a partial fill when allowPartialFill is true", async () => {
+      setupHealthyMarket();
+      setupExecutionMocks(400); // 400 of 1000 XLM left unfilled
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "pf-ok", fromAsset: "XLM", toAsset: "USDC", amount: 1000 }],
+        { allowPartialFill: true, rollbackOnFailure: false },
+      );
+
+      expect(result.status).toBe("partial");
+      expect(result.partialFills).toHaveLength(1);
+      expect(result.executedTrades[0].status).toBe("partial");
+      expect(result.executedTrades[0].executedAmount).toBe(600);
+      expect(result.executedTrades[0].remainingAmount).toBe(400);
+      expect(result.explanation.partialFill).toBe(true);
+      expect(result.explanation.filledAmount).toBe(600);
+    });
+
+    it("rejects a partial fill when allowPartialFill is false", async () => {
+      setupHealthyMarket();
+      setupExecutionMocks(400);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "pf-no", fromAsset: "XLM", toAsset: "USDC", amount: 1000 }],
+        { allowPartialFill: false, rollbackOnFailure: false },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.failureReason).toContain("Partial fill is not allowed");
+      expect(result.failedTrades).toHaveLength(1);
+      expect(result.failedTrades[0].status).toBe("failed");
+      // The filled position is retained so rollback/reconciliation can act on it.
+      expect(result.executedTrades).toHaveLength(1);
+      expect(result.executedTrades[0].executedAmount).toBe(600);
+      expect(result.explanation.partialFill).toBe(true);
+      expect(result.explanation.filledAmount).toBe(600);
+    });
+  });
+
+  // ── Multi-hop path payments (#1382) ──────────────────────────────────────
+
+  describe("Multi-hop path payments (#1382)", () => {
+    const MOCK_KEYPAIR = Keypair.random();
+
+    function mockEmptyOrderbook() {
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: vi.fn().mockResolvedValue(createOrderbook([], [])),
+      } as any);
+    }
+
+    function mockStrictSendPaths(records: MockPathRecord[]) {
+      vi.spyOn(service["server"], "strictSendPaths").mockReturnValue({
+        call: vi.fn().mockResolvedValue({ records }),
+      } as any);
+    }
+
+    function setupExecutionMocks() {
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue(
+        new Account(MOCK_KEYPAIR.publicKey(), "1") as any,
+      );
+      vi.spyOn(service["server"], "offers").mockReturnValue({
+        forAccount: () => ({
+          limit: () => ({ call: vi.fn().mockResolvedValue({ records: [] }) }),
+        }),
+      } as any);
+      vi.spyOn(service as any, "tryGetAverageTradePrice").mockResolvedValue(undefined);
+    }
+
+    describe("discoverPath", () => {
+      it("prefers the shortest path (fewest hops)", async () => {
+        const singleHop = createPathRecord({ destinationAmount: 180, path: [{ code: "EURT" }] });
+        const twoHop = createPathRecord({
+          destinationAmount: 182,
+          path: [{ code: "EURT" }, { code: "AUDD" }],
+        });
+        mockStrictSendPaths([twoHop, singleHop]);
+
+        const best = await (service as any).discoverPath(
+          TEST_ASSETS.XLM,
+          TEST_ASSETS.USDC,
+          1000,
+          3,
+        );
+
+        expect(best.pathLength).toBe(1);
+        expect(best.intermediateAssets).toHaveLength(1);
+        expect(best.estimatedDestinationAmount).toBe(180);
+      });
+
+      it("prefers the highest destination amount among paths of equal length", async () => {
+        const worse = createPathRecord({ destinationAmount: 178, path: [{ code: "EURT" }] });
+        const better = createPathRecord({ destinationAmount: 183, path: [{ code: "AUDD" }] });
+        mockStrictSendPaths([worse, better]);
+
+        const best = await (service as any).discoverPath(
+          TEST_ASSETS.XLM,
+          TEST_ASSETS.USDC,
+          1000,
+          3,
+        );
+
+        expect(best.pathLength).toBe(1);
+        expect(best.estimatedDestinationAmount).toBe(183);
+      });
+
+      it("returns undefined when every candidate path exceeds maxHops", async () => {
+        const tooLong = createPathRecord({
+          destinationAmount: 183,
+          path: [{ code: "EURT" }, { code: "AUDD" }, { code: "BRL" }],
+        });
+        mockStrictSendPaths([tooLong]);
+
+        const best = await (service as any).discoverPath(
+          TEST_ASSETS.XLM,
+          TEST_ASSETS.USDC,
+          1000,
+          2,
+        );
+
+        expect(best).toBeUndefined();
+      });
+
+      it("filters source and destination assets out of the intermediate hop list", async () => {
+        const record = createPathRecord({
+          destinationAmount: 182,
+          path: [
+            { code: "XLM" },
+            { code: "EURT" },
+            { code: "USDC", issuer: TEST_ASSETS.USDC.getIssuer() },
+          ],
+        });
+        mockStrictSendPaths([record]);
+
+        const best = await (service as any).discoverPath(
+          TEST_ASSETS.XLM,
+          TEST_ASSETS.USDC,
+          1000,
+          3,
+        );
+
+        expect(best.pathLength).toBe(3);
+        expect(best.intermediateAssets).toEqual([
+          `EURT:${record.path[1].asset_issuer}`,
+        ]);
+      });
+    });
+
+    it("executes a two-hop trade with a pathPaymentStrictSend operation", async () => {
+      const record = createPathRecord({
+        destinationAmount: 182,
+        sourceAmount: 100,
+        path: [{ code: "EURT" }, { code: "AUDD" }],
+      });
+      mockEmptyOrderbook();
+      mockStrictSendPaths([record]);
+      setupExecutionMocks();
+
+      const submitSpy = vi.fn().mockResolvedValue({ hash: "multi-hop-tx" });
+      vi.spyOn(service["server"], "submitTransaction").mockImplementation(submitSpy as any);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [
+          {
+            tradeId: "hop-1",
+            fromAsset: "XLM",
+            toAsset: "USDC",
+            amount: 100,
+            maxSlippageBps: 100,
+          },
+        ],
+        { rollbackOnFailure: false },
+      );
+
+      expect(result.status).toBe("success");
+      const trade = result.executedTrades[0];
+      expect(trade.status).toBe("executed");
+      expect(trade.path).toEqual([
+        `EURT:${record.path[0].asset_issuer}`,
+        `AUDD:${record.path[1].asset_issuer}`,
+      ]);
+      expect(trade.remainingAmount).toBe(0);
+
+      const submittedTx = submitSpy.mock.calls[0][0];
+      const op = submittedTx.operations[0];
+      expect(op.type).toBe("pathPaymentStrictSend");
+      expect(op.sendAmount).toBe("100.0000000");
+      // priceLimit = 1.82 * (1 - 100/10000) = 1.8018 → destMin = round(100 * 1.8018)
+      expect(op.destMin).toBe("180.1800000");
+      expect(op.path.map((asset: any) => asset.getCode())).toEqual(["EURT", "AUDD"]);
+      expect(op.destAsset.getCode()).toBe("USDC");
+      expect(op.sendAsset.getCode()).toBe("XLM");
+    });
+
+    it("fails when the only discovered path exceeds the configured maxHops", async () => {
+      const record = createPathRecord({
+        destinationAmount: 182,
+        path: [{ code: "EURT" }, { code: "AUDD" }, { code: "BRL" }],
+      });
+      mockEmptyOrderbook();
+      mockStrictSendPaths([record]);
+      setupExecutionMocks();
+
+      const submitSpy = vi.fn().mockResolvedValue({ hash: "multi-hop-tx" });
+      vi.spyOn(service["server"], "submitTransaction").mockImplementation(submitSpy as any);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "hop-2", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { rollbackOnFailure: false, maxHops: 2 },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.failedTrades[0].failureReason).toContain(
+        "No direct trading pair or multi-hop path found",
+      );
+      expect(submitSpy).not.toHaveBeenCalled();
+    });
+
+    it("assesses a two-hop path as executable when no direct pair exists", async () => {
+      const record = createPathRecord({
+        destinationAmount: 182,
+        sourceAmount: 100,
+        path: [{ code: "EURT" }, { code: "AUDD" }],
+      });
+      mockEmptyOrderbook();
+      mockStrictSendPaths([record]);
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+
+      const result = await service.assessRebalanceTrades(
+        [{ tradeId: "hop-3", fromAsset: "XLM", toAsset: "USDC", amount: 100 }],
+        { maxHops: 3 },
+      );
+
+      expect(result.status).toBe("success");
+      expect(result.executableTrades).toHaveLength(1);
+      expect(result.executableTrades[0].estimatedReceivedAmount).toBe(182);
+      expect(result.executableTrades[0].path).toEqual([
+        `EURT:${record.path[0].asset_issuer}`,
+        `AUDD:${record.path[1].asset_issuer}`,
+      ]);
     });
   });
 });
