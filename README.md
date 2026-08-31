@@ -1,7 +1,18 @@
 # Stellar Portfolio Rebalancer
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Stellar-Reflector%20Protocol-blue" alt="Stellar" />
+  <img src="https://img.shields.io/badge/Soroban-Smart%20Contracts-orange" alt="Soroban" />
+  <img src="https://img.shields.io/badge/Backend-Rust%20%2F%20Fastify-green" alt="Backend" />
+  <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License" />
+</p>
+
 [![GitHub Repo](https://img.shields.io/badge/repo-Stellar%20Portfolio%20Rebalancer-blue?style=flat-square)](https://github.com/ritik4ever/stellar-portfolio-rebalancer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**Docs:** [English](README.md) · [Español](docs/README.es.md) · [Português](docs/README.pt.md)
+
+**UI languages:** English · Español · Português · Français · Deutsch
 
 ---
 

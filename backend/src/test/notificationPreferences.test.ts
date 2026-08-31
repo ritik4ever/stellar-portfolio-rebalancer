@@ -190,6 +190,42 @@ describe("notificationPreferencesSchema — enabled/disabled combinations", () =
   });
 });
 
+describe("notificationPreferencesSchema — price alert thresholds", () => {
+  it("accepts per-asset threshold overrides", () => {
+    const result = notificationPreferencesSchema.safeParse({
+      ...basePayload,
+      priceAlertThresholds: { XLM: 7, BTC: 3 },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.priceAlertThresholds).toEqual({ XLM: 7, BTC: 3 });
+    }
+  });
+
+  it("uppercases asset codes", () => {
+    const result = notificationPreferencesSchema.safeParse({
+      ...basePayload,
+      priceAlertThresholds: { xlm: 7 },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.priceAlertThresholds).toEqual({ XLM: 7 });
+    }
+  });
+
+  it("rejects non-positive thresholds", () => {
+    const result = notificationPreferencesSchema.safeParse({
+      ...basePayload,
+      priceAlertThresholds: { XLM: 0 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("allows thresholds to be omitted", () => {
+    expect(notificationPreferencesSchema.safeParse(basePayload).success).toBe(true);
+  });
+});
+
 describe("normalizeNotificationPreferences", () => {
   it("trims whitespace from userId", () => {
     const result = normalizeNotificationPreferences({

@@ -1,6 +1,9 @@
 import type { PricesMap, RiskHeatmap } from '../types/index.js'
 import { assetRegistryService } from './assetRegistryService.js'
 import { logger } from '../utils/logger.js'
+import { notificationService } from './notificationService.js'
+import { buildNotificationPayload } from './notificationTemplates.js'
+import { portfolioStorage } from './portfolioStorage.js'
 
 export interface StatisticalRiskMetrics {
     ewmaVolatility: number
@@ -45,6 +48,25 @@ export type RiskDecisionReasonCode =
     | 'STAT_MODEL_CVAR_BREACH'
     | 'STAT_MODEL_DRAWDOWN_BREACH'
 
+export interface AutoPauseThresholds {
+    /** VaR(95) level that triggers an auto-pause. Expressed as a decimal fraction (e.g. 0.12 = 12%). */
+    var95?: number
+    /** CVaR(95) level that triggers an auto-pause. Expressed as a decimal fraction (e.g. 0.16 = 16%). */
+    cvar95?: number
+    /** How many milliseconds to pause the portfolio for once a breach is detected. Default: 24 hours. */
+    pauseDurationMs?: number
+}
+
+export interface CVaRVaRCheckResult {
+    portfolioId: string
+    breached: boolean
+    breachType?: 'VAR_BREACH' | 'CVAR_BREACH'
+    measuredValue?: number
+    threshold?: number
+    paused: boolean
+    riskMetrics: ReturnType<RiskManagementService['analyzePortfolioRisk']>
+}
+
 type ReturnPoint = { value: number, timestamp: number }
 type PricePoint = { price: number, timestamp: number }
 
@@ -68,7 +90,16 @@ export class RiskManagementService {
     private readonly CIRCUIT_BREAKER_THRESHOLD = 0.20
     private readonly CIRCUIT_BREAKER_COOLDOWN = 300000 // 5 minutes
 
-    constructor() {
+    /** Configurable CVaR/VaR auto-pause thresholds (fall back to class defaults when not set). */
+    private readonly autoPauseVar95Threshold: number
+    private readonly autoPauseCvar95Threshold: number
+    private readonly autoPauseDurationMs: number
+
+    constructor(autoPauseThresholds: AutoPauseThresholds = {}) {
+        this.autoPauseVar95Threshold = autoPauseThresholds.var95 ?? this.VAR95_BLOCK_THRESHOLD
+        this.autoPauseCvar95Threshold = autoPauseThresholds.cvar95 ?? this.CVAR95_BLOCK_THRESHOLD
+        this.autoPauseDurationMs = autoPauseThresholds.pauseDurationMs ?? 24 * 60 * 60 * 1000 // 24 h
+
         const symbols = assetRegistryService.getSymbols(true)
         const assets = symbols.length > 0 ? symbols : ['XLM', 'BTC', 'ETH', 'USDC']
         assets.forEach(asset => {
@@ -334,6 +365,137 @@ export class RiskManagementService {
         }
     }
 
+    /**
+     * Evaluates CVaR(95) and VaR(95) against the configured auto-pause thresholds.
+     *
+     * When either metric exceeds its threshold:
+     *  - Marks the portfolio as paused until `now + autoPauseDurationMs` by setting
+     *    `riskPausedUntil` on the portfolio record.
+     *  - Sends a `riskChange` notification to `userId` explaining the auto-pause.
+     *
+     * When neither metric is breached the portfolio is left unchanged and no
+     * notification is sent.
+     *
+     * @param portfolioId  The portfolio to evaluate and potentially pause.
+     * @param allocations  Current target allocations (weights or percentages).
+     * @param prices       Latest price data used for risk calculation.
+     * @param userId       Stellar address of the portfolio owner – used for notifications.
+     * @returns            A `CVaRVaRCheckResult` describing the outcome.
+     */
+    async checkCVaRVaRThresholdsAndAutoPause(
+        portfolioId: string,
+        allocations: Record<string, number>,
+        prices: PricesMap,
+        userId: string
+    ): Promise<CVaRVaRCheckResult> {
+        const riskMetrics = this.analyzePortfolioRisk(allocations, prices)
+
+        // Only run the threshold check once we have enough data for reliable stats
+        if (riskMetrics.sampleSize < this.MIN_RETURNS_FOR_STATS) {
+            logger.debug('[RISK] Skipping CVaR/VaR auto-pause check – insufficient sample size', {
+                portfolioId,
+                sampleSize: riskMetrics.sampleSize,
+                minRequired: this.MIN_RETURNS_FOR_STATS
+            })
+            return { portfolioId, breached: false, paused: false, riskMetrics }
+        }
+
+        // Determine which metric (if any) is breached – VaR is checked first
+        let breachType: 'VAR_BREACH' | 'CVAR_BREACH' | undefined
+        let measuredValue: number | undefined
+        let threshold: number | undefined
+
+        if (riskMetrics.var95 > this.autoPauseVar95Threshold) {
+            breachType = 'VAR_BREACH'
+            measuredValue = riskMetrics.var95
+            threshold = this.autoPauseVar95Threshold
+        } else if (riskMetrics.cvar95 > this.autoPauseCvar95Threshold) {
+            breachType = 'CVAR_BREACH'
+            measuredValue = riskMetrics.cvar95
+            threshold = this.autoPauseCvar95Threshold
+        }
+
+        if (!breachType) {
+            // All clear – no action needed
+            return { portfolioId, breached: false, paused: false, riskMetrics }
+        }
+
+        // ── Breach detected ──────────────────────────────────────────────────────
+        const pausedUntil = new Date(Date.now() + this.autoPauseDurationMs).toISOString()
+
+        logger.warn('[RISK] CVaR/VaR threshold breached – auto-pausing portfolio', {
+            portfolioId,
+            breachType,
+            measuredValue,
+            threshold,
+            pausedUntil
+        })
+
+        // 1. Persist the pause flag on the portfolio
+        try {
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (portfolio) {
+                await portfolioStorage.updatePortfolio(portfolioId, { riskPausedUntil: pausedUntil })
+            } else {
+                logger.warn('[RISK] Portfolio not found for auto-pause', { portfolioId })
+            }
+        } catch (err) {
+            logger.error('[RISK] Failed to persist auto-pause on portfolio', {
+                portfolioId,
+                error: err instanceof Error ? err.message : String(err)
+            })
+        }
+
+        // 2. Send a notification explaining the pause
+        try {
+            const metricLabel = breachType === 'VAR_BREACH' ? 'VaR(95)' : 'CVaR(95)'
+            const measuredPct = `${(measuredValue! * 100).toFixed(2)}%`
+            const thresholdPct = `${(threshold! * 100).toFixed(2)}%`
+
+            const payload = buildNotificationPayload(userId, {
+                eventType: 'riskChange',
+                data: {
+                    portfolioId,
+                    oldLevel: riskMetrics.overallRiskLevel,
+                    newLevel: 'critical',
+                    autoPause: {
+                        reason: breachType,
+                        measuredValue: measuredPct,
+                        threshold: thresholdPct,
+                        pausedUntil
+                    }
+                }
+            })
+
+            await notificationService.notify(payload)
+
+            logger.info('[RISK] Auto-pause notification sent', {
+                portfolioId,
+                userId,
+                metricLabel,
+                measuredValue: measuredPct,
+                threshold: thresholdPct
+            })
+        } catch (err) {
+            // Notification failure must never prevent the pause from being recorded
+            logger.error('[RISK] Failed to send auto-pause notification', {
+                portfolioId,
+                userId,
+                error: err instanceof Error ? err.message : String(err)
+            })
+        }
+
+        return {
+            portfolioId,
+            breached: true,
+            breachType,
+            measuredValue,
+            threshold,
+            paused: true,
+            riskMetrics
+        }
+    }
+
     getCircuitBreakerStatus(): Record<string, CircuitBreakerStatus> {
         const status: Record<string, CircuitBreakerStatus> = {}
 
@@ -348,6 +510,43 @@ export class RiskManagementService {
         })
 
         return status
+    }
+
+    /**
+     * Resets a tripped circuit breaker for a given portfolio or asset (or all if not specified).
+     * @param targetId Portfolio ID, asset symbol, or undefined for all circuit breakers.
+     */
+    resetCircuitBreaker(targetId?: string): { resetCount: number; resetTargets: string[] } {
+        const resetTargets: string[] = []
+
+        if (targetId) {
+            const assetKey = targetId.toUpperCase()
+            if (this.circuitBreakers.has(assetKey)) {
+                const cb = this.circuitBreakers.get(assetKey)!
+                cb.isTriggered = false
+                cb.triggerReason = undefined
+                cb.cooldownUntil = undefined
+                cb.triggeredAssets = []
+                resetTargets.push(assetKey)
+            } else {
+                this.circuitBreakers.set(targetId, {
+                    isTriggered: false,
+                    triggeredAssets: []
+                })
+                resetTargets.push(targetId)
+            }
+        } else {
+            this.circuitBreakers.forEach((cb, key) => {
+                cb.isTriggered = false
+                cb.triggerReason = undefined
+                cb.cooldownUntil = undefined
+                cb.triggeredAssets = []
+                resetTargets.push(key)
+            })
+        }
+
+        logger.info('[RISK] Circuit breaker reset', { targetId, resetTargets })
+        return { resetCount: resetTargets.length, resetTargets }
     }
 
     getRecommendations(riskMetrics: RiskMetrics, allocationsInput: Record<string, number>): string[] {

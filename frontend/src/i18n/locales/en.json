@@ -96,7 +96,11 @@
   },
   "languageSelector": {
     "label": "Language",
-    "english": "English"
+    "english": "English",
+    "spanish": "Spanish",
+    "portuguese": "Portuguese",
+    "french": "French",
+    "german": "German"
   },
   "portfolioSetup": {
     "title": "Create Portfolio",

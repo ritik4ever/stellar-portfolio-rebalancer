@@ -2,21 +2,39 @@
 name = "portfolio-rebalancer"
 version = "0.1.0"
 edition = "2021"
+# Resolver v2 prevents dev-dependency features (soroban-sdk/testutils) from
+# leaking into the plain lib build during `cargo test`, which would otherwise
+# force `#[contracttype]` derives to emit `SorobanArbitrary` code against a
+# `Error` type that cannot satisfy it in the non-test build.
+resolver = "2"
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-soroban-sdk = "21.0.0"
+# Force ed25519-dalek 2.x to prevent 3.0.0 conflict with testutils
+ed25519-dalek = "=2.2.0"
+soroban-sdk = "27.0.2"
 
 [dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+# `soroban-sdk/testutils` must NOT be enabled here: resolver v1-style feature
+# unification would leak it into the plain `(lib)` build during `cargo test`
+# (the unit built for the integration-test targets), forcing every
+# `#[contracttype]` derive to emit `SorobanArbitrary` code against `types::Error`.
+# Instead, contract tests run via `cargo test --features testutils` (see
+# package.json "test:contracts"), which enables the package `testutils` feature
+# (mapping to `soroban-sdk/testutils`) for the whole build uniformly.
 proptest = "1.4.0"
+ed25519-dalek = "2.2.0"
 
 [features]
 default = []
 testutils = ["soroban-sdk/testutils"]
-integration = []
+# `integration` tests (tests/*.rs) use the test sandbox APIs (mock_all_auths,
+# register_contract, Address::generate, ...), so the feature must bring in
+# `testutils` for those targets. It is only enabled explicitly via
+# `cargo test --features integration`, never in the plain lib build.
+integration = ["testutils"]
 
 [profile.release]
 opt-level = "z"

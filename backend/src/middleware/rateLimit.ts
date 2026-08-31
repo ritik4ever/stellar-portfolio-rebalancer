@@ -1,11 +1,12 @@
 import { rateLimit } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
-import IORedis from "ioredis";
+import ioredisMod from "ioredis";
+const IORedis = (ioredisMod as any).default || ioredisMod;
 import type { Request, Response, NextFunction } from "express";
 import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
-import { REDIS_URL, getCachedRedisAvailability } from "../queue/connection.js";
+import { REDIS_URL, getRedisUrl, refreshRedisCredentials, getCachedRedisAvailability } from "../queue/connection.js";
 
 const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
 const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
@@ -31,9 +32,14 @@ function makeStore(prefix: string): RedisStore | undefined {
   });
 }
 
-if (process.env.NODE_ENV !== "test") {
+function initRedisClient() {
+  if (process.env.NODE_ENV === "test") {
+    logger.info("[RATE-LIMIT] Test environment — using memory store");
+    return;
+  }
   try {
-    redisClient = new IORedis(REDIS_URL, {
+    const url = typeof getRedisUrl === 'function' ? getRedisUrl() : REDIS_URL;
+    redisClient = new IORedis(url, {
       lazyConnect: true,
       connectTimeout: 3000,
       maxRetriesPerRequest: 0,
@@ -42,18 +48,33 @@ if (process.env.NODE_ENV !== "test") {
     // Absorb all connection errors so a missing Redis never crashes the process.
     // express-rate-limit will degrade gracefully to its in-memory store if any
     // Redis command fails.
-    redisClient.on("error", () => {});
+    if (typeof redisClient.on === 'function') {
+      redisClient.on("error", (err: Error) => {
+        const msg = (err.message || '').toLowerCase();
+        if (msg.includes('noauth') || msg.includes('wrongpass') || msg.includes('authentication')) {
+          logger.warn("[RATE-LIMIT] Redis auth error detected — refreshing credentials...");
+          if (typeof refreshRedisCredentials === 'function') {
+            refreshRedisCredentials().then(() => {
+              try {
+                if (redisClient) redisClient.disconnect();
+              } catch {}
+              initRedisClient();
+            }).catch(() => {});
+          }
+        }
+      });
+    }
     logger.info("[RATE-LIMIT] Redis store configured (lazy connect)", {
-      redisUrl: REDIS_URL.replace(/:\/\/[^@]*@/, "://***@"),
+      redisUrl: url.replace(/:\/\/[^@]*@/, "://***@"),
     });
   } catch (error) {
     logger.warn("[RATE-LIMIT] Redis store init failed — using memory store", {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-} else {
-  logger.info("[RATE-LIMIT] Test environment — using memory store");
 }
+
+initRedisClient();
 
 // Enhanced rate limit handler with detailed metrics
 function createHandler(windowMs: number, limitType: string) {
@@ -356,7 +377,8 @@ export const requestMonitoringMiddleware = (
   res: import("express").Response,
   next: import("express").NextFunction,
 ): void => {
-  rateLimitMonitor.recordRequest();
+  // Passing the request also feeds the per-IP / per-API-key consumption dashboard.
+  rateLimitMonitor.recordRequest(req);
   next();
 };
 

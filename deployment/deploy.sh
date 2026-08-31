@@ -4,9 +4,9 @@ set -euo pipefail
 
 PRODUCTION_DEPLOY=false
 DRY_RUN=false
-HEALTH_URL="${DEPLOY_HEALTH_URL:-http://localhost:3001/health}"
+HEALTH_URL="${DEPLOY_HEALTH_URL:-${HEALTH_CHECK_URL:-http://localhost:3001/health}}"
 HEALTH_TIMEOUT="${DEPLOY_HEALTH_TIMEOUT:-10}"
-HEALTH_RETRIES="${DEPLOY_HEALTH_RETRIES:-6}"
+HEALTH_RETRIES="${DEPLOY_HEALTH_RETRIES:-5}"
 HEALTH_INTERVAL="${DEPLOY_HEALTH_INTERVAL:-10}"
 ROLLBACK_WINDOW_SECONDS="${DEPLOY_ROLLBACK_WINDOW:-300}"
 ROLLBACK_COMMAND="${ROLLBACK_COMMAND:-}"
@@ -24,6 +24,7 @@ fi
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 usage() {
@@ -34,26 +35,43 @@ usage() {
     echo "  $0 --production --dry-run --health-url http://localhost:3001/health"
 }
 
+print_status() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERR]${NC} $1"
+}
+
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
 log_event() {
     mkdir -p "${DEPLOY_STATE_DIR}"
     echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] $1" | tee -a "${DEPLOY_LOG_FILE}"
 }
 
-print_status() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-emit_alert() {
+send_alert() {
     local message="$1"
-    log_event "ALERT: ${message}"
+    local severity="${2:-warning}"
+
+    echo -e "${RED}ALERT [${severity}]:${NC} ${message}"
+
+    if [ -n "${SLACK_WEBHOOK_URL}" ]; then
+        local emoji="warning"
+        if [ "${severity}" = "error" ]; then
+            emoji="alert"
+        fi
+        curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"${emoji} ${message}\"}" \
+            "${SLACK_WEBHOOK_URL}" || print_warning "Failed to send Slack notification"
+    fi
+
     if [ -n "${ALERT_COMMAND}" ]; then
         if ! bash -lc "${ALERT_COMMAND} \"${message}\""; then
             print_warning "Alert command failed; continuing with deployment workflow."
@@ -77,7 +95,7 @@ trigger_rollback() {
 
     if [ "${DRY_RUN}" = "true" ]; then
         log_event "DRY-RUN: health check failed after ${age_seconds}s (${reason}). Rollback would be triggered to the previous known-good deployment."
-        emit_alert "Dry-run rollback would have been triggered after failed post-deploy health check (${reason})"
+        send_alert "Dry-run rollback would have been triggered after failed post-deploy health check (${reason})" "warning"
         return 0
     fi
 
@@ -90,12 +108,13 @@ trigger_rollback() {
 
     if [ -z "${effective_rollback_command}" ]; then
         print_error "Health check failed after ${age_seconds}s (${reason}) but no rollback command was configured."
-        emit_alert "Automated rollback skipped because no rollback command was configured after failed post-deploy health check (${reason})."
+        send_alert "Automated rollback skipped because no rollback command was configured after failed post-deploy health check (${reason})." "error"
         return 1
     fi
 
-    emit_alert "Automated rollback triggered after failed post-deploy health check (${reason})"
+    send_alert "Automated rollback triggered after failed post-deploy health check (${reason})" "error"
     log_event "Executing rollback command: ${effective_rollback_command}"
+
     if bash -lc "${effective_rollback_command}"; then
         log_event "Rollback completed successfully."
         print_status "Rollback completed successfully."
@@ -103,7 +122,7 @@ trigger_rollback() {
     fi
 
     print_error "Rollback command failed after health check failure."
-    emit_alert "Rollback command failed following failed post-deploy health check (${reason})."
+    send_alert "Rollback command failed following failed post-deploy health check (${reason})." "error"
     return 1
 }
 
@@ -133,6 +152,37 @@ check_dependencies() {
     if ! command -v docker &> /dev/null; then
         print_warning "Docker is not installed. Deployment to production will be limited."
     fi
+}
+
+health_check() {
+    local url="$HEALTH_URL"
+    local attempt=1
+    local start_epoch
+    start_epoch="$(date +%s)"
+
+    print_info "Running health check against ${url} (max ${HEALTH_RETRIES} attempts, ${HEALTH_INTERVAL}s interval)..."
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY-RUN] Would poll ${url} up to ${HEALTH_RETRIES} times"
+        return 1
+    fi
+
+    while [ "$attempt" -le "$HEALTH_RETRIES" ]; do
+        if curl -sf --max-time "$HEALTH_TIMEOUT" "$url" > /dev/null 2>&1; then
+            print_status "Health check passed on attempt ${attempt}"
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$HEALTH_RETRIES" ]; then
+            print_warning "Health check failed (attempt ${attempt}/${HEALTH_RETRIES}), retrying in ${HEALTH_INTERVAL}s..."
+            sleep "$HEALTH_INTERVAL"
+        fi
+
+        attempt=$((attempt + 1))
+    done
+
+    print_error "Health check failed after ${HEALTH_RETRIES} attempts (elapsed $(( $(date +%s) - start_epoch ))s)"
+    return 1
 }
 
 parse_args() {
@@ -193,35 +243,6 @@ parse_args() {
     done
 }
 
-wait_for_health_check() {
-    local attempt=1
-    local elapsed_seconds=0
-    local start_epoch
-    start_epoch="$(date +%s)"
-
-    log_event "Running post-deploy health check against ${HEALTH_URL} (timeout=${HEALTH_TIMEOUT}s, retries=${HEALTH_RETRIES}, interval=${HEALTH_INTERVAL}s)"
-
-    while [ "${attempt}" -le "${HEALTH_RETRIES}" ]; do
-        if curl --fail --silent --show-error --max-time "${HEALTH_TIMEOUT}" "${HEALTH_URL}" >/dev/null 2>&1; then
-            print_status "Health check passed for ${HEALTH_URL} on attempt ${attempt}/${HEALTH_RETRIES}."
-            return 0
-        fi
-
-        elapsed_seconds=$(( $(date +%s) - start_epoch ))
-        print_warning "Health check failed at attempt ${attempt}/${HEALTH_RETRIES} (elapsed ${elapsed_seconds}s). Retrying in ${HEALTH_INTERVAL}s..."
-
-        if [ "${attempt}" -lt "${HEALTH_RETRIES}" ]; then
-            sleep "${HEALTH_INTERVAL}"
-        fi
-
-        attempt=$((attempt + 1))
-    done
-
-    elapsed_seconds=$(( $(date +%s) - start_epoch ))
-    print_error "Post-deploy health check failed after ${elapsed_seconds}s for ${HEALTH_URL}."
-    return 1
-}
-
 build_contracts() {
     print_status "Building smart contracts..."
     cd contracts
@@ -253,6 +274,8 @@ deploy_contracts() {
 
         print_status "Contract deployed with ID: $CONTRACT_ID"
 
+        REFLECTOR_ADDRESS="${REFLECTOR_ADDRESS:-CDSWUUXGPWDZG76ISK6SUCVPZJMD5YUV66J2FXFXFGDX25XKZJIEITAO}"
+
         soroban contract invoke \
             --id "$CONTRACT_ID" \
             --source "$STELLAR_SECRET_KEY" \
@@ -265,7 +288,6 @@ deploy_contracts() {
 
         echo "VITE_CONTRACT_ADDRESS=$CONTRACT_ID" >> ../frontend/.env
         echo "CONTRACT_ADDRESS=$CONTRACT_ID" >> ../backend/.env
-
     else
         print_warning "Soroban CLI not found. Please deploy manually."
     fi
@@ -290,50 +312,56 @@ build_backend() {
 }
 
 deploy_production() {
-    if [ "${PRODUCTION_DEPLOY}" = "true" ]; then
-        if [ "${DRY_RUN}" = "true" ]; then
-            print_status "DRY-RUN: production deployment validated without executing docker compose up."
-            print_status "Health URL: ${HEALTH_URL}"
-            return 0
-        fi
+    if [ "${PRODUCTION_DEPLOY}" != "true" ] && [ "${DRY_RUN}" != "true" ]; then
+        return 0
+    fi
 
-        print_status "Deploying to production..."
+    if [ "${DRY_RUN}" = "true" ]; then
+        print_info "==========================================="
+        print_info "  DRY-RUN MODE: no actual changes will be made"
+        print_info "==========================================="
+        print_status "DRY-RUN: production deployment validated without executing docker compose up."
+        print_status "Health URL: ${HEALTH_URL}"
+        return 0
+    fi
 
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-            COMPOSE_CMD="docker compose"
-        elif command -v docker-compose &> /dev/null; then
-            COMPOSE_CMD="docker-compose"
-        else
-            print_error "Neither docker compose plugin nor docker-compose is installed"
-            exit 1
-        fi
+    print_status "Deploying to production..."
 
-        print_status "Validating compose configuration..."
-        ${COMPOSE_CMD} -f deployment/docker-compose.yml config > /dev/null
+    if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+        COMPOSE_CMD="docker compose"
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        print_error "Neither docker compose plugin nor docker-compose is installed"
+        exit 1
+    fi
 
-        local deployment_start
-        deployment_start="$(date +%s)"
-        ${COMPOSE_CMD} -f deployment/docker-compose.yml up --build -d
+    print_status "Validating compose configuration..."
+    ${COMPOSE_CMD} -f deployment/docker-compose.yml config > /dev/null
 
-        if ! wait_for_health_check; then
-            local elapsed_seconds=$(( $(date +%s) - deployment_start ))
-            if [ "${elapsed_seconds}" -le "${ROLLBACK_WINDOW_SECONDS}" ]; then
-                print_warning "Health check failed within rollback window (${elapsed_seconds}s <= ${ROLLBACK_WINDOW_SECONDS}s). Triggering rollback..."
-                if ! trigger_rollback "post-deploy health check failed" "${elapsed_seconds}"; then
-                    print_error "Deployment failed and rollback could not be completed."
-                    exit 1
-                fi
-            else
-                print_warning "Health check failed outside rollback window (${elapsed_seconds}s > ${ROLLBACK_WINDOW_SECONDS}s). Keeping deployment for manual review."
-                emit_alert "Health check failed outside rollback window; manual review required."
+    local deployment_start
+    deployment_start="$(date +%s)"
+    ${COMPOSE_CMD} -f deployment/docker-compose.yml up --build -d
+
+    if ! health_check; then
+        local elapsed_seconds=$(( $(date +%s) - deployment_start ))
+
+        if [ "${elapsed_seconds}" -le "${ROLLBACK_WINDOW_SECONDS}" ]; then
+            print_warning "Health check failed within rollback window (${elapsed_seconds}s <= ${ROLLBACK_WINDOW_SECONDS}s). Triggering rollback..."
+            if ! trigger_rollback "post-deploy health check failed" "${elapsed_seconds}"; then
+                print_error "Deployment failed and rollback could not be completed."
                 exit 1
             fi
+        else
+            print_warning "Health check failed outside rollback window (${elapsed_seconds}s > ${ROLLBACK_WINDOW_SECONDS}s). Keeping deployment for manual review."
+            send_alert "Health check failed outside rollback window; manual review required." "warning"
+            exit 1
         fi
-
-        print_status "Production deployment completed!"
-        print_status "Frontend: http://localhost:3000"
-        print_status "Backend API: http://localhost:3001/api"
     fi
+
+    print_status "Production deployment completed!"
+    print_status "Frontend: http://localhost:3000"
+    print_status "Backend API: http://localhost:3001/api"
 }
 
 main() {

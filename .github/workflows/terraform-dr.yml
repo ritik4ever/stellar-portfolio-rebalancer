@@ -1,0 +1,37 @@
+name: Terraform DR Plan Validation
+
+on:
+  push:
+    paths:
+      - 'deployment/terraform/**'
+  pull_request:
+    paths:
+      - 'deployment/terraform/**'
+
+jobs:
+  terraform-plan:
+    name: Validate Terraform plan for DR module
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.6'
+
+      - name: Terraform fmt check
+        working-directory: deployment/terraform/modules/secondary-region
+        run: |
+          terraform fmt -check -recursive
+
+      - name: Initialize and validate
+        working-directory: deployment/terraform/modules/secondary-region
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          terraform init -input=false
+          terraform validate
+          terraform plan -input=false -no-color -out=plan.tfplan || true

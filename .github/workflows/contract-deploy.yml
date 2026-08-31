@@ -76,6 +76,40 @@ jobs:
             exit 1
           fi
 
+      - name: Generate nginx rate limiting config
+        run: |
+          cat > nginx.conf <<'EOF'
+          # Rate limiting configuration for sensitive endpoints.
+          # Applied at the nginx layer as defense-in-depth in addition to app-level rate limiting.
+          # Zones are scoped per endpoint group to avoid overly aggressive throttling of legitimate traffic.
+          limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=10r/m;
+          limit_req_zone $binary_remote_addr zone=import_limit:10m rate=5r/m;
+          limit_req_zone $binary_remote_addr zone=admin_limit:10m rate=2r/m;
+
+          server {
+              # Authentication endpoints
+              location /api/auth/ {
+                  limit_req zone=auth_limit burst=20 nodelay;
+                  limit_req_status 429;
+                  add_header Retry-After 60 always;
+              }
+
+              # Import endpoints (larger payloads, lower observed traffic)
+              location /api/import/ {
+                  limit_req zone=import_limit burst=10 nodelay;
+                  limit_req_status 429;
+                  add_header Retry-After 120 always;
+              }
+
+              # Admin endpoints (restricted, lowest limit)
+              location /api/admin/ {
+                  limit_req zone=admin_limit burst=5 nodelay;
+                  limit_req_status 429;
+                  add_header Retry-After 5 always;
+              }
+          }
+          EOF
+
       - name: Deploy contract
         run: bash deployment/contract-deploy.sh
 

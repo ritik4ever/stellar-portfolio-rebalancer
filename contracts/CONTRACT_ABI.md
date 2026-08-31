@@ -5,6 +5,7 @@ Contract source:
 - `contracts/src/lib.rs`
 - `contracts/src/types.rs`
 - `contracts/src/portfolio.rs`
+- `contracts/src/templates.rs`
 - `contracts/src/reflector.rs`
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
@@ -34,9 +35,39 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Notes:**
   - External clients can use this to confirm the configured governance/admin address before invoking privileged actions.
 
+### `propose_admin(env: Env, new_admin: Address) -> Result<(), Error>`
+
+- **Purpose:** Step 1 of the two-step admin transfer — nominates `new_admin` as the pending admin and emits `admin_proposed`.
+- **Auth:** Requires auth from the current admin (`DataKey::Admin`).
+- **Parameters:**
+  - `new_admin`: address nominated to take over the admin role.
+- **Errors:**
+  - `InvalidAdminProposal` (39) when `new_admin` is already the current admin.
+- **Notes:**
+  - Nomination alone grants nothing: every admin-gated entrypoint keeps reading `DataKey::Admin`, which is only rewritten by `accept_admin`.
+  - Calling it again **replaces** a proposal still in flight, so the current admin can retarget — or effectively cancel — a mistaken nomination by proposing a different address.
+  - This is the only path that changes the admin after `initialize`; there is no single-call `set_admin`.
+
+### `accept_admin(env: Env) -> Result<(), Error>`
+
+- **Purpose:** Step 2 of the two-step admin transfer — the pending admin claims the role. Rewrites `DataKey::Admin`, clears `DataKey::PendingAdmin`, and emits `admin_transferred`.
+- **Auth:** Requires auth from the address stored by `propose_admin`; any other caller fails the invocation. Requiring the incoming admin to sign is what proves the key is controllable, so a handover can never complete against a typo'd or unusable address.
+- **Errors:**
+  - `NoPendingAdmin` (38) when no transfer is in flight (never proposed, or already accepted).
+- **Notes:**
+  - The previous admin loses every admin right the moment this returns.
+  - Not replayable — the nomination is consumed, so a second call returns `NoPendingAdmin`.
+
+### `get_pending_admin(env: Env) -> Option<Address>`
+
+- **Purpose:** Reads the address nominated by `propose_admin` and still awaiting its `accept_admin` call.
+- **Returns:** `Some(address)` while a transfer is in flight, `None` otherwise.
+- **Notes:**
+  - Lets clients and monitoring surface a pending governance handover before it takes effect.
+
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
 
-- **Purpose:** Creates a new user portfolio and emits a `("portfolio","created")` event.
+- **Purpose:** Creates a new user portfolio (with default `StrategyType::Threshold` strategy) and emits a `("portfolio","created")` event.
 - **Parameters:**
   - `user`: Portfolio owner; must authorize this call.
   - `target_allocations`: Target allocations per asset (`Address -> percentage`).
@@ -57,6 +88,15 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - Allocation map passes `portfolio::validate_allocations`.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
 
+### `create_portfolio_with_strategy(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32, strategy: StrategyType, strategy_config: StrategyConfig) -> Result<u64, Error>`
+
+- **Purpose:** Creates a new user portfolio with an explicit rebalancing strategy and emits a `("portfolio","created")` event.
+- **Parameters:**
+  - Same as `create_portfolio` plus:
+  - `strategy`: `StrategyType` enum — `Threshold (0)`, `Periodic (1)`, `Volatility (2)`, or `Custom (3)`.
+  - `strategy_config`: `StrategyConfig` struct with fields `interval_seconds`, `volatility_threshold_bps`, `min_interval_seconds`.
+- **Returns:** Same as `create_portfolio`.
+
 #### Portfolio ID derivation (deterministic)
 
 - **Strategy:** Portfolio IDs are allocated from a monotonically increasing
@@ -69,6 +109,59 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Notes:** The contract exposes `get_portfolio` to read portfolio contents by
   id. Consumers should store the returned id along with the portfolio metadata
   to maintain a canonical reference.
+
+### `create_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only: stores a new named on-chain allocation template. Templates
+  are persistent contract storage, not hardcoded contract logic, so new named
+  presets (e.g. "Conservative", "Balanced", "Aggressive") can be added or
+  changed without a contract upgrade.
+- **Parameters:**
+  - `name`: Template name; must not already be in use.
+  - `allocations`: Target allocations per asset (`Address -> percentage`), same shape and validation as `create_portfolio`'s `target_allocations`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::InvalidAllocation)` — allocations do not sum to 100% or contain a zero percentage.
+  - `Err(Error::TooManyAssets)` — the allocation map has more than `MAX_PORTFOLIO_ASSETS` (10) entries, same limit `create_portfolio` enforces.
+  - `Err(Error::PortfolioStorageFootprintTooLarge)` — a portfolio instantiated from this template would exceed `MAX_PORTFOLIO_STORAGE_BYTES`, estimated using default asset decimals and no balances yet (a lower bound on the real footprint).
+  - `Err(Error::TemplateAlreadyExists)` — a template with this name already exists; use `update_template` instead.
+  - `Err(Error::TooManyTemplates)` — the template registry already holds `MAX_TEMPLATES` (50) entries.
+- **Preconditions:** `admin.require_auth()` succeeds.
+- **Notes:** These limits exist so a template accepted here can, under normal use, be turned into a portfolio later via `create_portfolio_from_template` without hitting `create_portfolio`'s own asset-count and storage-footprint checks. This is not an absolute guarantee: the footprint estimate here assumes `asset_decimals` at portfolio-creation time has exactly one entry per allocated asset (as `create_portfolio_from_template`'s own `asset_decimals` parameter normally would). Since decimal *values* are fixed-width and don't affect the serialized size, only the number of `asset_decimals` entries matters — a caller who supplies extra, unrelated entries in `asset_decimals` at `create_portfolio_from_template` time can still exceed `MAX_PORTFOLIO_STORAGE_BYTES` despite the template having been accepted here.
+
+### `update_template(env: Env, name: String, allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Admin-only: replaces the allocations of an existing named template.
+- **Parameters:** Same as `create_template`.
+- **Returns:** `Ok(())` or one of:
+  - `Err(Error::InvalidAllocation)`
+  - `Err(Error::TooManyAssets)`
+  - `Err(Error::PortfolioStorageFootprintTooLarge)`
+  - `Err(Error::TemplateNotFound)` — no template with this name exists; use `create_template` instead.
+- **Preconditions:** `admin.require_auth()` succeeds.
+
+### `get_template(env: Env, name: String) -> Option<Map<Address, u32>>`
+
+- **Purpose:** Public read-only view of a template's stored allocations.
+- **Returns:** `Some(allocations)` if the template exists, `None` otherwise.
+- **Preconditions:** None; callable without signing.
+
+### `list_templates(env: Env) -> Vec<String>`
+
+- **Purpose:** Public read-only view of all known template names, in creation order.
+- **Preconditions:** None; callable without signing.
+
+### `create_portfolio_from_template(env: Env, user: Address, template_name: String, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
+
+- **Purpose:** Creates a new user portfolio using the allocations stored under a named
+  template instead of passing `target_allocations` directly. Shares the same
+  validation, storage-footprint checks, and `("portfolio","created")` event
+  emission as `create_portfolio`.
+- **Parameters:** Same as `create_portfolio`, except `target_allocations` is replaced by `template_name`.
+- **Returns:** `Ok(portfolio_id)` or any error `create_portfolio` can return, plus:
+  - `Err(Error::TemplateNotFound)` — no template with this name exists.
+- **Preconditions:**
+  - `user.require_auth()` succeeds.
+  - A template named `template_name` exists.
 
 ### `get_portfolio(env: Env, portfolio_id: u64) -> Portfolio`
 
@@ -290,6 +383,14 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `25` | `AssetNotSupported` | An asset in the portfolio has no price data available from the Reflector oracle. | Verify the asset is listed in the Reflector oracle. Check the asset's contract address or Stellar issuer is correctly specified. |
 | `26` | `InvalidAmount` | A deposit or trade amount is zero, negative, or below the minimum trade size. | Provide a positive amount greater than the minimum trade size. |
 | `27` | `WithdrawFailed` | A withdrawal operation could not be completed. | Check that the portfolio has sufficient balance and is not paused. Verify the withdrawal amount does not exceed available balances. |
+| `28` | `InvalidAllocationSum` | A portfolio's target allocations no longer sum to exactly 100% at rebalance time. | Update the portfolio's target allocations so they sum to exactly 100% before retrying. |
+| `29` | `BatchTooLarge` | `batch_rebalance` was called with more than `MAX_BATCH_REBALANCE_PORTFOLIOS` (10) portfolio IDs. | Split the batch into groups of 10 or fewer portfolio IDs per call. |
+| `30` | `InvalidOracleAddress` | The address passed to `initialize` as `reflector_address` does not behave like a Reflector oracle (its `base()` call failed or returned unexpectedly). | Verify the Reflector contract address is correct and deployed on the target network before calling `initialize`. |
+| `31` | `TemplateNotFound` | `update_template` or `create_portfolio_from_template` referenced a template name that does not exist. | Call `list_templates` to see available names, or `create_template` first. |
+| `32` | `TemplateAlreadyExists` | `create_template` was called with a name that is already in use. | Use `update_template` to change an existing template, or choose a different name. |
+| `33` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | There is no delete entrypoint. Repurpose an existing template's allocations via `update_template` instead of creating a new one. |
+| `38` | `NoPendingAdmin` | `accept_admin` was called while no admin transfer is in flight. | Have the current admin call `propose_admin` first, or check `get_pending_admin` before accepting. |
+| `39` | `InvalidAdminProposal` | `propose_admin` was called with the address that is already the current admin. | Propose a different address; re-proposing the incumbent would be a no-op transfer. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 
@@ -316,6 +417,16 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - `total_value: i128`
   - `is_active: bool`
   - `pause_reason: PauseReason`
+  - `strategy: StrategyType` — rebalancing strategy (`Threshold`, `Periodic`, `Volatility`, `Custom`)
+  - `strategy_config: StrategyConfig` — per-strategy parameters
+- `StrategyType` (`contracts/src/types.rs`)
+  - Enum: `Threshold = 0`, `Periodic = 1`, `Volatility = 2`, `Custom = 3`
+  - Mirrors backend `RebalanceStrategyType` (excluding `dca`, which is handled separately)
+- `StrategyConfig` (`contracts/src/types.rs`)
+  - Struct: `interval_seconds: u64`, `volatility_threshold_bps: u32`, `min_interval_seconds: u64`
+  - Default: 7-day interval, 10% volatility threshold, 1-day minimum interval
+- `LegacyPortfolio` (`contracts/src/types.rs`)
+  - Pre-strategy schema Portfolio struct used for on-read migration of existing stored portfolios
 - `ContractCapabilitySummary` (`contracts/src/types.rs`)
   - Struct with `version: u32`, `schema_version: u32`, `capability_flags: u32`, `min_rebalance_threshold: u32`, `max_rebalance_threshold: u32`, `min_slippage_tolerance_bps: u32`, `max_slippage_tolerance_bps: u32`, `max_portfolio_assets: u32`.
 - `Asset` (`contracts/src/reflector.rs`)
@@ -324,3 +435,57 @@ The contract uses Soroban contract types (`#[contracttype]`) which are encoded a
   - Struct with `price: i128` and `timestamp: u64`.
 
 For call builders and generated client bindings, use Soroban CLI/SDK tooling against the compiled WASM artifact.
+
+## Property-Based Tests (`contracts/src/property_tests.rs`)
+
+The contract includes a comprehensive property-based test suite using the
+[`proptest`](https://docs.rs/proptest) crate. These tests verify invariant
+properties across **10 000 random input combinations** each.
+
+### Properties Tested
+
+| # | Property | Description | Cases |
+|---|----------|-------------|-------|
+| 1 | **Allocation sum invariance** | Target allocations always sum to exactly `ALLOCATION_DENOMINATOR` (10 000 bps). Creating a portfolio with valid allocations always succeeds. | 10 000 |
+| 2 | **Drift range** | Current allocation percentage and drift are always in `[0, 10000]` range. Portfolio valuation fields are within valid bounds. | 10 000 |
+| 3 | **Rebalance idempotency** | When no rebalance is needed (drift within threshold), the portfolio state is stable — executing a rebalance does not change state. If rebalance IS needed, one execution brings portfolio into a stable state requiring no further rebalance. | 10 000 |
+| 4 | **Deposit-withdraw roundtrip** | Depositing an amount and immediately withdrawing the same amount restores the original user balance. Internal portfolio balance returns to zero. | 10 000 |
+| 5 | **Random allocation validity** | Any randomly generated allocation that sums to 10 000 bps and has 2–10 assets is accepted. Stored allocations match input exactly, and portfolio invariants hold. | 10 000 |
+
+### Running Property Tests
+
+```bash
+# Run all property tests (50 000 total cases, ~3–5 minutes)
+cd contracts
+make test-property
+
+# Or directly:
+cargo test --features testutils property_ -- --nocapture
+```
+
+### CI Integration
+
+The property test suite runs in CI as part of the contract test pipeline.
+Test reports are uploaded as CI artifacts for regression analysis.
+
+### Random Seed Reproducibility
+
+Each proptest run logs the random seed used. To reproduce a specific failure:
+
+```bash
+PROPTEST_SEED=<hex-seed> cargo test --features testutils property_
+```
+
+## Property-Based Tests (`contracts/src/property_tests.rs`)
+
+The contract includes property-based tests using [`proptest`](https://docs.rs/proptest) with **10,000 random inputs per property**.
+
+| # | Property | Cases |
+|---|----------|-------|
+| 1 | Valid allocations (sum=10000) always accepted | 10,000 |
+| 2 | Invalid allocations (sum!=10000) rejected | 10,000 |
+| 3 | Deposit+withdraw roundtrip preserves balance | 10,000 |
+| 4 | Drift and current_pct in [0,10000] range | 10,000 |
+| 5 | Rebalance idempotent when no drift | 10,000 |
+
+Run: `cargo test --features testutils property_`

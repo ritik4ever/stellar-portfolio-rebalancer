@@ -10,6 +10,7 @@ import { startAnalyticsCompactionWorker } from './analyticsCompactionWorker.js'
 import { startIdempotencyCleanupWorker } from './idempotencyCleanupWorker.js'
 import { startPortfolioExportWorker } from './portfolioExportWorker.js'
 import { startUserAlertsWorker } from './userAlertsWorker.js'
+import { startScheduledExportWorker } from './scheduledExportWorker.js'
 import { startPriceHistoryWorkers, stopPriceHistoryWorkers } from './priceHistoryWorker.js'
 
 export interface WorkerRuntimeStatus {
@@ -166,7 +167,8 @@ export function startAllWorkers(): void {
             startAnalyticsCompactionWorker() as Worker,
             startIdempotencyCleanupWorker() as Worker,
             startPortfolioExportWorker() as Worker,
-            startUserAlertsWorker()
+            startUserAlertsWorker(),
+            startScheduledExportWorker() as Worker
         )
         
         startPriceHistoryWorkers()

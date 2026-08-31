@@ -16,6 +16,7 @@ import PriceTracker from './PriceTracker'
 
 import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
+import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
 import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
 import { buildPortfolioCloneDraft, savePortfolioCloneDraft, loadPortfolioCloneDraft, clearPortfolioCloneDraft } from '../utils/portfolioCloneDraft'
@@ -185,6 +186,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
             queryClient.invalidateQueries({ queryKey: priceKeys.all }),
+            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
         ])
     }, [queryClient])
 
@@ -491,6 +493,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
 
                     <div className="flex items-center space-x-4">
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('analytics')}
+                            className="rounded-lg px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            title="View portfolio analytics"
+                        >
+                            Analytics
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('tax-report')}
+                            className="rounded-lg px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            title="View tax report"
+                        >
+                            Tax Report
+                        </button>
                         <button
                             type="button"
                             onClick={() => onNavigate('settings')}
@@ -991,17 +1009,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                 )}
                             </div>
 
-import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
-
-...
-    const refreshData = useCallback(async () => {
-        await Promise.all([
-            queryClient.invalidateQueries({ queryKey: portfolioKeys.all }),
-            queryClient.invalidateQueries({ queryKey: priceKeys.all }),
-            queryClient.invalidateQueries({ queryKey: marketMoversKeys.all }),
-        ])
-    }, [queryClient])
-...
                             <PriceTracker />
                         </div>
                     </div>

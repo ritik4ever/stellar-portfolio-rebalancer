@@ -9,6 +9,38 @@ import { databaseService } from './databaseService.js'
 
 type PriceResolutionHint = PriceFeedMeta['resolutionHint']
 
+/**
+ * Outcome of a Reflector oracle reachability probe.
+ *
+ * `reason` distinguishes the failure modes that need different operator action:
+ *   not_configured — REFLECTOR_API_URL is unset (fallback price source only)
+ *   unreachable    — DNS/TCP/TLS failure reaching the oracle
+ *   timeout        — oracle accepted the connection but did not answer in time
+ *   http_error     — oracle answered with a non-2xx status
+ *   no_data        — oracle answered but returned no price for the probed asset
+ *   stale          — oracle answered with a quote older than PRICE_DATA_MAX_AGE
+ *   ok             — fresh quote returned
+ */
+export type OracleReachabilityReason =
+    | 'ok'
+    | 'not_configured'
+    | 'unreachable'
+    | 'timeout'
+    | 'http_error'
+    | 'no_data'
+    | 'stale'
+
+export interface OracleReachabilityResult {
+    reachable: boolean
+    reason: OracleReachabilityReason
+    asset: string
+    endpoint?: string
+    latencyMs?: number
+    httpStatus?: number
+    quoteTimestamp?: number
+    error?: string
+}
+
 const DEFAULT_SYMBOLS = ['XLM', 'BTC', 'ETH', 'USDC']
 const DEFAULT_COIN_IDS: Record<string, string> = {
     'XLM': 'stellar',
@@ -61,6 +93,18 @@ export class ReflectorService {
     private getCoinIdMap(): Record<string, string> {
         const map = assetRegistryService.getCoingeckoIdMap()
         return Object.keys(map).length > 0 ? map : { ...DEFAULT_COIN_IDS }
+    }
+
+    /** CoinGecko / Reflector API base URL (supports REFLECTOR_SERVICE_URL for offline dev) */
+    private getBaseUrl(): string {
+        const customUrl = process.env.REFLECTOR_SERVICE_URL || process.env.COINGECKO_BASE_URL
+        if (customUrl && customUrl.trim()) {
+            return customUrl.trim().replace(/\/$/, '')
+        }
+        const apiKey = this.coinGeckoApiKey
+        return apiKey && apiKey.trim()
+            ? 'https://pro-api.coingecko.com/api/v3'
+            : 'https://api.coingecko.com/api/v3'
     }
 
     async getCurrentPrices(): Promise<PricesMap> {
@@ -400,9 +444,7 @@ export class ReflectorService {
 
         try {
             const apiKey = this.coinGeckoApiKey
-
-            // FIXED: Use correct API endpoints
-            const baseUrl = 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
             logger.info('[DEBUG] Using API', { api: apiKey ? 'CoinGecko Pro' : 'CoinGecko Free' })
             logger.info('[DEBUG] Base URL', { baseUrl })
 
@@ -540,9 +582,7 @@ export class ReflectorService {
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -601,9 +641,7 @@ export class ReflectorService {
             if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',
@@ -715,12 +753,122 @@ export class ReflectorService {
         return result
     }
 
+    /**
+     * Lightweight, read-only reachability probe for the Reflector oracle itself
+     * (distinct from testApiConnectivity, which exercises the CoinGecko fallback).
+     *
+     * Fetches a single asset price and reports a machine-readable `reason` so
+     * callers — the startup self-test in particular — can tell an unconfigured
+     * oracle from an unreachable one, an HTTP error, or a stale feed.
+     */
+    async testOracleReachability(
+        options: { timeoutMs?: number; asset?: string } = {},
+    ): Promise<OracleReachabilityResult> {
+        const timeoutMs = options.timeoutMs ?? 5000
+        const asset = options.asset || this.getAssetList()[0] || DEFAULT_SYMBOLS[0]
+        const endpoint = this.reflectorApiUrl.replace(/\/$/, '')
+
+        if (!endpoint) {
+            return {
+                reachable: false,
+                reason: 'not_configured',
+                asset,
+                error: 'REFLECTOR_API_URL is not set',
+            }
+        }
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+        const startedAt = Date.now()
+
+        try {
+            const response = await fetch(
+                `${endpoint}/prices?assets=${encodeURIComponent(asset)}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        Accept: 'application/json',
+                        'User-Agent': 'StellarPortfolioRebalancer/1.0',
+                    },
+                    signal: controller.signal,
+                },
+            )
+
+            const latencyMs = Date.now() - startedAt
+
+            if (!response.ok) {
+                return {
+                    reachable: false,
+                    reason: 'http_error',
+                    asset,
+                    endpoint,
+                    latencyMs,
+                    httpStatus: response.status,
+                    error: `Reflector API responded ${response.status}`,
+                }
+            }
+
+            const payload = await response.json() as
+                | { prices?: Record<string, { price?: unknown; timestamp?: number }> }
+                | Record<string, { price?: unknown; timestamp?: number }>
+            const rows = ('prices' in payload && payload.prices) ? payload.prices : payload
+            const row = (rows as Record<string, { price?: unknown; timestamp?: number }>)?.[asset]
+
+            if (!row || row.price === undefined || row.price === null) {
+                return {
+                    reachable: false,
+                    reason: 'no_data',
+                    asset,
+                    endpoint,
+                    latencyMs,
+                    httpStatus: response.status,
+                    error: `Reflector returned no price for ${asset}`,
+                }
+            }
+
+            if (typeof row.timestamp === 'number' && this.isPriceStale(row.timestamp)) {
+                return {
+                    reachable: true,
+                    reason: 'stale',
+                    asset,
+                    endpoint,
+                    latencyMs,
+                    httpStatus: response.status,
+                    quoteTimestamp: row.timestamp,
+                    error: `Reflector price for ${asset} is older than ${this.PRICE_DATA_MAX_AGE}s`,
+                }
+            }
+
+            return {
+                reachable: true,
+                reason: 'ok',
+                asset,
+                endpoint,
+                latencyMs,
+                httpStatus: response.status,
+                quoteTimestamp: row.timestamp,
+            }
+        } catch (error) {
+            const aborted = error instanceof Error && error.name === 'AbortError'
+            return {
+                reachable: false,
+                reason: aborted ? 'timeout' : 'unreachable',
+                asset,
+                endpoint,
+                latencyMs: Date.now() - startedAt,
+                error: aborted
+                    ? `Reflector oracle did not respond within ${timeoutMs}ms`
+                    : error instanceof Error ? error.message : String(error),
+            }
+        } finally {
+            clearTimeout(timeoutId)
+        }
+    }
+
     async testApiConnectivity(): Promise<{ success: boolean, error?: string, data?: any }> {
         try {
             const apiKey = this.coinGeckoApiKey
-            const baseUrl = apiKey && apiKey.trim()
-                ? 'https://pro-api.coingecko.com/api/v3'
-                : 'https://api.coingecko.com/api/v3'
+            const baseUrl = this.getBaseUrl()
 
             const headers: Record<string, string> = {
                 'Accept': 'application/json',

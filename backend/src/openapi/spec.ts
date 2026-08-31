@@ -398,6 +398,91 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/portfolios': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'List all portfolios',
+                description: 'Get all portfolios, optionally filtered by user address query parameter.',
+                parameters: [{ name: 'userAddress', in: 'query', required: false, schema: { type: 'string' } }],
+                responses: {
+                    '200': {
+                        description: 'List of portfolios',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolios: {
+                                                    type: 'array',
+                                                    items: { $ref: '#/components/schemas/Portfolio' },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/clone': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Clone portfolio',
+                description: 'Create a new portfolio cloning the allocations, threshold, and strategy of an existing portfolio.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: false,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    name: { type: 'string', description: 'Optional new name for cloned portfolio' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '201': {
+                        description: 'Portfolio cloned',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolioId: { type: 'string' },
+                                                portfolio: { $ref: '#/components/schemas/Portfolio' },
+                                                status: { type: 'string', example: 'created' },
+                                                mode: { type: 'string', enum: ['demo', 'onchain'] },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/user/{address}/portfolios': {
             get: {
                 tags: ['Portfolio'],
@@ -428,6 +513,45 @@ const spec: Record<string, any> = {
                     '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolios/summary': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Multi-portfolio dashboard summary',
+                description: 'Get a compact summary of every portfolio belonging to one address in a single request, instead of one call per portfolio. Prices are read once from the oracle cache and shared across every portfolio in the response. Returns an empty array when the address has no portfolios. When JWT auth is enabled, only the authenticated user (token subject) may summarise their own address.',
+                parameters: [{ name: 'userAddress', in: 'query', required: true, schema: { type: 'string' }, description: 'Stellar address whose portfolios are summarised.' }],
+                security: [{ adminAuth: [] }],
+                responses: {
+                    '200': {
+                        description: 'Portfolio summaries',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolios: {
+                                                    type: 'array',
+                                                    items: { $ref: '#/components/schemas/PortfolioSummary' },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -685,6 +809,32 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Performance summary', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/tax-report': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get tax report',
+                description:
+                    'Realized gain/loss tax report for a tax year. Lots are matched using the selected ' +
+                    'cost-basis method (FIFO by default). `format=turbotax` returns a TurboTax-importable ' +
+                    'CSV with the columns: Currency Name, Purchase Date, Cost Basis, Date Sold, Proceeds.',
+                parameters: [
+                    { name: 'year', in: 'query', schema: { type: 'integer', minimum: 2000, maximum: 2100, description: 'Tax year (defaults to the current year)' } },
+                    { name: 'format', in: 'query', schema: { type: 'string', enum: ['json', 'csv', 'turbotax'], default: 'json' } },
+                    { name: 'costBasisMethod', in: 'query', schema: { type: 'string', enum: ['fifo', 'lifo', 'hifo'], default: 'fifo', description: 'Lot-matching method used to determine cost basis' } },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Tax report summary (JSON) or CSV download (format=csv or format=turbotax)',
+                        content: {
+                            'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } },
+                            'text/csv': { schema: { type: 'string' } },
+                        },
+                    },
+                    '400': { description: 'Invalid year or costBasisMethod', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -1136,6 +1286,64 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/notifications/alerts/thresholds': {
+            get: {
+                tags: ['Notifications'],
+                summary: 'Get price alert thresholds',
+                description: 'Get per-asset price alert threshold overrides and the global default threshold for a user.',
+                parameters: [{ name: 'userId', in: 'query', required: true, schema: { type: 'string' } }],
+                responses: {
+                    '200': { description: 'Alert thresholds', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            put: {
+                tags: ['Notifications'],
+                summary: 'Set price alert thresholds',
+                description: 'Set or merge per-asset price alert threshold overrides for a user.',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['thresholds'],
+                                properties: {
+                                    userId: { type: 'string', description: 'Required when auth is disabled' },
+                                    thresholds: {
+                                        type: 'object',
+                                        additionalProperties: { type: 'number', minimum: 1 },
+                                        description: 'Map of asset code to threshold percentage',
+                                        example: { XLM: 7, BTC: 3 },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Updated alert thresholds', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { ValidationError: { $ref: '#/components/examples/ValidationError' } } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            delete: {
+                tags: ['Notifications'],
+                summary: 'Delete price alert threshold',
+                description: 'Remove a single per-asset price alert threshold override for a user.',
+                parameters: [
+                    { name: 'userId', in: 'query', required: true, schema: { type: 'string' } },
+                    { name: 'asset', in: 'query', required: true, schema: { type: 'string' }, description: 'Asset code (e.g. XLM)' },
+                ],
+                responses: {
+                    '200': { description: 'Threshold removed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
+                    '400': { description: 'userId or asset required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '404': { description: 'No override found for asset', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/queue/health': {
             get: {
                 tags: ['Queue'],
@@ -1272,6 +1480,22 @@ const spec: Record<string, any> = {
                 },
             },
             Portfolio: { type: 'object' },
+            PortfolioSummary: {
+                type: 'object',
+                required: ['id', 'name', 'total_value_usd', 'drift_status', 'last_rebalanced'],
+                properties: {
+                    id: { type: 'string', example: 'portfolio-abc123' },
+                    name: { type: 'string', nullable: true, description: 'Null when the portfolio was never named.', example: 'Core holdings' },
+                    total_value_usd: { type: 'number', description: 'Current USD value of all holdings. An asset with no available price contributes zero.', example: 10000 },
+                    drift_status: {
+                        type: 'string',
+                        enum: ['ok', 'warning', 'critical'],
+                        description: 'Largest allocation drift measured against the portfolio\'s own rebalance threshold: critical past the threshold, warning from half the threshold up to it, otherwise ok.',
+                        example: 'warning',
+                    },
+                    last_rebalanced: { type: 'string', format: 'date-time', nullable: true, example: '2026-01-02T00:00:00.000Z' },
+                },
+            },
             PriceData: { type: 'object' },
             RiskMetrics: { type: 'object' },
             RebalanceResult: { type: 'object' },
@@ -1296,6 +1520,7 @@ const spec: Record<string, any> = {
                     webhookUrl: { type: 'string', format: 'uri', pattern: '^https?://', description: 'Required when webhookEnabled is true. Must use http or https.' },
                     events: { $ref: '#/components/schemas/NotificationEventsInput' },
                     digestMode: { type: 'string', enum: ['immediate','daily','weekly'], description: 'Delivery mode for notifications: immediate (per-event), daily digest, or weekly digest.' },
+                    priceAlertThresholds: { type: 'object', additionalProperties: { type: 'number', minimum: 1 }, description: 'Per-asset price alert threshold overrides keyed by asset code (e.g. XLM).', example: { XLM: 7, BTC: 3 } },
                 },
             },
         },

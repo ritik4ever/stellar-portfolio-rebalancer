@@ -1,0 +1,184 @@
+name: Contract WASM Size Check
+
+# Runs on every PR that touches contracts/ or this workflow file.
+# Also runs on pushes to main so the baseline stays auditable.
+
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contract-wasm-size.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contract-wasm-size.yml"
+
+# ── Tunable knobs ─────────────────────────────────────────────────────────────
+env:
+  # Build artefact path (relative to contracts/)
+  WASM_PATH: target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+  # Baseline file path (relative to contracts/)
+  BASELINE_FILE: wasm-size-baseline.txt
+  # Percentage growth that triggers a failure (integer, e.g. 10 = 10 %)
+  WASM_SIZE_THRESHOLD_PCT: "10"
+
+jobs:
+  wasm-size:
+    name: WASM size regression check
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write   # needed to post a PR comment with the size delta
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust (wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: wasm-size-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
+          restore-keys: |
+            wasm-size-${{ runner.os }}-
+
+      - name: Build contract (release WASM)
+        working-directory: contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Measure WASM size and compare against baseline
+        id: size_check
+        working-directory: contracts
+        run: |
+          set -euo pipefail
+
+          # ── Read baseline ──────────────────────────────────────────────────
+          if [ ! -f "$BASELINE_FILE" ]; then
+            echo "::error::Baseline file '$BASELINE_FILE' not found in contracts/."
+            echo "::error::Run 'wc -c < $WASM_PATH' after a release build and add the"
+            echo "::error::result to contracts/$BASELINE_FILE (see file for format)."
+            exit 1
+          fi
+
+          # Extract the numeric value from BASELINE= line, ignoring comment lines.
+          BASELINE=$(grep -E '^BASELINE=[0-9]+' "$BASELINE_FILE" | head -1 | cut -d= -f2)
+          if [ -z "$BASELINE" ] || [ "$BASELINE" -le 0 ] 2>/dev/null; then
+            echo "::error::Could not parse a positive integer from BASELINE= in $BASELINE_FILE"
+            exit 1
+          fi
+
+          # ── Measure actual size ────────────────────────────────────────────
+          if [ ! -f "$WASM_PATH" ]; then
+            echo "::error::WASM artefact not found at contracts/$WASM_PATH"
+            exit 1
+          fi
+          ACTUAL=$(wc -c < "$WASM_PATH")
+
+          # ── Compute delta ──────────────────────────────────────────────────
+          # Use awk for floating-point arithmetic; bash only does integer math.
+          DELTA=$((ACTUAL - BASELINE))
+          PCT=$(awk "BEGIN { printf \"%.2f\", ($ACTUAL - $BASELINE) / $BASELINE * 100 }")
+          ABS_PCT=$(awk "BEGIN { printf \"%.2f\", ($ACTUAL - $BASELINE < 0 ? $BASELINE - $ACTUAL : $ACTUAL - $BASELINE) / $BASELINE * 100 }")
+
+          # ── Emit step summary ──────────────────────────────────────────────
+          {
+            echo "## Contract WASM Size Report"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Baseline | $(numfmt --grouping "$BASELINE") bytes |"
+            echo "| Actual   | $(numfmt --grouping "$ACTUAL") bytes |"
+            echo "| Delta    | $([ $DELTA -ge 0 ] && echo "+")${DELTA} bytes (${PCT}%) |"
+            echo "| Threshold | ±${WASM_SIZE_THRESHOLD_PCT}% |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # ── Expose outputs for downstream use (e.g. PR comments) ──────────
+          echo "baseline=$BASELINE"   >> "$GITHUB_OUTPUT"
+          echo "actual=$ACTUAL"       >> "$GITHUB_OUTPUT"
+          echo "delta=$DELTA"         >> "$GITHUB_OUTPUT"
+          echo "pct=$PCT"             >> "$GITHUB_OUTPUT"
+
+          # ── Enforce threshold (growth only; shrinkage is always fine) ──────
+          OVER_THRESHOLD=$(awk "BEGIN { print ($ACTUAL > $BASELINE && ($ACTUAL - $BASELINE) / $BASELINE * 100 > $WASM_SIZE_THRESHOLD_PCT) ? 1 : 0 }")
+          if [ "$OVER_THRESHOLD" = "1" ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            echo "::error::WASM size regression: ${ACTUAL} bytes is ${PCT}% larger than baseline ${BASELINE} bytes (threshold: +${WASM_SIZE_THRESHOLD_PCT}%)."
+            echo "::error::To accept this growth, update BASELINE in contracts/${BASELINE_FILE} and commit the change alongside your feature."
+            exit 1
+          fi
+
+          echo "failed=false" >> "$GITHUB_OUTPUT"
+
+          if [ "$DELTA" -lt 0 ]; then
+            echo "::notice::WASM shrank by ${ABS_PCT}% (${ACTUAL} vs baseline ${BASELINE} bytes). Consider updating the baseline."
+          else
+            echo "::notice::WASM size OK: ${ACTUAL} bytes (+${PCT}% within ${WASM_SIZE_THRESHOLD_PCT}% threshold)."
+          fi
+
+      - name: Post PR comment with size delta
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const baseline = '${{ steps.size_check.outputs.baseline }}';
+            const actual   = '${{ steps.size_check.outputs.actual }}';
+            const delta    = '${{ steps.size_check.outputs.delta }}';
+            const pct      = '${{ steps.size_check.outputs.pct }}';
+            const failed   = '${{ steps.size_check.outputs.failed }}' === 'true';
+            const threshold = process.env.WASM_SIZE_THRESHOLD_PCT;
+
+            const sign = delta >= 0 ? '+' : '';
+            const icon = failed ? '❌' : (delta < 0 ? '✅' : '✅');
+            const status = failed
+              ? `**Regression detected** — size grew by ${sign}${delta} bytes (${sign}${pct}%), exceeding the ±${threshold}% threshold.`
+              : `Size change is within the ±${threshold}% threshold.`;
+
+            const body = [
+              `### ${icon} Contract WASM Size Check`,
+              '',
+              `| | Bytes |`,
+              `|---|---|`,
+              `| Baseline | ${Number(baseline).toLocaleString()} |`,
+              `| This PR  | ${Number(actual).toLocaleString()} |`,
+              `| Delta    | ${sign}${Number(delta).toLocaleString()} (${sign}${pct}%) |`,
+              '',
+              status,
+              '',
+              failed
+                ? `To accept this size increase, update \`BASELINE\` in \`contracts/wasm-size-baseline.txt\` to \`${actual}\` in this PR.`
+                : '',
+            ].join('\n');
+
+            // Upsert: replace an existing comment if re-running.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Contract WASM Size Check')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

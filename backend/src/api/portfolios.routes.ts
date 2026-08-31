@@ -11,16 +11,19 @@ import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
+import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema } from './validation.js'
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
-import { getPortfolioExport } from '../services/portfolioExportService.js'
+import { getPortfolioExport, getRebalanceHistoryExport, setExportSchedule, getExportSchedule, deleteExportSchedule } from '../services/portfolioExportService.js'
+import { buildRebalancePlan, buildBatchRebalancePlan } from '../services/rebalancePlan.js'
 
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, createDraftSchema, updateDraftSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
+import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
 import type { Portfolio } from '../types/index.js'
 
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
@@ -45,8 +48,9 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
         const search = req.query.search as string || ''
         const limit = parseInt(req.query.limit as string) || 20
         const offset = parseInt(req.query.offset as string) || 0
+        const includeArchived = req.query.include_archived === 'true'
 
-        const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset)
+        const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset, includeArchived)
         return ok(res, { portfolios, limit, offset })
     } catch (error) {
         logger.error('[ERROR] Search portfolios failed', { error: getErrorObject(error) })
@@ -57,6 +61,55 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
 const stellarService = new StellarService()
 const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
+
+/**
+ * Dashboard summary for every portfolio belonging to one address.
+ *
+ * A dashboard listing N portfolios previously needed N calls to
+ * `GET /portfolio/:id`, each of which resolves prices independently. This
+ * serves the same listing from one database read plus one price lookup,
+ * regardless of how many portfolios come back. Prices come from
+ * `getCurrentPrices()`, which is already backed by the Redis and in-process
+ * oracle caches, so the endpoint does no oracle round trip on a warm cache.
+ */
+portfoliosRouter.get('/portfolios/summary', validateQuery(portfolioSummaryQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const userAddress = req.query.userAddress as string
+
+        // Ownership rules mirror GET /user/:address/portfolios: when auth is on,
+        // an address's portfolios are only visible to that address.
+        const authConfig = getAuthConfig()
+        const allowPublicInDemo =
+            authConfig.enabled &&
+            featureFlags.demoMode &&
+            featureFlags.allowPublicUserPortfoliosInDemo
+
+        if (authConfig.enabled && !allowPublicInDemo) {
+            let nextCalled = false
+            requireJwt(req, res, () => { nextCalled = true })
+            if (!nextCalled) return
+
+            if (req.user?.address !== userAddress) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only view your own portfolios')
+            }
+        }
+
+        const portfolios = await portfolioStorage.getUserPortfolios(userAddress)
+
+        // An unknown address resolves to an empty list without touching the
+        // price feed at all.
+        if (portfolios.length === 0) {
+            return ok(res, { portfolios: [] })
+        }
+
+        const prices = await reflectorService.getCurrentPrices()
+
+        return ok(res, { portfolios: buildPortfolioSummaries(portfolios, prices) })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolio summaries failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
 
 portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), async (req: Request, res: Response) => {
     try {
@@ -294,6 +347,66 @@ portfoliosRouter.get('/portfolio/:id/share', async (req: Request, res: Response)
 })
 
 // ================================
+// ARCHIVE / RESTORE ROUTES
+// ================================
+
+portfoliosRouter.delete('/portfolio/:id', ...protectedWriteLimiter, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only archive your own portfolio')
+        }
+
+        if (portfolio.archivedAt) {
+            return fail(res, 400, 'ALREADY_ARCHIVED', 'Portfolio is already archived')
+        }
+
+        const archived = await portfolioStorage.archivePortfolio(portfolioId)
+        if (!archived) return fail(res, 500, 'INTERNAL_ERROR', 'Failed to archive portfolio')
+
+        logger.info('[ARCHIVE] Portfolio archived', { portfolioId })
+        return ok(res, { portfolioId, status: 'archived', archivedAt: new Date().toISOString() })
+    } catch (error) {
+        logger.error('[ERROR] Archive portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/:id/restore', ...protectedWriteLimiter, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled && (!req.user || portfolio.userAddress !== req.user.address)) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only restore your own portfolio')
+        }
+
+        if (!portfolio.archivedAt) {
+            return fail(res, 400, 'NOT_ARCHIVED', 'Portfolio is not archived')
+        }
+
+        const restored = await portfolioStorage.restorePortfolio(portfolioId)
+        if (!restored) return fail(res, 500, 'INTERNAL_ERROR', 'Failed to restore portfolio')
+
+        logger.info('[RESTORE] Portfolio restored', { portfolioId })
+        return ok(res, { portfolioId, status: 'restored' })
+    } catch (error) {
+        logger.error('[ERROR] Restore portfolio failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ================================
 // DRAFT PORTFOLIO ROUTES
 // ================================
 
@@ -398,6 +511,83 @@ portfoliosRouter.get('/user/:address/drafts', async (req: Request, res: Response
         return ok(res, { drafts })
     } catch (error) {
         logger.error('[DRAFT] List drafts failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// ── recurring emailed exports (#1411) ────────────────────────────────────────
+
+/** Opt a portfolio into (or out of) a weekly emailed CSV export. */
+portfoliosRouter.put(
+    '/portfolio/:id/export-schedule',
+    requireJwt,
+    validateRequest(exportScheduleSchema),
+    async (req: Request, res: Response) => {
+        try {
+            const portfolioId = req.params.id
+            const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+            if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+            if (portfolio.userAddress !== req.user!.address) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only schedule exports for your own portfolio')
+            }
+            if (!databaseService.hasFullConsent(portfolio.userAddress)) {
+                return fail(res, 403, 'FORBIDDEN', 'Active consent is required before scheduling exports')
+            }
+
+            const { frequency, emailAddress, enabled, firstRunAt } = req.body
+            const schedule = setExportSchedule({
+                portfolioId,
+                userAddress: portfolio.userAddress,
+                emailAddress,
+                frequency,
+                enabled,
+                firstRunAt,
+            })
+
+            return ok(res, { schedule })
+        } catch (error) {
+            logger.error('[EXPORT-SCHEDULE] Failed to save schedule', { error: getErrorObject(error) })
+            return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        }
+    }
+)
+
+/** Read the current schedule for a portfolio. */
+portfoliosRouter.get('/portfolio/:id/export-schedule', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        if (portfolio.userAddress !== req.user!.address) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only view your own export schedule')
+        }
+
+        const schedule = getExportSchedule(portfolioId)
+        if (!schedule) return fail(res, 404, 'NOT_FOUND', 'No export schedule configured for this portfolio')
+
+        return ok(res, { schedule })
+    } catch (error) {
+        logger.error('[EXPORT-SCHEDULE] Failed to read schedule', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/** Cancel a recurring export. */
+portfoliosRouter.delete('/portfolio/:id/export-schedule', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        const portfolio = await portfolioStorage.getPortfolio(portfolioId)
+        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+        if (portfolio.userAddress !== req.user!.address) {
+            return fail(res, 403, 'FORBIDDEN', 'You can only cancel your own export schedule')
+        }
+
+        const deleted = deleteExportSchedule(portfolioId)
+        if (!deleted) return fail(res, 404, 'NOT_FOUND', 'No export schedule configured for this portfolio')
+
+        return ok(res, { portfolioId, deleted: true })
+    } catch (error) {
+        logger.error('[EXPORT-SCHEDULE] Failed to delete schedule', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -509,11 +699,70 @@ portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Resp
             }
         }
 
-        const list = await portfolioStorage.getUserPortfolios(address)
+        const includeArchived = req.query.include_archived === 'true'
+        const list = await portfolioStorage.getUserPortfolios(address, includeArchived)
 
         return ok(res, { portfolios: list })
     } catch (error) {
         logger.error('[ERROR] Get user portfolios failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
+    try {
+        const address = (req.query.userAddress || req.query.address) as string | undefined
+        let list: Portfolio[] = []
+        if (address) {
+            list = await portfolioStorage.getUserPortfolios(address)
+        } else {
+            list = await portfolioStorage.getAllPortfolios()
+        }
+        return ok(res, { portfolios: list })
+    } catch (error) {
+        logger.error('[ERROR] Get portfolios list failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
+
+        const parsed = clonePortfolioSchema.safeParse(req.body ?? {})
+        if (!parsed.success) {
+            const first = parsed.error.issues[0]
+            return fail(res, 400, 'VALIDATION_ERROR', first?.message ?? 'Validation failed')
+        }
+
+        const original = await portfolioStorage.getPortfolio(portfolioId)
+        if (!original) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const authConfig = getAuthConfig()
+        if (authConfig.enabled) {
+            let nextCalled = false
+            requireJwt(req, res, () => { nextCalled = true })
+            if (!nextCalled) return
+
+            if (req.user?.address !== original.userAddress) {
+                return fail(res, 403, 'FORBIDDEN', 'You can only clone your own portfolio')
+            }
+        }
+
+        const cloneName = parsed.data.name
+        const clone = await portfolioStorage.clonePortfolio(portfolioId, cloneName)
+        if (!clone) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
+
+        const mode = featureFlags.demoMode ? 'demo' : 'onchain'
+        return ok(res, {
+            portfolioId: clone.id,
+            portfolio: clone,
+            status: 'created',
+            mode
+        }, { status: 201 })
+    } catch (error) {
+        logger.error('[ERROR] Clone portfolio failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -528,6 +777,47 @@ portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: 
         return ok(res, buildRebalancePlan(portfolio, prices, feedMeta))
     } catch (error) {
         logger.error('[ERROR] Rebalance plan failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Batch rebalance planning: compute plans for many portfolios in one call
+// without executing any trades. Each portfolio is planned in isolation; a
+// failure for one portfolio does not block the others, and the response
+// carries a combined summary (total trades / estimated fees).
+portfoliosRouter.post('/portfolios/rebalance-plans', validateRequest(batchRebalancePlansSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioIds = req.body.portfolioIds as string[]
+        const uniqueIds = [...new Set(portfolioIds)]
+
+        // Per-portfolio load isolation: a missing/unreadable portfolio is
+        // reported in `failed` instead of aborting the whole batch.
+        const portfolios: Portfolio[] = []
+        const failed: { portfolioId: string; error: string }[] = []
+        for (const portfolioId of uniqueIds) {
+            try {
+                const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
+                if (!portfolio) {
+                    failed.push({ portfolioId, error: 'Portfolio not found' })
+                    continue
+                }
+                portfolios.push(portfolio)
+            } catch (error) {
+                failed.push({ portfolioId, error: getErrorMessage(error) })
+            }
+        }
+
+        const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()
+        const result = buildBatchRebalancePlan(portfolios, prices, feedMeta)
+        // Merge load-phase failures into the planning-phase failure list.
+        result.failed.push(...failed)
+        result.summary.failedCount = result.failed.length
+        result.summary.totalPortfolios = uniqueIds.length
+        result.summary.plansGenerated = result.plans.length
+
+        return ok(res, result)
+    } catch (error) {
+        logger.error('[ERROR] Batch rebalance plans failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -669,6 +959,36 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
         });
     } catch (error) {
         logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
+portfoliosRouter.get('/portfolio/:id/rebalance-history/export', validateQuery(rebalanceHistoryExportQuerySchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
+        }
+
+        const { format = 'json', from, to } = req.query as any;
+
+        const start = Date.now();
+        const result = await getRebalanceHistoryExport(portfolioId, format, { from, to });
+        const duration = Date.now() - start;
+
+        if (!result) {
+            return fail(res, 404, 'NOT_FOUND', 'Portfolio not found');
+        }
+
+        if (duration > 200) {
+            logger.warn('Slow rebalance history export detected', { portfolioId, durationMs: duration });
+        }
+
+        res.setHeader('Content-Type', result.contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+        return res.status(200).send(result.body);
+    } catch (error) {
+        logger.error('[ERROR] Failed to export rebalance history', { error: getErrorObject(error) });
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
 });

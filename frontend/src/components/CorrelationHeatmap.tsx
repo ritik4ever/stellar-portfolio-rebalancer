@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
+import { Modal } from './ui/Modal'
+import { usePriceCandlestick } from '../hooks/queries/usePriceCandlestickQuery'
 
 export type CorrelationTimeRange = '7D' | '30D' | '90D'
 
@@ -48,6 +50,35 @@ function getCoefficient(matrix: CorrelationMatrix | undefined, rowIndex: number,
   return clampCorrelation(typeof value === 'number' ? value : 0)
 }
 
+function computePearsonCorrelation(pricesA: number[], pricesB: number[]): number {
+  if (pricesA.length !== pricesB.length || pricesA.length < 3) return 0
+  const returnsA: number[] = []
+  const returnsB: number[] = []
+  for (let i = 1; i < pricesA.length; i++) {
+    returnsA.push(pricesA[i] > 0 ? (pricesA[i] - pricesA[i - 1]) / pricesA[i - 1] : 0)
+    returnsB.push(pricesB[i] > 0 ? (pricesB[i] - pricesB[i - 1]) / pricesB[i - 1] : 0)
+  }
+  const n = returnsA.length
+  if (n < 3) return 0
+  const meanA = returnsA.reduce((s, v) => s + v, 0) / n
+  const meanB = returnsB.reduce((s, v) => s + v, 0) / n
+  let cov = 0, varA = 0, varB = 0
+  for (let i = 0; i < n; i++) {
+    const da = returnsA[i] - meanA
+    const db = returnsB[i] - meanB
+    cov += da * db
+    varA += da * da
+    varB += db * db
+  }
+  const denom = Math.sqrt(varA * varB)
+  return denom === 0 ? 0 : clampCorrelation(cov / denom)
+}
+
+interface SelectedPair {
+  rowAsset: string
+  columnAsset: string
+}
+
 const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({
   assets,
   correlations,
@@ -55,6 +86,44 @@ const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({
 }) => {
   const [selectedRange, setSelectedRange] = useState<CorrelationTimeRange>(defaultRange)
   const [hoveredCell, setHoveredCell] = useState<HeatmapCell | null>(null)
+  const [selectedPair, setSelectedPair] = useState<SelectedPair | null>(null)
+
+  const { data: candleDataA } = usePriceCandlestick(
+    selectedPair ? selectedPair.rowAsset : null,
+    '1D'
+  )
+  const { data: candleDataB } = usePriceCandlestick(
+    selectedPair ? selectedPair.columnAsset : null,
+    '1D'
+  )
+
+  const trendCorrelations = useMemo(() => {
+    if (!candleDataA || !candleDataB) return null
+    const pricesA = candleDataA.candles.map((c) => c.close)
+    const pricesB = candleDataB.candles.map((c) => c.close)
+    if (pricesA.length < 7 || pricesB.length < 7) return null
+
+    const minLen = Math.min(pricesA.length, pricesB.length)
+    const alignedA = pricesA.slice(pricesA.length - minLen)
+    const alignedB = pricesB.slice(pricesB.length - minLen)
+
+    const fullPeriod = computePearsonCorrelation(alignedA, alignedB)
+    const mid = Math.floor(minLen / 2)
+    const recent = computePearsonCorrelation(alignedA.slice(mid), alignedB.slice(mid))
+    const older = computePearsonCorrelation(alignedA.slice(0, mid), alignedB.slice(0, mid))
+
+    return { fullPeriod, recent, older }
+  }, [candleDataA, candleDataB])
+
+  const handleCellClick = useCallback((cell: HeatmapCell) => {
+    if (cell.rowAsset !== cell.columnAsset) {
+      setSelectedPair({ rowAsset: cell.rowAsset, columnAsset: cell.columnAsset })
+    }
+  }, [])
+
+  const closeModal = useCallback(() => {
+    setSelectedPair(null)
+  }, [])
 
   const visibleAssets = useMemo(() => assets.slice(0, MAX_ASSETS), [assets])
   const selectedMatrix = correlations[selectedRange]
@@ -151,7 +220,8 @@ const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({
                       onFocus={() => setHoveredCell(cell)}
                       onMouseLeave={() => setHoveredCell(null)}
                       onBlur={() => setHoveredCell(null)}
-                      className="h-11 min-w-11 rounded border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      onClick={() => handleCellClick(cell)}
+                      className="h-11 min-w-11 rounded border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
                       style={{ backgroundColor: correlationColor(coefficient) }}
                       data-testid={`correlation-cell-${rowIndex}-${columnIndex}`}
                       data-correlation={coefficient.toFixed(2)}
@@ -190,6 +260,59 @@ const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({
           {hoveredCell.coefficient.toFixed(2)}
         </div>
       )}
+
+      <Modal open={!!selectedPair} onClose={closeModal} title="Correlation Detail">
+        {selectedPair && (
+          <div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Historical correlation trend for <span className="font-semibold text-gray-900 dark:text-white">{selectedPair.rowAsset}</span> / <span className="font-semibold text-gray-900 dark:text-white">{selectedPair.columnAsset}</span>
+            </p>
+
+            {trendCorrelations ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Full period</span>
+                  <span
+                    className="text-sm font-semibold px-2 py-0.5 rounded"
+                    style={{
+                      color: trendCorrelations.fullPeriod > 0.3 ? '#16a34a' : trendCorrelations.fullPeriod < -0.3 ? '#dc2626' : '#6b7280',
+                      backgroundColor: trendCorrelations.fullPeriod > 0.3 ? '#dcfce7' : trendCorrelations.fullPeriod < -0.3 ? '#fee2e2' : '#f3f4f6',
+                    }}
+                  >
+                    {trendCorrelations.fullPeriod.toFixed(3)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Recent half</span>
+                  <span
+                    className="text-sm font-semibold px-2 py-0.5 rounded"
+                    style={{
+                      color: trendCorrelations.recent > 0.3 ? '#16a34a' : trendCorrelations.recent < -0.3 ? '#dc2626' : '#6b7280',
+                      backgroundColor: trendCorrelations.recent > 0.3 ? '#dcfce7' : trendCorrelations.recent < -0.3 ? '#fee2e2' : '#f3f4f6',
+                    }}
+                  >
+                    {trendCorrelations.recent.toFixed(3)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Older half</span>
+                  <span
+                    className="text-sm font-semibold px-2 py-0.5 rounded"
+                    style={{
+                      color: trendCorrelations.older > 0.3 ? '#16a34a' : trendCorrelations.older < -0.3 ? '#dc2626' : '#6b7280',
+                      backgroundColor: trendCorrelations.older > 0.3 ? '#dcfce7' : trendCorrelations.older < -0.3 ? '#fee2e2' : '#f3f4f6',
+                    }}
+                  >
+                    {trendCorrelations.older.toFixed(3)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading price data for correlation trend...</p>
+            )}
+          </div>
+        )}
+      </Modal>
     </section>
   )
 }

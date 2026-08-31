@@ -3,7 +3,8 @@ use soroban_sdk::{Address, Env, Map};
 use crate::{types::*, portfolio, PortfolioRebalancer};
 
 /// Configure DCA settings for a portfolio.
-/// Only the portfolio owner (or steward) may call.
+///
+/// Only the portfolio owner or configured steward may call this function.
 pub fn configure_dca(
     env: &Env,
     portfolio_id: u64,
@@ -11,20 +12,21 @@ pub fn configure_dca(
     amount: i128,
     interval: u64,
 ) -> Result<(), Error> {
-    // Authorization: portfolio owner or steward must auth
     let portfolio = PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
-    // Determine who can authorize: steward if set, else user
+
     let steward = env
         .storage()
         .persistent()
         .get(&DataKey::Steward(portfolio_id))
         .unwrap_or(portfolio.user.clone());
+
     steward.require_auth();
 
     if enabled {
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
+
         if interval == 0 {
             return Err(Error::InvalidCooldown);
         }
@@ -34,44 +36,46 @@ pub fn configure_dca(
         enabled,
         amount,
         interval,
-        // if enabling now, schedule next execution at current timestamp + interval
         next_execution: if enabled {
             env.ledger().timestamp() + interval
         } else {
             0
         },
     };
+
     env.storage()
         .persistent()
         .set(&DataKey::DCAConfig(portfolio_id), &config);
+
     Ok(())
 }
 
-/// Execute DCA for a portfolio if the schedule has arrived.
-/// This adds capital according to target allocations without triggering rebalance.
+/// Execute DCA for a portfolio when its configured schedule has arrived.
+///
+/// The configured amount is divided according to the portfolio's target
+/// allocations. This operation does not update the last rebalance timestamp.
 pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
-    // Load portfolio and DCA config
     let mut portfolio = PortfolioRebalancer::load_portfolio(env, portfolio_id)?;
+
     let mut config: DCAConfig = match env
         .storage()
         .persistent()
         .get(&DataKey::DCAConfig(portfolio_id))
     {
-        Some(c) => c,
-        None => return Err(Error::InvalidAmount), // no config means disabled
+        Some(config) => config,
+        None => return Err(Error::InvalidAmount),
     };
 
     if !config.enabled {
         return Err(Error::InvalidAmount);
     }
 
-    let current_ts = env.ledger().timestamp();
-    if current_ts < config.next_execution {
-        // not yet time to execute
+    let current_timestamp = env.ledger().timestamp();
+
+    if current_timestamp < config.next_execution {
         return Err(Error::InvalidCooldown);
     }
 
-    // Ensure portfolio is active
     if !portfolio.is_active {
         return Err(Error::PortfolioPaused);
     }
@@ -87,42 +91,40 @@ pub fn execute_dca(env: &Env, portfolio_id: u64) -> Result<(), Error> {
             let current: i128 = portfolio.current_balances.get(asset.clone()).unwrap_or(0);
             portfolio
                 .current_balances
-                .set(asset.clone(), current + to_invest);
-            purchased.set(asset.clone(), to_invest);
+                .set(asset, current + to_invest);
         }
     }
 
-    // Update total_value (recalculate) and last DCA timestamp
-    // For simplicity we reuse existing portfolio calculation utilities to recompute value.
-    // Note: this does not affect last_rebalance.
-    // Calculate total value via reflector price data.
     let reflector_address = env
         .storage()
         .instance()
         .get(&DataKey::ReflectorAddress)
         .unwrap();
+
     let reflector_client = crate::reflector::ReflectorClient::new(env, &reflector_address);
+
     let total_value = match portfolio::calculate_portfolio_value(
         env,
         &portfolio.current_balances,
         &portfolio.asset_decimals,
         &reflector_client,
     ) {
-        Ok(v) => v,
+        Ok(value) => value,
         Err(_) => return Err(Error::StaleData),
     };
-    portfolio.total_value = total_value;
 
-    // Persist updated portfolio and DCA config (next execution)
-    config.next_execution = current_ts + config.interval;
+    portfolio.total_value = total_value;
+    config.next_execution = current_timestamp + config.interval;
+
     env.storage()
         .persistent()
         .set(&DataKey::Portfolio(portfolio_id), &portfolio);
+
     env.storage()
         .persistent()
         .set(&DataKey::DCAConfig(portfolio_id), &config);
 
     // Emit event
-    portfolio::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_ts);
+    portfolio::emit_dca_executed(env, portfolio_id, config.amount, purchased, current_timestamp);
     Ok(())
 }
