@@ -1,4 +1,4 @@
-# Gitleaks configuration for Stellar Portfolio Rebalancer
+# Giteaks configuration for Stellar Portfolio Rebalancer
 # Docs: https://github.com/gitleaks/gitleaks
 
 title = "Stellar Portfolio Rebalancer gitleaks config"
@@ -25,7 +25,7 @@ useDefault = true
   # Paths to allowlist entirely (e.g., test fixture directories).
   paths = [
     'test/fixtures/',
-    'tests/.*/fixtures/',
+    'tests/.*/fixtures/'
     '.*/example.*',
     '.*/mock.*',
   ]
