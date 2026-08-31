@@ -65,6 +65,8 @@ variable "blue_green_deployment_config" {
     })), [])
   })
   default = {}
+}
+
 variable "ecs_min_capacity" {
   description = "Minimum number of tasks to run"
   type        = number
