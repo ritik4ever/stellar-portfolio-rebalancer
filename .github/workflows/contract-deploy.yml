@@ -19,6 +19,9 @@ on:
           - staging
           - mainnet
 
+  schedule:
+    - cron: '0 2 * * *'
+
 concurrency:
   group: contract-deploy-${ {{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}-{$ { github.ref }}
   cancel-in-progress: true
@@ -28,6 +31,64 @@ permissions:
   deployments: write
 
 jobs:
+  # Dependency scanning gate. To explicitly waive an advisory:
+  # - Add the advisory ID (RUSTSEC-XXXX or GHSA-XXXX) to `.dependency-audit/cargo-allowlist.txt` or `.dependency-audit/npm-allowlist.txt`
+  #   (one ID per line, blank lines and comments starting with # are ignored).
+  # - Commit the allowlist file; this becomes part of the audit trail.
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: contracts
+        run: |
+          args=()
+          if [ -f .dependency-audit/cargo-allowlist.txt ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              args+=(--ignore "$line")
+            done < .dependency-audit/cargo-allowlist.txt
+          fi
+          cargo audit "${args[@]}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run npm audit (backend & frontend)
+        run: |
+          set -euo pipefail
+          for dir in backend frontend; do
+            echo "Scanning $dir..."
+            (cd "$dir" && node -e "
+              const fs = require('fs');
+              const path = '../.dependency-audit/npm-allowlist.txt';
+              const allowlist = fs.existsSync(path) ? fs.readFileSync(path, 'utf8').split(/\r?\n/).filter(l => l && !l.startsWith('#')) : [];
+              const { execSync } = require('child_process');
+              let stdout;
+              try {
+                stdout = execSync('npm audit --json --audit-level=high', { encoding: 'utf8', stdio: ['pipe','pipe','ignore'] });
+              } catch (e) {
+                stdout = (e.stdout || '').toString();
+              }
+              const json = JSON.parse(stdout);
+              const vulns = Object.values(json.vulnerabilities || {}).filter(v => (v.severity === 'high' || v.severity === 'critical') && !allowlist.includes(v.name));
+              if (vulns.length > 0) {
+                console.error('npm audit failed:', vulns.map(v => v.name + '@' + v.severity).join(', '));
+                process.exit(1);
+              }
+              console.log('npm audit passed');
+            ")
+          done
+
   deploy-contract:
     if: >
       github.event_name == 'workflow_dispatch' ||
