@@ -1,1 +1,1 @@
-{"_comment":"See docs/DEPENDENCY_AUDIT.md for waivers.","npm":[],"cargo":[]}
+{"_comment":"Waiver process: add npm advisory IDs to security/npm-audit-baseline.json; add cargo advisory IDs to security/cargo-audit-baseline.txt. A security reviewer must approve the waiver PR.","npm":[],"cargo":[]}
