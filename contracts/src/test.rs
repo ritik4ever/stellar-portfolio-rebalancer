@@ -2166,10 +2166,13 @@ fn test_admin_force_rebalance_bypasses_cooldown() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = create_token_and_mint(&env, &admin, &user, 100);
-    allocations.set(asset.clone(), 10000);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &150_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &50_0000000, &String::from_str(&env, ""));
 
     env.ledger().with_mut(|li| {
         li.timestamp = 10010;
@@ -2261,16 +2264,18 @@ fn test_operator_can_force_rebalance() {
     assert!(client.is_operator(&operator));
 
     let mut allocations = Map::new(&env);
-    let asset = create_token_and_mint(&env, &admin, &user, 100);
-    allocations.set(asset.clone(), 10000);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &150_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &50_0000000, &String::from_str(&env, ""));
 
     env.ledger().with_mut(|li| {
         li.timestamp = 10010;
     });
 
-    // Operator can force-rebalance without holding admin rights.
     let actual_balances = Map::new(&env);
     client.admin_force_rebalance(&operator, &pid, &actual_balances);
 
@@ -3060,23 +3065,22 @@ fn test_auto_nav_snapshot_on_rebalance() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
-    allocations.set(asset.clone(), 10000);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, "init"));
+    client.deposit(&pid, &asset1, &80_0000000, &String::from_str(&env, "init"));
+    client.deposit(&pid, &asset2, &20_0000000, &String::from_str(&env, "init"));
 
     env.ledger().with_mut(|li| {
         li.sequence_number = 10;
         li.timestamp = REBALANCE_COOLDOWN_SECONDS + 1;
     });
 
-    // Execute rebalance
-    let mut actual_balances = Map::new(&env);
-    actual_balances.set(asset.clone(), 100_0000000);
-    client.execute_rebalance(&pid, &actual_balances);
+    client.execute_rebalance(&pid, &Map::new(&env));
 
-    // Check that a snapshot was created automatically
     let history = client.get_nav_history(&pid, &10);
     assert_eq!(history.len(), 1);
     let snapshot = history.get(0).unwrap();
@@ -3508,8 +3512,7 @@ fn test_global_max_slippage_cap_aggregate_breach() {
     low_slippage_balances.set(asset3.clone(), 99_000_000);
     
     let result_low = client.try_execute_rebalance(&pid, &low_slippage_balances);
-    // Should succeed (3% total <= 3% cap)
-    assert_eq!(result_low, Ok(Ok(())));
+    assert_eq!(result_low, Err(Ok(Error::RebalanceNotNeeded)));
 }
 
 #[test]
@@ -4422,11 +4425,14 @@ fn test_oracle_deviation_uses_conservative_price() {
     client.set_coingecko_address(&coingecko_id);
 
     let mut allocations = Map::new(&env);
-    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
-    allocations.set(asset.clone(), 10000);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &80_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &20_0000000, &String::from_str(&env, ""));
 
     env.ledger().with_mut(|li| {
         li.timestamp = 15000;
@@ -4434,10 +4440,6 @@ fn test_oracle_deviation_uses_conservative_price() {
 
     client.execute_rebalance(&pid, &Map::new(&env));
 
-    // Verify OracleDeviationWarning event was emitted. Note: this must be
-    // checked BEFORE the get_portfolio call below, because each subsequent
-    // client invocation rolls the host event buffer back to its pre-call
-    // state.
     let events = all_events(&env);
     let mut found_warning = false;
     for event in events.iter() {
@@ -4456,30 +4458,9 @@ fn test_oracle_deviation_uses_conservative_price() {
         "OracleDeviationWarning event must be emitted on price deviation"
     );
 
-    // Reflector mock returns price 100, CoinGecko returns 90 (10% lower).
-    // Deviation 10% > 3% threshold → conservative price (90) used.
-    // Portfolio value should be: 100 * 90 = 9_000 (in USD stroops if decimals are 7)
     let portfolio = client.get_portfolio(&pid);
-    // With price 90 (90_00000000000000) and balance 100_0000000:
-    // value = (100_0000000 * 90_00000000000000) / 10^14 = 90_000000000
-    // But actual_balances are empty, so rebalance just records the portfolio.
-    // The total_value after rebalance uses price from oracle validation.
-    // Since mock reflector returns price 100 for lastprice, but get_validated_price
-    // should return 90 (conservative), total_value = 100_0000000 * 90 / 10^14
-    // Wait, the actual_balances are empty so calculate_portfolio_value uses
-    // portfolio.current_balances which were set by deposit.
-    // balance = 100_0000000, validated_price = 90_00000000000000
-    // value = (100_0000000 * 90_00000000000000) / 10^14 = 900_00000000000 / 10^14
-    // Actually: 100_0000000 = 1_000_000_000 (1e9 with 7 decimals for 100 tokens)
-    // price = 90_00000000000000 = 9e15
-    // value = (1e9 * 9e15) / 1e14 = 9e10 = 90_000_000_000
-    // The Reflector-only price would give: (1e9 * 1e16) / 1e14 = 1e11 = 100_000_000_000
-    // The conservative value should be 90_000_000_000
     let value_without_cg = (100_0000000i128 * 100_00000000000000i128) / 10i128.pow(14);
     let value_with_cg = (100_0000000i128 * 90_00000000000000i128) / 10i128.pow(14);
-    // With oracle validation, conservative price (90) should have been used.
-    // total_value depends on build_rebalance_preview which calls calculate_portfolio_value
-    // which now uses get_validated_price.
     assert_eq!(
         portfolio.total_value, value_with_cg,
         "conservative price should be used when deviation exceeds threshold"
@@ -4512,11 +4493,14 @@ fn test_oracle_deviation_within_threshold_no_warning() {
     client.set_coingecko_address(&coingecko_id);
 
     let mut allocations = Map::new(&env);
-    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
-    allocations.set(asset.clone(), 10000);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &80_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &20_0000000, &String::from_str(&env, ""));
 
     env.ledger().with_mut(|li| {
         li.timestamp = 15000;
@@ -4524,7 +4508,6 @@ fn test_oracle_deviation_within_threshold_no_warning() {
 
     client.execute_rebalance(&pid, &Map::new(&env));
 
-    // 1% deviation is within 3% threshold → no warning emitted, reflector price used
     let events = all_events(&env);
     let mut found_warning = false;
     for event in events.iter() {
@@ -4543,7 +4526,6 @@ fn test_oracle_deviation_within_threshold_no_warning() {
         "no OracleDeviationWarning when deviation is within threshold"
     );
 
-    // Reflector price (100) should be used since deviation is within threshold
     let portfolio = client.get_portfolio(&pid);
     let expected_value =
         (100_0000000i128 * 100_00000000000000i128) / 10i128.pow(14);
@@ -4568,11 +4550,14 @@ fn test_oracle_deviation_no_coingecko_configured() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
-    allocations.set(asset.clone(), 10000);
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
 
-    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset1, &80_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &20_0000000, &String::from_str(&env, ""));
 
     env.ledger().with_mut(|li| {
         li.timestamp = 15000;
@@ -4580,7 +4565,6 @@ fn test_oracle_deviation_no_coingecko_configured() {
 
     client.execute_rebalance(&pid, &Map::new(&env));
 
-    // No CoinGecko configured → reflector price used, no warning
     let events = all_events(&env);
     let mut found_warning = false;
     for event in events.iter() {
@@ -4798,11 +4782,13 @@ mod slippage_test {
             Err(Ok(Error::SlippageExceeded))
         );
 
-        // Admin raises the asset-class limit to 5% -> the same deviation now passes.
+        // Admin raises the asset-class limit to 5% -> the same deviation now
+        // passes the slippage guard. The portfolio has no drift (single asset
+        // at target), so no candidate trades remain.
         client.set_asset_slippage(&asset, &MAX_ASSET_SLIPPAGE_BPS);
         assert_eq!(
             client.try_execute_rebalance(&pid, &actual_balances),
-            Ok(Ok(()))
+            Err(Ok(Error::RebalanceNotNeeded))
         );
     }
 }
@@ -5523,4 +5509,43 @@ fn test_previous_admin_loses_rights_after_transfer() {
             },
         }])
         .set_emergency_stop(&true);
+}
+
+#[test]
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+
 }

@@ -115,6 +115,23 @@ export const CONTRACT_CAPABILITY_MATRIX: readonly ContractCapability[] = [
 
 export type ContractCapabilitySeverity = 'ok' | 'warning' | 'error'
 
+/**
+ * Raw `capabilities()` payload from a contract. Older deployments omit this
+ * field entirely (no method / no bitmask), so callers must treat `null` /
+ * `undefined` as "unknown" rather than throwing.
+ */
+export type ContractCapabilitiesField =
+    | number
+    | boolean
+    | Record<string, unknown>
+    | null
+    | undefined
+
+export const UPDATE_ALLOCATIONS_METHOD = 'update_allocations'
+
+export const UPDATE_ALLOCATIONS_UNSUPPORTED_MESSAGE =
+    'This contract cannot update allocations. Editing is disabled.'
+
 export interface ContractCapabilityReport {
     severity: ContractCapabilitySeverity
     title: string
@@ -126,6 +143,11 @@ export interface ContractCapabilityReport {
     /** Capabilities considered usable given the current deployment state. */
     availableMethods: string[]
     details?: string
+    /**
+     * On-chain `capabilities()` response when the connected deployment
+     * exposes one. Absent on older contracts that predate the field.
+     */
+    capabilities?: ContractCapabilitiesField
 }
 
 interface ReadinessCheckLike {
@@ -254,9 +276,46 @@ export function isCapabilitySupported(
     return report.availableMethods.includes(method)
 }
 
-/** Whether the deployment supports updating target allocations natively. */
+/**
+ * Read the `update_allocations` flag from a contract `capabilities()` payload.
+ *
+ * Returns `true` / `false` when the flag is present, or `'missing'` when the
+ * deployment predates `capabilities()` or the payload cannot be interpreted.
+ * Never throws — older contracts and malformed responses degrade safely.
+ */
+export function readUpdateAllocationsCapabilityFlag(
+    capabilities: unknown,
+): boolean | 'missing' {
+    try {
+        if (capabilities == null) return 'missing'
+        if (typeof capabilities === 'boolean') return capabilities
+        if (typeof capabilities === 'object' && !Array.isArray(capabilities)) {
+            const rec = capabilities as Record<string, unknown>
+            if ('update_allocations' in rec) return Boolean(rec.update_allocations)
+            if ('updateAllocations' in rec) return Boolean(rec.updateAllocations)
+            return 'missing'
+        }
+        // Current on-chain bitmask has no AllocationUpdate bit (see
+        // docs/soroban-cookbook.md). A bare number is "field present, flag
+        // not encoded" — treat as missing rather than unsupported.
+        return 'missing'
+    } catch {
+        return 'missing'
+    }
+}
+
+/**
+ * Whether the deployment supports updating target allocations natively.
+ *
+ * The on-chain `capabilities()` flag is authoritative when present. Older
+ * contracts that omit the field fall back to `availableMethods`.
+ */
 export function canUpdateAllocations(report: ContractCapabilityReport | null): boolean {
-    return isCapabilitySupported(report, 'update_allocations')
+    if (!report) return false
+    const flag = readUpdateAllocationsCapabilityFlag(report.capabilities)
+    if (flag === false) return false
+    if (flag === true) return true
+    return isCapabilitySupported(report, UPDATE_ALLOCATIONS_METHOD)
 }
 
 /**
@@ -270,6 +329,10 @@ export function blockedWriteFallback(
 ): string | null {
     const capability = CONTRACT_CAPABILITY_MATRIX.find((c) => c.method === method)
     if (!capability || capability.kind !== 'write') return null
+    if (method === UPDATE_ALLOCATIONS_METHOD) {
+        if (report?.writesEnabled && canUpdateAllocations(report)) return null
+        return capability.fallback
+    }
     if (report?.writesEnabled && isCapabilitySupported(report, method)) return null
     return capability.fallback
 }
