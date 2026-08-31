@@ -822,6 +822,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 ### Slack Delivery Failures
 
+> **Implementation module:** `backend/src/notifications/slack.ts`
+
 **Problem**: Slack notifications not appearing in channel
 
 **Solutions**:
@@ -847,6 +849,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 ### SMS Delivery Failures
 
+> **Implementation module:** `backend/src/notifications/sms.ts`
+
 **Problem**: SMS not being delivered to phone
 
 **Solutions**:
@@ -855,7 +859,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 3. Check that `SMS_ENABLED=true` is set in environment variables
 4. Verify Twilio credentials: confirm `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are correct
 5. Check the Twilio console (https://console.twilio.com) for message logs and error details
-6. Twilio trial accounts can only send to verified numbers — upgrade to a paid account for unrestricted delivery
+6. Check backend logs for `sms` provider entries
+7. Twilio trial accounts can only send to verified numbers — upgrade to a paid account for unrestricted delivery
 
 **Problem**: Twilio returns error `21603` ("A 'From' phone number is required") or `21211` ("Invalid 'To' phone number")
 
