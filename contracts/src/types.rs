@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, Map, String, Vec};
 
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
 pub const ALLOCATION_DENOMINATOR: u32 = 10_000;
@@ -33,6 +33,8 @@ pub const CURRENT_STORAGE_SCHEMA_VERSION: u32 = 1;
 /// Attempting to create a portfolio with more assets returns [`Error::TooManyAssets`].
 
 pub const MAX_PORTFOLIO_ASSETS: u32 = 10;
+pub const MAX_PORTFOLIOS_PER_USER: u32 = 10;
+pub const DEFAULT_REBALANCE_HISTORY_CAPACITY: u32 = 10;
 pub const MAX_PORTFOLIO_STORAGE_BYTES: u32 = 3_072;
 pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
 pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
@@ -290,6 +292,53 @@ pub enum DataKey {
     /// its own `accept_admin` call. Cleared once the transfer completes.
     /// Absence of this key means no admin transfer is in flight.
     PendingAdmin,
+    /// Fixed-capacity ring buffer storing rebalance history per portfolio.
+    RebalanceHistory(u64),
+    /// Stored admin-configurable max assets limit per portfolio.
+    MaxPortfolioAssets,
+    /// Stored admin-configurable max portfolios limit per user.
+    MaxPortfoliosPerUser,
+    /// Portfolio count per user address.
+    UserPortfolioCount(Address),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebalanceRecord {
+    pub timestamp: u64,
+    pub trades: Map<Address, i128>,
+    pub fee_paid: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebalanceHistoryBuffer {
+    pub records: Vec<RebalanceRecord>,
+    pub capacity: u32,
+}
+
+impl RebalanceHistoryBuffer {
+    pub fn new(env: &Env, capacity: u32) -> Self {
+        Self {
+            records: Vec::new(env),
+            capacity,
+        }
+    }
+
+    pub fn push(&mut self, record: RebalanceRecord) {
+        self.records.push_back(record);
+        if self.capacity > 0 && self.records.len() > self.capacity {
+            self.records = self.records.slice(1..self.records.len());
+        }
+    }
+
+    pub fn len(&self) -> u32 {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
 }
 
 #[contracttype]
@@ -351,6 +400,8 @@ pub enum Error {
     /// A proposed admin is required to differ from the current admin;
     /// re-proposing the incumbent would be a no-op transfer.
     InvalidAdminProposal = 39,
+    /// Portfolio creation failed because the user reached the maximum allowed portfolios.
+    TooManyPortfolios = 40,
 }
 
 #[contracttype]

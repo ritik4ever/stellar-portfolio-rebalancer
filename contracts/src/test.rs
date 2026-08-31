@@ -5524,3 +5524,170 @@ fn test_previous_admin_loses_rights_after_transfer() {
         }])
         .set_emergency_stop(&true);
 }
+
+#[test]
+fn test_emergency_stop_allows_withdrawal_but_blocks_deposit_and_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Initial deposit while EmergencyStop is false
+    client.deposit(&pid, &asset, &50_0000000, &String::from_str(&env, ""));
+
+    // Activate EmergencyStop
+    client.set_emergency_stop(&true);
+
+    // Deposit should be blocked
+    let deposit_res = client.try_deposit(&pid, &asset, &10_0000000, &String::from_str(&env, ""));
+    assert_eq!(deposit_res, Err(Ok(Error::EmergencyStop)));
+
+    // Rebalance should be blocked
+    let rebalance_res = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(rebalance_res, Err(Ok(Error::EmergencyStop)));
+
+    // Withdrawal of already-held balance MUST succeed during EmergencyStop
+    let withdraw_res = client.try_withdraw(&pid, &asset, &20_0000000);
+    assert_eq!(withdraw_res, Ok(Ok(())));
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.current_balances.get(asset).unwrap(), 30_0000000);
+}
+
+#[test]
+fn test_rebalance_history_ring_buffer_eviction() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let asset = create_token_and_mint(&env, &admin, &user, 100_0000000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    // Perform 12 rebalances (exceeding default capacity of 10)
+    for i in 0..12u64 {
+        env.ledger().with_mut(|li| {
+            li.timestamp = 10000 + (i + 1) * (REBALANCE_COOLDOWN_SECONDS + 10);
+        });
+        client.execute_rebalance(&pid, &Map::new(&env));
+    }
+
+    let history = client.get_rebalance_history(&pid);
+    // Capacity N is bounded to 10
+    assert_eq!(history.len(), DEFAULT_REBALANCE_HISTORY_CAPACITY);
+
+    // Oldest entries (index 0 and 1) were evicted FIFO
+    let first_record = history.get(0).unwrap();
+    let expected_first_ts = 10000 + 3 * (REBALANCE_COOLDOWN_SECONDS + 10);
+    assert_eq!(first_record.timestamp, expected_first_ts);
+
+    let last_record = history.get(history.len() - 1).unwrap();
+    let expected_last_ts = 10000 + 12 * (REBALANCE_COOLDOWN_SECONDS + 10);
+    assert_eq!(last_record.timestamp, expected_last_ts);
+}
+
+#[test]
+fn test_admin_configurable_max_portfolio_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.max_portfolio_assets(), MAX_PORTFOLIO_ASSETS);
+
+    // Lower the max portfolio assets to 5
+    client.set_max_portfolio_assets(&5);
+    assert_eq!(client.max_portfolio_assets(), 5);
+
+    // 6 assets should fail with TooManyAssets (allocations must sum to 10000)
+    let mut six_assets = Map::new(&env);
+    let mut asset_decimals = Map::new(&env);
+    for i in 0..6 {
+        let a = create_token_and_mint(&env, &admin, &user, 1000);
+        let pct = if i == 5 { 1670 } else { 1666 };
+        six_assets.set(a.clone(), pct);
+        asset_decimals.set(a, DEFAULT_ASSET_DECIMALS);
+    }
+    let res = client.try_create_portfolio(&user, &six_assets, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    assert_eq!(res, Err(Ok(Error::TooManyAssets)));
+
+    // Raise the limit to 12
+    client.set_max_portfolio_assets(&12);
+    assert_eq!(client.max_portfolio_assets(), 12);
+
+    let pid = client.create_portfolio(&user, &six_assets, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    assert!(pid > 0);
+}
+
+#[test]
+fn test_max_portfolios_per_user_enforcement() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.max_portfolios_per_user(), MAX_PORTFOLIOS_PER_USER);
+    assert_eq!(client.get_user_portfolio_count(&user), 0);
+
+    let asset = create_token_and_mint(&env, &admin, &user, 1000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), 10000);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+
+    // Create maximum allowed portfolios (10) for user
+    for i in 0..MAX_PORTFOLIOS_PER_USER {
+        let pid = client.create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+        assert!(pid > 0);
+        assert_eq!(client.get_user_portfolio_count(&user), i + 1);
+    }
+
+    // 11th portfolio creation should fail with TooManyPortfolios
+    let err_res = client.try_create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    assert_eq!(err_res, Err(Ok(Error::TooManyPortfolios)));
+
+    // Admin raises cap to 11
+    client.set_max_portfolios_per_user(&11);
+    assert_eq!(client.max_portfolios_per_user(), 11);
+
+    // Now 11th creation succeeds
+    let pid11 = client.create_portfolio(&user, &allocations, &asset_decimals, &5, &50, &CURRENT_SLIPPAGE_POLICY_VERSION);
+    assert!(pid11 > 0);
+    assert_eq!(client.get_user_portfolio_count(&user), 11);
+
+    // Closing a portfolio decrements user count
+    client.close_portfolio(&pid11);
+    assert_eq!(client.get_user_portfolio_count(&user), 10);
+}
