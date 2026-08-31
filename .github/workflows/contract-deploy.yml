@@ -99,3 +99,45 @@ jobs:
           name: contract-deploy-${{ env.DEPLOYMENT_ENVIRONMENT }}
           path: ${{ env.CONTRACT_ENV_FILE }}
           if-no-files-found: error
+
+  # Chaos test: simulate Reflector oracle outage during scheduled rebalance (staging only)
+  chaos-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'staging'
+    needs: deploy-contract
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download deployment metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: contract-deploy-staging
+          path: /tmp/deploy-env
+
+      - name: Set environment variables from deployment metadata
+        run: cat /tmp/deploy-env/*.env >> "$GITHUB_ENV"
+
+      - name: Run reflector oracle outage chaos test
+        run: bash scripts/chaos/run_reflector_outage_chaos.sh
+        env:
+          CHAOS_ENVIRONMENT: staging
+          CONTRACT_ID: ${{ env.CONTRACT_ID }}
+          REFLECTOR_ADDRESS: ${{ env.REFLECTOR_ADDRESS }}
+
+      - name: Upload chaos report
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-report
+          path: chaos-report.json
+          if-no-files-found: error
+
+      - name: Summarize chaos run
+        run: |
+          {
+            echo "## Chaos test: Reflector oracle outage"
+            echo ""
+            echo "Run against staging environment. Metrics in chaos-report.json artifact."
+            echo "For safe usage, only run against staging: trigger via workflow_dispatch with environment=staging."
+          } >> "$GITHUB_STEP_SUMMARY"
+
