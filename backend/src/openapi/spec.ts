@@ -325,6 +325,20 @@ const spec: Record<string, any> = {
                                     },
                                     threshold: { type: 'number', minimum: 1, maximum: 50, description: 'Rebalance threshold %' },
                                     slippageTolerance: { type: 'number', minimum: 0.1, maximum: 5, default: 1, description: 'Slippage tolerance %' },
+                                    strategyConfig: {
+                                        type: 'object',
+                                        description: 'Optional scheduled-rebalance strategy settings.',
+                                        properties: {
+                                            intervalDays: { type: 'number', minimum: 1, maximum: 365 },
+                                            volatilityThresholdPct: { type: 'number', minimum: 1, maximum: 100 },
+                                            minDaysBetweenRebalance: { type: 'number', minimum: 0, maximum: 365 },
+                                            dryRun: {
+                                                type: 'boolean',
+                                                description: 'When set, overrides AUTO_REBALANCE_DRY_RUN for this portfolio. A dry run computes and reports the plan without submitting a transaction.',
+                                            },
+                                        },
+                                        additionalProperties: false,
+                                    },
                                 },
                             },
                             example: {
@@ -332,6 +346,7 @@ const spec: Record<string, any> = {
                                 allocations: { XLM: 40, BTC: 30, USDC: 30 },
                                 threshold: 5,
                                 slippageTolerance: 1,
+                                strategyConfig: { dryRun: true },
                             },
                         },
                     },

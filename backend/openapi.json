@@ -709,6 +709,32 @@
                     "maximum": 5,
                     "default": 1,
                     "description": "Slippage tolerance %"
+                  },
+                  "strategyConfig": {
+                    "type": "object",
+                    "description": "Optional scheduled-rebalance strategy settings.",
+                    "properties": {
+                      "intervalDays": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 365
+                      },
+                      "volatilityThresholdPct": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "minDaysBetweenRebalance": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 365
+                      },
+                      "dryRun": {
+                        "type": "boolean",
+                        "description": "When set, overrides AUTO_REBALANCE_DRY_RUN for this portfolio. A dry run computes and reports the plan without submitting a transaction."
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 }
               },
@@ -720,7 +746,10 @@
                   "USDC": 30
                 },
                 "threshold": 5,
-                "slippageTolerance": 1
+                "slippageTolerance": 1,
+                "strategyConfig": {
+                  "dryRun": true
+                }
               }
             }
           }
@@ -1758,7 +1787,7 @@
           "Portfolio"
         ],
         "summary": "Get tax report",
-        "description": "Realized gain/loss tax report computed with FIFO cost basis for a tax year.",
+        "description": "Realized gain/loss tax report for a tax year. Lots are matched using the selected cost-basis method (FIFO by default). `format=turbotax` returns a TurboTax-importable CSV with the columns: Currency Name, Purchase Date, Cost Basis, Date Sold, Proceeds.",
         "parameters": [
           {
             "name": "year",
@@ -1777,15 +1806,30 @@
               "type": "string",
               "enum": [
                 "json",
-                "csv"
+                "csv",
+                "turbotax"
               ],
               "default": "json"
+            }
+          },
+          {
+            "name": "costBasisMethod",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fifo",
+                "lifo",
+                "hifo"
+              ],
+              "default": "fifo",
+              "description": "Lot-matching method used to determine cost basis"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Tax report summary (JSON) or CSV download (format=csv)",
+            "description": "Tax report summary (JSON) or CSV download (format=csv or format=turbotax)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1800,7 +1844,7 @@
             }
           },
           "400": {
-            "description": "Invalid year",
+            "description": "Invalid year or costBasisMethod",
             "content": {
               "application/json": {
                 "schema": {
