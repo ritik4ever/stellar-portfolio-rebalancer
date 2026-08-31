@@ -33,3 +33,9 @@ variable "notification_email" {
   type        = list(string)
   default     = []
 }
+
+variable "notification_slack_webhook" {
+  description = "Slack webhook URL for budget alerts"
+  type        = string
+  default     = ""
+}
