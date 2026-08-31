@@ -1,10 +1,15 @@
+import { createHash } from "node:crypto";
 import { Address, SorobanRpc, scValToNative } from "@stellar/stellar-sdk";
-import { databaseService, type IndexerCursorState } from "./databaseService.js";
+import { databaseService } from "./databaseService.js";
+import { sorobanRpcEndpointPool } from "./stellar.js";
 import { logger } from "../utils/logger.js";
 import {
   BACKEND_CONTRACT_EVENT_SCHEMA_VERSION,
   checkContractEventSchemaVersion,
 } from "../config/contractEventSchema.js";
+
+const INDEXER_CURSOR_KEY = "soroban_event_indexer.cursor";
+const INDEXER_LATEST_LEDGER_KEY = "soroban_event_indexer.latest_ledger";
 
 type IndexedEventKind = "portfolio_created" | "deposit" | "rebalance_executed";
 
@@ -44,6 +49,25 @@ interface ContractEventIndexerStatus {
         eventCount: number
         integrityHash: string | undefined
     }
+    gapReplay?: {
+        detected: boolean
+        gapSize: number
+        fromLedger: number | undefined
+        toLedger: number | undefined
+        ingested: number
+        batches: number
+        lastDetectedAt?: string
+    }
+}
+
+interface GapReplayResult {
+    detected: boolean
+    replayed: boolean
+    gapSize: number
+    fromLedger: number | undefined
+    toLedger: number | undefined
+    ingested: number
+    batches: number
 }
 
 interface ReplayValidationResult {
@@ -54,8 +78,6 @@ interface ReplayValidationResult {
     integrityHash: string
     errors: string[]
 }
-
-const INDEXER_STATE_NAME = "soroban_event_indexer";
 
 const MAX_RECENT_ERRORS = 10;
 const MAX_RPC_RETRIES = 3;
@@ -105,9 +127,26 @@ export class ContractEventIndexerService {
     1,
     100,
   );
-  private readonly rpcServer = new SorobanRpc.Server(this.rpcUrl, {
-    allowHttp: this.rpcUrl.startsWith("http://"),
-  });
+  private readonly gapReplayThreshold = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_GAP_REPLAY_THRESHOLD_LEDGERS",
+    100,
+    1,
+    10_000_000,
+  );
+  private readonly maxGapReplaySyncs = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_GAP_REPLAY_MAX_SYNCS",
+    10,
+    1,
+    1000,
+  );
+  private readonly gapReplayBatchDelayMs = this.readNumberEnv(
+    "SOROBAN_EVENT_INDEXER_GAP_REPLAY_BATCH_DELAY_MS",
+    100,
+    0,
+    300000,
+  );
+  /** Test seam: when set, RPC calls use this server instead of the endpoint pool. */
+  private readonly rpcServer: SorobanRpc.Server | null = null;
 
   private pollingTimer: NodeJS.Timeout | null = null;
   private isSyncing = false;
@@ -142,16 +181,11 @@ export class ContractEventIndexerService {
   }
 
   getStatus(): ContractEventIndexerStatus {
-    const storedState = this.loadPersistedState();
     return {
       ...this.status,
       running: this.pollingTimer !== null,
-      cursor: storedState.cursor ?? this.status.cursor,
-      latestLedger: storedState.latestLedger ?? this.status.latestLedger,
-      lastSuccessfulRunAt:
-        storedState.lastSuccessfulSyncAt ?? this.status.lastSuccessfulRunAt,
-      lastFailedRunAt: storedState.lastFailedSyncAt ?? this.status.lastFailedRunAt,
-      lastError: storedState.lastError ?? this.status.lastError,
+      cursor: databaseService.getIndexerState(INDEXER_CURSOR_KEY) ?? this.status.cursor,
+      latestLedger: Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || this.status.latestLedger,
       consecutiveFailures: this.consecutiveFailures,
       recentErrors: [...this.recentErrors],
     };
@@ -168,16 +202,12 @@ export class ContractEventIndexerService {
     consecutiveFailures: number;
     recentErrors: string[];
   } {
-    const storedState = this.loadPersistedState();
-
     return {
-      cursor: storedState.cursor,
-      latestLedger: storedState.latestLedger,
-      lastSuccessfulSyncAt:
-        storedState.lastSuccessfulSyncAt ?? this.status.lastSuccessfulRunAt,
-      lastFailedSyncAt:
-        storedState.lastFailedSyncAt ?? this.status.lastFailedRunAt,
-      lastError: storedState.lastError ?? this.status.lastError,
+      cursor: databaseService.getIndexerState(INDEXER_CURSOR_KEY) ?? this.status.cursor,
+      latestLedger: Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || this.status.latestLedger,
+      lastSuccessfulSyncAt: this.status.lastSuccessfulRunAt,
+      lastFailedSyncAt: this.status.lastFailedRunAt,
+      lastError: this.status.lastError,
       pollIntervalMs: this.pollIntervalMs,
       bootstrapWindowLedgers: this.bootstrapWindowLedgers,
       consecutiveFailures: this.consecutiveFailures,
@@ -186,16 +216,117 @@ export class ContractEventIndexerService {
   }
 
   resetCursor(fromLedger?: number): void {
-    const resetState = databaseService.resetContractEventIndexerState(
-      fromLedger,
-      INDEXER_STATE_NAME,
-    );
-    this.status.cursor = resetState.cursor;
-    this.status.latestLedger = resetState.latestLedger;
-    this.status.lastSuccessfulRunAt = resetState.lastSuccessfulSyncAt;
-    this.status.lastFailedRunAt = resetState.lastFailedSyncAt;
-    this.status.lastError = resetState.lastError;
+    if (fromLedger !== undefined) {
+      databaseService.setIndexerState(INDEXER_CURSOR_KEY, "");
+      databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(fromLedger));
+    } else {
+      databaseService.setIndexerState(INDEXER_CURSOR_KEY, "");
+      databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, "0");
+    }
+    this.status.cursor = undefined;
+    this.status.latestLedger = fromLedger;
+    this.status.lastSuccessfulRunAt = undefined;
+    this.status.lastFailedRunAt = undefined;
+    this.status.lastError = undefined;
     logger.info("[CHAIN-INDEXER] Cursor reset", { fromLedger });
+  }
+
+  /**
+   * Last ledger sequence the indexer successfully observed, if any.
+   */
+  private getLastIndexedLedger(): number | undefined {
+    const raw = databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY);
+    const parsed = Number(raw || 0);
+    return parsed > 0 ? parsed : undefined;
+  }
+
+  /**
+   * Detect a downtime gap between the last indexed ledger and the current chain
+   * tip. Returns `null` when there is no prior state or the gap is within the
+   * configured threshold (normal lag that the regular polling catches up on).
+   */
+  async detectGap(): Promise<{
+    fromLedger: number | undefined;
+    toLedger: number;
+    gapSize: number;
+  } | null> {
+    if (!this.isEnabled()) return null;
+    const latest = await this.rpcExecute((server) => server.getLatestLedger());
+    const toLedger = latest.sequence;
+    const fromLedger = this.getLastIndexedLedger();
+    if (fromLedger === undefined) return null;
+    const gapSize = toLedger - fromLedger;
+    if (gapSize <= this.gapReplayThreshold) return null;
+    return { fromLedger, toLedger, gapSize };
+  }
+
+  /**
+   * Replay events missed during downtime, in bounded batches.
+   *
+   * After a long downtime the gap between the last indexed ledger and the chain
+   * tip can be very large. Instead of replaying it in one unbounded sweep, this
+   * rewinds the cursor to the last indexed ledger and runs a series of
+   * `syncOnce()` passes — each pass ingests at most
+   * `maxPagesPerSync × pageLimit` events — so a huge gap cannot overwhelm the
+   * indexer on startup. The remaining range (if the batch cap is hit) is picked
+   * up by the regular polling cycle.
+   */
+  async runStartupGapReplay(): Promise<GapReplayResult> {
+    if (!this.isEnabled() || this.isSyncing) {
+      return { detected: false, replayed: false, gapSize: 0, fromLedger: undefined, toLedger: undefined, ingested: 0, batches: 0 };
+    }
+
+    const gap = await this.detectGap();
+    if (!gap) {
+      return { detected: false, replayed: false, gapSize: 0, fromLedger: this.getLastIndexedLedger(), toLedger: undefined, ingested: 0, batches: 0 };
+    }
+
+    logger.info("[CHAIN-INDEXER] Downtime gap detected, replaying missed events", {
+      fromLedger: gap.fromLedger,
+      toLedger: gap.toLedger,
+      gapSize: gap.gapSize,
+      threshold: this.gapReplayThreshold,
+    });
+
+    this.resetCursor(gap.fromLedger);
+
+    let ingested = 0;
+    let batches = 0;
+    for (let i = 0; i < this.maxGapReplaySyncs; i++) {
+      const result = await this.syncOnce();
+      ingested += result.ingested;
+      batches += 1;
+      if (result.ingested === 0) break;
+      if (this.gapReplayBatchDelayMs > 0 && i < this.maxGapReplaySyncs - 1) {
+        await this.sleep(this.gapReplayBatchDelayMs);
+      }
+    }
+
+    this.status.gapReplay = {
+      detected: true,
+      gapSize: gap.gapSize,
+      fromLedger: gap.fromLedger,
+      toLedger: gap.toLedger,
+      ingested,
+      batches,
+      lastDetectedAt: new Date().toISOString(),
+    };
+
+    logger.info("[CHAIN-INDEXER] Gap replay finished", {
+      ingested,
+      batches,
+      bound: this.maxGapReplaySyncs,
+    });
+
+    return {
+      detected: true,
+      replayed: true,
+      gapSize: gap.gapSize,
+      fromLedger: gap.fromLedger,
+      toLedger: gap.toLedger,
+      ingested,
+      batches,
+    };
   }
 
   async start(): Promise<void> {
@@ -209,9 +340,16 @@ export class ContractEventIndexerService {
     logger.info("[CHAIN-INDEXER] Starting contract event indexer", {
       contractAddress: this.contractAddress,
       pollIntervalMs: this.pollIntervalMs,
+      lastIndexedLedger: this.getLastIndexedLedger(),
     });
 
-    await this.syncOnce();
+    // Catch up on events emitted while the indexer was down, then run a normal
+    // sync only when there was no gap to replay (the replay already advances
+    // the cursor through the missed range in bounded batches).
+    const gapReplay = await this.runStartupGapReplay();
+    if (!gapReplay.detected) {
+      await this.syncOnce();
+    }
     this.pollingTimer = setInterval(() => {
       void this.syncWithBackoff();
     }, this.pollIntervalMs);
@@ -243,202 +381,11 @@ export class ContractEventIndexerService {
     await this.syncOnce();
   }
 
-  async syncOnce(): Promise<{ ingested: number; latestLedger?: number }> {
-    if (!this.isEnabled()) return { ingested: 0 };
-    if (this.isSyncing)
-      return { ingested: 0, latestLedger: this.status.latestLedger };
-
-    const schemaCheck = checkContractEventSchemaVersion();
-    if (!schemaCheck.ok) {
-      this.status.lastRunAt = new Date().toISOString();
-      this.status.lastError = schemaCheck.message;
-      this.status.contractEventSchemaOk = false;
-      logger.error("[CHAIN-INDEXER] Contract event schema mismatch", {
-        message: schemaCheck.message,
-      });
-      return { ingested: 0, latestLedger: this.status.latestLedger };
+  private async rpcExecute<T>(fn: (server: SorobanRpc.Server) => Promise<T>): Promise<T> {
+    if (this.rpcServer) {
+      return this.rpcCallWithRetry(() => fn(this.rpcServer));
     }
-    this.status.contractEventSchemaOk = true;
-
-    this.isSyncing = true;
-    try {
-      const storedState = this.loadPersistedState();
-      const storedCursor = storedState.cursor;
-      const storedLatestLedger = storedState.latestLedger;
-
-      let cursor = storedCursor;
-      let startLedger: number | undefined;
-      if (!cursor) {
-        const latest = await this.rpcCallWithRetry(() =>
-          this.rpcServer.getLatestLedger(),
-        );
-        const floorLedger = Math.max(
-          1,
-          latest.sequence - this.bootstrapWindowLedgers,
-        );
-        startLedger = storedLatestLedger
-          ? Math.max(1, storedLatestLedger - 1)
-          : floorLedger;
-      }
-
-      let ingested = 0;
-      let latestLedger = storedLatestLedger;
-      let pagesRead = 0;
-
-      while (pagesRead < this.maxPagesPerSync) {
-        const response = await this.rpcCallWithRetry(() =>
-          this.rpcServer.getEvents({
-            cursor,
-            startLedger,
-            limit: this.pageLimit,
-            filters: [{ type: "contract" }],
-          }),
-        );
-        pagesRead++;
-        latestLedger = response.latestLedger;
-
-        if (!response.events.length) {
-          if (latestLedger) this.persistCursorState({ latestLedger });
-          break;
-        }
-
-        for (const event of response.events) {
-          let indexed: ReturnType<typeof this.toIndexedOnChainEvent>;
-          try {
-            indexed = this.toIndexedOnChainEvent(event);
-          } catch (err) {
-            logger.warn("[CHAIN-INDEXER] Skipping malformed event", {
-              error: String(err),
-              txHash: event.txHash,
-            });
-            continue;
-          }
-          if (!indexed) continue;
-
-          const dedupKey = `${indexed.ledger}:${indexed.txHash}:${indexed.kind}:${indexed.portfolioId}`;
-          if (this.seenEventKeys.has(dedupKey)) {
-            continue;
-          }
-          this.seenEventKeys.add(dedupKey);
-
-          // Prevent unbounded memory growth
-          if (this.seenEventKeys.size > 10000) {
-            const iterator = this.seenEventKeys.values();
-            for (let i = 0; i < 1000; i++) {
-              const val = iterator.next().value;
-              if (val !== undefined) {
-                this.seenEventKeys.delete(val);
-              }
-            }
-          }
-
-          databaseService.ensurePortfolioExists(
-            indexed.portfolioId,
-            indexed.userAddress || "ONCHAIN-INDEXER",
-          );
-          databaseService.recordRebalanceEvent({
-            portfolioId: indexed.portfolioId,
-            timestamp: indexed.timestamp,
-            trigger: indexed.trigger,
-            trades: indexed.trades,
-            gasUsed: "on-chain",
-            status: "completed",
-            isAutomatic: false,
-            eventSource: "onchain",
-            onChainConfirmed: true,
-            onChainEventType: indexed.kind,
-            onChainTxHash: indexed.txHash,
-            onChainLedger: indexed.ledger,
-            onChainContractId: indexed.contractId,
-            onChainPagingToken: indexed.pagingToken,
-            isSimulated: false,
-          });
-          ingested++;
-        }
-
-        const previousCursor = cursor;
-        const nextCursor =
-          response.events[response.events.length - 1]?.pagingToken;
-        if (nextCursor) {
-          cursor = nextCursor;
-          this.persistCursorState({ cursor, latestLedger });
-          logger.debug("[CHAIN-INDEXER] Persisted page cursor", {
-            cursor,
-            latestLedger,
-            pagesRead,
-          });
-        } else if (latestLedger) {
-          this.persistCursorState({ latestLedger });
-        }
-
-        if (!nextCursor || nextCursor === previousCursor) break;
-        startLedger = undefined;
-      }
-
-      this.status.lastRunAt = new Date().toISOString();
-      this.status.lastSuccessfulRunAt = this.status.lastRunAt;
-      this.persistCursorState({
-        cursor,
-        latestLedger,
-        lastSuccessfulSyncAt: this.status.lastSuccessfulRunAt,
-        lastError: undefined,
-      });
-      this.status.lastError = undefined;
-      this.status.lastIngestedCount = ingested;
-      this.status.cursor = cursor;
-      this.status.latestLedger = latestLedger;
-      this.status.enabled = true;
-      this.consecutiveFailures = 0;
-
-      return { ingested, latestLedger };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const now = new Date().toISOString();
-      this.status.lastRunAt = now;
-      this.status.lastFailedRunAt = now;
-      this.status.lastError = message;
-      this.consecutiveFailures++;
-      this.pushRecentError(`[${now}] ${message}`);
-      this.persistCursorState({
-        lastFailedSyncAt: now,
-        lastError: message,
-      });
-      logger.error("[CHAIN-INDEXER] Sync failed", {
-        error: message,
-        consecutiveFailures: this.consecutiveFailures,
-        cursor: this.status.cursor,
-        latestLedger: this.status.latestLedger,
-      });
-      return { ingested: 0, latestLedger: this.status.latestLedger };
-    } finally {
-      this.isSyncing = false;
-    }
-  }
-
-  private loadPersistedState(): IndexerCursorState {
-    try {
-      return databaseService.getContractEventIndexerState(INDEXER_STATE_NAME);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error("[CHAIN-INDEXER] Failed to read persisted cursor state", {
-        error: message,
-      });
-      return { name: INDEXER_STATE_NAME };
-    }
-  }
-
-  private persistCursorState(
-    state: Partial<Omit<IndexerCursorState, "name">>,
-  ): void {
-    const persisted = databaseService.saveContractEventIndexerState(
-      state,
-      INDEXER_STATE_NAME,
-    );
-    this.status.cursor = persisted.cursor;
-    this.status.latestLedger = persisted.latestLedger;
-    this.status.lastSuccessfulRunAt = persisted.lastSuccessfulSyncAt;
-    this.status.lastFailedRunAt = persisted.lastFailedSyncAt;
-    this.status.lastError = persisted.lastError;
+    return sorobanRpcEndpointPool.call(fn);
   }
 
   private async rpcCallWithRetry<T>(fn: () => Promise<T>): Promise<T> {
@@ -536,7 +483,7 @@ export class ContractEventIndexerService {
         }
 
         if (!ledgerRange) {
-            const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+            const latest = await this.rpcExecute((s) => s.getLatestLedger())
             ledgerRange = {
                 start: Math.max(1, latest.sequence - this.bootstrapWindowLedgers),
                 end: latest.sequence,
@@ -593,7 +540,7 @@ export class ContractEventIndexerService {
             let cursor = storedCursor
             let startLedger: number | undefined
             if (!cursor) {
-                const latest = await this.rpcCallWithRetry(() => this.rpcServer.getLatestLedger())
+                const latest = await this.rpcExecute((s) => s.getLatestLedger())
                 const floorLedger = Math.max(1, latest.sequence - this.bootstrapWindowLedgers)
                 startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
             }
@@ -603,8 +550,8 @@ export class ContractEventIndexerService {
             let pagesRead = 0
 
             while (pagesRead < this.maxPagesPerSync) {
-                const response = await this.rpcCallWithRetry(() =>
-                    this.rpcServer.getEvents({
+                const response = await this.rpcExecute((s) =>
+                    s.getEvents({
                         cursor,
                         startLedger,
                         limit: this.pageLimit,
@@ -704,6 +651,13 @@ export class ContractEventIndexerService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private pushRecentError(message: string): void {
+    this.recentErrors.push(message);
+    if (this.recentErrors.length > MAX_RECENT_ERRORS) {
+      this.recentErrors.splice(0, this.recentErrors.length - MAX_RECENT_ERRORS);
+    }
   }
 
   private toIndexedOnChainEvent(

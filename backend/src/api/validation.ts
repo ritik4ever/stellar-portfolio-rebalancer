@@ -66,6 +66,13 @@ export const portfolioSummaryQuerySchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),
 });
 
+// Schema for POST /portfolios/rebalance-plans (batch planning, no trading).
+export const batchRebalancePlansSchema = z.object({
+    portfolioIds: z.array(z.string().min(1, "portfolioId must be a non-empty string"))
+        .min(1, "At least one portfolioId is required")
+        .max(50, "Cannot plan more than 50 portfolios in a single batch")
+}).strict();
+
 // Schema for POST /portfolio/:id/rebalance
 export const rebalancePortfolioSchema = z.object({
     options: z.object({

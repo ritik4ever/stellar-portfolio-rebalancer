@@ -1,7 +1,8 @@
 import TelegramBotApi from 'node-telegram-bot-api'
 import { logger } from '../utils/logger.js'
 import { autoRebalancer } from '../services/runtimeServices.js'
-import { portfolioStorage } from '../services/portfolioStorage.js'
+import { handleStatusCommand, LINK_INSTRUCTIONS } from './telegramCommands.js'
+import { linkChat, unlinkChat } from './telegramLink.js'
 
 const authorizedChatIds = new Set<string>()
 
@@ -13,33 +14,6 @@ function isAuthorized(chatId: string): boolean {
   return authorizedChatIds.has(chatId)
 }
 
-async function getPortfolioStatus(): Promise<string> {
-  const portfolios = await portfolioStorage.getAllPortfolios()
-  if (portfolios.length === 0) return 'No portfolios found.'
-
-  const totalValue = portfolios.reduce((sum, p) => sum + (p.totalValue || 0), 0)
-  const totalDrift = portfolios.reduce((sum, p) => {
-    const maxDrift = Math.max(
-      ...Object.keys(p.allocations).map((asset) => {
-        const target = p.allocations[asset] || 0
-        const balance = p.balances[asset] || 0
-        const currentPct = totalValue > 0 ? (balance / totalValue) * 100 : 0
-        return Math.abs(currentPct - target)
-      }),
-      0,
-    )
-    return Math.max(sum, maxDrift)
-  }, 0)
-
-  return [
-    `📊 *Portfolio Status*`,
-    `Portfolios: ${portfolios.length}`,
-    `Total Value: ${totalValue.toFixed(2)} XLM`,
-    `Max Drift: ${totalDrift.toFixed(2)}%`,
-    `Threshold: ${portfolios[0].threshold}%`,
-  ].join('\n')
-}
-
 export function startBot(): void {
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) {
@@ -49,18 +23,40 @@ export function startBot(): void {
 
   const bot = new TelegramBotApi(token, { polling: true })
 
+  // /status reports on the chat's *linked* user rather than the whole system.
+  // An unlinked chat gets linking instructions instead of a bare error (#1396).
   bot.onText(/\/status/, async (msg) => {
     const chatId = String(msg.chat.id)
-    if (!isAuthorized(chatId)) {
-      await bot.sendMessage(chatId, 'Unauthorized')
+    const reply = await handleStatusCommand(msg as never)
+    await bot.sendMessage(
+      chatId,
+      reply.text,
+      reply.parseMode ? { parse_mode: reply.parseMode } : undefined,
+    )
+  })
+
+  bot.onText(/\/link (.+)/, async (msg, match) => {
+    const chatId = String(msg.chat.id)
+    const address = match?.[1]?.trim()
+    if (!address) {
+      await bot.sendMessage(chatId, LINK_INSTRUCTIONS, { parse_mode: 'Markdown' })
       return
     }
-    try {
-      const status = await getPortfolioStatus()
-      await bot.sendMessage(chatId, status, { parse_mode: 'Markdown' })
-    } catch (err) {
-      await bot.sendMessage(chatId, `Error: ${err instanceof Error ? err.message : String(err)}`)
-    }
+    linkChat(chatId, address)
+    registerChat(chatId)
+    await bot.sendMessage(
+      chatId,
+      `This chat is now linked to ${address}. Send /status to see your portfolios.`,
+    )
+  })
+
+  bot.onText(/\/unlink/, async (msg) => {
+    const chatId = String(msg.chat.id)
+    const had = unlinkChat(chatId)
+    await bot.sendMessage(
+      chatId,
+      had ? 'This chat is no longer linked.' : 'This chat was not linked.',
+    )
   })
 
   bot.onText(/\/pause/, async (msg) => {
@@ -93,7 +89,10 @@ export function startBot(): void {
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = String(msg.chat.id)
-    await bot.sendMessage(chatId, 'Welcome to Stellar Portfolio Rebalancer Bot\n\nAvailable commands:\n/status - Portfolio status\n/pause - Pause rebalancing\n/resume - Resume rebalancing')
+    await bot.sendMessage(
+      chatId,
+      'Welcome to Stellar Portfolio Rebalancer Bot\n\nAvailable commands:\n/link <address> - Link this chat to your account\n/status - Your portfolio status\n/unlink - Unlink this chat\n/pause - Pause rebalancing\n/resume - Resume rebalancing',
+    )
   })
 
   logger.info('Telegram bot started in polling mode')

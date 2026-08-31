@@ -395,3 +395,163 @@ export function dbGetNotificationLogs(userId: string, limit: number = 50): Notif
         createdAt: r.created_at
     }))
 }
+
+// ── per-portfolio notification preference overrides (#1395) ──────────────────
+//
+// An override stores only the fields the user actually set for that portfolio;
+// everything else resolves from their global preferences. Storing partial rows
+// (rather than a full copy) means a later change to a global setting still
+// propagates to portfolios that never overrode it.
+
+export interface PortfolioNotificationOverride {
+    userId: string
+    portfolioId: string
+    emailEnabled?: boolean
+    webhookEnabled?: boolean
+    emailAddress?: string
+    webhookUrl?: string
+    digestMode?: 'immediate' | 'daily' | 'weekly'
+    events?: Partial<{
+        rebalance: boolean
+        circuitBreaker: boolean
+        priceMovement: boolean
+        riskChange: boolean
+    }>
+    updatedAt?: string
+}
+
+interface PortfolioOverrideRow {
+    user_id: string
+    portfolio_id: string
+    email_enabled: number | null
+    webhook_enabled: number | null
+    email_address: string | null
+    webhook_url: string | null
+    digest_mode: string | null
+    events: string | null
+    created_at: string
+    updated_at: string
+}
+
+function ensureOverrideTable(): void {
+    ensureNotificationTable()
+    getDb().exec(`
+        CREATE TABLE IF NOT EXISTS notification_preference_overrides (
+            user_id       TEXT NOT NULL,
+            portfolio_id  TEXT NOT NULL,
+            email_enabled INTEGER,
+            webhook_enabled INTEGER,
+            email_address TEXT,
+            webhook_url   TEXT,
+            digest_mode   TEXT,
+            events        TEXT,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL,
+            PRIMARY KEY (user_id, portfolio_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_notification_overrides_user
+            ON notification_preference_overrides(user_id);
+    `)
+}
+
+function nullableBool(value: number | null): boolean | undefined {
+    return value === null ? undefined : value === 1
+}
+
+function rowToOverride(row: PortfolioOverrideRow): PortfolioNotificationOverride {
+    let events: PortfolioNotificationOverride['events']
+    if (row.events) {
+        try {
+            const parsed = JSON.parse(row.events)
+            if (parsed && typeof parsed === 'object') events = parsed
+        } catch {
+            // Corrupt JSON falls back to "no event overrides".
+        }
+    }
+
+    return {
+        userId: row.user_id,
+        portfolioId: row.portfolio_id,
+        emailEnabled: nullableBool(row.email_enabled),
+        webhookEnabled: nullableBool(row.webhook_enabled),
+        emailAddress: row.email_address ?? undefined,
+        webhookUrl: row.webhook_url ?? undefined,
+        digestMode: (row.digest_mode as 'immediate' | 'daily' | 'weekly' | null) ?? undefined,
+        events,
+        updatedAt: row.updated_at,
+    }
+}
+
+export function dbSavePortfolioNotificationOverride(
+    override: PortfolioNotificationOverride,
+): PortfolioNotificationOverride {
+    ensureOverrideTable()
+    const now = new Date().toISOString()
+
+    getDb().prepare(`
+        INSERT INTO notification_preference_overrides
+            (user_id, portfolio_id, email_enabled, webhook_enabled, email_address,
+             webhook_url, digest_mode, events, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (user_id, portfolio_id) DO UPDATE SET
+            email_enabled   = excluded.email_enabled,
+            webhook_enabled = excluded.webhook_enabled,
+            email_address   = excluded.email_address,
+            webhook_url     = excluded.webhook_url,
+            digest_mode     = excluded.digest_mode,
+            events          = excluded.events,
+            updated_at      = excluded.updated_at
+    `).run(
+        override.userId,
+        override.portfolioId,
+        override.emailEnabled === undefined ? null : override.emailEnabled ? 1 : 0,
+        override.webhookEnabled === undefined ? null : override.webhookEnabled ? 1 : 0,
+        override.emailAddress ?? null,
+        override.webhookUrl ?? null,
+        override.digestMode ?? null,
+        override.events && Object.keys(override.events).length > 0
+            ? JSON.stringify(override.events)
+            : null,
+        now,
+        now,
+    )
+
+    return dbGetPortfolioNotificationOverride(override.userId, override.portfolioId)!
+}
+
+export function dbGetPortfolioNotificationOverride(
+    userId: string,
+    portfolioId: string,
+): PortfolioNotificationOverride | undefined {
+    ensureOverrideTable()
+    const row = getDb()
+        .prepare<[string, string], PortfolioOverrideRow>(
+            'SELECT * FROM notification_preference_overrides WHERE user_id = ? AND portfolio_id = ?',
+        )
+        .get(userId, portfolioId)
+    return row ? rowToOverride(row) : undefined
+}
+
+export function dbListPortfolioNotificationOverrides(
+    userId: string,
+): PortfolioNotificationOverride[] {
+    ensureOverrideTable()
+    const rows = getDb()
+        .prepare<[string], PortfolioOverrideRow>(
+            'SELECT * FROM notification_preference_overrides WHERE user_id = ? ORDER BY portfolio_id',
+        )
+        .all(userId)
+    return rows.map(rowToOverride)
+}
+
+export function dbDeletePortfolioNotificationOverride(
+    userId: string,
+    portfolioId: string,
+): boolean {
+    ensureOverrideTable()
+    const result = getDb()
+        .prepare('DELETE FROM notification_preference_overrides WHERE user_id = ? AND portfolio_id = ?')
+        .run(userId, portfolioId)
+    return result.changes > 0
+}

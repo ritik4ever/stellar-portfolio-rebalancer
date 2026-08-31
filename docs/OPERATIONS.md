@@ -30,6 +30,17 @@ The alert clears automatically once the backlog drains below the threshold.
 
 ## Redis and queues
 
+### ElastiCache Multi-AZ Failover
+
+Production Terraform now provisions Redis as an ElastiCache replication group with automatic failover enabled and at least one read replica. The backend should connect to the replication group's primary endpoint through `REDIS_URL` or the Terraform-injected `REDIS_HOST`; after an AZ failure, AWS promotes a replica and keeps the primary endpoint stable for reconnecting clients.
+
+Expected client behavior during failover:
+
+- Existing BullMQ and Redis connections may see a brief disconnect while the replica is promoted.
+- Backend probes call `getRedisUrl(true)` on retry paths so rotated credentials and endpoint-derived URLs are refreshed.
+- Queue workers should reconnect using `getConnectionOptions()` instead of pinning a single cache node hostname.
+- If Redis remains unavailable, queue-backed features degrade and idempotency falls back to the database-backed store.
+
 - **BullMQ** drives scheduled work: portfolio checks, rebalance jobs, analytics snapshots, and idempotency key cleanup.
 - **Connection:** `REDIS_URL` (default `redis://localhost:6379`). If Redis is unreachable, `probeRedis()` reports unavailable and the HTTP API still starts; queue-backed features are degraded.
 - **Scheduler:** When Redis is up, `startQueueScheduler()` (from `backend/src/queue/scheduler.ts`) registers repeatable cron jobs and enqueues one-off startup jobs (portfolio check, analytics snapshot, idempotency cleanup).

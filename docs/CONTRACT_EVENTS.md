@@ -15,9 +15,7 @@ Bump the constant when you change topic strings or tuple layouts expected below,
 
 Contract events do not currently include application correlation IDs in their topics or payloads.
 
-The former `contracts/src/events.rs` module was removed because it was not declared by `contracts/src/lib.rs`, its correlation-ID helpers were not called by active contract entrypoints, and active portfolio events are already emitted from their existing contract modules.
-
-The remaining stale `events` import and DCA event call were removed from `contracts/src/strategies/dca.rs`. The existing DCA entrypoints remain available, but this maintenance change does not introduce a new DCA event or alter the documented event schema.
+`contracts/src/events.rs` is declared by `contracts/src/lib.rs` and retained for the DCA execution event and the two-step admin-transfer events (`emit_dca_executed`, `emit_admin_proposed`, `emit_admin_transferred`), all of which are wired into active contract entrypoints. Its six correlation-ID helpers (`emit_portfolio_created`, `emit_allocation_updated`, `emit_rebalance_executed`, `emit_circuit_breaker_triggered`, `emit_admin_changed`, `emit_paused`) were dead code — never called by any entrypoint — and have been removed. Active portfolio events (creation, allocation updates, rebalances, circuit breaker trips) continue to be emitted inline from their existing contract modules, as documented below.
 
 Backend request correlation IDs remain an off-chain logging and request-context concern. Adding correlation IDs to on-chain events in the future should be handled as an intentional schema change, including contract entrypoint design, event payload updates, backend decoder changes, documentation, and schema-version review.
 
@@ -80,6 +78,19 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
 
+### Governance: two-step admin transfer
+
+Admin handover does not use the `portfolio` topic domain — both events are topic-indexed by the **admin address acting at that step**, so a watcher can filter on the outgoing admin:
+
+| Topic[0]             | Topic[1]                  | Payload      | Emitted by       |
+| -------------------- | ------------------------- | ------------ | ---------------- |
+| `admin_proposed`     | `current_admin: Address`  | `Address`    | `propose_admin`  |
+| `admin_transferred`  | `previous_admin: Address` | `Address`    | `accept_admin`   |
+
+The payload is the incoming admin in both cases: the nominee for `admin_proposed`, the address that actually took the role for `admin_transferred`.
+
+Because the transfer is two-step, `admin_proposed` is **not** a change of authority — `DataKey::Admin` is untouched until the matching `admin_transferred` lands. A proposal may be superseded by a later `admin_proposed` from the same admin (the newest nomination wins) and may never be accepted at all, so consumers must treat `admin_transferred` as the only authoritative signal that the admin changed. There is no single-call `set_admin`: after `initialize`, every admin change produces exactly this pair of events.
+
 The `deposit` event now includes a `memo: String` field at tuple index `3`. Backend indexers must decode the 4-tuple `(u64, Address, i128, String)` instead of the previous 3-tuple.
 
 ## Payload parsing (backend)
@@ -125,7 +136,7 @@ Emitted by the `update_allocations` entrypoint when a user changes a portfolio's
 }
 ```
 
-> **Note:** The `events.rs` helper (`emit_allocation_updated`) emits the event with topics `(alloc_upd, invoker, correlation_id)` and payload `portfolio_id`. The inline emit in `lib.rs` uses topics `(portfolio, alloc_upd)` with payload `(portfolio_id, old_allocations, new_allocations)`. Backend indexers should handle both shapes.
+> **Note:** `events.rs`'s unused `emit_allocation_updated` correlation-ID helper has been removed (see "Correlation-ID module decision" above). The `alloc_upd` event is emitted only via the inline call in `lib.rs`, with topics `(portfolio, alloc_upd)` and payload `(portfolio_id, old_allocations, new_allocations)`.
 
 ## Reusable test fixtures
 

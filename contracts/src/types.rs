@@ -15,6 +15,13 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 pub const CONTRACT_VERSION: u32 = 2;
 /// Contract event schema version matching backend expected schema version.
 pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
+/// Persistent storage schema version. Tracked separately from
+/// `CONTRACT_EVENT_SCHEMA_VERSION` (which only versions emitted event
+/// shapes): this one versions the on-chain storage layout itself and is
+/// advanced by `upgrade::migrate_storage`, which runs automatically as part
+/// of `execute_upgrade`. A contract with no stored value is treated as
+/// version 0 (pre-versioning / legacy storage).
+pub const CURRENT_STORAGE_SCHEMA_VERSION: u32 = 1;
 /// Maximum number of assets allowed in a single portfolio (#296).
 ///
 /// Soroban persistent storage entries are bounded by ledger entry size limits.
@@ -274,6 +281,15 @@ pub enum DataKey {
     AssetSlippage(Address),
     Template(String),
     TemplateNames,
+    /// Persisted storage schema version; see `CURRENT_STORAGE_SCHEMA_VERSION`.
+    SchemaVersion,
+    /// Marks `Address` as a registered operator (scoped permission distinct
+    /// from full Admin rights) when present and `true`.
+    Operator(Address),
+    /// Address nominated by the current admin via `propose_admin`, pending
+    /// its own `accept_admin` call. Cleared once the transfer completes.
+    /// Absence of this key means no admin transfer is in flight.
+    PendingAdmin,
 }
 
 #[contracttype]
@@ -326,6 +342,15 @@ pub enum Error {
     TemplateNotFound = 34,
     TemplateAlreadyExists = 35,
     TooManyTemplates = 36,
+    /// Caller authenticated successfully but is neither the contract admin
+    /// nor a registered operator for an operator-eligible entrypoint.
+    Unauthorized = 37,
+    /// `accept_admin` was called while no admin transfer is in flight
+    /// (`propose_admin` has never run, or the transfer already completed).
+    NoPendingAdmin = 38,
+    /// A proposed admin is required to differ from the current admin;
+    /// re-proposing the incumbent would be a no-op transfer.
+    InvalidAdminProposal = 39,
 }
 
 #[contracttype]

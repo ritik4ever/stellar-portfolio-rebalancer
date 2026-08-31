@@ -512,6 +512,43 @@ export class RiskManagementService {
         return status
     }
 
+    /**
+     * Resets a tripped circuit breaker for a given portfolio or asset (or all if not specified).
+     * @param targetId Portfolio ID, asset symbol, or undefined for all circuit breakers.
+     */
+    resetCircuitBreaker(targetId?: string): { resetCount: number; resetTargets: string[] } {
+        const resetTargets: string[] = []
+
+        if (targetId) {
+            const assetKey = targetId.toUpperCase()
+            if (this.circuitBreakers.has(assetKey)) {
+                const cb = this.circuitBreakers.get(assetKey)!
+                cb.isTriggered = false
+                cb.triggerReason = undefined
+                cb.cooldownUntil = undefined
+                cb.triggeredAssets = []
+                resetTargets.push(assetKey)
+            } else {
+                this.circuitBreakers.set(targetId, {
+                    isTriggered: false,
+                    triggeredAssets: []
+                })
+                resetTargets.push(targetId)
+            }
+        } else {
+            this.circuitBreakers.forEach((cb, key) => {
+                cb.isTriggered = false
+                cb.triggerReason = undefined
+                cb.cooldownUntil = undefined
+                cb.triggeredAssets = []
+                resetTargets.push(key)
+            })
+        }
+
+        logger.info('[RISK] Circuit breaker reset', { targetId, resetTargets })
+        return { resetCount: resetTargets.length, resetTargets }
+    }
+
     getRecommendations(riskMetrics: RiskMetrics, allocationsInput: Record<string, number>): string[] {
         const allocations = this.normalizeAllocations(allocationsInput)
         const recommendations: string[] = []

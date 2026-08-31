@@ -9,11 +9,19 @@ import {
   dbSaveDigestEvent,
   dbGetAndDeleteDigestEventsBefore,
   dbInitDefaultNotificationPreferences,
+  dbGetPortfolioNotificationOverride,
+  dbSavePortfolioNotificationOverride,
+  dbListPortfolioNotificationOverrides,
+  dbDeletePortfolioNotificationOverride,
+  type PortfolioNotificationOverride,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
 import nodemailer from "nodemailer";
-import { normalizeNotificationPreferences } from "./notificationPreferences.js";
+import {
+  normalizeNotificationPreferences,
+  resolvePortfolioNotificationPreferences,
+} from "./notificationPreferences.js";
 import { databaseService } from "./databaseService.js";
 import {
   getNotificationDeliveryConfig,
@@ -35,6 +43,8 @@ export interface EmailAttachment {
 
 export interface NotificationPayload {
   userId: string;
+  /** When set, portfolio-level preference overrides apply to this delivery (#1395). */
+  portfolioId?: string;
   eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
   message: string;
@@ -402,6 +412,54 @@ export class NotificationService {
   }
 
   /**
+   * Preferences that actually apply to one portfolio: global settings with any
+   * portfolio-level override layered on top (#1395). Falls back to the global
+   * preferences unchanged when no override exists.
+   */
+  getPreferencesForPortfolio(
+    userId: string,
+    portfolioId?: string,
+  ): NotificationPreferences & { overrideApplied: boolean } {
+    const global = this.getPreferences(userId);
+    if (!portfolioId) return { ...global, overrideApplied: false };
+
+    const override = dbGetPortfolioNotificationOverride(userId, portfolioId);
+    return resolvePortfolioNotificationPreferences(global, override);
+  }
+
+  /** Create or update a portfolio-level override. */
+  setPortfolioOverride(
+    override: PortfolioNotificationOverride,
+  ): PortfolioNotificationOverride {
+    const saved = dbSavePortfolioNotificationOverride(override);
+    logger.info('[NOTIFICATION] Portfolio preference override saved', {
+      userId: override.userId,
+      portfolioId: override.portfolioId,
+    });
+    return saved;
+  }
+
+  getPortfolioOverride(
+    userId: string,
+    portfolioId: string,
+  ): PortfolioNotificationOverride | undefined {
+    return dbGetPortfolioNotificationOverride(userId, portfolioId);
+  }
+
+  listPortfolioOverrides(userId: string): PortfolioNotificationOverride[] {
+    return dbListPortfolioNotificationOverrides(userId);
+  }
+
+  /** Remove an override so the portfolio falls back to global preferences. */
+  deletePortfolioOverride(userId: string, portfolioId: string): boolean {
+    const deleted = dbDeletePortfolioNotificationOverride(userId, portfolioId);
+    if (deleted) {
+      logger.info('[NOTIFICATION] Portfolio preference override removed', { userId, portfolioId });
+    }
+    return deleted;
+  }
+
+  /**
    * Get per-asset price alert threshold overrides for a user.
    */
   getPriceAlertThresholds(userId: string): Record<string, number> {
@@ -477,7 +535,10 @@ export class NotificationService {
    * Send notification to user
    */
   async notify(payload: NotificationPayload): Promise<void> {
-    const preferences = this.getPreferences(payload.userId);
+    const preferences = this.getPreferencesForPortfolio(
+      payload.userId,
+      payload.portfolioId,
+    );
 
     const eventKey = payload.eventType as keyof typeof preferences.events;
     if (!preferences.events[eventKey]) {

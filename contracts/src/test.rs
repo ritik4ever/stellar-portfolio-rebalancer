@@ -2176,7 +2176,7 @@ fn test_admin_force_rebalance_bypasses_cooldown() {
     });
 
     let actual_balances = Map::new(&env);
-    client.admin_force_rebalance(&pid, &actual_balances);
+    client.admin_force_rebalance(&admin, &pid, &actual_balances);
 
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.last_rebalance, 10010);
@@ -2207,11 +2207,11 @@ fn test_admin_force_rebalance_non_admin_rejected() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "admin_force_rebalance",
-                args: (pid, actual_balances.clone()).into_val(&env),
+                args: (unauthorized.clone(), pid, actual_balances.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .admin_force_rebalance(&pid, &actual_balances);
+        .admin_force_rebalance(&unauthorized, &pid, &actual_balances);
 }
 
 #[test]
@@ -2234,7 +2234,162 @@ fn test_admin_force_rebalance_admin_success() {
     // `admin_force_rebalance` and the portfolio user auth required by the
     // inner `execute_rebalance_internal`.
     let actual_balances = Map::new(&env);
-    client.admin_force_rebalance(&pid, &actual_balances);
+    client.admin_force_rebalance(&admin, &pid, &actual_balances);
+}
+
+// ── Issue #1377: operator role, scoped to admin_force_rebalance ─────────
+
+#[test]
+fn test_operator_can_force_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert!(!client.is_operator(&operator));
+    client.add_operator(&operator);
+    assert!(client.is_operator(&operator));
+
+    let mut allocations = Map::new(&env);
+    let asset = create_token_and_mint(&env, &admin, &user, 100);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10010;
+    });
+
+    // Operator can force-rebalance without holding admin rights.
+    let actual_balances = Map::new(&env);
+    client.admin_force_rebalance(&operator, &pid, &actual_balances);
+
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(portfolio.last_rebalance, 10010);
+}
+
+#[test]
+fn test_revoked_operator_rejected_from_force_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.add_operator(&operator);
+    client.remove_operator(&operator);
+    assert!(!client.is_operator(&operator));
+
+    let actual_balances = Map::new(&env);
+    let result = client.try_admin_force_rebalance(&operator, &pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn test_non_operator_rejected_from_force_rebalance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let actual_balances = Map::new(&env);
+    let result = client.try_admin_force_rebalance(&stranger, &pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+#[should_panic]
+fn test_operator_rejected_from_admin_only_upgrade() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let operator = Address::generate(&env);
+    client.add_operator(&operator);
+
+    let new_wasm_hash = env.deployer().upload_contract_wasm(&[0u8; 0] as &[u8]);
+
+    // Operators are scoped to `admin_force_rebalance` only: `queue_upgrade`
+    // still fetches the real Admin from storage and requires auth from
+    // exactly that address, so an operator-only auth mock fails here.
+    client
+        .mock_auths(&[MockAuth {
+            address: &operator,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "queue_upgrade",
+                args: (new_wasm_hash.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .queue_upgrade(&new_wasm_hash);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_rejected_from_admin_only_set_fee_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let operator = Address::generate(&env);
+    client.add_operator(&operator);
+
+    let config = FeeConfig {
+        platform_name: String::from_str(&env, "test"),
+        fee_bps: 25,
+        fee_recipient: Address::generate(&env),
+        enabled: true,
+    };
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &operator,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_fee_config",
+                args: (config.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_fee_config(&config);
 }
 
 #[test]
@@ -3177,11 +3332,15 @@ fn test_circuit_breaker_boundary_just_above_threshold_trips_with_exact_reason() 
     assert_ne!(pause_reason, PauseReason::AdminEmergency);
     assert_ne!(pause_reason, PauseReason::UserPaused);
     assert_ne!(pause_reason, PauseReason::CooldownActive);
-    // NOTE: check_volatility() only persists ContractPauseReason — it does not
-    // flip DataKey::EmergencyStop, which is the only flag execute_rebalance
-    // actually checks. So this attempt is not currently blocked by the trip.
-    // Flagging this as a pre-existing gap rather than asserting a false pass.
-    let _ = client.try_execute_rebalance(&pid, &Map::new(&env));
+    // check_volatility() now flips DataKey::EmergencyStop alongside
+    // ContractPauseReason, so the trip actually blocks further calls —
+    // not just records a reason nothing else checks.
+    let result = client.try_execute_rebalance(&pid, &Map::new(&env));
+    assert_eq!(
+        result,
+        Err(Ok(Error::EmergencyStop)),
+        "a circuit breaker trip must actually block execute_rebalance, not just record a reason"
+    );
 }
 
 #[test]
@@ -3586,6 +3745,102 @@ fn test_timelock_upgrade_post_delay_success() {
         })
         .collect();
     assert!(!upgrade_events.is_empty(), "upgraded event should be emitted");
+}
+
+// ── Issue #1378: schema-version-aware migrate_storage() in upgrade() ────
+
+#[test]
+fn test_fresh_initialize_starts_at_current_schema_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.storage_schema_version(), CURRENT_STORAGE_SCHEMA_VERSION);
+}
+
+#[test]
+fn test_execute_upgrade_migrates_legacy_portfolio_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    // Simulate a contract that predates both the strategy-aware portfolio
+    // schema and storage-schema versioning: downgrade the just-created
+    // PortfolioV2 entry to the old LegacyPortfolio shape under the old key,
+    // and reset SchemaVersion to "never migrated".
+    env.as_contract(&contract_id, || {
+        let current: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PortfolioV2(pid))
+            .unwrap();
+        let legacy = LegacyPortfolio {
+            user: current.user,
+            target_allocations: current.target_allocations,
+            current_balances: current.current_balances,
+            asset_decimals: current.asset_decimals,
+            rebalance_threshold: current.rebalance_threshold,
+            slippage_tolerance: current.slippage_tolerance,
+            slippage_policy_version: current.slippage_policy_version,
+            last_rebalance: current.last_rebalance,
+            total_value: current.total_value,
+            is_active: current.is_active,
+            pause_reason: current.pause_reason,
+            circuit_breaker_config: current.circuit_breaker_config,
+            global_max_slippage_bps: current.global_max_slippage_bps,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Portfolio(pid), &legacy);
+        env.storage().persistent().remove(&DataKey::PortfolioV2(pid));
+        env.storage().instance().remove(&DataKey::SchemaVersion);
+    });
+
+    assert_eq!(client.storage_schema_version(), 0);
+
+    // Queue + execute an upgrade -- migrate_storage() should run as part of
+    // execute_upgrade, before any new functionality is exposed.
+    let new_wasm_hash = env.deployer().upload_contract_wasm(&[0u8; 0] as &[u8]);
+    client.queue_upgrade(&new_wasm_hash);
+    env.ledger().with_mut(|li| {
+        li.timestamp = TIMELOCK_DELAY_SECONDS + 1;
+    });
+    client.execute_upgrade();
+
+    // schema_version is incremented and persisted post-migration.
+    assert_eq!(client.storage_schema_version(), CURRENT_STORAGE_SCHEMA_VERSION);
+
+    // Old-format data was migrated and is readable post-upgrade -- checked
+    // directly against storage (not via a getter that itself lazily
+    // migrates on read) to prove migrate_storage() did the work eagerly.
+    env.as_contract(&contract_id, || {
+        assert!(
+            !env.storage().persistent().has(&DataKey::Portfolio(pid)),
+            "legacy key should have been removed by migration"
+        );
+        let migrated: Portfolio = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PortfolioV2(pid))
+            .expect("PortfolioV2 should exist after migration");
+        assert_eq!(migrated.user, user);
+        assert_eq!(migrated.strategy, StrategyType::Threshold);
+    });
 }
 
 #[test]
@@ -4864,4 +5119,408 @@ fn test_create_portfolio_from_unknown_template_rejected() {
         &CURRENT_SLIPPAGE_POLICY_VERSION,
     );
     assert_eq!(result, Err(Ok(Error::TemplateNotFound)));
+}
+
+// ── Two-step admin transfer (propose / accept) ───────────────────────────
+
+/// Register and initialize the contract with a known admin *without* leaning
+/// on `env.mock_all_auths()`, so the admin-transfer tests below can mock auth
+/// per-address and prove who is actually allowed to call what.
+///
+/// Returns `(contract_id, admin)`; callers build their own client so each test
+/// keeps control of the auth entries it mocks.
+fn init_with_scoped_auth(env: &Env) -> (Address, Address) {
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    (contract_id, admin)
+}
+
+#[test]
+fn test_two_step_admin_transfer_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.get_pending_admin(), None, "no transfer in flight yet");
+
+    // Step 1: propose. The incumbent is still the admin at this point.
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    assert_eq!(
+        client.get_admin(),
+        admin,
+        "proposing must not hand over admin rights on its own"
+    );
+
+    // Step 2: accept. Only now does the admin actually change.
+    client.accept_admin();
+    assert_eq!(client.get_admin(), new_admin);
+    assert_eq!(
+        client.get_pending_admin(),
+        None,
+        "pending nomination is cleared once accepted"
+    );
+}
+
+#[test]
+fn test_two_step_admin_transfer_emits_events_at_each_step() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    client.propose_admin(&new_admin);
+
+    let proposed = all_events(&env)
+        .into_iter()
+        .rev()
+        .find(|(_, topics, _)| match topics.first() {
+            Some(topic) => match Symbol::try_from_val(&env, &topic) {
+                Ok(sym) => sym == Symbol::new(&env, "admin_proposed"),
+                Err(_) => false,
+            },
+            None => false,
+        })
+        .expect("propose_admin emits admin_proposed");
+    assert_eq!(
+        Address::try_from_val(&env, &proposed.1.get(1).unwrap()).unwrap(),
+        admin,
+        "admin_proposed is topic-indexed by the proposing admin"
+    );
+    let proposed_data: Address = proposed.2.into_val(&env);
+    assert_eq!(proposed_data, new_admin);
+
+    client.accept_admin();
+
+    let transferred = all_events(&env)
+        .into_iter()
+        .rev()
+        .find(|(_, topics, _)| match topics.first() {
+            Some(topic) => match Symbol::try_from_val(&env, &topic) {
+                Ok(sym) => sym == Symbol::new(&env, "admin_transferred"),
+                Err(_) => false,
+            },
+            None => false,
+        })
+        .expect("accept_admin emits admin_transferred");
+    assert_eq!(
+        Address::try_from_val(&env, &transferred.1.get(1).unwrap()).unwrap(),
+        admin,
+        "admin_transferred is topic-indexed by the outgoing admin"
+    );
+    let transferred_data: Address = transferred.2.into_val(&env);
+    assert_eq!(transferred_data, new_admin);
+}
+
+#[test]
+fn test_propose_admin_overwrites_pending_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let first_candidate = Address::generate(&env);
+    let second_candidate = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    client.propose_admin(&first_candidate);
+    client.propose_admin(&second_candidate);
+
+    assert_eq!(
+        client.get_pending_admin(),
+        Some(second_candidate.clone()),
+        "the newest proposal replaces the one in flight"
+    );
+
+    // The superseded candidate can no longer claim the role; the live one can.
+    client.accept_admin();
+    assert_eq!(client.get_admin(), second_candidate);
+}
+
+#[test]
+#[should_panic]
+fn test_superseded_candidate_cannot_accept_admin() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let first_candidate = Address::generate(&env);
+    let second_candidate = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&first_candidate,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&first_candidate);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&second_candidate,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&second_candidate);
+
+    // `accept_admin` requires auth from the *stored* pending admin, which the
+    // second proposal overwrote, so the superseded candidate cannot finalize.
+    client
+        .mock_auths(&[MockAuth {
+            address: &first_candidate,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+}
+
+#[test]
+#[should_panic]
+fn test_accept_admin_by_non_pending_address_rejected() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&new_admin,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&new_admin);
+
+    // Only the nominated address can finalize: `accept_admin` calls
+    // `require_auth()` on the address read from `DataKey::PendingAdmin`, so an
+    // auth entry signed by anyone else fails the invocation.
+    client
+        .mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+}
+
+#[test]
+#[should_panic]
+fn test_propose_admin_by_non_admin_rejected() {
+    let env = Env::default();
+
+    let (contract_id, _admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    let attacker_pick = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&attacker_pick,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&attacker_pick);
+}
+
+#[test]
+fn test_accept_admin_without_pending_proposal_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+fn test_accept_admin_is_not_replayable() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    client.propose_admin(&new_admin);
+    client.accept_admin();
+
+    // The nomination was consumed, so a replay finds nothing pending rather
+    // than re-running the handover.
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_propose_admin_rejects_current_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    assert_eq!(
+        client.try_propose_admin(&admin),
+        Err(Ok(Error::InvalidAdminProposal))
+    );
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+#[test]
+fn test_admin_rights_move_to_new_admin_after_transfer() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&new_admin,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&new_admin);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+
+    assert_eq!(client.get_admin(), new_admin);
+
+    // The new admin can exercise an admin-only entrypoint...
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_emergency_stop",
+                args: vec![&env, true.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_emergency_stop(&true);
+}
+
+#[test]
+#[should_panic]
+fn test_previous_admin_loses_rights_after_transfer() {
+    let env = Env::default();
+
+    let (contract_id, admin) = init_with_scoped_auth(&env);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_admin",
+                args: (&new_admin,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&new_admin);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "accept_admin",
+                args: vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+
+    // ...and the outgoing admin can no longer: admin-gated entrypoints read
+    // `DataKey::Admin`, which now holds `new_admin`.
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_emergency_stop",
+                args: vec![&env, true.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_emergency_stop(&true);
 }
