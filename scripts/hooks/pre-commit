@@ -1,4 +1,21 @@
 #!/usr/bin/env sh
 set -eu
 
+# Run existing quick checks
 npm run quick:pre-commit
+
+# Run secret scan on staged changes (if not skipped)
+if [ "${SKIP_SECRET_SCAN:-}" = "1" ]; then
+  echo "SKIP_SECRET_SCAN=1: skipping gitleaks secret scan"
+  exit 0
+fi
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "Error: gitleaks is not installed. Install it with:" >&2
+  echo "  brew install gitleaks" >&2
+  echo "  or go install github.com/gitleaks/gitleaks/v8@latest" >&2
+  echo "For exceptional cases, you can bypass with SKIP_SECRET_SCAN=1 (see CONTRIBUTING.md)." >&2
+  exit 1
+fi
+
+gitleaks protect --staged --config .gitleaks.toml
