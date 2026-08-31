@@ -138,7 +138,7 @@ impl PortfolioRebalancer {
 
     /// Step 2 of the two-step admin transfer: the pending admin claims the role.
     ///
-    /// Callable only by the address stored by [`propose_admin`] — it must
+    
     /// authorize this call itself, which is what proves the incoming admin
     /// controls the key. On success `DataKey::Admin` is rewritten, the
     /// pending nomination is cleared, and the previous admin loses every
@@ -346,7 +346,7 @@ impl PortfolioRebalancer {
             .set(&DataKey::NextPortfolioId, &(portfolio_id + 1));
         portfolio::check_portfolio_invariants(&portfolio)?;
 
-        // Store under V2 key (strategy-aware schema).
+       
         env.storage()
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
