@@ -1,2 +1,2 @@
 #!/bin/bash
-echo "simulate outage"
+cource ./blib/common.s.haps"outage"
