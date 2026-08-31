@@ -1,5 +1,22 @@
 name: Contract Deploy
 
+# Slack / SMS Notification Channels
+# ---------------------------------
+# After a successful deployment, notifications can be sent to Slack and SMS.
+#
+# Slack configuration:
+#   - Set SLACK_WEBHOOK_URL as an environment secret (incoming webhook URL).
+#
+# SMS configuration:
+#   - Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and SMS_TO_PHONE (verified phone number).
+#
+# Troubleshooting:
+#   - Slack: Ensure the webhook URL is valid and has not been revoked.
+#   - SMS: Verify that the recipient phone number is verified in Twilio and can receive SMS.
+#
+# Implementation details: see `slack.ts` and `sms.ts` in the backend.
+# Full documentation: docs/NOTIFICATIONS.md
+
 on:
   push:
     branches:
