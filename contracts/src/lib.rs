@@ -12,6 +12,7 @@ mod events;
 mod nav;
 mod oracle;
 mod portfolio;
+mod portfolio_ops;
 mod reflector;
 mod slippage;
 mod stop_loss;
@@ -362,6 +363,18 @@ impl PortfolioRebalancer {
 
     pub fn get_portfolio(env: Env, portfolio_id: u64) -> Portfolio {
         Self::load_portfolio(&env, portfolio_id).unwrap()
+    }
+
+    /// Move `pct_to_new` percent of every asset into a new portfolio owned by
+    /// the same user. The percentage must be between 1 and 99 (inclusive).
+    pub fn split_portfolio(env: Env, source_id: u64, pct_to_new: u32) -> Result<u64, Error> {
+        portfolio_ops::split_portfolio(&env, source_id, pct_to_new)
+    }
+
+    /// Merge `source_id` into `target_id`, preserving asset balances and
+    /// weighting target allocations by the portfolios' stored values.
+    pub fn merge_portfolios(env: Env, source_id: u64, target_id: u64) -> Result<(), Error> {
+        portfolio_ops::merge_portfolios(&env, source_id, target_id)
     }
 
     pub fn check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error> {
