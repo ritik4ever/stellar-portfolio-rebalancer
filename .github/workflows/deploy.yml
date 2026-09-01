@@ -56,6 +56,79 @@ jobs:
           cd deployment/terraform
           terraform apply tfplan
 
+      - name: Capture Terraform outputs
+        run: |
+          cd deployment/terraform
+          echo "CF_DIST_ID=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_ENV"
+          echo "S3_BUCKET=$(terraform output -raw s3_bucket_id)" >> "$GITHUB_ENV"
+          echo "FRONTEND_URL=$(terraform output -raw frontend_url)" >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        run: |
+          npm ci
+          npm run build:frontend
+
+      - name: Upload frontend assets to S3
+        run: |
+          aws s3 sync frontend/dist "s3://${{ env.S3_BUCKET }}" --delete
+
+      - name: Create CloudFront invalidation
+        run: |
+          DIST_ID="${{ env.CF_DIST_ID }}"
+          BUCKET="${{ env.S3_BUCKET }}"
+
+          # Build list of invalidation paths
+          INVALIDATION_PATHS=("/index.html" "/manifest.json" "/favicon.ico" "/robots.txt")
+
+          # Compare local dist/ with S3 to find changed hashed assets
+          S3_ASSETS=$(aws s3 ls "s3://${BUCKET}/assets/" --recursive 2>/dev/null | awk '{print $4}' | sort)
+          LOCAL_ASSETS=$(cd frontend/dist/assets 2>/dev/null && ls | sort || true)
+
+          if [ -n "$S3_ASSETS" ] && [ -n "$LOCAL_ASSETS" ]; then
+            CHANGED=$(diff <(echo "$S3_ASSETS") <(echo "$LOCAL_ASSETS") | grep '^>' | sed 's/^> //' || true)
+            if [ -n "$CHANGED" ]; then
+              while IFS= read -r file; do
+                INVALIDATION_PATHS+=("/assets/${file}")
+              done <<< "$CHANGED"
+            fi
+          elif [ -n "$LOCAL_ASSETS" ]; then
+            # First deploy or all assets are new — invalidate all assets
+            INVALIDATION_PATHS+=("/assets/*")
+          fi
+
+          # Build invalidation paths JSON
+          PATHS_JSON=$(printf '%s\n' "${INVALIDATION_PATHS[@]}" | jq -R . | jq -s .)
+          PATH_COUNT=${#INVALIDATION_PATHS[@]}
+          CALLER_REF="deploy-$(date +%s)-$$"
+
+          INVALIDATION_BATCH=$(jq -n \
+            --argjson count "$PATH_COUNT" \
+            --argjson paths "$PATHS_JSON" \
+            --arg ref "$CALLER_REF" \
+            '{Paths: {Quantity: $count, Items: $paths}, CallerReference: $ref}')
+
+          echo "Invalidating $PATH_COUNT path(s): ${INVALIDATION_PATHS[*]}"
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DIST_ID" \
+            --invalidation-batch "$INVALIDATION_BATCH" \
+            --query 'Invalidation.Id' --output text)
+
+          echo "Waiting for invalidation $INVALIDATION_ID to complete..."
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DIST_ID" \
+            --id "$INVALIDATION_ID"
+          echo "Invalidation $INVALIDATION_ID completed successfully"
+
+      - name: Smoke check CDN
+        run: |
+          sleep 10
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ env.FRONTEND_URL }}")
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::error::CDN smoke check failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+          echo "CDN smoke check passed (HTTP $HTTP_STATUS)"
+
   deploy-production:
     if: github.ref == 'refs/heads/main'
     needs: zap-security-gate
@@ -109,3 +182,72 @@ jobs:
         run: |
           cd deployment/terraform
           terraform apply tfplan
+
+      - name: Capture Terraform outputs
+        run: |
+          cd deployment/terraform
+          echo "CF_DIST_ID=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_ENV"
+          echo "S3_BUCKET=$(terraform output -raw s3_bucket_id)" >> "$GITHUB_ENV"
+          echo "FRONTEND_URL=$(terraform output -raw frontend_url)" >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        run: |
+          npm ci
+          npm run build:frontend
+
+      - name: Upload frontend assets to S3
+        run: |
+          aws s3 sync frontend/dist "s3://${{ env.S3_BUCKET }}" --delete
+
+      - name: Create CloudFront invalidation
+        run: |
+          DIST_ID="${{ env.CF_DIST_ID }}"
+          BUCKET="${{ env.S3_BUCKET }}"
+
+          INVALIDATION_PATHS=("/index.html" "/manifest.json" "/favicon.ico" "/robots.txt")
+
+          S3_ASSETS=$(aws s3 ls "s3://${BUCKET}/assets/" --recursive 2>/dev/null | awk '{print $4}' | sort)
+          LOCAL_ASSETS=$(cd frontend/dist/assets 2>/dev/null && ls | sort || true)
+
+          if [ -n "$S3_ASSETS" ] && [ -n "$LOCAL_ASSETS" ]; then
+            CHANGED=$(diff <(echo "$S3_ASSETS") <(echo "$LOCAL_ASSETS") | grep '^>' | sed 's/^> //' || true)
+            if [ -n "$CHANGED" ]; then
+              while IFS= read -r file; do
+                INVALIDATION_PATHS+=("/assets/${file}")
+              done <<< "$CHANGED"
+            fi
+          elif [ -n "$LOCAL_ASSETS" ]; then
+            INVALIDATION_PATHS+=("/assets/*")
+          fi
+
+          PATHS_JSON=$(printf '%s\n' "${INVALIDATION_PATHS[@]}" | jq -R . | jq -s .)
+          PATH_COUNT=${#INVALIDATION_PATHS[@]}
+          CALLER_REF="deploy-$(date +%s)-$$"
+
+          INVALIDATION_BATCH=$(jq -n \
+            --argjson count "$PATH_COUNT" \
+            --argjson paths "$PATHS_JSON" \
+            --arg ref "$CALLER_REF" \
+            '{Paths: {Quantity: $count, Items: $paths}, CallerReference: $ref}')
+
+          echo "Invalidating $PATH_COUNT path(s): ${INVALIDATION_PATHS[*]}"
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DIST_ID" \
+            --invalidation-batch "$INVALIDATION_BATCH" \
+            --query 'Invalidation.Id' --output text)
+
+          echo "Waiting for invalidation $INVALIDATION_ID to complete..."
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DIST_ID" \
+            --id "$INVALIDATION_ID"
+          echo "Invalidation $INVALIDATION_ID completed successfully"
+
+      - name: Smoke check CDN
+        run: |
+          sleep 10
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ env.FRONTEND_URL }}")
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::error::CDN smoke check failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+          echo "CDN smoke check passed (HTTP $HTTP_STATUS)"

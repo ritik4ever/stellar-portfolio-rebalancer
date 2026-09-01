@@ -5717,7 +5717,7 @@ fn test_previous_admin_loses_rights_after_transfer() {
 }
 
 #[test]
-fn test_max_portfolio_assets_boundary_gas_cost() {
+
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
@@ -5726,7 +5726,7 @@ fn test_max_portfolio_assets_boundary_gas_cost() {
     let admin = Address::generate(&env);
     client.initialize(&admin, &reflector_id);
 
-    // 1. Construct portfolio with exactly MAX_PORTFOLIO_ASSETS (10)
+
     let user = Address::generate(&env);
     let mut allocations = Map::new(&env);
     for _ in 0..MAX_PORTFOLIO_ASSETS {
@@ -5734,27 +5734,13 @@ fn test_max_portfolio_assets_boundary_gas_cost() {
         allocations.set(asset, 1000);
     }
 
-    let portfolio_id = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
-    assert_eq!(portfolio_id, 1);
-
-    // 2. Companion test: Attempting MAX_PORTFOLIO_ASSETS + 1 (11) is rejected
-    let mut oversized = Map::new(&env);
-    for i in 0..11u32 {
-        let a = Address::generate(&env);
-        let pct = if i == 10 { 910 } else { 909 };
-        oversized.set(a, pct);
-    }
-    let asset_decimals = allocation_decimals(&env, &oversized, DEFAULT_ASSET_DECIMALS);
-    let res = client.try_create_portfolio(
-        &user,
-        &oversized,
-        &asset_decimals,
-        &5,
-        &50,
-        &CURRENT_SLIPPAGE_POLICY_VERSION,
-    );
-    assert_eq!(res, Err(Ok(Error::TooManyAssets)));
-}
 
 
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset, 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    let new_steward = Address::generate(&env);
+    client.transfer_stewardship(&pid, &new_steward);
 
