@@ -132,6 +132,11 @@ jobs:
         working-directory: deployment/terraform
         run: terraform init -input=false && terraform apply -input=false -auto-approve -target=aws_budgets_budget.monthly
 
+          if [ -z "${FEE_RECIPIENT_ADDRESS:-}" ]; then
+            echo "::error::Missing FEE_RECIPIENT_ADDRESS in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
+            exit 1
+          fi
+
       - name: Generate nginx rate limiting config
         run: |
           cat > nginx.conf <<'EOF'
@@ -165,6 +170,21 @@ jobs:
               }
           }
           EOF
+
+      - name: Update security audit documentation
+        run: |
+          mkdir -p docs
+          if ! grep -q "set_fee_config default recipient" docs/SECURITY_AUDIT.md 2>/dev/null; then
+          cat >> docs/SECURITY_AUDIT.md <<'EOF'
+          ## [SECURITY] set_fee_config default recipient defaults to contract's own address
+          - **Category:** security
+          - **Project area:** contracts/src
+          - **Description:** The `set_fee_config` function, when called without an explicit `fee_recipient`, falls back to the contract's own address.
+          - **Impact:** Fees collected may become permanently stranded in the contract with no withdrawal path.
+          - **Remediation:** This deployment workflow now requires `FEE_RECIPIENT_ADDRESS` to be set and passes it to the contract deployment.
+          - **Status:** Fixed by commit `${{ github.sha }}` ([link](https://github.com/${{ github.repository }}/commit/${{ github.sha }})).
+          EOF
+          fi
 
       - name: Deploy contract
         run: bash deployment/contract-deploy.sh
