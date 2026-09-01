@@ -155,7 +155,50 @@ All cURL examples below use the v1 API. Replace `http://localhost:3001` with you
 
 ## Health & System
 
-### Health Check
+### Root Service Status
+
+```bash
+GET /
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "version": "1.0.0",
+  "name": "stellar-portfolio-backend"
+}
+```
+
+### Liveness Probe
+
+```bash
+GET /health
+```
+
+Response:
+```text
+200 ok
+```
+
+### Deep Readiness Probe
+
+```bash
+GET /ready
+```
+
+Response:
+```json
+{
+  "status": "ready",
+  "checks": {
+    "db": "ok",
+    "redis": "ok"
+  }
+}
+```
+
+### API Health Check
 
 ```bash
 GET /api/v1/health
@@ -225,7 +268,8 @@ Idempotency-Key: <uuid>
   "allocations": { "XLM": 40, "BTC": 30, "USDC": 30 },
   "threshold": 5,
   "slippageTolerance": 1,
-  "strategy": "threshold"
+  "strategy": "threshold",
+  "strategyConfig": { "dryRun": true }
 }
 ```
 
@@ -246,6 +290,7 @@ Validation:
 - `threshold`: 1–50%
 - `slippageTolerance`: 0.1–5% (optional, default: 1)
 - `strategy`: `threshold` | `periodic` | `volatility` | `custom` (optional, default: `threshold`)
+- `strategyConfig.dryRun`: optional portfolio-level override for scheduled auto-rebalance dry-run mode. When enabled, the scheduler computes and reports the plan without submitting an on-chain transaction. This value takes precedence over `AUTO_REBALANCE_DRY_RUN`.
 
 ### Bulk Import Portfolio
 
@@ -931,6 +976,34 @@ Response:
 }
 ```
 
+### OHLCV Candles
+
+```bash
+GET /api/v1/prices/ohlcv?asset=XLM&interval=1d&from=2025-01-01T00:00:00.000Z&to=2025-01-07T00:00:00.000Z
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "asset": "XLM",
+    "interval": "1d",
+    "candles": [
+      {
+        "timestamp": 1735689600000,
+        "open": 0.35,
+        "high": 0.36,
+        "low": 0.34,
+        "close": 0.3589
+      }
+    ]
+  },
+  "error": null,
+  "timestamp": "2025-01-07T00:00:00.000Z"
+}
+```
+
 ### Market Details
 
 ```bash
@@ -1079,6 +1152,22 @@ DELETE /api/v1/notifications/alerts/thresholds?userId=GALPHABET...&asset=XLM
 
 Removes the per-asset override for the given asset so alert evaluation falls back to the user's global default.
 
+### Queue Health
+
+```bash
+GET /api/v1/queue/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "queues": {
+    "rebalance": { "active": 0, "waiting": 0, "failed": 0 }
+  }
+}
+```
+
 ---
 
 ## Consent (GDPR)
@@ -1131,6 +1220,51 @@ Idempotency-Key: <uuid>
 
 ```bash
 GET /api/v1/consent/audit?userId=GALPHABET...
+```
+
+### Consent Audit-Trail Export
+
+Export full consent history as JSON. Non-admin users can export their own consent trail (`Authorization: Bearer <token>`). Admins can export any user's consent trail by specifying `?userId=<address>`.
+
+```bash
+GET /api/v1/consent/export?userId=GALPHABET...
+Authorization: Bearer <access_token>
+```
+
+Response:
+```json
+{
+  "userId": "GALPHABET...",
+  "exportedAt": "2026-08-28T09:49:26.000Z",
+  "consent": {
+    "active": true,
+    "documentVersion": "66319e1f1025874cd1a7edb6b6f115a0637008723c02b28a428bbb6b05058e67",
+    "termsAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "privacyAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "cookieAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "analyticsAcceptedAt": "2026-08-28T09:49:26.000Z",
+    "marketingAcceptedAt": null,
+    "categories": ["terms", "privacy", "cookies", "analytics"]
+  },
+  "history": [
+    {
+      "id": "cm...",
+      "action": "grant",
+      "timestamp": "2026-08-28T09:49:26.000Z",
+      "documentVersion": "66319e1f1025874cd1a7edb6b6f115a0637008723c02b28a428bbb6b05058e67",
+      "categories": ["terms", "privacy", "cookies", "analytics"],
+      "categoryDetails": {
+        "terms": true,
+        "privacy": true,
+        "cookies": true,
+        "analytics": true,
+        "marketing": false
+      },
+      "ipAddress": "127.0.0.1",
+      "userAgent": "Mozilla/5.0..."
+    }
+  ]
+}
 ```
 
 ### Delete User Data (GDPR Erasure)
@@ -1187,6 +1321,107 @@ Content-Type: application/json
 ```bash
 DELETE /api/v1/admin/assets/{symbol}
 Authorization: Bearer <admin_token>
+```
+
+### Get Analytics Retention Policy
+
+```bash
+GET /api/admin/analytics/retention-policy
+Authorization: Bearer <admin_token>
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "retentionPolicy": {
+      "cutoffDays": 90,
+      "recentDays": 7,
+      "defaults": {
+        "cutoffDays": 90,
+        "recentDays": 7
+      },
+      "limits": {
+        "minCutoffDays": 1,
+        "maxCutoffDays": 3650,
+        "minRecentDays": 1,
+        "maxRecentDays": 365
+      }
+    }
+  }
+}
+```
+
+### Trigger Analytics Compaction Manually
+
+#### Single Portfolio Compaction
+
+```bash
+POST /api/admin/analytics/compact
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "portfolioId": "portfolio-abc123",
+  "cutoffDays": 90,
+  "recentDays": 7
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "stats": {
+      "deletedCount": 15,
+      "retainedCount": 30,
+      "cutoffDate": "2025-01-01T00:00:00.000Z",
+      "recentCutoffDate": "2025-03-24T00:00:00.000Z"
+    },
+    "cutoffDays": 90,
+    "recentDays": 7
+  }
+}
+```
+
+#### All Portfolios Compaction (Omitting `portfolioId`)
+
+```bash
+POST /api/admin/analytics/compact
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "cutoffDays": 90,
+  "recentDays": 7
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "results": [
+      {
+        "portfolioId": "portfolio-abc123",
+        "deletedCount": 15,
+        "retainedCount": 30,
+        "cutoffDate": "2025-01-01T00:00:00.000Z",
+        "recentCutoffDate": "2025-03-24T00:00:00.000Z"
+      }
+    ],
+    "summary": {
+      "portfoliosProcessed": 1,
+      "totalSnapshotsDeleted": 15,
+      "totalSnapshotsRetained": 30,
+      "cutoffDays": 90,
+      "recentDays": 7
+    }
+  }
+}
 ```
 
 ---

@@ -44,6 +44,15 @@ inhibit_rules:
     target_matchers:
       - alertname =~ "BackendReadinessFailed|BackendApiRootFailed|ApiDocsProbeFailed|WebSocketHandshakeFailed"
 
+# Suppression rules: keep one incident to one page.
+inhibit_rules:
+  # The backend process being down is the root cause of every blackbox probe
+  # failure aimed at it. Page for BackendDown only, not for each dependent probe.
+  - source_matchers:
+      - alertname = BackendDown
+    target_matchers:
+      - alertname =~ "BackendReadinessFailed|WebSocketHandshakeFailed"
+
 receivers:
   - name: default
     webhook_configs:
