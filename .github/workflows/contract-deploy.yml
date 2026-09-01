@@ -1,24 +1,6 @@
 name: Contract Deploy
 
-name: Contract Deploy
-on: push: branches: - main
-pull_request:
-  branches:
-    - main
-workflow_dispatch:
-  inputs:
-    environment:
-      description: Deployment target
-      required: true
-      type: choice
-      default: testnet
-      options:
-        - testnet
-        - staging
-        - mainnet
 
-  schedule:
-    - cron: '0 2 * * *'
 
 concurrency:
 
