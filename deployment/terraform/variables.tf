@@ -204,7 +204,6 @@ variable "blue_green_deployment_config" {
     }
   }
 }
-
 variable "ecs_min_capacity" {
   description = "Minimum number of ECS tasks"
   type        = map(number)

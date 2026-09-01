@@ -19,6 +19,14 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Test listener port used by CodeDeploy for blue/green health-check traffic
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -55,6 +63,7 @@ resource "aws_lb" "main" {
   subnets            = var.public_subnet_ids
 }
 
+# Blue target group – receives production traffic by default
 resource "aws_lb_target_group" "main" {
   name        = "${var.name_prefix}-tg-blue"
   port        = 3000
@@ -73,7 +82,7 @@ resource "aws_lb_target_group" "main" {
   }
 }
 
-# Green target group for blue/green deployments
+# Green target group – used by CodeDeploy to stage the new version
 resource "aws_lb_target_group" "green" {
   count       = var.enable_blue_green ? 1 : 0
   name        = "${var.name_prefix}-tg-green"
@@ -93,6 +102,7 @@ resource "aws_lb_target_group" "green" {
   }
 }
 
+# Production listener on port 80 – CodeDeploy shifts traffic here
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
@@ -101,6 +111,20 @@ resource "aws_lb_listener" "http" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.main.arn
+  }
+}
+
+# Test listener on port 8080 – CodeDeploy routes test/canary traffic here
+# before committing to the full traffic shift on the production listener.
+resource "aws_lb_listener" "test" {
+  count             = var.enable_blue_green ? 1 : 0
+  load_balancer_arn = aws_lb.main.arn
+  port              = "8080"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.green[0].arn
   }
 }
 
@@ -141,7 +165,6 @@ resource "aws_iam_policy" "ecs_secrets_policy" {
         Resource = [
           var.db_secret_arn,
           var.redis_secret_arn,
-          # Optionally add external API keys ARNs here
         ]
       }
     ]
@@ -241,6 +264,12 @@ resource "aws_ecs_service" "main" {
     container_port   = 3000
   }
 
+  # When blue/green is enabled CodeDeploy manages traffic shifting;
+  # rolling updates are used otherwise.
+  deployment_controller {
+    type = var.enable_blue_green ? "CODE_DEPLOY" : "ECS"
+  }
+
   depends_on = [aws_lb_listener.http]
 
   deployment_circuit_breaker {
@@ -249,7 +278,12 @@ resource "aws_ecs_service" "main" {
   }
 
   lifecycle {
-    ignore_changes = [desired_count]
+    # CodeDeploy owns task_definition and load_balancer changes during deployments
+    ignore_changes = [
+      desired_count,
+      task_definition,
+      load_balancer,
+    ]
   }
 }
 
@@ -325,63 +359,9 @@ resource "aws_cloudwatch_metric_alarm" "low_queue_backlog" {
   alarm_actions       = [aws_appautoscaling_policy.scale_in.arn]
 }
 
-# Blue/Green deployment resources
-resource "aws_codedeploy_app" "main" {
-  count = var.enable_blue_green ? 1 : 0
-  name  = "${var.name_prefix}-ecs-deployment"
-
-  compute_platform = "ECS"
-}
-
-resource "aws_codedeploy_deployment_group" "main" {
-  count = var.enable_blue_green ? 1 : 0
-  app_name              = aws_codedeploy_app.main[0].name
-  deployment_group_name  = "${var.name_prefix}-deployment-group"
-  service_role_arn      = aws_iam_role.codedeploy[0].arn
-
-  deployment_config_name = "CodeDeployDefault.ECSAllAtOnce"
-  deployment_style {
-    deployment_option = "WITH_TRAFFIC_CONTROL"
-    deployment_type   = "BLUE_GREEN"
-  }
-
-  load_balancer_info {
-    target_group_pair_info {
-      prod_traffic_route {
-        listener_arns = [aws_lb_listener.http.arn]
-      }
-
-      target_group {
-        name = aws_lb_target_group.main.name
-      }
-
-      target_group {
-        name = aws_lb_target_group.green[0].name
-      }
-    }
-  }
-
-  ecs_service {
-    cluster_name = aws_ecs_cluster.main.name
-    service_name = aws_ecs_service.main.name
-  }
-
-  auto_rollback_configuration {
-    enabled = true
-    events  = ["DEPLOYMENT_FAILURE"]
-  }
-
-  alarm_configuration {
-    alarms  = ["${var.name_prefix}-deployment-alarm"]
-    enabled = true
-  }
-
-  trigger_configuration {
-    trigger_events     = ["DeploymentSuccess"]
-    trigger_name       = "${var.name_prefix}-deployment-success"
-    trigger_target_arn = aws_sns_topic.deployment_notifications[0].arn
-  }
-}
+# ---------------------------------------------------------------------------
+# Blue/Green deployment resources (created only when enable_blue_green = true)
+# ---------------------------------------------------------------------------
 
 # IAM role for CodeDeploy
 resource "aws_iam_role" "codedeploy" {
@@ -438,14 +418,15 @@ resource "aws_sns_topic_policy" "deployment_notifications" {
   })
 }
 
-# CloudWatch alarm for deployment health
+# CloudWatch alarm that triggers automatic rollback when healthy hosts drop
+# below 1 during a deployment. CodeDeploy references this alarm by name.
 resource "aws_cloudwatch_metric_alarm" "deployment_health" {
   count               = var.enable_blue_green ? 1 : 0
   alarm_name          = "${var.name_prefix}-deployment-alarm"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 2
   metric_name         = "HealthyHostCount"
-  namespace           = "AWS/ElasticLoadBalancing"
+  namespace           = "AWS/ApplicationELB"
   period              = 60
   statistic           = "Average"
   threshold           = 1
@@ -453,6 +434,111 @@ resource "aws_cloudwatch_metric_alarm" "deployment_health" {
   alarm_actions       = [aws_sns_topic.deployment_notifications[0].arn]
 
   dimensions = {
-    TargetGroup = aws_lb_target_group.main.arn_suffix
+    TargetGroup  = aws_lb_target_group.main.arn_suffix
+    LoadBalancer = aws_lb.main.arn_suffix
+  }
+}
+
+# CodeDeploy application – compute_platform must be "ECS" for blue/green ECS
+resource "aws_codedeploy_app" "main" {
+  count            = var.enable_blue_green ? 1 : 0
+  name             = "${var.name_prefix}-ecs-app"
+  compute_platform = "ECS"
+}
+
+# CodeDeploy deployment configuration – controls how traffic shifts between
+# the blue and green target groups.
+# CodeDeployDefault.ECSAllAtOnce shifts 100 % after health checks pass.
+# Use CodeDeployDefault.ECSCanary10Percent5Minutes or a custom config for
+# gradual canary-style shifts.
+resource "aws_codedeploy_deployment_config" "main" {
+  count                      = var.enable_blue_green ? 1 : 0
+  deployment_config_name     = "${var.name_prefix}-ecs-deployment-config"
+  compute_platform           = "ECS"
+
+  traffic_routing_config {
+    type = "AllAtOnce"
+  }
+}
+
+# CodeDeploy deployment group – ties the app, ECS service, ALB listeners,
+# target groups, rollback rules, and CloudWatch alarms together.
+resource "aws_codedeploy_deployment_group" "main" {
+  count                  = var.enable_blue_green ? 1 : 0
+  app_name               = aws_codedeploy_app.main[0].name
+  deployment_group_name  = "${var.name_prefix}-deployment-group"
+  service_role_arn       = aws_iam_role.codedeploy[0].arn
+  deployment_config_name = aws_codedeploy_deployment_config.main[0].deployment_config_name
+
+  deployment_style {
+    deployment_option = "WITH_TRAFFIC_CONTROL"
+    deployment_type   = "BLUE_GREEN"
+  }
+
+  blue_green_deployment_config {
+    # How long to wait before shifting traffic once health checks pass.
+    # CONTINUE_DEPLOYMENT means proceed immediately.
+    deployment_ready_option {
+      action_on_timeout = var.blue_green_deployment_config.deployment_ready_option.action_on_timeout
+    }
+
+    # Keep the original (blue) task set running for this many minutes after a
+    # successful shift so a manual or automatic rollback can redirect traffic
+    # back instantly without a cold start.
+    terminate_blue_instances_on_deployment_success {
+      action                           = "TERMINATE"
+      termination_wait_time_in_minutes = var.blue_green_deployment_config.termination_wait_time_in_minutes
+    }
+  }
+
+  load_balancer_info {
+    target_group_pair_info {
+      # Production listener – receives live user traffic
+      prod_traffic_route {
+        listener_arns = [aws_lb_listener.http.arn]
+      }
+
+      # Test listener – CodeDeploy routes health-check traffic here before
+      # switching the production listener
+      test_traffic_route {
+        listener_arns = [aws_lb_listener.test[0].arn]
+      }
+
+      # Blue target group (current / original)
+      target_group {
+        name = aws_lb_target_group.main.name
+      }
+
+      # Green target group (new version)
+      target_group {
+        name = aws_lb_target_group.green[0].name
+      }
+    }
+  }
+
+  ecs_service {
+    cluster_name = aws_ecs_cluster.main.name
+    service_name = aws_ecs_service.main.name
+  }
+
+  # Automatically roll back on deployment failure or when the CloudWatch
+  # health alarm fires during the traffic shift.
+  auto_rollback_configuration {
+    enabled = true
+    events  = ["DEPLOYMENT_FAILURE", "DEPLOYMENT_STOP_ON_ALARM"]
+  }
+
+  # Wire in the CloudWatch alarm so CodeDeploy watches healthy host count
+  # and triggers an automatic rollback if it fires.
+  alarm_configuration {
+    alarms                    = [aws_cloudwatch_metric_alarm.deployment_health[0].alarm_name]
+    enabled                   = true
+    ignore_poll_alarm_failure = false
+  }
+
+  trigger_configuration {
+    trigger_events     = ["DeploymentSuccess", "DeploymentFailure", "DeploymentRollback"]
+    trigger_name       = "${var.name_prefix}-deployment-events"
+    trigger_target_arn = aws_sns_topic.deployment_notifications[0].arn
   }
 }
