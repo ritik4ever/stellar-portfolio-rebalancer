@@ -1,80 +1,136 @@
 name: Contract Deploy
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: Deployment target
-        required: true
-        type: choice
-        default: testnet
-        options:
-          - testnet
-          - staging
-          - mainnet
+name: Contract Deploy
+on: push: branches: - main
+pull_request:
+  branches:
+    - main
+workflow_dispatch:
+  inputs:
+    environment:
+      description: Deployment target
+      required: true
+      type: choice
+      default: testnet
+      options:
+        - testnet
+        - staging
+        - mainnet
+
+  schedule:
+    - cron: '0 2 * * *'
 
 concurrency:
-  group: contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}-${{ github.ref }}
+
   cancel-in-progress: true
 
 permissions:
   contents: read
+  deployments: write
 
 jobs:
+  # Dependency scanning gate. To explicitly waive an advisory:
+  # - Add the advisory ID (RUSTSEC-XXXX or GHSA-XXXX) to `.dependency-audit/cargo-allowlist.txt` or `.dependency-audit/npm-allowlist.txt`
+  #   (one ID per line, blank lines and comments starting with # are ignored).
+  # - Commit the allowlist file; this becomes part of the audit trail.
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: contracts
+        run: |
+          args=()
+          if [ -f .dependency-audit/cargo-allowlist.txt ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              args+=(--ignore "$line")
+            done < .dependency-audit/cargo-allowlist.txt
+          fi
+          cargo audit "${args[@]}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run npm audit (backend & frontend)
+        run: |
+          set -euo pipefail
+          for dir in backend frontend; do
+            echo "Scanning $dir..."
+            (cd "$dir" && node -e "
+              const fs = require('fs');
+              const path = '../.dependency-audit/npm-allowlist.txt';
+              const allowlist = fs.existsSync(path) ? fs.readFileSync(path, 'utf8').split(/\r?\n/).filter(l => l && !l.startsWith('#')) : [];
+              const { execSync } = require('child_process');
+              let stdout;
+              try {
+                stdout = execSync('npm audit --json --audit-level=high', { encoding: 'utf8', stdio: ['pipe','pipe','ignore'] });
+              } catch (e) {
+                stdout = (e.stdout || '').toString();
+              }
+              const json = JSON.parse(stdout);
+              const vulns = Object.values(json.vulnerabilities || {}).filter(v => (v.severity === 'high' || v.severity === 'critical') && !allowlist.includes(v.name));
+              if (vulns.length > 0) {
+                console.error('npm audit failed:', vulns.map(v => v.name + '@' + v.severity).join(', '));
+                process.exit(1);
+              }
+              console.log('npm audit passed');
+            ")
+          done
+
   deploy-contract:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}
-    env:
-      DEPLOYMENT_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}
-      STELLAR_NETWORK: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'mainnet' || 'testnet' }}
-      SOROBAN_RPC_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'https://soroban-mainnet.stellar.org' || 'https://soroban-testnet.stellar.org' }}
-      SOROBAN_NETWORK_PASSPHRASE: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'Public Global Stellar Network ; September 2015' || 'Test SDF Network ; September 2015' }}
-      CONTRACT_ENV_FILE: ${{ runner.temp }}/contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}.env
+
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-
       - name: Cache Cargo and Soroban
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.soroban
-            contracts/target
-          key: contract-deploy-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
-          restore-keys: |
-            contract-deploy-${{ runner.os }}-
 
       - name: Install Soroban CLI
         run: cargo install --locked soroban-cli
-
       - name: Validate deployment inputs
         run: |
-          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
-            echo "::error::Missing STELLAR_SECRET_KEY in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
+
             exit 1
           fi
 
-          if [ -z "${REFLECTOR_ADDRESS:-}" ]; then
-            echo "::error::Missing REFLECTOR_ADDRESS in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
-            exit 1
-          fi
+      # AWS Budget Alerting
+      # Ensure the monthly budget and notification thresholds are applied via Terraform.
+      # See deployment/terraform for budget definitions and escalation contacts.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Apply AWS Budget
+        working-directory: deployment/terraform
+        run: terraform init -input=false && terraform apply -input=false -auto-approve -target=aws_budgets_budget.monthly
 
           if [ -z "${FEE_RECIPIENT_ADDRESS:-}" ]; then
             echo "::error::Missing FEE_RECIPIENT_ADDRESS in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
@@ -132,24 +188,11 @@ jobs:
 
       - name: Deploy contract
         run: bash deployment/contract-deploy.sh
-
       - name: Export deployment metadata
-        run: cat "$CONTRACT_ENV_FILE" >> "$GITHUB_ENV"
 
       - name: Summarize deployment
         run: |
           {
             echo "## Contract deployment"
             echo ""
-            echo "- Environment: \`$DEPLOYMENT_ENVIRONMENT\`"
-            echo "- Network: \`$STELLAR_NETWORK\`"
-            echo "- Contract ID: \`$CONTRACT_ID\`"
-            echo "- Reflector address: \`$REFLECTOR_ADDRESS\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload deployment metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: contract-deploy-${{ env.DEPLOYMENT_ENVIRONMENT }}
-          path: ${{ env.CONTRACT_ENV_FILE }}
-          if-no-files-found: error
