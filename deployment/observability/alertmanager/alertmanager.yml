@@ -10,18 +10,6 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
-    # ----------------------------------------------------
-    # CRITICAL ALERTS: Page the on-call engineer
-    #
-    # Grouping is deliberately coarse here (subsystem + service instead of
-    # alertname) so one underlying incident that trips several rules collapses
-    # into a single notification group. Alertmanager derives the PagerDuty
-    # dedup_key / Opsgenie alias from that group key, so repeated evaluations of
-    # the same incident update the existing page instead of opening a new one.
-    #
-    # Switch to Opsgenie by pointing this route at `oncall-opsgenie`. Only ever
-    # route to one vendor — listing both would page the on-call twice.
-    # ----------------------------------------------------
     - match:
         severity: critical
       receiver: oncall-pagerduty
@@ -29,46 +17,14 @@ route:
       group_wait: 10s
       group_interval: 5m
       repeat_interval: 1h
-      routes:
-        - match:
-            subsystem: portfolio-engine
-          receiver: oncall-pagerduty
-        - match:
-            subsystem: api-gateway
-          receiver: oncall-pagerduty
-        - match:
-            subsystem: database
-          receiver: oncall-pagerduty
-        - match:
-            subsystem: system
-          receiver: oncall-pagerduty
 
-    # ----------------------------------------------------
-    # WARNING ALERTS: Asynchronous logging / Slack warning
-    # ----------------------------------------------------
     - match:
         severity: warning
       receiver: slack-warnings
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 12h
-      routes:
-        - match:
-            subsystem: portfolio-engine
-          receiver: slack-warnings
-        - match:
-            subsystem: api-gateway
-          receiver: slack-warnings
-        - match:
-            subsystem: database
-          receiver: slack-warnings
-        - match:
-            subsystem: system
-          receiver: slack-warnings
 
-    # ----------------------------------------------------
-    # INFO ALERTS: Diagnostic logging records / Low priority
-    # ----------------------------------------------------
     - match:
         severity: info
       receiver: diagnostic-logs
@@ -76,20 +32,13 @@ route:
       group_interval: 10m
       repeat_interval: 24h
 
-# ------------------------------------------------------------------
-# Suppression rules: keep one incident to one page.
-# ------------------------------------------------------------------
 inhibit_rules:
-  # A critical alert is already paging the on-call engineer, so the warning and
-  # info alerts describing the same failing service add no new information.
   - source_matchers:
       - severity = critical
     target_matchers:
       - severity =~ "warning|info"
     equal: ['subsystem', 'service']
 
-  # The backend process being down is the root cause of every blackbox probe
-  # failure aimed at it. Page for BackendDown only, not for each dependent probe.
   - source_matchers:
       - alertname = BackendDown
     target_matchers:
@@ -110,9 +59,6 @@ receivers:
       - url: http://host.docker.internal:5001/alerts
         send_resolved: true
 
-  # On-call paging via PagerDuty Events API v2. The integration routing key is
-  # read from a mounted secret file so it never lands in version control; see
-  # deployment/observability/alertmanager/oncall-secrets/README.md.
   - name: oncall-pagerduty
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/pagerduty_routing_key
@@ -128,9 +74,6 @@ receivers:
           description: '{{ .CommonAnnotations.description }}'
           runbook: 'docs/OBSERVABILITY.md#on-call-escalation-policy'
 
-  # Opsgenie equivalent of the receiver above. `alias` pins the deduplication
-  # identity to the incident (subsystem + service) so Opsgenie keeps appending to
-  # the open alert rather than creating a new one per evaluation cycle.
   - name: oncall-opsgenie
     opsgenie_configs:
       - api_key_file: /etc/alertmanager/secrets/opsgenie_api_key
@@ -139,7 +82,6 @@ receivers:
         message: '{{ .CommonLabels.alertname }} ({{ or .CommonLabels.subsystem "platform" }})'
         description: '{{ or .CommonAnnotations.description .CommonAnnotations.summary }}'
         source: alertmanager
-        # Opsgenie tags are a single comma-separated string, not a YAML list.
         tags: 'stellar-portfolio-rebalancer,critical'
         responders:
           - name: stellar-portfolio-oncall
