@@ -21,6 +21,12 @@ import {
 import { logger } from '../utils/logger.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
+import {
+  getAnomalyThresholds,
+  setAnomalyThresholds,
+  getAnomalySummary,
+  AnomalyThresholds
+} from '../monitoring/anomalyTracker.js'
 
 export const adminRouter = Router()
 
@@ -44,6 +50,100 @@ function logAdminAction(actor: string, action: string, target: string | null, be
     logger.warn('[ADMIN] Failed to record audit entry', { error: getErrorMessage(err), action, target })
   }
 }
+
+const VALID_THRESHOLD_KEYS: (keyof AnomalyThresholds)[] = [
+  'criticalRiskAlerts',
+  'warningRiskAlerts',
+  'infoRiskAlerts',
+  'rebalanceBlocks',
+  'priceFeedAnomalies',
+  'circuitBreakerTriggers',
+  'totalAnomalies'
+]
+
+function handleGetAnomalyThresholds(_req: Request, res: Response) {
+  try {
+    const summary = getAnomalySummary()
+    return ok(res, {
+      thresholds: summary.thresholds,
+      summary: {
+        counts: {
+          riskAlerts: summary.riskAlerts,
+          rebalanceBlocks: summary.rebalanceBlocks,
+          priceFeedAnomalies: summary.priceFeedAnomalies,
+          circuitBreakerTriggers: summary.circuitBreakerTriggers,
+          total: summary.total
+        },
+        exceeded: summary.exceeded,
+        exceededMetrics: summary.exceededMetrics
+      }
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to get anomaly thresholds', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+}
+
+function handleUpdateAnomalyThresholds(req: Request, res: Response) {
+  try {
+    const body = req.body
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'Request body must be a JSON object')
+    }
+
+    const keys = Object.keys(body)
+    if (keys.length === 0) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'At least one threshold field must be provided')
+    }
+
+    const updates: Partial<AnomalyThresholds> = {}
+    for (const key of keys) {
+      if (!VALID_THRESHOLD_KEYS.includes(key as keyof AnomalyThresholds)) {
+        return fail(res, 400, 'VALIDATION_ERROR', `Invalid threshold key '${key}'. Allowed keys: ${VALID_THRESHOLD_KEYS.join(', ')}`)
+      }
+      const val = body[key]
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || !Number.isInteger(val)) {
+        return fail(res, 400, 'VALIDATION_ERROR', `Threshold value for '${key}' must be a non-negative integer`)
+      }
+      updates[key as keyof AnomalyThresholds] = val
+    }
+
+    const before = getAnomalyThresholds()
+    const updated = setAnomalyThresholds(updates)
+    const actor = req.adminPublicKey ?? 'unknown'
+
+    logAdminAction(actor, 'update_anomaly_thresholds', 'anomaly_tracker', before, updated)
+
+    const summary = getAnomalySummary()
+    return ok(res, {
+      message: 'Anomaly detection thresholds updated successfully',
+      thresholds: updated,
+      summary: {
+        counts: {
+          riskAlerts: summary.riskAlerts,
+          rebalanceBlocks: summary.rebalanceBlocks,
+          priceFeedAnomalies: summary.priceFeedAnomalies,
+          circuitBreakerTriggers: summary.circuitBreakerTriggers,
+          total: summary.total
+        },
+        exceeded: summary.exceeded,
+        exceededMetrics: summary.exceededMetrics
+      }
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to update anomaly thresholds', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+}
+
+// GET & PUT/PATCH routes for anomaly-thresholds (and anomaly-detection/thresholds alias)
+adminRouter.get('/anomaly-thresholds', requireAdmin, handleGetAnomalyThresholds)
+adminRouter.get('/anomaly-detection/thresholds', requireAdmin, handleGetAnomalyThresholds)
+
+adminRouter.put('/anomaly-thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+adminRouter.patch('/anomaly-thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+adminRouter.put('/anomaly-detection/thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+adminRouter.patch('/anomaly-detection/thresholds', requireAdmin, handleUpdateAnomalyThresholds)
 
 adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -142,232 +242,3 @@ adminRouter.get('/audit-log', requireAdmin, async (req: Request, res: Response) 
   }
 })
 
-// ── Issuer metadata cache (TTL + stale-serve + manual refresh) ───────────────
-
-adminRouter.get('/issuer-metadata/:issuer', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const issuer = req.params.issuer
-    if (!issuer) {
-      return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
-    }
-    const result = await issuerMetadataService.getMetadataWithStatus(issuer)
-    if (!result) {
-      return fail(res, 404, 'NOT_FOUND', 'No metadata available for this issuer account')
-    }
-    return ok(res, {
-      issuer,
-      fetchedAtMs: result.fetchedAtMs,
-      expiresAtMs: result.expiresAtMs,
-      stale: result.stale,
-      source: result.source,
-      data: result.data
-    })
-  } catch (error) {
-    logger.error('[ADMIN] Failed to read issuer metadata', { error: getErrorMessage(error), issuer: req.params.issuer })
-    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-  }
-})
-
-adminRouter.post('/issuer-metadata/:issuer/refresh', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const issuer = req.params.issuer
-    if (!issuer) {
-      return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
-    }
-    const actor = req.adminPublicKey ?? 'unknown'
-    logger.info('[ADMIN] Issuer metadata refresh requested', { issuer, adminPublicKey: actor })
-
-    const result = await issuerMetadataService.forceRefreshMetadata(issuer)
-    logAdminAction(actor, 'issuer_metadata_refresh', issuer, null, {
-      stale: result.stale,
-      source: result.source,
-      fetchedAtMs: result.fetchedAtMs
-    })
-
-    return ok(res, {
-      issuer,
-      stale: result.stale,
-      source: result.source,
-      fetchedAtMs: result.fetchedAtMs,
-      expiresAtMs: result.expiresAtMs,
-      data: result.data
-    })
-  } catch (error) {
-    logger.warn('[ADMIN] Issuer metadata refresh failed', { error: getErrorMessage(error), issuer: req.params.issuer })
-    return fail(res, 502, 'UPSTREAM_ERROR', `Failed to refresh issuer metadata: ${getErrorMessage(error)}`)
-  }
-})
-
-/**
- * Get the currently configured analytics snapshot retention and compaction policy.
- */
-adminRouter.get('/analytics/retention-policy', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const currentConfig = getAnalyticsCompactionConfig()
-    const actor = (req as any).adminPublicKey ?? 'unknown'
-    logAdminAction(actor, 'get_analytics_retention_policy', null)
-
-    return ok(res, {
-      retentionPolicy: {
-        cutoffDays: currentConfig.cutoffDays,
-        recentDays: currentConfig.recentDays,
-        defaults: {
-          cutoffDays: DEFAULT_ANALYTICS_COMPACTION_CUTOFF_DAYS,
-          recentDays: DEFAULT_ANALYTICS_COMPACTION_RECENT_DAYS,
-        },
-        limits: {
-          minCutoffDays: MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS,
-          maxCutoffDays: MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS,
-          minRecentDays: MIN_ANALYTICS_COMPACTION_RECENT_DAYS,
-          maxRecentDays: MAX_ANALYTICS_COMPACTION_RECENT_DAYS,
-        },
-      },
-    })
-  } catch (error) {
-    logger.error('[ADMIN] Failed to fetch analytics retention policy', { error: getErrorMessage(error) })
-    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-  }
-})
-
-/**
- * Trigger analytics snapshot compaction manually with optional custom retention window overrides.
- */
-adminRouter.post('/analytics/compact', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const actor = (req as any).adminPublicKey ?? 'unknown'
-    const { portfolioId, cutoffDays, recentDays } = req.body ?? {}
-
-    let parsedCutoff: number | undefined
-    if (cutoffDays !== undefined) {
-      if (typeof cutoffDays !== 'number' && typeof cutoffDays !== 'string') {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          `cutoffDays must be an integer between ${MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS} and ${MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS}`,
-        )
-      }
-      const trimmedCutoff = typeof cutoffDays === 'string' ? cutoffDays.trim() : cutoffDays
-      if (trimmedCutoff === '') {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          `cutoffDays must be an integer between ${MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS} and ${MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS}`,
-        )
-      }
-      const numCutoff = typeof trimmedCutoff === 'number' ? trimmedCutoff : Number(trimmedCutoff)
-      if (
-        !Number.isInteger(numCutoff) ||
-        numCutoff < MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS ||
-        numCutoff > MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS
-      ) {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          `cutoffDays must be an integer between ${MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS} and ${MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS}`,
-        )
-      }
-      parsedCutoff = numCutoff
-    }
-
-    let parsedRecent: number | undefined
-    if (recentDays !== undefined) {
-      if (typeof recentDays !== 'number' && typeof recentDays !== 'string') {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          `recentDays must be an integer between ${MIN_ANALYTICS_COMPACTION_RECENT_DAYS} and ${MAX_ANALYTICS_COMPACTION_RECENT_DAYS}`,
-        )
-      }
-      const trimmedRecent = typeof recentDays === 'string' ? recentDays.trim() : recentDays
-      if (trimmedRecent === '') {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          `recentDays must be an integer between ${MIN_ANALYTICS_COMPACTION_RECENT_DAYS} and ${MAX_ANALYTICS_COMPACTION_RECENT_DAYS}`,
-        )
-      }
-      const numRecent = typeof trimmedRecent === 'number' ? trimmedRecent : Number(trimmedRecent)
-      if (
-        !Number.isInteger(numRecent) ||
-        numRecent < MIN_ANALYTICS_COMPACTION_RECENT_DAYS ||
-        numRecent > MAX_ANALYTICS_COMPACTION_RECENT_DAYS
-      ) {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          `recentDays must be an integer between ${MIN_ANALYTICS_COMPACTION_RECENT_DAYS} and ${MAX_ANALYTICS_COMPACTION_RECENT_DAYS}`,
-        )
-      }
-      parsedRecent = numRecent
-    }
-
-    const currentConfig = getAnalyticsCompactionConfig()
-    const effectiveCutoff = parsedCutoff ?? currentConfig.cutoffDays
-    const effectiveRecent = parsedRecent ?? currentConfig.recentDays
-
-    if (effectiveCutoff < effectiveRecent) {
-      return fail(
-        res,
-        400,
-        'VALIDATION_ERROR',
-        `cutoffDays (${effectiveCutoff}) must be >= recentDays (${effectiveRecent})`,
-      )
-    }
-
-    if (portfolioId !== undefined) {
-      if (typeof portfolioId !== 'string' || portfolioId.trim() === '') {
-        return fail(
-          res,
-          400,
-          'VALIDATION_ERROR',
-          'portfolioId must be a non-empty string when provided',
-        )
-      }
-
-      const targetPortfolioId = portfolioId.trim()
-      const stats = await analyticsService.compactAnalyticsForPortfolio(
-        targetPortfolioId,
-        effectiveCutoff,
-        effectiveRecent,
-      )
-      logAdminAction(actor, 'compact_analytics_portfolio', targetPortfolioId, null, {
-        stats,
-        cutoffDays: effectiveCutoff,
-        recentDays: effectiveRecent,
-      })
-      return ok(res, { stats, cutoffDays: effectiveCutoff, recentDays: effectiveRecent })
-    }
-
-    const results = await analyticsService.compactAllPortfolios(effectiveCutoff, effectiveRecent)
-    const totalDeleted = results.reduce((sum, r) => sum + r.deletedCount, 0)
-    const totalRetained = results.reduce((sum, r) => sum + r.retainedCount, 0)
-
-    logAdminAction(actor, 'compact_analytics_all', null, null, {
-      portfoliosProcessed: results.length,
-      totalSnapshotsDeleted: totalDeleted,
-      totalSnapshotsRetained: totalRetained,
-      cutoffDays: effectiveCutoff,
-      recentDays: effectiveRecent,
-    })
-
-    return ok(res, {
-      results,
-      summary: {
-        portfoliosProcessed: results.length,
-        totalSnapshotsDeleted: totalDeleted,
-        totalSnapshotsRetained: totalRetained,
-        cutoffDays: effectiveCutoff,
-        recentDays: effectiveRecent,
-      },
-    })
-  } catch (error) {
-    logger.error('[ADMIN] Manual analytics compaction failed', { error: getErrorMessage(error) })
-    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-  }
-})
