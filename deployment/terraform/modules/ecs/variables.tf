@@ -38,12 +38,6 @@ variable "redis_host" {
   type = string
 }
 
-variable "deployment_type" {
-  description = "Deployment type: BLUE_GREEN or ROLLING"
-  type        = string
-  default     = "ROLLING"
-}
-
 variable "enable_blue_green" {
   description = "Enable blue/green deployment with CodeDeploy"
   type        = bool
@@ -57,14 +51,15 @@ variable "blue_green_deployment_config" {
     deployment_ready_option = optional(object({
       action_on_timeout = optional(string, "CONTINUE_DEPLOYMENT")
     }), {})
-    lifecycle_hooks = optional(list(object({
-      lifecycle_hook_name     = string
-      target_group_name      = string
-      container_name         = string
-      container_port         = number
-    })), [])
   })
-  default = {}
+  default = {
+    termination_wait_time_in_minutes = 30
+    deployment_ready_option = {
+      action_on_timeout = "CONTINUE_DEPLOYMENT"
+    }
+  }
+}
+
 variable "ecs_min_capacity" {
   description = "Minimum number of tasks to run"
   type        = number

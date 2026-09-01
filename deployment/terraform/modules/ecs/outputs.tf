@@ -14,7 +14,7 @@ output "green_target_group_arn" {
 
 output "codedeploy_app_name" {
   description = "Name of the CodeDeploy application (if blue/green enabled)"
-  value       = try(aws_ecodedeploy_app.main[0].name, null)
+  value       = try(aws_codedeploy_app.main[0].name, null)
 }
 
 output "deployment_group_name" {
@@ -25,4 +25,9 @@ output "deployment_group_name" {
 output "deployment_sns_topic_arn" {
   description = "ARN of the deployment notifications SNS topic (if blue/green enabled)"
   value       = try(aws_sns_topic.deployment_notifications[0].arn, null)
+}
+
+output "test_listener_arn" {
+  description = "ARN of the test listener on port 8080 (if blue/green enabled)"
+  value       = try(aws_lb_listener.test[0].arn, null)
 }

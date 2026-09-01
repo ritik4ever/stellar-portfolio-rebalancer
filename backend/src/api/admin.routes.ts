@@ -1,10 +1,32 @@
 import { Router, Request, Response } from 'express'
 import { requireAdmin } from '../middleware/auth.js'
 import { databaseService } from '../services/databaseService.js'
+import { analyticsService } from '../services/analyticsService.js'
+import {
+  getAnalyticsCompactionConfig,
+  DEFAULT_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  DEFAULT_ANALYTICS_COMPACTION_RECENT_DAYS,
+  MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  MIN_ANALYTICS_COMPACTION_RECENT_DAYS,
+  MAX_ANALYTICS_COMPACTION_RECENT_DAYS,
+} from '../config/analyticsCompactionConfig.js'
 import { issuerMetadataService } from '../services/issuerMetadataService.js'
+import {
+  MAX_VOLATILITY_THRESHOLD_PCT,
+  MIN_VOLATILITY_THRESHOLD_PCT,
+  getVolatilityThresholdPct,
+  setVolatilityThresholdPct,
+} from '../config/volatilityConfig.js'
 import { logger } from '../utils/logger.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { getErrorMessage } from '../utils/helpers.js'
+import {
+  getAnomalyThresholds,
+  setAnomalyThresholds,
+  getAnomalySummary,
+  AnomalyThresholds
+} from '../monitoring/anomalyTracker.js'
 
 export const adminRouter = Router()
 
@@ -29,6 +51,100 @@ function logAdminAction(actor: string, action: string, target: string | null, be
   }
 }
 
+const VALID_THRESHOLD_KEYS: (keyof AnomalyThresholds)[] = [
+  'criticalRiskAlerts',
+  'warningRiskAlerts',
+  'infoRiskAlerts',
+  'rebalanceBlocks',
+  'priceFeedAnomalies',
+  'circuitBreakerTriggers',
+  'totalAnomalies'
+]
+
+function handleGetAnomalyThresholds(_req: Request, res: Response) {
+  try {
+    const summary = getAnomalySummary()
+    return ok(res, {
+      thresholds: summary.thresholds,
+      summary: {
+        counts: {
+          riskAlerts: summary.riskAlerts,
+          rebalanceBlocks: summary.rebalanceBlocks,
+          priceFeedAnomalies: summary.priceFeedAnomalies,
+          circuitBreakerTriggers: summary.circuitBreakerTriggers,
+          total: summary.total
+        },
+        exceeded: summary.exceeded,
+        exceededMetrics: summary.exceededMetrics
+      }
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to get anomaly thresholds', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+}
+
+function handleUpdateAnomalyThresholds(req: Request, res: Response) {
+  try {
+    const body = req.body
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'Request body must be a JSON object')
+    }
+
+    const keys = Object.keys(body)
+    if (keys.length === 0) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'At least one threshold field must be provided')
+    }
+
+    const updates: Partial<AnomalyThresholds> = {}
+    for (const key of keys) {
+      if (!VALID_THRESHOLD_KEYS.includes(key as keyof AnomalyThresholds)) {
+        return fail(res, 400, 'VALIDATION_ERROR', `Invalid threshold key '${key}'. Allowed keys: ${VALID_THRESHOLD_KEYS.join(', ')}`)
+      }
+      const val = body[key]
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || !Number.isInteger(val)) {
+        return fail(res, 400, 'VALIDATION_ERROR', `Threshold value for '${key}' must be a non-negative integer`)
+      }
+      updates[key as keyof AnomalyThresholds] = val
+    }
+
+    const before = getAnomalyThresholds()
+    const updated = setAnomalyThresholds(updates)
+    const actor = req.adminPublicKey ?? 'unknown'
+
+    logAdminAction(actor, 'update_anomaly_thresholds', 'anomaly_tracker', before, updated)
+
+    const summary = getAnomalySummary()
+    return ok(res, {
+      message: 'Anomaly detection thresholds updated successfully',
+      thresholds: updated,
+      summary: {
+        counts: {
+          riskAlerts: summary.riskAlerts,
+          rebalanceBlocks: summary.rebalanceBlocks,
+          priceFeedAnomalies: summary.priceFeedAnomalies,
+          circuitBreakerTriggers: summary.circuitBreakerTriggers,
+          total: summary.total
+        },
+        exceeded: summary.exceeded,
+        exceededMetrics: summary.exceededMetrics
+      }
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to update anomaly thresholds', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+}
+
+// GET & PUT/PATCH routes for anomaly-thresholds (and anomaly-detection/thresholds alias)
+adminRouter.get('/anomaly-thresholds', requireAdmin, handleGetAnomalyThresholds)
+adminRouter.get('/anomaly-detection/thresholds', requireAdmin, handleGetAnomalyThresholds)
+
+adminRouter.put('/anomaly-thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+adminRouter.patch('/anomaly-thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+adminRouter.put('/anomaly-detection/thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+adminRouter.patch('/anomaly-detection/thresholds', requireAdmin, handleUpdateAnomalyThresholds)
+
 adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { queryId, params = [] } = req.body
@@ -46,7 +162,7 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
       return fail(res, 400, 'VALIDATION_ERROR', 'params must be an array')
     }
 
-    const actor = req.adminPublicKey ?? 'unknown'
+    const actor = (req as any).adminPublicKey ?? 'unknown'
     logger.info('[ADMIN] EXPLAIN ANALYZE requested', { queryId, adminPublicKey: actor })
 
     const db = (databaseService as any).db
@@ -101,7 +217,7 @@ adminRouter.get('/db/queries', requireAdmin, async (req: Request, res: Response)
       id: key,
       query: PREDEFINED_QUERIES[key]
     }))
-    logAdminAction(req.adminPublicKey ?? 'unknown', 'list_queries', null)
+    logAdminAction((req as any).adminPublicKey ?? 'unknown', 'list_queries', null)
     return ok(res, { queries })
   } catch (error) {
     logger.error('[ADMIN] Failed to list queries', { error: getErrorMessage(error) })
@@ -126,58 +242,3 @@ adminRouter.get('/audit-log', requireAdmin, async (req: Request, res: Response) 
   }
 })
 
-// ── Issuer metadata cache (TTL + stale-serve + manual refresh) ───────────────
-
-adminRouter.get('/issuer-metadata/:issuer', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const issuer = req.params.issuer
-    if (!issuer) {
-      return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
-    }
-    const result = await issuerMetadataService.getMetadataWithStatus(issuer)
-    if (!result) {
-      return fail(res, 404, 'NOT_FOUND', 'No metadata available for this issuer account')
-    }
-    return ok(res, {
-      issuer,
-      fetchedAtMs: result.fetchedAtMs,
-      expiresAtMs: result.expiresAtMs,
-      stale: result.stale,
-      source: result.source,
-      data: result.data
-    })
-  } catch (error) {
-    logger.error('[ADMIN] Failed to read issuer metadata', { error: getErrorMessage(error), issuer: req.params.issuer })
-    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-  }
-})
-
-adminRouter.post('/issuer-metadata/:issuer/refresh', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const issuer = req.params.issuer
-    if (!issuer) {
-      return fail(res, 400, 'VALIDATION_ERROR', 'issuer account is required')
-    }
-    const actor = req.adminPublicKey ?? 'unknown'
-    logger.info('[ADMIN] Issuer metadata refresh requested', { issuer, adminPublicKey: actor })
-
-    const result = await issuerMetadataService.forceRefreshMetadata(issuer)
-    logAdminAction(actor, 'issuer_metadata_refresh', issuer, null, {
-      stale: result.stale,
-      source: result.source,
-      fetchedAtMs: result.fetchedAtMs
-    })
-
-    return ok(res, {
-      issuer,
-      stale: result.stale,
-      source: result.source,
-      fetchedAtMs: result.fetchedAtMs,
-      expiresAtMs: result.expiresAtMs,
-      data: result.data
-    })
-  } catch (error) {
-    logger.warn('[ADMIN] Issuer metadata refresh failed', { error: getErrorMessage(error), issuer: req.params.issuer })
-    return fail(res, 502, 'UPSTREAM_ERROR', `Failed to refresh issuer metadata: ${getErrorMessage(error)}`)
-  }
-})

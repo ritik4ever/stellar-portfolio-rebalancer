@@ -25,6 +25,27 @@ variable "db_instance_class" {
   }
 }
 
+variable "backup_retention_period" {
+  description = "Days of RDS automated backups + snapshot retention, per workspace"
+  type        = map(number)
+  default = {
+    staging    = 7
+    production = 14
+  }
+}
+
+variable "secret_rotation_days" {
+  description = "Days between automatic secret rotations"
+  type        = number
+  default     = 30
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = "ARN of the Lambda that rotates DB/Redis secrets (optional; null = AWS managed rotation)"
+  type        = string
+  default     = null
+}
+
 variable "redis_node_type" {
   description = "ElastiCache node type"
   type        = map(string)
@@ -32,6 +53,24 @@ variable "redis_node_type" {
     staging    = "cache.t4g.micro"
     production = "cache.t4g.small"
   }
+}
+
+variable "secret_rotation_days" {
+  description = "Days between automatic secret rotations"
+  type        = number
+  default     = 30
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = "ARN of the Lambda that rotates DB/Redis secrets (optional; null = AWS managed rotation)"
+  type        = string
+  default     = null
+}
+
+variable "snapshot_cleanup_schedule" {
+  description = "EventBridge schedule for the RDS snapshot cleanup Lambda"
+  type        = string
+  default     = "cron(0 21 * * ? *)"
 }
 
 variable "ecs_task_cpu" {
@@ -112,6 +151,44 @@ variable "enable_blue_green" {
   }
 }
 
+# ─── Secret Rotation ──────────────────────────────────────────────────────────
+
+variable "secret_rotation_days" {
+  description = "Number of days between automatic AWS Secrets Manager rotations for RDS and Redis credentials. Applies to both modules."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.secret_rotation_days >= 1 && var.secret_rotation_days <= 365
+    error_message = "secret_rotation_days must be between 1 and 365."
+  }
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = <<-EOT
+    ARN of an existing Lambda function used to rotate secrets.
+    When null (the default), automatic rotation is disabled and the
+    aws_secretsmanager_secret_rotation resources are not created.
+    Provide the ARN of the AWS-managed rotation Lambda deployed in your
+    account, e.g. the SecretsManagerRDSPostgreSQLRotationSingleUser Lambda,
+    or your own custom rotation function.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "create_rotation_lambda" {
+  description = <<-EOT
+    When true, deploys the rotation_lambda Terraform module which provisions
+    the AWS Secrets Manager managed rotation Lambda for RDS PostgreSQL
+    (single-user strategy) and a custom rotation Lambda for the Redis AUTH
+    token.  Set to false (the default) when you prefer to supply an existing
+    rotation Lambda via secret_rotation_lambda_arn.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "blue_green_deployment_config" {
   description = "Blue/green deployment configuration"
   type = object({
@@ -125,6 +202,8 @@ variable "blue_green_deployment_config" {
     deployment_ready_option = {
       action_on_timeout = "CONTINUE_DEPLOYMENT"
     }
+  }
+}
 variable "ecs_min_capacity" {
   description = "Minimum number of ECS tasks"
   type        = map(number)

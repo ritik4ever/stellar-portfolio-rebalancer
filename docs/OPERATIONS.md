@@ -497,124 +497,89 @@ For detailed, step-by-step procedures to handle incident response, outages, cont
 
 ## Circuit-breaker manual-reset runbook
 
-The `RiskManagementService` maintains an in-memory circuit breaker for every tracked asset (`XLM`, `BTC`, `ETH`, `USDC`, and any assets added via the admin API). A breaker **trips** when an asset's tick-over-tick price change exceeds **20 %** (the `CIRCUIT_BREAKER_THRESHOLD`). While tripped, `shouldAllowRebalance()` returns `allowed: false` with reason code `CIRCUIT_BREAKER_ACTIVE`, blocking all automatic and manual rebalance operations for any portfolio that holds the affected asset.
+There are two independent circuit-breaker layers. Diagnose and clear both before resuming production rebalancing:
 
-Tripped breakers auto-recover after **5 minutes** (`CIRCUIT_BREAKER_COOLDOWN`). The steps below are for situations where you need to reset before that window expires, or where you need to confirm the system is healthy after an incident.
+- **Backend (`RiskManagementService`):** an in-memory, per-asset breaker trips when the tick-over-tick price move is greater than 20%. Any active entry blocks backend risk checks globally, reports `CIRCUIT_BREAKER_ACTIVE`, and lazily clears after the five-minute `CIRCUIT_BREAKER_COOLDOWN`.
+- **Soroban contract:** `check_volatility` uses each portfolio's `CircuitBreakerConfig` (default: 100 bps / 1% over a one-hour window). A trip sets the contract-wide `EmergencyStop` flag and returns `Error::EmergencyStop`. This state is on-chain and does **not** auto-recover; only the contract admin can clear it with `set_emergency_stop(false)`.
 
-### 1. Diagnose – confirm the breaker is tripped
+### 1. Diagnose
 
-**Public status endpoint (no auth):**
-
-```bash
-curl -s https://<API_HOST>/api/system/status | jq '.data.riskManagement'
-```
-
-A tripped breaker looks like:
-
-```json
-{
-  "circuitBreakers": {
-    "BTC": {
-      "isTriggered": true,
-      "triggerReason": "22.3% price movement",
-      "cooldownUntil": 1722080760000,
-      "triggeredAssets": ["BTC"]
-    }
-  },
-  "enabled": true,
-  "alertsActive": true
-}
-```
-
-`isTriggered: true` with a `cooldownUntil` value in the future confirms the breaker is active. Convert the Unix millisecond timestamp to determine how much cooldown remains:
+Use the versioned, public status and risk endpoints (the unversioned `/api/...` paths are legacy aliases):
 
 ```bash
-node -e "console.log(new Date(1722080760000).toISOString())"
+curl -s https://<API_HOST>/api/v1/system/status | jq '.data.riskManagement'
+curl -s https://<API_HOST>/api/v1/risk/check/<PORTFOLIO_ID> | jq '.data | {allowed, reason, reasonCode}'
+curl -s https://<API_HOST>/api/v1/risk/metrics/<PORTFOLIO_ID> | jq '.data.circuitBreakers'
 ```
 
-**Per-portfolio risk check:**
+Treat a breaker as active when the status map contains the affected key with `isTriggered: true` and a future `cooldownUntil`, or when the risk check returns `reasonCode: "CIRCUIT_BREAKER_ACTIVE"`. The key is normally the asset symbol (for example, `BTC`). `getCircuitBreakerStatus()` checks expiry when the endpoint is read; poll once more after the cooldown has elapsed.
+
+Check the on-chain guard as well. `get_config_view` includes `emergency_stop`, and `get_contract_pause_reason` identifies the pause reason:
 
 ```bash
-curl -s https://<API_HOST>/api/risk/check/<PORTFOLIO_ID> | jq '{allowed, reason, reasonCode}'
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source <STELLAR_ADMIN_IDENTITY> \
+  --network <STELLAR_NETWORK> \
+  -- get_config_view --portfolio_id <PORTFOLIO_ID>
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source <STELLAR_ADMIN_IDENTITY> \
+  --network <STELLAR_NETWORK> \
+  -- get_contract_pause_reason
 ```
 
-If the response is `"reasonCode": "CIRCUIT_BREAKER_ACTIVE"`, rebalancing is blocked for that portfolio.
+`emergency_stop: true`, `PauseReason::VolatilityCircuitBreaker`, or transaction failures with `Error::EmergencyStop` means the contract reset is required even if the backend status is clear.
 
-**Per-portfolio detailed circuit-breaker status:**
+### 2. Decide whether to reset
+
+Wait for automatic backend recovery when its cooldown is close to expiry and the price feed and market have stabilised. Do not reset while the underlying move, stale oracle data, or correlation anomaly is continuing; it will retrigger immediately. A manual reset is appropriate for a confirmed false-positive feed tick, a resolved incident that requires immediate service restoration, or a backend breaker whose cooldown has not yet elapsed. The Soroban emergency stop always requires an explicit admin reset; it has no timer-based recovery.
+
+Before resetting, record the incident, affected asset/portfolio, trigger reason, and current oracle/market checks. Keep automatic rebalancing paused through the reset if an incident is still active.
+
+### 3. Reset the backend breaker
+
+The route is `POST /api/v1/circuit-breaker/:portfolioId/reset` (legacy alias: `POST /api/circuit-breaker/:portfolioId/reset`). The collection form, `POST /api/v1/circuit-breaker/reset` (or its `/api` alias), accepts `portfolioId` in the JSON body or query string. Despite the route parameter name, the service resets the matching in-memory breaker key; use the exact key shown by `circuitBreakers` (usually an asset symbol). The request requires the `requireAdmin` Stellar signature headers:
+
+- `X-Public-Key`: an address listed in `ADMIN_PUBLIC_KEYS`;
+- `X-Message`: a current Unix timestamp in milliseconds;
+- `X-Signature`: base64 Ed25519 signature over the UTF-8 `X-Message` value.
+
+Generate the signature with the approved admin wallet/tooling; do not put a secret key in shell history. Example for a `BTC` breaker:
 
 ```bash
-curl -s https://<API_HOST>/api/risk/metrics/<PORTFOLIO_ID> | jq '.data.circuitBreakers'
+curl -sS -X POST "https://<API_HOST>/api/v1/circuit-breaker/BTC/reset" \
+  -H "X-Public-Key: <ADMIN_PUBLIC_KEY>" \
+  -H "X-Message: <CURRENT_UNIX_MS>" \
+  -H "X-Signature: <BASE64_SIGNATURE>" | jq
 ```
 
-This returns the per-asset breaker map, including `triggerReason` and the precise `cooldownUntil` timestamp.
+A successful response is `200` with `data.reset: true`, the `portfolioId` route value, and `resetTargets` containing the key that was cleared. The endpoint also removes `riskPausedUntil` for a matching backend portfolio record. For a multi-instance deployment, repeat the request on every instance because backend breaker state is process-local.
 
----
+### 4. Reset the Soroban contract guard (when active)
 
-### 2. Decide – reset manually or wait?
-
-| Situation | Recommended action |
-|-----------|-------------------|
-| Cooldown expires in < 3 minutes | **Wait.** Auto-recovery will fire; no operator action needed. |
-| Flash-crash or data anomaly confirmed as false alarm | **Reset manually.** Prices have stabilised and the trigger was a bad tick or feed glitch. |
-| Market still highly volatile (> 15 % EWMA vol) | **Wait or investigate further.** Resetting into continued volatility will likely re-trip the breaker immediately. |
-| Cooldown has expired but `isTriggered` is still `true` in status | Call `GET /api/system/status` again — `getCircuitBreakerStatus()` performs the expiry check lazily on each read. If the flag does not clear, restart the API process (see Safe shutdown and restart below). |
-| Incident requires immediate production rebalancing | Follow the manual-reset steps below, then monitor `/api/risk/check/:portfolioId` continuously after the reset. |
-
----
-
-### 3. Perform the manual reset
-
-The admin endpoint accepts an `X-Admin-Key` header (value of the `ADMIN_API_KEY` environment variable) and optionally a specific asset to reset. Omitting `asset` resets **all** tripped breakers.
-
-**Reset a single asset (e.g. BTC):**
+After confirming the oracle and market are safe, the configured contract admin must submit this state-changing call:
 
 ```bash
-curl -X POST https://<API_HOST>/api/admin/circuit-breaker/reset \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: <ADMIN_API_KEY>" \
-  -d '{"asset": "BTC"}'
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source <STELLAR_ADMIN_IDENTITY> \
+  --network <STELLAR_NETWORK> \
+  -- set_emergency_stop --stop false
 ```
 
-**Reset all assets at once:**
+The call requires the on-chain contract admin's Soroban authorization. It sets `emergency_stop` to `false` and `ContractPauseReason` to `None`; it does not change per-portfolio pause state. If a portfolio was separately paused, the portfolio steward must call `resume_portfolio` after the contract guard is clear. See [CONTRACT_ABI.md](../contracts/CONTRACT_ABI.md) for the contract entrypoint and [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md#51-smart-contract-containment-emergency-stop) for admin identity handling.
 
-```bash
-curl -X POST https://<API_HOST>/api/admin/circuit-breaker/reset \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: <ADMIN_API_KEY>" \
-  -d '{}'
-```
+### 5. Post-reset confirmation checklist
 
-Expected success response (`200 OK`):
-
-```json
-{
-  "success": true,
-  "data": {
-    "reset": ["BTC"],
-    "message": "Circuit breaker(s) reset successfully"
-  }
-}
-```
-
-> **Note:** The `RiskManagementService` instance is in-process and in-memory. If the API runs as multiple instances behind a load balancer, send the reset request to **every instance** (or use a sticky session / internal broadcast mechanism). After any process restart the breaker state is cleared automatically.
-
----
-
-### 4. Post-reset confirmation checklist
-
-Run through the following checks after performing a reset to confirm the system has returned to normal operation:
-
-- [ ] **Breaker cleared** – `GET /api/system/status` returns `alertsActive: false` and `isTriggered: false` for the affected asset(s).
-- [ ] **Risk check passes** – `GET /api/risk/check/<PORTFOLIO_ID>` returns `"reasonCode": "CIRCUIT_BREAKER_ACTIVE"` no longer; `allowed: true` (assuming no other blocks are active).
-- [ ] **Price feed is live** – `GET /api/system/status` shows `"priceFeeds": true` under `services`. Stale or absent prices will re-trip the breaker on the next price tick if volatility is still high.
-- [ ] **Auto-rebalancer running** – `GET /api/system/status` → `autoRebalancer.status.isRunning: true`. If the auto-rebalancer paused due to the circuit-breaker event, restart it:
-  ```bash
-  curl -X POST https://<API_HOST>/api/auto-rebalancer/start \
-    -H "X-Admin-Key: <ADMIN_API_KEY>"
-  ```
-- [ ] **No repeat trips** – Monitor `GET /api/system/status` for 5–10 minutes after the reset. If the breaker re-trips immediately, the underlying market condition has not stabilised; **do not keep resetting manually** — investigate the price feed or wait for conditions to calm.
-- [ ] **Notification delivered** – If circuit-breaker notifications are enabled (`event_circuit_breaker` preference), confirm users received the event-cleared or rebalancing-resumed notification (check `GET /api/notifications` for recent entries).
-- [ ] **Audit log entry** – Confirm the admin action is reflected in application logs (search for `circuit-breaker reset` at `INFO` level).
+- [ ] **Backend breaker clear:** `GET /api/v1/system/status` shows `isTriggered: false` and no future `cooldownUntil` for every reset key; `riskManagement.alertsActive` is false unless another alert is active.
+- [ ] **Risk check clear:** `GET /api/v1/risk/check/<PORTFOLIO_ID>` no longer returns `CIRCUIT_BREAKER_ACTIVE`; `allowed: true` or a different, understood policy reason is returned.
+- [ ] **Contract guard clear:** `get_config_view` returns `emergency_stop: false` and `get_contract_pause_reason` returns `None`; a read-only contract call succeeds before any new rebalance.
+- [ ] **Price sources healthy:** system status has `services.priceFeeds: true`, and the latest oracle values are fresh and plausible.
+- [ ] **Portfolio state healthy:** confirm the portfolio is active and not still paused by `riskPausedUntil` or an on-chain `pause_reason`.
+- [ ] **Auto-rebalancer state:** `GET /api/v1/auto-rebalancer/status` reports `status.isRunning: true` before releasing the incident hold. If it was intentionally stopped, restart it with the same signed admin headers at `POST /api/v1/auto-rebalancer/start`.
+- [ ] **No repeat trip:** monitor status and risk checks for 5–10 minutes. If the breaker retrips, stop resetting and investigate the feed or market conditions.
+- [ ] **Evidence retained:** keep the `resetTargets`, transaction hash, admin actor, timestamps, and `[AUDIT] Circuit breaker reset by admin` log entry with the incident record.
 
 ---
 

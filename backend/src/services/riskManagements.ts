@@ -1,5 +1,6 @@
 import type { PricesMap, RiskHeatmap } from '../types/index.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { getVolatilityThresholdFraction } from '../config/volatilityConfig.js'
 import { logger } from '../utils/logger.js'
 import { notificationService } from './notificationService.js'
 import { buildNotificationPayload } from './notificationTemplates.js'
@@ -81,7 +82,6 @@ export class RiskManagementService {
     private readonly CORRELATION_WINDOW = 90
 
     private readonly EWMA_LAMBDA = 0.94
-    private readonly VOLATILITY_ALERT_THRESHOLD = 0.15
     private readonly EWMA_VOL_BLOCK_THRESHOLD = 0.08
     private readonly VAR95_BLOCK_THRESHOLD = 0.12
     private readonly CVAR95_BLOCK_THRESHOLD = 0.16
@@ -623,12 +623,13 @@ export class RiskManagementService {
         const series = this.returnSeries.get(asset)
         if (!series || series.length < 10) return null
 
+        const volatilityAlertThreshold = getVolatilityThresholdFraction()
         const ewmaVol = this.computeEwmaVolatility(series.map(p => p.value).slice(-30))
-        if (ewmaVol <= this.VOLATILITY_ALERT_THRESHOLD) return null
+        if (ewmaVol <= volatilityAlertThreshold) return null
 
         return {
             type: 'volatility',
-            severity: ewmaVol > this.VOLATILITY_ALERT_THRESHOLD * 1.5 ? 'critical' : 'warning',
+            severity: ewmaVol > volatilityAlertThreshold * 1.5 ? 'critical' : 'warning',
             message: `High EWMA volatility detected in ${asset} (${(ewmaVol * 100).toFixed(2)}%)`,
             asset,
             recommendedAction: 'Consider reducing exposure or widening rebalance cooldown',

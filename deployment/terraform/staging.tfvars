@@ -1,9 +1,9 @@
-# Staging workspace configuration
+# Staging workspace configuration (Isolated from production - Issue #1292)
 # Usage: terraform apply -var-file=staging.tfvars --workspace=staging
 
-aws_region = "us-east-1"
+aws_region   = "us-east-1"
 project_name = "stellar-portfolio"
-vpc_cidr = "10.1.0.0/16"
+vpc_cidr     = "10.1.0.0/16"
 
 # Staging uses smaller, cheaper instance types
 db_instance_class = {
@@ -27,12 +27,20 @@ monthly_cost_limit = {
   staging = 50.0
 }
 
-budget_notification_emails = ["team@example.com"]
-create_budget_sns_topic = true
-enable_service_budgets = false
+budget_notification_emails    = ["team@example.com"]
+create_budget_sns_topic       = true
+enable_service_budgets        = false
 enable_cost_anomaly_detection = false
 
 # Blue/Green deployment configuration
 enable_blue_green = {
   staging = false
 }
+
+# ─── Credential Rotation ──────────────────────────────────────────────────────
+# Rotate secrets every 30 days in staging.
+# Set create_rotation_lambda = true to auto-deploy the rotation Lambdas,
+# or leave false and provide secret_rotation_lambda_arn manually.
+secret_rotation_days       = 30
+create_rotation_lambda     = false
+# secret_rotation_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:staging-rds-rotation"
