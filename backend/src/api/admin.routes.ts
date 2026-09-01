@@ -1,6 +1,16 @@
 import { Router, Request, Response } from 'express'
 import { requireAdmin } from '../middleware/auth.js'
 import { databaseService } from '../services/databaseService.js'
+import { analyticsService } from '../services/analyticsService.js'
+import {
+  getAnalyticsCompactionConfig,
+  DEFAULT_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  DEFAULT_ANALYTICS_COMPACTION_RECENT_DAYS,
+  MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  MIN_ANALYTICS_COMPACTION_RECENT_DAYS,
+  MAX_ANALYTICS_COMPACTION_RECENT_DAYS,
+} from '../config/analyticsCompactionConfig.js'
 import { issuerMetadataService } from '../services/issuerMetadataService.js'
 import {
   MAX_VOLATILITY_THRESHOLD_PCT,
@@ -152,7 +162,7 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
       return fail(res, 400, 'VALIDATION_ERROR', 'params must be an array')
     }
 
-    const actor = req.adminPublicKey ?? 'unknown'
+    const actor = (req as any).adminPublicKey ?? 'unknown'
     logger.info('[ADMIN] EXPLAIN ANALYZE requested', { queryId, adminPublicKey: actor })
 
     const db = (databaseService as any).db
@@ -207,7 +217,7 @@ adminRouter.get('/db/queries', requireAdmin, async (req: Request, res: Response)
       id: key,
       query: PREDEFINED_QUERIES[key]
     }))
-    logAdminAction(req.adminPublicKey ?? 'unknown', 'list_queries', null)
+    logAdminAction((req as any).adminPublicKey ?? 'unknown', 'list_queries', null)
     return ok(res, { queries })
   } catch (error) {
     logger.error('[ADMIN] Failed to list queries', { error: getErrorMessage(error) })

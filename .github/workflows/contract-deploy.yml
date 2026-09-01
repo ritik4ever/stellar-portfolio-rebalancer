@@ -53,9 +53,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.soroban
+            ~/cargo/registry
+            ~/cargo/git
+            ~/soroban
             contracts/target
           key: contract-deploy-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
           restore-keys: |
@@ -75,6 +75,25 @@ jobs:
             echo "::error::Missing REFLECTOR_ADDRESS in the ${DEPLOYMENT_ENVIRONMENT} GitHub environment"
             exit 1
           fi
+
+      # AWS Budget Alerting
+      # Ensure the monthly budget and notification thresholds are applied via Terraform.
+      # See deployment/terraform for budget definitions and escalation contacts.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Apply AWS Budget
+        working-directory: deployment/terraform
+        run: terraform init -input=false && terraform apply -input=false -auto-approve -target=aws_budgets_budget.monthly
 
       - name: Generate nginx rate limiting config
         run: |
@@ -121,10 +140,10 @@ jobs:
           {
             echo "## Contract deployment"
             echo ""
-            echo "- Environment: \`$DEPLOYMENT_ENVIRONMENT\`"
-            echo "- Network: \`$STELLAR_NETWORK\`"
-            echo "- Contract ID: \`$CONTRACT_ID\`"
-            echo "- Reflector address: \`$REFLECTOR_ADDRESS\`"
+            echo "- Environment: $DEPLOYMENT_ENVIRONMENT"
+            echo "- Network: $STELLAR_NETWORK"
+            echo "- Contract IDs: $CONTRACT_ID"
+            echo "- Reflector address: $REFLECTOR_ADDRESS"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deployment metadata
