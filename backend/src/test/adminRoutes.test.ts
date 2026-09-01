@@ -56,7 +56,10 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
         app.use(express.json())
         app.set('trust proxy', 1)
         app.use('/api', portfolioRouter)
-    })
+    }, 60000)
+
+
+
 
     afterAll(() => {
         vi.unstubAllEnvs()

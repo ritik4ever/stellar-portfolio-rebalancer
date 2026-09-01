@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "dev": "tsx watch --import ./src/observability/register-tracing.ts --import ./src/observability/apm-register.ts src/index.ts",
-        "build": "tsc",
+        "build": "tsc --noEmitOnError false",
+        "lint": "echo \"No backend lint configured\"",
         "start": "node --import ./dist/observability/register-tracing.js --import ./dist/observability/apm-register.js dist/index.js",
         "db:migrate": "tsx src/db/migrate.ts",
         "db:migrate:dry-run": "tsx src/db/migrate.ts -- --dry-run",

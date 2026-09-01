@@ -2,6 +2,7 @@ import { portfolioStorage } from './portfolioStorage.js'
 import { ReflectorService } from './reflector.js'
 import { logger } from '../utils/logger.js'
 import { dbCompactAnalyticsSnapshots, type CompactionStats } from '../db/analyticsDb.js'
+import { getAnalyticsCompactionConfig } from '../config/analyticsCompactionConfig.js'
 
 interface PortfolioSnapshot {
     portfolioId: string
@@ -303,27 +304,31 @@ class AnalyticsService {
      * Preserves recent high-frequency data while rolling up older data to daily snapshots.
      * 
      * @param portfolioId - Portfolio to compact
-     * @param cutoffDays - Delete all snapshots older than this (default: 90)
-     * @param recentDays - Keep high-frequency data for this period (default: 7)
+     * @param cutoffDays - Delete all snapshots older than this (defaults to configured retention window)
+     * @param recentDays - Keep high-frequency data for this period (defaults to configured recent window)
      */
     async compactAnalyticsForPortfolio(
         portfolioId: string,
-        cutoffDays: number = 90,
-        recentDays: number = 7
+        cutoffDays?: number,
+        recentDays?: number
     ): Promise<CompactionStats> {
         try {
-            if (cutoffDays < recentDays) {
-                throw new Error(`cutoffDays (${cutoffDays}) must be >= recentDays (${recentDays})`)
+            const config = getAnalyticsCompactionConfig()
+            const effectiveCutoffDays = cutoffDays ?? config.cutoffDays
+            const effectiveRecentDays = recentDays ?? config.recentDays
+
+            if (effectiveCutoffDays < effectiveRecentDays) {
+                throw new Error(`cutoffDays (${effectiveCutoffDays}) must be >= recentDays (${effectiveRecentDays})`)
             }
 
-            const stats = await dbCompactAnalyticsSnapshots(portfolioId, cutoffDays, recentDays)
+            const stats = await dbCompactAnalyticsSnapshots(portfolioId, effectiveCutoffDays, effectiveRecentDays)
             
             logger.info('Analytics snapshots compacted for portfolio', {
                 portfolioId,
                 deletedCount: stats.deletedCount,
                 retainedCount: stats.retainedCount,
-                cutoffDays,
-                recentDays,
+                cutoffDays: effectiveCutoffDays,
+                recentDays: effectiveRecentDays,
             })
 
             return stats
@@ -341,24 +346,32 @@ class AnalyticsService {
      * Called by the analytics-compaction BullMQ worker.
      */
     async compactAllPortfolios(
-        cutoffDays: number = 90,
-        recentDays: number = 7
+        cutoffDays?: number,
+        recentDays?: number
     ): Promise<CompactionStats[]> {
         try {
+            const config = getAnalyticsCompactionConfig()
+            const effectiveCutoffDays = cutoffDays ?? config.cutoffDays
+            const effectiveRecentDays = recentDays ?? config.recentDays
+
+            if (effectiveCutoffDays < effectiveRecentDays) {
+                throw new Error(`cutoffDays (${effectiveCutoffDays}) must be >= recentDays (${effectiveRecentDays})`)
+            }
+
             const portfolios = portfolioStorage.getAllPortfolios()
             const results: CompactionStats[] = []
 
             logger.info('Starting analytics compaction for all portfolios', {
                 portfolioCount: portfolios.length,
-                cutoffDays,
-                recentDays,
+                cutoffDays: effectiveCutoffDays,
+                recentDays: effectiveRecentDays,
             })
 
             for (const portfolio of portfolios) {
                 const stats = await this.compactAnalyticsForPortfolio(
                     portfolio.id,
-                    cutoffDays,
-                    recentDays
+                    effectiveCutoffDays,
+                    effectiveRecentDays
                 )
                 results.push(stats)
             }

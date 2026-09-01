@@ -101,78 +101,130 @@ soroban contract invoke \
 
 ### 5. Update Portfolio Allocations
 
-**Signature** (`contracts/src/lib.rs`):
+Use `update_allocations` to replace a portfolio's target percentages without
+moving funds immediately. The contract entrypoint is
+`update_allocations(portfolio_id: u64, new_allocations: Map<Address, u32>)` in
+[`contracts/src/lib.rs`](../contracts/src/lib.rs#L743-L778). Each value is in
+basis points of the allocation denominator: the values must be positive and
+sum to **10,000** (for example, 7,000 and 3,000 represent 70% and 30%). The
+new map may contain only assets already registered on the portfolio.
 
-```text
-update_allocations(portfolio_id: u64, new_allocations: Map<Address, u32>) -> Result<(), Error>
-```
+Before submitting a write, check that the deployment exposes
+`update_allocations` in the capability matrix. Deployments that do not expose
+the method must remain read-only for allocations; see the
+[`CONTRACT_CAPABILITY_MATRIX.md`](CONTRACT_CAPABILITY_MATRIX.md#capability-matrix)
+entry for the required fallback.
 
 #### CLI
+
+The Soroban CLI accepts the `Map<Address, u32>` argument as a JSON object. The
+`--source` identity must be able to authorize the portfolio owner address.
+Replace the placeholders with real Stellar addresses and a portfolio ID:
 
 ```bash
 soroban contract invoke \
   --id <CONTRACT_ID> \
-  --source alice \
+  --source <OWNER_SECRET_KEY_OR_IDENTITY> \
   --network testnet \
   -- update_allocations \
   --portfolio_id 1 \
-  --new_allocations '{"CDML...": 60, "CDEF...": 40}'
+  --new_allocations '{"<ASSET_A_ADDRESS>": 7000, "<ASSET_B_ADDRESS>": 3000}'
 ```
+
+For a dry run, add `--simulate` before `--` to catch authorization and
+validation failures without submitting the transaction. A successful
+transaction returns the contract's `()` result; inspect the transaction's
+contract events to verify the allocation update.
 
 #### SDK (TypeScript)
 
+The explicit `xdr.ScVal.scvMap` construction below preserves the fact that
+both map keys are Stellar `Address` values and both map values are `u32`
+values. Add the returned operation to the transaction builder used by the
+application, then simulate, assemble, sign with the owner key, and submit it
+through the normal Soroban RPC flow.
+
 ```typescript
-import { Contract, nativeToScVal } from "@stellar/stellar-sdk";
+import {
+  Address,
+  Contract,
+  nativeToScVal,
+  xdr,
+} from "@stellar/stellar-sdk";
 
-// Replace with your deployed contract ID and desired values.
-const CONTRACT_ID = "C...";           // deployed portfolio_rebalancer contract ID
-const portfolioId = 1;                // u64 portfolio ID
-const newAllocations: Record<string, number> = {
-  "CDML...": 6000,                    // 60% in basis points
-  "CDEF...": 4000,                    // 40% in basis points
-}; // Map<Address, u32>, values must sum to 10000
+const contract = new Contract("<CONTRACT_ID>");
+const portfolioId = nativeToScVal(1, { type: "u64" });
+const allocations = xdr.ScVal.scvMap([
+  new xdr.ScMapEntry(
+    Address.fromString("<ASSET_A_ADDRESS>").toScVal(),
+    nativeToScVal(7000, { type: "u32" }),
+  ),
+  new xdr.ScMapEntry(
+    Address.fromString("<ASSET_B_ADDRESS>").toScVal(),
+    nativeToScVal(3000, { type: "u32" }),
+  ),
+]);
 
-const contract = new Contract(CONTRACT_ID);
-const op = contract.call(
-  "update_allocations",
-  nativeToScVal(portfolioId, { type: "u64" }),
-  nativeToScVal(newAllocations, { type: "map" })
-);
-// Build, sign with the portfolio owner key, and submit as usual.
+const operation = contract.call("update_allocations", portfolioId, allocations);
+
+// Add `operation` to a TransactionBuilder, simulate/assemble it, sign with
+// the portfolio owner key, and submit through SorobanRpc.Server. For example:
+// const tx = new TransactionBuilder(account, feeAndNetworkOptions)
+//   .addOperation(operation).setTimeout(300).build();
+// const simulated = await server.simulateTransaction(tx);
+// const prepared = SorobanRpc.assembleTransaction(tx, simulated).build();
+// prepared.sign(ownerKeypair);
+// await server.sendTransaction(prepared);
 ```
+
+The contract argument name is `new_allocations`, even though the capability
+matrix calls the logical field `target_allocations`. The SDK operation must use
+the entrypoint name and positional argument order shown above.
 
 #### Required Auth
 
-The portfolio **owner** (`portfolio.user`) must authorize the call. This is
-enforced via `portfolio.user.require_auth()` in `update_allocations`. If
-stewardship has been transferred, the steward does **not** have permission to
-update allocations — only the original owner does.
+The current entrypoint requires the **portfolio owner** (`portfolio.user`) to
+authorize the call with `require_auth()`. The transaction therefore fails if
+it is signed only by an unrelated account. The repository's stewardship model
+also exposes a **current steward**, and the capability documentation may refer
+to owner/steward authorization for deployments that delegate write authority;
+however, this implementation does not resolve `DataKey::Steward(portfolio_id)`
+inside `update_allocations`. Until that contract behavior changes, sign with
+the owner key. If a future deployment explicitly accepts the steward, sign with
+the current steward key and verify the deployed contract version first.
 
-#### Event Emission
+#### Expected Event Emission
 
-Emits a `portfolio.alloc_upd` event with the portfolio ID, old allocations,
-and new allocations:
-
-```
-topic: (symbol_short!("portfolio"), Symbol::new(&env, "alloc_upd"))
-data:  (portfolio_id, old_allocations, new_allocations)
-```
+A successful call emits one contract event with topics
+`("portfolio", "alloc_upd")` and data `(portfolio_id, old_allocations,
+new_allocations)`. The old and new maps are included in the event, which lets
+indexers reconstruct the change without reading the portfolio again. See the
+[`CONTRACT_EVENTS.md`](CONTRACT_EVENTS.md#alloc_upd-event-details) event
+reference and the `test_update_allocations_success` fixture for the canonical
+shape.
 
 #### Common Error Scenarios
 
-| Error | Code | Trigger | Guidance |
-| --- | --- | --- | --- |
-| `InvalidAllocation` | 1 | New `target_allocations` don't sum to exactly 10,000 bps, or an asset has a 0% allocation | `validate_allocations` requires percentages to sum to `ALLOCATION_DENOMINATOR` (10,000) and rejects any zero entries — recheck your allocation map |
-| `AssetNotSupported` | 25 | An asset in `new_allocations` is not in the portfolio's `asset_decimals` map | Only assets that were registered at portfolio creation can be targeted — remove unknown assets or recreate the portfolio |
-| `InvariantViolation` | 14 | Post-update invariant check failed (e.g. allocations no longer valid after mutation) | Ensure the new allocations map passes `validate_allocations` |
-| `PortfolioNotFound` | 21 | `portfolio_id` doesn't exist in storage | Verify the ID with `get_portfolio` first |
+| Error | Meaning | Guidance |
+| --- | --- | --- |
+| `Error(Auth)` or an authorization failure | The owner (or a deployment-supported steward) did not authorize the invocation. | Sign the transaction with the required address and ensure the identity passed to `--source` controls that key. |
+| `InvalidAllocation` | Values are non-positive or do not sum to 10,000. | Recalculate the map in basis points; for two assets, `7000 + 3000` is valid. |
+| `AssetNotSupported` | A map key is not already present in the portfolio's supported asset set. | Use only assets returned by `get_portfolio`; create a new portfolio if the asset set must change. |
+| `PortfolioNotFound` | The supplied portfolio ID is not stored by the contract. | Call `get_portfolio` with the ID and check the deployed contract address/network. |
+| `TooManyAssets` or `PortfolioStorageFootprintTooLarge` | The updated portfolio exceeds its asset-count or storage limits. | Keep the allocation map within `MAX_PORTFOLIO_ASSETS` and avoid introducing additional asset keys. |
+| `PortfolioPaused` or `EmergencyStop` | The portfolio or contract is paused. | Inspect the portfolio pause state and wait for the administrator or authorized actor to clear the stop before retrying. |
+| Capability unavailable | The deployment does not advertise this write method. | Do not invoke optimistically; keep the UI read-only and use the fallback described in the capability matrix. |
 
 #### Test Coverage
 
-- `test_update_allocations_success` — verifies allocations are persisted after update
-- `test_update_allocations_invalid_sum` — rejects allocations not summing to 10,000
-- `test_update_allocations_unknown_asset` — rejects assets not in the portfolio's `asset_decimals`
-- `test_update_allocations_then_rebalance` — update allocations then execute a rebalance using the new targets
+`update_allocations` is a write capability in
+[`frontend/src/lib/contractCapabilities.ts`](../frontend/src/lib/contractCapabilities.ts)
+and the human-readable matrix. Check `availableMethods` and `writesEnabled`
+before constructing the transaction. The contract's `capabilities()` and
+`capability_summary()` endpoints are the version/capability discovery points;
+use them to avoid sending this recipe to an older deployment. The matrix
+records the method as emitting `alloc_upd` and specifies the safe fallback:
+**block the write and keep existing allocations visible read-only**.
 
 ## Debugging and Inspection
 
