@@ -1,9 +1,16 @@
 # Stellar Portfolio Rebalancer — README (Español)
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Stellar-Reflector%20Protocol-blue" alt="Stellar" />
+  <img src="https://img.shields.io/badge/Soroban-Smart%20Contracts-orange" alt="Soroban" />
+  <img src="https://img.shields.io/badge/Backend-Rust%20%2F%20Fastify-green" alt="Backend" />
+  <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License" />
+</p>
+
 [![GitHub Repo](https://img.shields.io/badge/repo-Stellar%20Portfolio%20Rebalancer-blue?style=flat-square)](https://github.com/ritik4ever/stellar-portfolio-rebalancer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Nota:** Esta traducción puede estar una versión por detrás del README en inglés. Consulte el [README principal](../README.md) para obtener la información más actualizada.
+> **Nota de traducción:** Última sincronización con el README en inglés: 2026-08-31. Consulte el [README principal](../README.md) para obtener la información más actualizada.
 
 [English](../README.md) | [Português](README.pt.md) | **Español**
 
@@ -33,12 +40,12 @@ Ayuda a los usuarios a mantener una asignación óptima de activos mediante reba
 
 Vea hacia dónde se dirige Stellar Portfolio Rebalancer.
 
-| **Ahora** (Sprint Actual)          | **Próximamente** (1-2 meses) | **Más Adelante** (3-6+ meses) |
-| :---------------------------------- | :----------------------------- | :------------------------------ |
-| Algoritmo de rebalanceo principal   | Panel de control de cartera    | Aplicación móvil                |
-| Integración de oráculo Reflector    | Informes históricos            | Estrategias personalizadas      |
-| Estabilidad de conexión de billetera| Sistema de notificaciones      | Integración DeFi                |
-| Corrección de errores               | Soporte multi-activo           | Optimización fiscal             |
+| **Ahora** (Sprint Actual)            | **Próximamente** (1-2 meses) | **Más Adelante** (3-6+ meses) |
+| :----------------------------------- | :--------------------------- | :---------------------------- |
+| Algoritmo de rebalanceo principal    | Panel de control de cartera  | Aplicación móvil              |
+| Integración de oráculo Reflector     | Informes históricos          | Estrategias personalizadas    |
+| Estabilidad de conexión de billetera | Sistema de notificaciones    | Integración DeFi              |
+| Corrección de errores                | Soporte multi-activo         | Optimización fiscal           |
 
 **[Ver hoja de ruta detallada →](ROADMAP.md)**
 
@@ -68,12 +75,12 @@ Los nuevos contribuidores deben leer el glosario antes de profundizar en la conf
 
 ### Stack Tecnológico
 
-| Capa                | Tecnología                          |
-| -------------------- | ------------------------------------ |
-| Contratos Inteligentes | Rust + Soroban                     |
-| Frontend             | React + TypeScript + Tailwind CSS    |
-| Backend              | Node.js + Express + TypeScript       |
-| Datos de Precios     | Reflector + CoinGecko API            |
+| Capa                   | Tecnología                        |
+| ---------------------- | --------------------------------- |
+| Contratos Inteligentes | Rust + Soroban                    |
+| Frontend               | React + TypeScript + Tailwind CSS |
+| Backend                | Node.js + Express + TypeScript    |
+| Datos de Precios       | Reflector + CoinGecko API         |
 
 ---
 
@@ -203,8 +210,6 @@ soroban contract invoke \
 
 Ejemplo de dirección de contrato: `CCQ4LISQJFTZJKQDRJHRLXQ2UML45GVXUECN5NGSQKAT55JKAK2JAX7I`
 
-Para un checklist completo por entorno (local, testnet, staging, producción), vea [Contract Deployment Checklist](CONTRACT_DEPLOYMENT_CHECKLIST.md).
-
 ### Verificación del Hash WASM
 
 Antes de desplegar, puede calcular y auditar el hash SHA-256 canónico del contrato WASM compilado para garantizar la reproducibilidad y la seguridad:
@@ -233,8 +238,6 @@ Este target genera el hash tanto del WASM de release como del WASM optimizado (s
 1. Conecte su billetera Stellar
 2. Cree una cartera y establezca las asignaciones objetivo (la suma debe ser 100%, máximo 10 activos por cartera)
 3. Configure los umbrales de rebalanceo (1–50%)
-4. Active/desactive el rebalanceo automático
-5. Envíe la transacción
 
 **Detección de Volatilidad:** Pausa el rebalanceo durante condiciones de mercado extremas.
 
@@ -260,6 +263,7 @@ Legado (obsoleto): `/api/*`
 ```bash
 # Crear cartera
 POST /api/v1/portfolio
+Content-Type: application/json
 {
   "userAddress": "DIRECCION_STELLAR",
   "allocations": {"XLM": 40, "USDC": 35, "BTC": 25},
@@ -280,6 +284,7 @@ GET /api/v1/portfolio/:id/rebalance-status
 ```
 
 Notificaciones:
+
 ```bash
 # Suscribirse
 POST /api/v1/notifications/subscribe
@@ -290,6 +295,7 @@ DELETE /api/v1/notifications/unsubscribe?userId=DIRECCION_STELLAR
 ```
 
 Datos de Precios:
+
 ```bash
 GET /api/v1/prices
 GET /api/v1/portfolio/:id/rebalance-plan
@@ -337,11 +343,10 @@ docker compose -f deployment/docker-compose.yml up --build -d
 
 Consulte **[CONTRIBUTING.md](../CONTRIBUTING.md)** para la guía canónica del contribuidor. Incluye configuración local mínima, servicios opcionales (Redis, PostgreSQL, SMTP), comandos de prueba, generación de documentación de API, expectativas de queue workers y configuración de pruebas E2E del frontend.
 
-Para usuarios de Windows y WSL, consulte la [Guía de Desarrollo Local Windows/WSL](windows-wsl-workflow.md).
-
-**Los PRs deben estar vinculados a una issue** o proporcionar una justificación cuando no exista una issue. Una verificación de CI lo exige.
+**Requisito de PR:** Los Pull Requests deben vincularse explícitamente a una issue abierta, o proporcionar una justificación detallada cuando no exista una issue. Una comprobación de CI a nivel de bloque aplica esta regla estrictamente.
 
 Pasos rápidos:
+
 1. Haga un fork del repositorio
 2. Cree una rama de funcionalidad: `git checkout -b feature/funcionalidad-increible`
 3. Siga la configuración en [docs/CONTRIBUTING.md](CONTRIBUTING.md)
