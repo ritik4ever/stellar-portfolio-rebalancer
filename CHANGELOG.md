@@ -102,7 +102,10 @@ Release changelog entries are generated into these sections:
 
 ## [Unreleased]
 
-### Added
+- Configurable analytics snapshot retention policy and admin management endpoints ([#1397](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1397))
+  - Added configurable retention cutoff (`ANALYTICS_COMPACTION_CUTOFF_DAYS`) and raw high-frequency snapshot window (`ANALYTICS_COMPACTION_RECENT_DAYS`) with startup validation and environment variable overrides.
+  - Added `GET /api/admin/analytics/retention-policy` and `POST /api/admin/analytics/compact` endpoints with comprehensive admin auditing and validation.
+  - Integrated retention policy into the background analytics compaction worker and analytics service with boundary-aware pruning and rollup logic.
 
 - Scheduled auto-rebalance dry-run mode with portfolio-level and environment configuration, simulated history/notifications, and no on-chain submission ([#1401](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1401))
 

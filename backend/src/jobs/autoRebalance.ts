@@ -12,6 +12,12 @@ import {
 } from "../services/serviceContainer.js";
 import { notificationService } from "../services/notificationService.js";
 import { CircuitBreakers } from "../services/circuitBreakers.js";
+import {
+  computeDcaSchedule,
+  crossCheckRebalanceDecision,
+  shouldRebalanceByStrategy,
+} from "../services/rebalancingStrategyService.js";
+import { getFeatureFlags } from "../config/featureFlags.js";
 import { getRebalanceQueue } from "../queue/queues.js";
 import type { AutoRebalanceCheckJobData } from "../queue/queues.js";
 import { getConnectionOptions } from "../queue/connection.js";
@@ -50,30 +56,17 @@ function isAutoRebalanceEnabled(p: Portfolio): boolean {
   return true;
 }
 
-export type AutoRebalanceDryRunSource = "portfolio" | "environment" | "disabled";
-
 /**
- * Portfolio configuration takes precedence over the deployment-wide setting so
- * operators can opt individual portfolios in or out during a staged rollout.
+ * Returns true when the portfolio is currently auto-paused by the CVaR/VaR
+ * risk guardrail (`riskPausedUntil` is set in the future).
  */
-export function resolveAutoRebalanceDryRun(
-  portfolio: Portfolio,
-  env: NodeJS.ProcessEnv = process.env,
-): { enabled: boolean; source: AutoRebalanceDryRunSource } {
-  const portfolioSetting = portfolio.strategyConfig?.dryRun;
-  if (typeof portfolioSetting === "boolean") {
-    return { enabled: portfolioSetting, source: "portfolio" };
-  }
-
-  const environmentSetting = env.AUTO_REBALANCE_DRY_RUN?.trim().toLowerCase();
-  if (environmentSetting === "true") {
-    return { enabled: true, source: "environment" };
-  }
-
-  return { enabled: false, source: "disabled" };
+export function isRiskPaused(p: Portfolio): boolean {
+  if (!p.riskPausedUntil) return false;
+  const untilMs = new Date(p.riskPausedUntil).getTime();
+  if (Number.isNaN(untilMs)) return false;
+  return untilMs > Date.now();
 }
 
-/** Compute the largest allocation drift and whether it exceeds the portfolio threshold. */
 function computeDrift(
   portfolio: Portfolio,
   prices: PricesMap,
@@ -152,11 +145,22 @@ export async function processAutoRebalanceJob(
     const rebalanceQueue = getRebalanceQueue();
 
     const skipCounts: Record<string, number> = {};
+    const flags = getFeatureFlags();
 
     for (const portfolio of eligible) {
       summary.portfoliosChecked++;
 
       try {
+        // CVaR/VaR auto-pause: a portfolio with a future riskPausedUntil is skipped.
+        if (isRiskPaused(portfolio)) {
+          skipCounts["risk_paused"] = (skipCounts["risk_paused"] ?? 0) + 1;
+          logger.debug("[WORKER:auto-rebalance] Portfolio skipped — risk auto-paused", {
+            portfolioId: portfolio.id,
+            riskPausedUntil: portfolio.riskPausedUntil,
+          });
+          continue;
+        }
+
         const cooldownCheck = CircuitBreakers.checkCooldownPeriod(
           portfolio.lastRebalance,
           MIN_COOLDOWN_HOURS,
@@ -172,84 +176,101 @@ export async function processAutoRebalanceJob(
 
         const riskCheck = riskManagementService.shouldAllowRebalance(portfolio, prices);
         if (!riskCheck.allowed) {
-          skipCounts["circuit_breaker"] = (skipCounts["circuit_breaker"] ?? 0) + 1;
-          logger.debug("[WORKER:auto-rebalance] Portfolio skipped — circuit breaker", {
+          // A VaR/CVaR breach also triggers the configurable auto-pause guardrail
+          // (notification + riskPausedUntil persistence) so the user knows why
+          // rebalancing stopped.
+          if (
+            riskCheck.reasonCode === "STAT_MODEL_VAR_BREACH" ||
+            riskCheck.reasonCode === "STAT_MODEL_CVAR_BREACH"
+          ) {
+            await riskManagementService.checkCVaRVaRThresholdsAndAutoPause(
+              portfolio.id,
+              portfolio.allocations ?? {},
+              prices,
+              portfolio.userAddress,
+            );
+            skipCounts["risk_paused"] = (skipCounts["risk_paused"] ?? 0) + 1;
+          } else {
+            skipCounts["circuit_breaker"] = (skipCounts["circuit_breaker"] ?? 0) + 1;
+          }
+          logger.debug("[WORKER:auto-rebalance] Portfolio skipped — risk check", {
             portfolioId: portfolio.id,
             reason: riskCheck.reason,
+            reasonCode: riskCheck.reasonCode,
           });
           continue;
         }
 
+        const now = Date.now();
         const drift = computeDrift(portfolio, prices);
-        if (!drift.drifted) {
-          skipCounts["no_drift_needed"] = (skipCounts["no_drift_needed"] ?? 0) + 1;
-          logger.debug("[WORKER:auto-rebalance] Portfolio skipped — no drift", {
+        const strategy = portfolio.strategy ?? "threshold";
+        const strategyConfig = portfolio.strategyConfig ?? {};
+        const strategyTriggered = shouldRebalanceByStrategy({ portfolio, prices, now });
+
+        let shouldTrigger: boolean;
+        let triggerReason: string;
+
+        if (strategy === "dca") {
+          // DCA portfolios run on their own interval cadence regardless of drift.
+          const schedule = computeDcaSchedule(portfolio, strategyConfig, now);
+          shouldTrigger = strategyTriggered;
+          triggerReason = shouldTrigger
+            ? `dca_interval_${schedule.intervalDays}d`
+            : "dca_not_due";
+          if (shouldTrigger) {
+            logger.info("[WORKER:auto-rebalance] DCA execution due", {
+              portfolioId: portfolio.id,
+              amount: schedule.amount,
+              intervalDays: schedule.intervalDays,
+              nextBuyAtMs: schedule.nextBuyAtMs,
+            });
+          }
+        } else if (strategy === "threshold") {
+          shouldTrigger = drift.drifted;
+          triggerReason = drift.drifted ? "drift" : "no_drift_needed";
+        } else {
+          shouldTrigger = strategyTriggered;
+          triggerReason = shouldTrigger ? `strategy:${strategy}` : "strategy_not_due";
+        }
+
+        if (!shouldTrigger) {
+          skipCounts[triggerReason] = (skipCounts[triggerReason] ?? 0) + 1;
+          logger.debug("[WORKER:auto-rebalance] Portfolio skipped — no trigger", {
             portfolioId: portfolio.id,
+            triggerReason,
             maxDriftPct: drift.maxDriftPct.toFixed(2),
             threshold: portfolio.threshold,
           });
           continue;
         }
 
-        const dryRun = resolveAutoRebalanceDryRun(portfolio);
-        if (dryRun.enabled) {
-          const plan = buildRebalancePlan(portfolio, prices, feedMeta);
-          const estimatedTrades = plan.estimatedFees.tradeCount;
-
-          logger.info("[WORKER:auto-rebalance] Dry-run plan computed — no transaction submitted", {
-            portfolioId: portfolio.id,
-            dryRunSource: dryRun.source,
-            plan,
-          });
-
-          await rebalanceHistoryService.recordRebalanceEvent({
-            portfolioId: portfolio.id,
-            trigger: "Automatic Rebalancing (Dry Run Simulation)",
-            trades: estimatedTrades,
-            gasUsed: "0 XLM",
-            status: "completed",
-            isAutomatic: true,
-            actor: "scheduler",
-            source: "auto_rebalance",
-            eventSource: "simulated",
-            isSimulated: true,
-            triggerMetadata: {
-              dryRun: true,
-              simulated: true,
-              dryRunSource: dryRun.source,
-              plan,
+        // Cross-check the backend decision against the on-chain check_rebalance_needed
+        // view before executing. Warn-only by default while rolling out; set
+        // REBALANCE_CROSS_CHECK_REQUIRE_AGREEMENT to block execution on disagreement.
+        if (flags.enableRebalanceCrossCheck) {
+          const crossCheck = await crossCheckRebalanceDecision(
+            { portfolio, prices, now },
+            async () => stellarService.checkRebalanceNeeded(portfolio.id),
+            {
+              requireAgreement: flags.requireRebalanceCrossCheckAgreement,
+              alertOnDisagreement: true,
             },
-            estimatedSlippageBps: plan.estimatedSlippageBps,
-          });
+          );
 
-          try {
-            await notificationService.notify({
-              userId: portfolio.userAddress,
+          if (!crossCheck.finalDecision) {
+            const skipReason = crossCheck.agreement
+              ? "rebalance_not_needed"
+              : "crosscheck_disagreement";
+            skipCounts[skipReason] = (skipCounts[skipReason] ?? 0) + 1;
+            logger.warn("[WORKER:auto-rebalance] Cross-check blocked rebalance", {
               portfolioId: portfolio.id,
-              eventType: "rebalance",
-              title: "Rebalance Simulation (Dry Run)",
-              message: `Simulation only — no on-chain transaction was submitted. The scheduled plan contains ${estimatedTrades} estimated trade${estimatedTrades === 1 ? "" : "s"}.`,
-              data: {
-                portfolioId: portfolio.id,
-                dryRun: true,
-                isSimulated: true,
-                plan,
-              },
-              timestamp: new Date().toISOString(),
+              backendDecision: crossCheck.backendDecision,
+              onChainDecision: crossCheck.onChainDecision,
+              agreement: crossCheck.agreement,
+              skipReason,
             });
-          } catch (notifyErr) {
-            logger.error("[WORKER:auto-rebalance] Dry-run notification failed (non-fatal)", {
-              portfolioId: portfolio.id,
-              error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
-            });
+            continue;
           }
-
-          summary.portfoliosSimulated++;
-          continue;
-        }
-
-        if (!rebalanceQueue) {
-          throw new Error("Rebalance queue unavailable");
         }
 
         await rebalanceQueue.add(
@@ -267,6 +288,7 @@ export async function processAutoRebalanceJob(
           portfolioId: portfolio.id,
           maxDriftPct: drift.maxDriftPct.toFixed(2),
           threshold: portfolio.threshold,
+          reason: triggerReason,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
