@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { CircuitBreakers } from "../services/circuitBreakers.js";
 import { RiskManagementService } from "../services/riskManagements.js";
+import { databaseService } from "../services/databaseService.js";
 import type { PricesMap } from "../types/index.js";
 
 const makePrices = (
@@ -589,5 +590,69 @@ describe("RiskManagementService circuit breaker lifecycle", () => {
     expect(status.ETH?.isTriggered).toBe(true);
     expect(status.BTC?.triggeredAssets).toEqual(["BTC"]);
     expect(status.ETH?.triggeredAssets).toEqual(["ETH"]);
+  });
+});
+
+// ============================================================
+// Configurable volatility threshold (#1386)
+// ============================================================
+
+describe("Configurable volatility threshold (#1386)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the default 15% threshold when nothing is configured", async () => {
+    const safeResult = await CircuitBreakers.checkMarketConditions({
+      BTC: { change: 14.5, timestamp: Date.now() / 1000 },
+    });
+    expect(safeResult.safe).toBe(true);
+
+    const breach = await CircuitBreakers.checkMarketConditions({
+      BTC: { change: 15.5, timestamp: Date.now() / 1000 },
+    });
+    expect(breach.safe).toBe(false);
+    expect(breach.reason).toContain("High volatility detected");
+  });
+
+  it("uses the threshold from the environment override", async () => {
+    vi.stubEnv("CIRCUIT_BREAKER_VOLATILITY_THRESHOLD_PCT", "30");
+
+    const safeResult = await CircuitBreakers.checkMarketConditions({
+      BTC: { change: 25, timestamp: Date.now() / 1000 },
+    });
+    expect(safeResult.safe).toBe(true);
+
+    const breach = await CircuitBreakers.checkMarketConditions({
+      BTC: { change: 31, timestamp: Date.now() / 1000 },
+    });
+    expect(breach.safe).toBe(false);
+    expect(breach.reason).toContain("31.00%");
+  });
+
+  it("uses the persisted admin value instead of the hardcoded default", async () => {
+    vi.spyOn(databaseService, "getKvValue").mockReturnValue("20");
+
+    const breach = await CircuitBreakers.checkMarketConditions({
+      BTC: { change: 21, timestamp: Date.now() / 1000 },
+    });
+    expect(breach.safe).toBe(false);
+    expect(breach.reason).toContain("21.00%");
+
+    const safeResult = await CircuitBreakers.checkMarketConditions({
+      BTC: { change: 19, timestamp: Date.now() / 1000 },
+    });
+    expect(safeResult.safe).toBe(true);
+  });
+
+  it("keeps the circuit breaker effective for any configured value within range", async () => {
+    vi.stubEnv("CIRCUIT_BREAKER_VOLATILITY_THRESHOLD_PCT", "5");
+
+    const breach = await CircuitBreakers.checkMarketConditions({
+      ETH: { change: 6, timestamp: Date.now() / 1000 },
+    });
+    expect(breach.safe).toBe(false);
+    expect(breach.reason).toContain("ETH");
   });
 });

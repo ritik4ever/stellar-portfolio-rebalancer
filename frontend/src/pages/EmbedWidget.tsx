@@ -76,14 +76,14 @@ function EmbedWidget({ id }: EmbedWidgetProps) {
         const res = await api.get<PublicPortfolioData>(ENDPOINTS.PORTFOLIO_SHARE_VIEW(id))
         setData(res)
         
-        // Attempt to fetch performance, ignore if it fails (not public or error)
+       
         try {
           const perfRes = await api.get<any>(ENDPOINTS.PORTFOLIO_PERFORMANCE_SUMMARY(res.portfolio.id))
           if (perfRes?.totalReturnPercent !== undefined) {
             setPerformancePercent(perfRes.totalReturnPercent)
           }
         } catch (e) {
-          // Silent fail for performance summary on embed
+          
         }
       } catch (err: any) {
         if (err.status === 410) {

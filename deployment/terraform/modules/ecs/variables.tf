@@ -58,13 +58,15 @@ variable "blue_green_deployment_config" {
       action_on_timeout = optional(string, "CONTINUE_DEPLOYMENT")
     }), {})
     lifecycle_hooks = optional(list(object({
-      lifecycle_hook_name     = string
-      target_group_name      = string
-      container_name         = string
-      container_port         = number
+      lifecycle_hook_name = string
+      target_group_name   = string
+      container_name      = string
+      container_port      = number
     })), [])
   })
   default = {}
+}
+
 variable "ecs_min_capacity" {
   description = "Minimum number of tasks to run"
   type        = number

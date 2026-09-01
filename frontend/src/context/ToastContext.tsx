@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { DEFAULT_TOAST_DURATION_MS, DEFAULT_TOAST_MAX_VISIBLE } from '../components/ui/Toast'
 
 export interface ToastItem {
   id: string
@@ -29,7 +30,7 @@ export const ToastProvider: React.FC<{
   children: React.ReactNode
   maxVisible?: number
   duration?: number
-}> = ({ children, maxVisible = 5, duration = 3000 }) => {
+}> = ({ children, maxVisible = DEFAULT_TOAST_MAX_VISIBLE, duration = DEFAULT_TOAST_DURATION_MS }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const queueRef = useRef<Omit<ToastItem, 'id'>[]>([])
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())

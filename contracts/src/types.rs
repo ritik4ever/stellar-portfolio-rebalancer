@@ -268,8 +268,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
-    StopLoss(u64, Address),
     CircuitBreakerConfig,
+    StopLoss(u64, Address),
     /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
     PortfolioV2(u64),
     QueuedFeeConfig,
@@ -431,6 +431,10 @@ pub enum Error {
     TemplateNotFound = 34,
     TemplateAlreadyExists = 35,
     TooManyTemplates = 36,
+    InvalidSplitPercentage = 37,
+    CannotMergeSamePortfolio = 38,
+    PortfolioOwnerMismatch = 39,
+    ArithmeticOverflow = 40,
     /// Caller authenticated successfully but is neither the contract admin
     /// nor a registered operator for an operator-eligible entrypoint.
     Unauthorized = 37,

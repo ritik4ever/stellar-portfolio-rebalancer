@@ -79,11 +79,16 @@ describe('ToastContext', () => {
     expect(within(container).queryByText('Toast C')).not.toBeInTheDocument()
   })
 
-  it('dismisses toasts independently with their own timers', () => {
+  it('dismisses rapidly triggered toasts independently', () => {
     renderWithProvider()
 
     act(() => {
       screen.getByRole('button', { name: 'Show A' }).click()
+    })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    act(() => {
       screen.getByRole('button', { name: 'Show B' }).click()
     })
 
@@ -91,11 +96,19 @@ describe('ToastContext', () => {
     expect(within(container).getByText('Toast A')).toBeInTheDocument()
     expect(within(container).getByText('Toast B')).toBeInTheDocument()
 
+    // A was shown 2s earlier, so it expires first while B remains.
     act(() => {
-      vi.advanceTimersByTime(5000)
+      vi.advanceTimersByTime(3000)
     })
 
-    expect(container.children.length).toBe(0)
+    expect(within(container).queryByText('Toast A')).not.toBeInTheDocument()
+    expect(within(container).getByText('Toast B')).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    expect(within(container).queryByText('Toast B')).not.toBeInTheDocument()
   })
 
   it('shows queued toast when a visible toast dismisses', () => {
@@ -136,6 +149,7 @@ describe('ToastContext', () => {
       dismissButton.click()
     })
 
-    expect(container.children.length).toBe(0)
+    expect(screen.queryByText('Toast A')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Notifications')).not.toBeInTheDocument()
   })
 })

@@ -28,7 +28,72 @@ class CredentialManager {
     private lastDbRefresh = 0;
     private lastRedisRefresh = 0;
 
+    /**
+     * Timer handle for the proactive background refresh loop.
+     * Set when startBackgroundRefresh() is called; cleared by stopBackgroundRefresh().
+     */
+    private backgroundRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
     constructor() {}
+
+    /**
+     * Start a proactive background refresh loop that re-fetches credentials
+     * from AWS Secrets Manager before the TTL cache window expires.
+     *
+     * Call this once at application startup when USE_AWS_SECRETS_MANAGER=true
+     * so that a rotation event is picked up within one refresh interval rather
+     * than waiting for the first cache miss or an auth error.
+     *
+     * @param intervalMs  How often to refresh (default: 4 minutes — slightly
+     *                    shorter than the 5-minute TTL so the cache never
+     *                    serves stale credentials).
+     */
+    public startBackgroundRefresh(intervalMs = 240_000): void {
+        if (this.backgroundRefreshTimer) {
+            // Already running — nothing to do.
+            return;
+        }
+
+        const secretArn = (process.env.DB_SECRET_ARN || process.env.AWS_DB_SECRET_ID)?.trim();
+        const useSecretsManager = process.env.USE_AWS_SECRETS_MANAGER === 'true' || Boolean(secretArn);
+
+        if (!useSecretsManager) {
+            logger.debug('[CREDENTIALS] Secrets Manager not configured — skipping background refresh');
+            return;
+        }
+
+        logger.info('[CREDENTIALS] Starting proactive background credential refresh', {
+            intervalMs,
+        });
+
+        this.backgroundRefreshTimer = setInterval(async () => {
+            try {
+                await Promise.all([
+                    this.getDbCredentials(true),
+                    this.getRedisCredentials(true),
+                ]);
+                logger.debug('[CREDENTIALS] Background credential refresh completed');
+            } catch (err) {
+                logger.warn('[CREDENTIALS] Background credential refresh failed', {
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }, intervalMs);
+
+        // Allow Node.js to exit even if the timer is active (non-blocking).
+        if (this.backgroundRefreshTimer?.unref) {
+            this.backgroundRefreshTimer.unref();
+        }
+    }
+
+    /** Stop the proactive background refresh loop. Useful in tests. */
+    public stopBackgroundRefresh(): void {
+        if (this.backgroundRefreshTimer) {
+            clearInterval(this.backgroundRefreshTimer);
+            this.backgroundRefreshTimer = null;
+            logger.debug('[CREDENTIALS] Background credential refresh stopped');
+        }
+    }
 
     public clearCache(): void {
         this.dbCredsCache = null;

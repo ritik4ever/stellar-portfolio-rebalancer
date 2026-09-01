@@ -184,6 +184,18 @@ const workerStatus = new Gauge({
   registers: [register],
 });
 
+const indexerLagGauge = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}contract_event_indexer_lag_ledgers`,
+  help: "Gap between chain tip ledger and last-indexed ledger",
+  registers: [register],
+});
+
+const indexerErrorsTotal = new Counter({
+  name: `${observabilityConfig.metrics.prefix}contract_event_indexer_errors_total`,
+  help: "Total errors encountered by the contract event indexer",
+  registers: [register],
+});
+
 export const dbQueryDuration = new Histogram({
   name: `${observabilityConfig.metrics.prefix}db_query_duration_seconds`,
   help: "Database query duration in seconds",
@@ -275,6 +287,14 @@ export function recordCacheSize(sizeBytes: number): void {
 
 export function recordCacheEntries(count: number): void {
   cacheEntriesGauge.set(count);
+}
+
+export function recordIndexerLag(lagLedgers: number): void {
+  indexerLagGauge.set(lagLedgers);
+}
+
+export function recordIndexerError(): void {
+  indexerErrorsTotal.inc();
 }
 
 // ── Auth security event metrics (Issue #423) ─────────────────────────────────
