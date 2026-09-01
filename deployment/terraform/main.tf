@@ -49,6 +49,43 @@ module "vpc" {
   vpc_cidr    = var.vpc_cidr
 }
 
+# ─── Optional: deploy rotation Lambdas ───────────────────────────────────────
+# This module is enabled when create_rotation_lambda = true.
+# It provisions the SAR-managed RDS rotation Lambda and a custom Redis rotation
+# Lambda, both inside the VPC.  The output ARNs are forwarded to the rds and
+# elasticache modules below so that aws_secretsmanager_secret_rotation is wired
+# up automatically.
+
+module "rotation_lambda" {
+  count  = var.create_rotation_lambda ? 1 : 0
+  source = "./modules/rotation_lambda"
+
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  private_subnet_ids         = module.vpc.private_subnet_ids
+  redis_secret_arn           = module.elasticache.redis_secret_arn
+  redis_replication_group_id = module.elasticache.redis_replication_group_id
+
+  depends_on = [module.vpc, module.elasticache]
+}
+
+# Resolve the effective rotation Lambda ARNs:
+#   • If create_rotation_lambda=true  → use the ARNs from the module above.
+#   • Otherwise                       → fall back to the caller-supplied ARN
+#     (secret_rotation_lambda_arn), which may be null (disables rotation).
+locals {
+  effective_rds_rotation_lambda_arn = (
+    var.create_rotation_lambda
+    ? module.rotation_lambda[0].rds_rotation_lambda_arn
+    : var.secret_rotation_lambda_arn
+  )
+  effective_redis_rotation_lambda_arn = (
+    var.create_rotation_lambda
+    ? module.rotation_lambda[0].redis_rotation_lambda_arn
+    : var.secret_rotation_lambda_arn
+  )
+}
+
 module "rds" {
   source                     = "./modules/rds"
   name_prefix                = local.name_prefix
@@ -56,9 +93,7 @@ module "rds" {
   subnet_ids                 = module.vpc.private_subnet_ids
   instance_class             = lookup(var.db_instance_class, terraform.workspace, "db.t4g.micro")
   secret_rotation_days       = var.secret_rotation_days
-  secret_rotation_lambda_arn = var.secret_rotation_lambda_arn
-  backup_retention_period    = lookup(var.backup_retention_period, terraform.workspace, 7)
-  environment                = terraform.workspace
+  secret_rotation_lambda_arn = local.effective_rds_rotation_lambda_arn
 }
 
 module "elasticache" {
@@ -68,7 +103,7 @@ module "elasticache" {
   subnet_ids                 = module.vpc.private_subnet_ids
   node_type                  = lookup(var.redis_node_type, terraform.workspace, "cache.t4g.micro")
   secret_rotation_days       = var.secret_rotation_days
-  secret_rotation_lambda_arn = var.secret_rotation_lambda_arn
+  secret_rotation_lambda_arn = local.effective_redis_rotation_lambda_arn
 }
 
 module "ecs" {

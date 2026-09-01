@@ -39,3 +39,12 @@ daily_spend_threshold          = 20.0
 enable_blue_green = {
   production = true
 }
+
+# ─── Credential Rotation ──────────────────────────────────────────────────────
+# Rotate secrets every 14 days in production for tighter security posture.
+# Set create_rotation_lambda = true to auto-deploy the rotation Lambdas
+# via this Terraform workspace.  Alternatively, set it to false and supply
+# the ARN of a pre-existing rotation Lambda below.
+secret_rotation_days       = 14
+create_rotation_lambda     = false
+# secret_rotation_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:prod-rds-rotation"

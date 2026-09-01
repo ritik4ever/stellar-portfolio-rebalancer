@@ -151,6 +151,44 @@ variable "enable_blue_green" {
   }
 }
 
+# ─── Secret Rotation ──────────────────────────────────────────────────────────
+
+variable "secret_rotation_days" {
+  description = "Number of days between automatic AWS Secrets Manager rotations for RDS and Redis credentials. Applies to both modules."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.secret_rotation_days >= 1 && var.secret_rotation_days <= 365
+    error_message = "secret_rotation_days must be between 1 and 365."
+  }
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = <<-EOT
+    ARN of an existing Lambda function used to rotate secrets.
+    When null (the default), automatic rotation is disabled and the
+    aws_secretsmanager_secret_rotation resources are not created.
+    Provide the ARN of the AWS-managed rotation Lambda deployed in your
+    account, e.g. the SecretsManagerRDSPostgreSQLRotationSingleUser Lambda,
+    or your own custom rotation function.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "create_rotation_lambda" {
+  description = <<-EOT
+    When true, deploys the rotation_lambda Terraform module which provisions
+    the AWS Secrets Manager managed rotation Lambda for RDS PostgreSQL
+    (single-user strategy) and a custom rotation Lambda for the Redis AUTH
+    token.  Set to false (the default) when you prefer to supply an existing
+    rotation Lambda via secret_rotation_lambda_arn.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "blue_green_deployment_config" {
   description = "Blue/green deployment configuration"
   type = object({
