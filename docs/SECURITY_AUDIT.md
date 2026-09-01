@@ -1,4 +1,4 @@
-# Security Audit — stellar-portfolio-rebalancer
+# Security Audit â€” stellar-portfolio-rebalancer
 
 This document records security findings identified during internal and external audits of the
 `stellar-portfolio-rebalancer` smart contract. Each entry includes a description, impact
@@ -11,7 +11,7 @@ assessment, reproduction steps, recommended remediation, and current status.
 | ID | Title | Severity | Status |
 |----|-------|----------|--------|
 | [SPR-001](#spr-001) | `get_fee_config` default `fee_recipient` falls back to the contract's own address | **High** | Open — fix tracked in #1519 |
-| [SPR-002](#spr-002) | `debug.routes.ts` diagnostic endpoints exposure risk in production | **Medium-High** | Remediated — gated via feature flag & admin auth (#1314) |
+| [SPR-002](#spr-002) | Unbounded `create_portfolio` allows storage-spam DoS | **Medium** | Open — mitigation recommended |
 
 ---
 
@@ -21,7 +21,7 @@ assessment, reproduction steps, recommended remediation, and current status.
 
 **Severity:** High
 
-**Status:** Open — remediation required (tracked in issue #1519)
+**Status:** Open â€” remediation required (tracked in issue #1519)
 
 **Reported:** 2026-07-27
 
@@ -35,7 +35,7 @@ assessment, reproduction steps, recommended remediation, and current status.
 
 `get_fee_config` returns an in-memory default `FeeConfig` when no fee configuration has been
 stored in contract storage. The default value hardcodes `fee_recipient` to
-`env.current_contract_address()` — the contract's own address:
+`env.current_contract_address()` â€” the contract's own address:
 
 ```rust
 // contracts/src/lib.rs
@@ -46,7 +46,7 @@ pub fn get_fee_config(env: Env) -> FeeConfig {
         .unwrap_or(FeeConfig {
             platform_name: String::from_str(&env, ""),
             fee_bps: 0,
-            fee_recipient: env.current_contract_address(), // ← self-referential default
+            fee_recipient: env.current_contract_address(), // â†� self-referential default
             enabled: false,
         })
 }
@@ -106,9 +106,9 @@ creates a critical trap under the following conditions:
 
 | Dimension | Assessment |
 |-----------|-----------|
-| **Funds at risk** | Yes — any fee-denominated token amount sent to the contract address is permanently unrecoverable without an upgrade |
-| **Requires admin action to trigger** | Yes — `enabled: false` in the default prevents automatic triggering today |
-| **Exploitable by external actor** | No — fee collection only runs inside `execute_rebalance_internal`, which requires steward auth |
+| **Funds at risk** | Yes â€” any fee-denominated token amount sent to the contract address is permanently unrecoverable without an upgrade |
+| **Requires admin action to trigger** | Yes â€” `enabled: false` in the default prevents automatic triggering today |
+| **Exploitable by external actor** | No â€” fee collection only runs inside `execute_rebalance_internal`, which requires steward auth |
 | **Scope of affected deployments** | All deployments where `set_fee_config` has not been called before fee collection is enabled |
 | **Recoverability** | None without a contract upgrade that adds a sweep function |
 
@@ -118,13 +118,13 @@ creates a critical trap under the following conditions:
 
 Two complementary fixes are required. Both should be delivered together.
 
-#### Fix 1 — Remove the unsafe default recipient (required)
+#### Fix 1 â€” Remove the unsafe default recipient (required)
 
 Replace the self-referential fallback in `get_fee_config` with a value that cannot silently
 route funds anywhere. The safest approach is to make the absence of a stored config
 unambiguously "fees disabled" at the type level:
 
-**Option A — Panic on access when not configured (strictest):**
+**Option A â€” Panic on access when not configured (strictest):**
 
 ```rust
 pub fn get_fee_config(env: Env) -> FeeConfig {
@@ -135,7 +135,7 @@ pub fn get_fee_config(env: Env) -> FeeConfig {
 }
 ```
 
-**Option B — Return a disabled sentinel with no recipient (recommended):**
+**Option B â€” Return a disabled sentinel with no recipient (recommended):**
 
 Introduce an `Option<Address>` for `fee_recipient`, or use a dedicated
 `fee_config_is_set: bool` flag in storage, so that the execution path can detect
@@ -161,7 +161,7 @@ let effective_fee_bps = match &fee_config {
 This eliminates the unsafe default entirely. Fee collection is off unless a `FeeConfig` is
 explicitly stored.
 
-#### Fix 2 — Add an admin fee sweep / withdrawal function (defence in depth)
+#### Fix 2 â€” Add an admin fee sweep / withdrawal function (defence in depth)
 
 Even with Fix 1 applied, add a recovery path so that any tokens inadvertently sent to the
 contract address can be retrieved:
@@ -179,10 +179,10 @@ pub fn admin_sweep_token(env: Env, token: Address, amount: i128, destination: Ad
 ```
 
 This function should require admin auth, emit an auditable event, and be callable only when
-the contract is not in emergency stop — or alternatively, only when emergency stop is active,
+the contract is not in emergency stop â€” or alternatively, only when emergency stop is active,
 depending on the operator's threat model.
 
-#### Fix 3 — Require explicit fee recipient in `initialize` (optional hardening)
+#### Fix 3 â€” Require explicit fee recipient in `initialize` (optional hardening)
 
 Add `fee_recipient: Option<Address>` to `initialize` so that deployments must declare an
 intent at construction time:
@@ -230,150 +230,53 @@ After applying the fix:
 
 ## SPR-002
 
-**Title:** `debug.routes.ts` diagnostic endpoints exposure risk in production
+- Issue: [#1519 â€” Security audit: set_fee_config default recipient defaults to contract's own address](../../issues/1519)
+- Affected code: [`contracts/src/lib.rs` â€” `get_fee_config`](../contracts/src/lib.rs)
+- Affected code: [`contracts/src/lib.rs` â€” `execute_rebalance_internal`](../contracts/src/lib.rs)
+- Soroban token interface: https://developers.stellar.org/docs/smart-contracts/tokens
 
-**Severity:** Medium-High
+---
 
-**Status:** Remediated — gated via feature flag & admin authentication (issue #1314)
+*Last updated: 2026-07-27*
+*Audited by: Kiro (automated security review, issue #1519)*
+
+---
+
+## SPR-002
+
+**Title:** Unbounded `create_portfolio` allows storage-spam DoS
+
+**Severity:** Medium
+
+**Status:** Open — mitigation recommended
 
 **Reported:** 2026-08-31
 
-**Affected file:** `backend/src/api/debug.routes.ts`
+**Affected file:** `contracts/src/lib.rs`
 
-**Affected endpoints:**
-- `POST /debug/notifications/test`
-- `GET /debug/coingecko-test`
-- `GET /debug/force-fresh-prices`
-- `GET /debug/reflector-test`
-- `GET /debug/env`
-- `GET /debug/auto-rebalancer-test`
+**Affected function:** `create_portfolio`, `create_portfolio_with_strategy`, `create_portfolio_from_template`
 
 ---
 
 ### Description
 
-The `debug.routes.ts` router exposes diagnostic and developer utility endpoints under `/api/debug/*` (and `/api/v1/debug/*`). These endpoints provide internal observability and debugging capabilities for oracle price feeds, notification dispatch, runtime environment parameters, and the auto-rebalancing worker.
+Currently, the `stellar-portfolio-rebalancer` contract does not restrict how many portfolios can be created globally or across multiple accounts. While a per-user cap is being tracked separately, an attacker could still circumvent this by generating numerous unique accounts and calling `create_portfolio` (or its variants) from each one.
 
-If exposed in production without multi-layered access controls, these endpoints present significant security risks including:
-1. **Unsafe Actions & State Mutation:** Active cache eviction that forces immediate external requests, and arbitrary trigger of notification delivery pipelines.
-2. **Denial of Service & Quota Exhaustion:** Cache thrashing against Reflector oracles and third-party CoinGecko API quotas.
-3. **Internal State & Reconnaissance Leaks:** Disclosure of internal service status, active portfolio counts, runtime environment flags, and oracle connectivity details.
-4. **Credential & Secret Exposure:** Potential exposure of third-party API keys, bearer tokens, user contact info (emails/webhooks), and environment secrets.
+Each new portfolio increments the global `NextPortfolioId` and writes a new `Portfolio` struct to `persistent` storage via `DataKey::PortfolioV2(portfolio_id)`. 
 
----
+### Storage-Rent and Cost Implications
 
-### Route-by-Route Exposure & Risk Assessment
+In Soroban, persistent storage entries require a minimum rent. While the invoker of `create_portfolio` pays the transaction fees and initial storage rent, the long-term rent burden falls on the contract or requires ongoing community effort to bump the ledger entries to prevent them from being archived. 
 
-| Endpoint | HTTP Method | Assigned Severity | Primary Risk & Potential Impact | Data Disclosed |
-|---|---|---|---|---|
-| `/debug/notifications/test` | `POST` | **Medium** | **Unsafe Action & Abuse:** Triggers live notification dispatch to user email/webhook/telegram. Risk of outbound notification spam, infrastructure resource consumption, and SSRF against internal services via user-supplied webhook URLs. | Masked recipient metadata (`email`, `webhook`) |
-| `/debug/coingecko-test` | `GET` | **High** | **Quota Depletion & Proxy Abuse:** Proxies live requests to CoinGecko using server-configured API keys (`COINGECKO_API_KEY`). Unrestricted access could exhaust paid API tiers or be abused as an open outbound proxy. | HTTP response status and raw CoinGecko pricing JSON |
-| `/debug/force-fresh-prices` | `GET` | **High** | **Unsafe State Mutation & DoS:** Clears in-memory/Redis price caches (`reflectorService.clearCache()`) and forces synchronous re-fetching from upstream oracles. Repeated calls cause cache stampedes, elevated latency for active rebalancing workflows, and upstream rate limiting. | Fresh price map, oracle feed metadata, cache status |
-| `/debug/reflector-test` | `GET` | **Medium** | **Reconnaissance & Oracle Probing:** Executes live oracle connectivity health checks and returns cache statistics alongside environment metadata. Aids attackers in fingerprinting infrastructure state. | Oracle connectivity status, cache operational metrics, `nodeEnv`, `apiKeySet` flag |
-| `/debug/env` | `GET` | **Low-Medium** | **Runtime Information Disclosure:** Discloses runtime `NODE_ENV`, auto-rebalancer initialization flag, and execution loop state. | `environment`, `autoRebalancerEnabled`, `autoRebalancerRunning` |
-| `/debug/auto-rebalancer-test` | `GET` | **Medium** | **Operational Metrics & DB Load:** Queries database for total portfolio count (`portfolioStorage.getPortfolioCount()`) and returns execution statistics and scheduler status. | Portfolio counts, rebalancer execution stats, operational timestamps |
+If an attacker aggressively spams portfolio creation:
+1. **Ledger Bloat & Rent Costs:** It increases the storage footprint of the contract significantly. Keeping these entries alive (if necessary for global state operations) will consume excessive rent fees.
+2. **Archival DoS Risk:** If the contract relies on querying active portfolios (e.g., via off-chain indexers or future on-chain aggregations) or if the sheer volume of data makes RPC queries expensive, it degrades system performance. If entries are archived, unarchiving them incurs additional costs.
+3. **ID Exhaustion:** While a `u64` is unlikely to wrap around, a massive number of portfolios might hit theoretical limits or cause issues for off-chain systems indexing `NextPortfolioId`.
 
----
+### Recommended Mitigation
 
-### Defense-in-Depth Analysis
+To prevent storage-spam and unbounded creation of portfolios, we recommend implementing a multi-layered defense:
 
-Security of debug routes is structured as a multi-tier defense-in-depth model:
-
-```
-[ Incoming Request ]
-         │
-         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 1: Feature Flag Gate (blockDebugInProduction)    │
- │ Checks ENABLE_DEBUG_ROUTES (default: false)            │
- │ Rejects with 404 Not Found to prevent route discovery   │
- └───────────────────────┬────────────────────────────────┘
-                         │ (if enabled)
-                         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 2: Admin Signature Auth (requireAdmin)           │
- │ Validates ed25519 signature + timestamp + admin key    │
- │ Rejects with 401 Unauthorized / 403 Forbidden          │
- └───────────────────────┬────────────────────────────────┘
-                         │ (if authorized)
-                         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 3: Request Validation & Rate Limiting            │
- │ Zod schema validation + IP/Admin rate limiters         │
- └───────────────────────┬────────────────────────────────┘
-                         │ (if valid)
-                         ▼
- ┌────────────────────────────────────────────────────────┐
- │ Layer 4: Execution & Response Redaction (redactObject) │
- │ Deeply masks secrets, keys, emails, and webhooks       │
- └────────────────────────────────────────────────────────┘
-```
-
-#### Cross-Reference with Feature-Flag Gating
-
-The `ENABLE_DEBUG_ROUTES` feature flag (evaluated in `backend/src/middleware/debugGate.ts` via `blockDebugInProduction`) serves as the perimeter switch:
-- **Default Value:** `false` across all environments (`featureFlags.ts`), ensuring safe-by-default behavior.
-- **Fail-Closed Design:** Returns HTTP `404 Not Found` rather than `401` or `403` when disabled, preventing route enumeration and fingerprinting by unauthorized scanners.
-
-**Why Feature-Flag Gating Alone Is Insufficient:**
-Relying solely on environment toggles represents a single point of failure:
-1. **Accidental Enablement:** Staging or production environments utilizing shared `.env` files or misconfigured `FEATURE_FLAGS_FILE` overrides could inadvertently enable the flag.
-2. **Environment Variable Injection:** Compromised container configuration or developer testing overrides could expose raw diagnostic endpoints to the public internet.
-3. **No Per-User Identity:** Feature flags are binary and process-wide; they do not distinguish between trusted administrators, normal users, or external attackers.
-
-Therefore, **mandatory cryptographic signature authentication (`requireAdmin`) is enforced on all debug endpoints** alongside flag gating.
-
----
-
-### Recommended Hardening Measures
-
-To achieve enterprise-grade defense in depth, the following hardening measures are documented and recommended:
-
-#### 1. Network Isolation & IP Allowlisting (Recommended)
-- **Mechanism:** Configure reverse proxy (Nginx, Cloudflare, AWS ALB) or Express middleware to restrict `/debug/*` and `/api/v1/debug/*` routes exclusively to internal management subnets, trusted VPN IP ranges, or localhost.
-- **Benefit:** Prevents external traffic from reaching debug handlers even if both the feature flag is toggled on and admin keys are leaked.
-
-#### 2. Segregated Administrative Keypairs & Role-Based Access Control
-- **Mechanism:** Maintain distinct public keys for diagnostic operations (`DEBUG_ADMIN_PUBLIC_KEYS`) separate from primary transaction-signing or configuration admin keys (`ADMIN_PUBLIC_KEYS`).
-- **Benefit:** Enforces the principle of least privilege, preventing a compromised diagnostic tool from executing high-privilege smart contract transactions or administrative config updates.
-
-#### 3. Granular Per-Route Rate Limiting
-- **Mechanism:** Apply strict rate limiting (e.g., maximum 5 requests/minute) specifically to `/debug/force-fresh-prices` and `/debug/coingecko-test` using `express-rate-limit` with Redis store.
-- **Benefit:** Mitigates risk of cache stampedes and protects third-party API quotas against accidental administrative script loops.
-
-#### 4. Automatic Deep Secret Redaction
-- **Mechanism:** All responses returned by debug routes must pass through `redactObject()` in `backend/src/utils/secretRedactor.ts`.
-- **Coverage:** Redaction regexes and sensitive key tokens cover Stellar secret seeds (`S...`), CoinGecko API keys, Bearer tokens, query parameters (`api_key=...`), email addresses, webhook URLs, and SMTP passwords.
-
----
-
-### Remediation Status Matrix
-
-| Component / Finding | Severity | Status | Remediation Details |
-|---|---|---|---|
-| Feature-Flag Perimeter Gate | High | **Remediated** | `blockDebugInProduction` middleware applied to all 6 debug routes; defaults to `404 Not Found` when `ENABLE_DEBUG_ROUTES=false`. |
-| Admin Authentication Enforcement | High | **Remediated** | `requireAdmin` Stellar signature verification attached to all 6 debug endpoints (`POST /debug/notifications/test` and all 5 `GET` routes). |
-| CoinGecko Test URL / Key Leakage | Medium | **Remediated** | Removed `testUrl` and `apiKeySet` disclosure from `/debug/coingecko-test` response body; API keys passed via secure headers only. |
-| Reflector Test API Key Length Leakage | Medium | **Remediated** | Removed `apiKeyLength` from `/debug/reflector-test` response to avoid aiding key bisection attacks. |
-| Diagnostic Notification Contact Leakage | Medium | **Remediated** | Integrated `redactObject` with `email` and `webhook` token matching to mask destination endpoints in `/debug/notifications/test`. |
-| Cache Thrashing / DoS Vector | High | **Mitigated** | Protected by dual layers of feature flag gating + admin cryptographic signature auth; recommended for IP allowlisting in production deployments. |
-| IP Allowlisting / Network Boundary | Medium | **Documented** | Recommended as deployment-level hardening for reverse proxy / API gateway layer. |
-| Dedicated Debug Auth Scope | Low | **Documented** | Recommended for multi-tenant / enterprise role separation. |
-
----
-
-### References
-
-- Issue: [#1314 — [SECURITY] Security review: debug.routes.ts exposure risk in production](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1314)
-- Affected code: [`backend/src/api/debug.routes.ts`](../backend/src/api/debug.routes.ts)
-- Gating middleware: [`backend/src/middleware/debugGate.ts`](../backend/src/middleware/debugGate.ts)
-- Auth middleware: [`backend/src/middleware/auth.ts`](../backend/src/middleware/auth.ts)
-- Feature flag config: [`backend/src/config/featureFlags.ts`](../backend/src/config/featureFlags.ts)
-- Secret redactor utility: [`backend/src/utils/secretRedactor.ts`](../backend/src/utils/secretRedactor.ts)
-- Test suite: [`backend/src/test/debug.routes.test.ts`](../backend/src/test/debug.routes.test.ts)
-
----
-
-*Last updated: 2026-08-31*
-*Audited by: Emmycivity (Security review, issue #1314)*
-
+1. **Per-Account Cap (Cross-Reference):** Enforce a strict limit on the number of portfolios a single user can create (this is currently being tracked separately as a per-user cap issue).
+2. **Minimum Balance / Fee Requirement (Recommended):** Require users to deposit a minimum balance of a supported asset into the portfolio upon creation, or charge a non-refundable protocol fee in XLM or USDC for each `create_portfolio` call. This imposes a direct economic cost on the attacker, effectively neutralizing sybil-based spam.
+3. **Admin-Configurable Global Cap (Defense in Depth):** Add a `max_global_portfolios` configuration setting that the admin can adjust. If the global limit is reached, new creations are paused until the admin evaluates the system's capacity and raises the limit.

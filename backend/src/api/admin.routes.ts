@@ -1,6 +1,16 @@
 import { Router, Request, Response } from 'express'
 import { requireAdmin } from '../middleware/auth.js'
 import { databaseService } from '../services/databaseService.js'
+import { analyticsService } from '../services/analyticsService.js'
+import {
+  getAnalyticsCompactionConfig,
+  DEFAULT_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  DEFAULT_ANALYTICS_COMPACTION_RECENT_DAYS,
+  MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+  MIN_ANALYTICS_COMPACTION_RECENT_DAYS,
+  MAX_ANALYTICS_COMPACTION_RECENT_DAYS,
+} from '../config/analyticsCompactionConfig.js'
 import { issuerMetadataService } from '../services/issuerMetadataService.js'
 import {
   MAX_VOLATILITY_THRESHOLD_PCT,
@@ -52,7 +62,7 @@ adminRouter.post('/db/explain', requireAdmin, async (req: Request, res: Response
       return fail(res, 400, 'VALIDATION_ERROR', 'params must be an array')
     }
 
-    const actor = req.adminPublicKey ?? 'unknown'
+    const actor = (req as any).adminPublicKey ?? 'unknown'
     logger.info('[ADMIN] EXPLAIN ANALYZE requested', { queryId, adminPublicKey: actor })
 
     const db = (databaseService as any).db
@@ -107,7 +117,7 @@ adminRouter.get('/db/queries', requireAdmin, async (req: Request, res: Response)
       id: key,
       query: PREDEFINED_QUERIES[key]
     }))
-    logAdminAction(req.adminPublicKey ?? 'unknown', 'list_queries', null)
+    logAdminAction((req as any).adminPublicKey ?? 'unknown', 'list_queries', null)
     return ok(res, { queries })
   } catch (error) {
     logger.error('[ADMIN] Failed to list queries', { error: getErrorMessage(error) })
@@ -188,52 +198,176 @@ adminRouter.post('/issuer-metadata/:issuer/refresh', requireAdmin, async (req: R
   }
 })
 
-// ── Configurable circuit-breaker volatility threshold ─────────────────────────
-
-adminRouter.get('/config/volatility-threshold', requireAdmin, (req: Request, res: Response) => {
+/**
+ * Get the currently configured analytics snapshot retention and compaction policy.
+ */
+adminRouter.get('/analytics/retention-policy', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const thresholdPct = getVolatilityThresholdPct()
-    logAdminAction(req.adminPublicKey ?? 'unknown', 'get_volatility_threshold', null)
+    const currentConfig = getAnalyticsCompactionConfig()
+    const actor = (req as any).adminPublicKey ?? 'unknown'
+    logAdminAction(actor, 'get_analytics_retention_policy', null)
+
     return ok(res, {
-      thresholdPct,
-      min: MIN_VOLATILITY_THRESHOLD_PCT,
-      max: MAX_VOLATILITY_THRESHOLD_PCT
+      retentionPolicy: {
+        cutoffDays: currentConfig.cutoffDays,
+        recentDays: currentConfig.recentDays,
+        defaults: {
+          cutoffDays: DEFAULT_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+          recentDays: DEFAULT_ANALYTICS_COMPACTION_RECENT_DAYS,
+        },
+        limits: {
+          minCutoffDays: MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+          maxCutoffDays: MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS,
+          minRecentDays: MIN_ANALYTICS_COMPACTION_RECENT_DAYS,
+          maxRecentDays: MAX_ANALYTICS_COMPACTION_RECENT_DAYS,
+        },
+      },
     })
   } catch (error) {
-    logger.error('[ADMIN] Failed to read volatility threshold', { error: getErrorMessage(error) })
+    logger.error('[ADMIN] Failed to fetch analytics retention policy', { error: getErrorMessage(error) })
     return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
   }
 })
 
-adminRouter.put('/config/volatility-threshold', requireAdmin, (req: Request, res: Response) => {
+/**
+ * Trigger analytics snapshot compaction manually with optional custom retention window overrides.
+ */
+adminRouter.post('/analytics/compact', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { threshold, thresholdPct } = req.body ?? {}
-    const value = typeof thresholdPct === 'number' ? thresholdPct : threshold
+    const actor = (req as any).adminPublicKey ?? 'unknown'
+    const { portfolioId, cutoffDays, recentDays } = req.body ?? {}
 
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      return fail(res, 400, 'VALIDATION_ERROR', 'threshold must be a finite number')
+    let parsedCutoff: number | undefined
+    if (cutoffDays !== undefined) {
+      if (typeof cutoffDays !== 'number' && typeof cutoffDays !== 'string') {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          `cutoffDays must be an integer between ${MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS} and ${MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS}`,
+        )
+      }
+      const trimmedCutoff = typeof cutoffDays === 'string' ? cutoffDays.trim() : cutoffDays
+      if (trimmedCutoff === '') {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          `cutoffDays must be an integer between ${MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS} and ${MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS}`,
+        )
+      }
+      const numCutoff = typeof trimmedCutoff === 'number' ? trimmedCutoff : Number(trimmedCutoff)
+      if (
+        !Number.isInteger(numCutoff) ||
+        numCutoff < MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS ||
+        numCutoff > MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS
+      ) {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          `cutoffDays must be an integer between ${MIN_ANALYTICS_COMPACTION_CUTOFF_DAYS} and ${MAX_ANALYTICS_COMPACTION_CUTOFF_DAYS}`,
+        )
+      }
+      parsedCutoff = numCutoff
     }
-    if (value < MIN_VOLATILITY_THRESHOLD_PCT || value > MAX_VOLATILITY_THRESHOLD_PCT) {
+
+    let parsedRecent: number | undefined
+    if (recentDays !== undefined) {
+      if (typeof recentDays !== 'number' && typeof recentDays !== 'string') {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          `recentDays must be an integer between ${MIN_ANALYTICS_COMPACTION_RECENT_DAYS} and ${MAX_ANALYTICS_COMPACTION_RECENT_DAYS}`,
+        )
+      }
+      const trimmedRecent = typeof recentDays === 'string' ? recentDays.trim() : recentDays
+      if (trimmedRecent === '') {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          `recentDays must be an integer between ${MIN_ANALYTICS_COMPACTION_RECENT_DAYS} and ${MAX_ANALYTICS_COMPACTION_RECENT_DAYS}`,
+        )
+      }
+      const numRecent = typeof trimmedRecent === 'number' ? trimmedRecent : Number(trimmedRecent)
+      if (
+        !Number.isInteger(numRecent) ||
+        numRecent < MIN_ANALYTICS_COMPACTION_RECENT_DAYS ||
+        numRecent > MAX_ANALYTICS_COMPACTION_RECENT_DAYS
+      ) {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          `recentDays must be an integer between ${MIN_ANALYTICS_COMPACTION_RECENT_DAYS} and ${MAX_ANALYTICS_COMPACTION_RECENT_DAYS}`,
+        )
+      }
+      parsedRecent = numRecent
+    }
+
+    const currentConfig = getAnalyticsCompactionConfig()
+    const effectiveCutoff = parsedCutoff ?? currentConfig.cutoffDays
+    const effectiveRecent = parsedRecent ?? currentConfig.recentDays
+
+    if (effectiveCutoff < effectiveRecent) {
       return fail(
         res,
         400,
         'VALIDATION_ERROR',
-        `threshold must be between ${MIN_VOLATILITY_THRESHOLD_PCT} and ${MAX_VOLATILITY_THRESHOLD_PCT} percent`
+        `cutoffDays (${effectiveCutoff}) must be >= recentDays (${effectiveRecent})`,
       )
     }
 
-    const actor = req.adminPublicKey ?? 'unknown'
-    const before = getVolatilityThresholdPct()
-    const updated = setVolatilityThresholdPct(value)
-    logAdminAction(actor, 'update_volatility_threshold', 'circuit_breaker.volatility_threshold_pct', before, updated)
+    if (portfolioId !== undefined) {
+      if (typeof portfolioId !== 'string' || portfolioId.trim() === '') {
+        return fail(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          'portfolioId must be a non-empty string when provided',
+        )
+      }
+
+      const targetPortfolioId = portfolioId.trim()
+      const stats = await analyticsService.compactAnalyticsForPortfolio(
+        targetPortfolioId,
+        effectiveCutoff,
+        effectiveRecent,
+      )
+      logAdminAction(actor, 'compact_analytics_portfolio', targetPortfolioId, null, {
+        stats,
+        cutoffDays: effectiveCutoff,
+        recentDays: effectiveRecent,
+      })
+      return ok(res, { stats, cutoffDays: effectiveCutoff, recentDays: effectiveRecent })
+    }
+
+    const results = await analyticsService.compactAllPortfolios(effectiveCutoff, effectiveRecent)
+    const totalDeleted = results.reduce((sum, r) => sum + r.deletedCount, 0)
+    const totalRetained = results.reduce((sum, r) => sum + r.retainedCount, 0)
+
+    logAdminAction(actor, 'compact_analytics_all', null, null, {
+      portfoliosProcessed: results.length,
+      totalSnapshotsDeleted: totalDeleted,
+      totalSnapshotsRetained: totalRetained,
+      cutoffDays: effectiveCutoff,
+      recentDays: effectiveRecent,
+    })
 
     return ok(res, {
-      thresholdPct: updated,
-      min: MIN_VOLATILITY_THRESHOLD_PCT,
-      max: MAX_VOLATILITY_THRESHOLD_PCT
+      results,
+      summary: {
+        portfoliosProcessed: results.length,
+        totalSnapshotsDeleted: totalDeleted,
+        totalSnapshotsRetained: totalRetained,
+        cutoffDays: effectiveCutoff,
+        recentDays: effectiveRecent,
+      },
     })
   } catch (error) {
-    logger.error('[ADMIN] Failed to update volatility threshold', { error: getErrorMessage(error) })
+    logger.error('[ADMIN] Manual analytics compaction failed', { error: getErrorMessage(error) })
     return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
   }
 })
