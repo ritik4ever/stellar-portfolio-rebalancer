@@ -22,6 +22,11 @@ class WebhookDeadLetterQueue {
     private useRedis = false
     private initialized = false
 
+    /**
+     * Initializes the dead-letter store: Redis with the shared failover-aware
+     * options (command replay explicitly disabled so a buffered RPUSH is never
+     * resent after a failover) when available, otherwise an in-memory list.
+     */
     async init(): Promise<void> {
         if (this.initialized) return
         this.initialized = true
@@ -29,7 +34,13 @@ class WebhookDeadLetterQueue {
         this.useRedis = await isRedisAvailable()
 
         if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, getRedisClientOptions())
+            // autoResendUnfulfilledCommands is explicitly disabled (also the
+            // shared default): push() issues RPUSH, and replaying a buffered
+            // RPUSH after a failover would enqueue the same dead-letter item
+            // twice.
+            this.redis = new Redis(REDIS_URL, getRedisClientOptions({
+                autoResendUnfulfilledCommands: false,
+            }))
             this.redis.on('error', (err) => {
                 logger.error('[DLQ] Redis error', { error: err.message })
             })

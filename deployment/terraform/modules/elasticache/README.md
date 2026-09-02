@@ -48,7 +48,10 @@ multi_az_enabled            = true
 
 1. ElastiCache detects that the primary node is unhealthy, or that the AZ
    hosting it is unavailable.
-2. A read replica **in another AZ** is promoted to primary.
+2. The available read replica with the **least replication lag** is promoted
+   to primary. The promoted replica may sit in the same AZ as the failed
+   primary or in a different one; only an outage of the primary's **entire
+   AZ** forces a cross-AZ promotion.
 3. The **primary endpoint DNS record is repointed** at the promoted node. The
    reader endpoint is updated to load-balance across the remaining replicas.
 4. A replacement replica is provisioned in a healthy AZ to restore the

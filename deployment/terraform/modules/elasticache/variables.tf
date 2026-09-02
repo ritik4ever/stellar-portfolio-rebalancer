@@ -78,8 +78,8 @@ variable "multi_az_enabled" {
   }
 
   validation {
-    condition     = !var.multi_az_enabled || length(var.availability_zones) >= 2
-    error_message = "multi_az_enabled requires at least two entries in availability_zones so the replica can be placed in a different AZ from the primary."
+    condition     = !var.multi_az_enabled || length(distinct(var.availability_zones)) >= 2
+    error_message = "multi_az_enabled requires at least two DISTINCT entries in availability_zones (duplicates would place the replica in the primary's AZ) so the replica can be placed in a different AZ from the primary."
   }
 }
 
@@ -97,9 +97,22 @@ variable "availability_zones" {
     Availability zones used to spread the primary and its read replicas.
     The first entry hosts the primary; replicas are allocated across the
     remaining entries (cycling when there are more replicas than AZs).
-    Must contain at least two AZs when multi_az_enabled is true, and every AZ
-    listed must have a subnet in `subnet_ids`.
+    Must contain at least one AZ, and at least two distinct AZs when
+    multi_az_enabled is true. Every AZ listed must have a subnet in
+    `subnet_ids`.
   EOT
   type        = list(string)
   default     = ["us-east-1a", "us-east-1b"]
+
+  # Guards the modulo in main.tf (`i % length(var.availability_zones)`): an
+  # empty list would otherwise raise a division-by-zero at plan time.
+  validation {
+    condition     = length(var.availability_zones) >= 1
+    error_message = "availability_zones must contain at least one AZ."
+  }
+
+  validation {
+    condition     = length(distinct(var.availability_zones)) == length(var.availability_zones)
+    error_message = "availability_zones must not contain duplicate entries."
+  }
 }

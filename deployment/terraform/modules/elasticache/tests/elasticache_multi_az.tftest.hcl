@@ -209,3 +209,38 @@ run "replica_count_is_capped_at_five" {
 
   expect_failures = [var.replica_count]
 }
+
+run "availability_zones_must_not_be_empty" {
+  command = plan
+
+  variables {
+    name_prefix        = "stellar-portfolio-staging"
+    vpc_id             = "vpc-0123456789abcdef0"
+    subnet_ids         = ["subnet-aaa"]
+    node_type          = "cache.t4g.micro"
+    availability_zones = []
+  }
+
+  # An empty AZ list would break the modulo-based AZ placement in main.tf,
+  # so the variable validation must reject it before plan evaluates locals.
+  expect_failures = [var.availability_zones]
+}
+
+run "availability_zones_must_not_contain_duplicates" {
+  command = plan
+
+  variables {
+    name_prefix        = "stellar-portfolio-staging"
+    vpc_id             = "vpc-0123456789abcdef0"
+    subnet_ids         = ["subnet-aaa", "subnet-bbb"]
+    node_type          = "cache.t4g.micro"
+    multi_az_enabled   = true
+    availability_zones = ["us-east-1a", "us-east-1a"]
+  }
+
+  # Duplicates would place the "second" node back into the primary's AZ,
+  # defeating Multi-AZ, so the variable-level duplicate check rejects the
+  # list outright (the multi_az distinct-AZ validation short-circuits once
+  # availability_zones itself is invalid).
+  expect_failures = [var.availability_zones]
+}

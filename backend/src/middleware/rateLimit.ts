@@ -33,6 +33,13 @@ function makeStore(prefix: string): RedisStore | undefined {
   });
 }
 
+/**
+ * Creates the singleton ioredis client backing the distributed rate-limit
+ * store, using the shared failover-aware options so an ElastiCache Multi-AZ
+ * failover reconnects with bounded backoff. Connection/command errors are
+ * absorbed so express-rate-limit degrades to its in-memory store instead of
+ * crashing the process.
+ */
 function initRedisClient() {
   if (process.env.NODE_ENV === "test") {
     logger.info("[RATE-LIMIT] Test environment — using memory store");

@@ -9,6 +9,13 @@ let redis: Redis | null = null
 let redisAvailable: boolean | null = null
 let failoverActive = false
 
+/**
+ * Lazily creates the failover-aware Redis client used for idempotency
+ * records, or returns null when Redis is unavailable. Connection errors
+ * activate the database fallback; the client's 'ready' event deactivates it
+ * again once ElastiCache has completed a failover, so records are shared
+ * across instances.
+ */
 async function getRedis(): Promise<Redis | null> {
     if (redisAvailable === null) {
         try {

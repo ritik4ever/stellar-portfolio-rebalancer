@@ -14,6 +14,11 @@ class TokenRevocationService {
     private useRedis = false
     private initialized = false
 
+    /**
+     * Initializes the revocation store: Redis with the shared failover-aware
+     * options when available, otherwise a per-process in-memory fallback
+     * (single-node deployments only).
+     */
     async init(): Promise<void> {
         if (this.initialized) return
         this.initialized = true

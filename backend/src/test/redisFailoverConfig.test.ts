@@ -169,6 +169,9 @@ describe('redisConnectionOptions', () => {
             expect(options.reconnectOnError).toBe(redisReconnectOnError)
             expect(options.enableOfflineQueue).toBe(true)
             expect(options.autoResubscribe).toBe(true)
+            // Non-idempotent commands (DEL, RPUSH, INCR, ...) must never be
+            // silently replayed after a failover reconnect.
+            expect(options.autoResendUnfulfilledCommands).toBe(false)
             expect(typeof (options.retryStrategy as (n: number) => number)).toBe('function')
         })
 

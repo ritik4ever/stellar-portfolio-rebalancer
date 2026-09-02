@@ -1,3 +1,48 @@
+# ─── Secondary-region DR wiring ──────────────────────────────────────────────
+# Restored from the previous configuration, which declared this module with an
+# unclosed block (invalid HCL that broke `terraform validate`). The block is
+# now closed correctly. It must stay in the root module: removing it would make
+# Terraform plan the destruction of every DR resource at this module address
+# (the cross-region RDS read replica — which has skip_final_snapshot = true —
+# the replica S3 buckets, and the DR ECS cluster).
+#
+# The `terraform {}` block that used to accompany this section is intentionally
+# NOT restored: providers.tf already declares required_version and the AWS
+# provider requirement, and a second required_version is invalid.
+
+variable "secondary_region" {
+  description = "The AWS region to provision DR resources into"
+  type        = string
+}
+
+variable "primary_db_identifier" {
+  description = "The identifier / ARN of the primary RDS instance to replicate from"
+  type        = string
+}
+
+variable "s3_buckets" {
+  description = "List of S3 buckets to configure cross-region replication for (source bucket names)"
+  type        = list(string)
+  default     = []
+}
+
+provider "aws" {
+  region = var.secondary_region
+  alias  = "secondary"
+}
+
+module "secondary_region" {
+  source = "./modules/secondary-region"
+
+  providers = {
+    aws = aws.secondary
+  }
+
+  secondary_region      = var.secondary_region
+  primary_db_identifier = var.primary_db_identifier
+  s3_buckets            = var.s3_buckets
+}
+
 locals {
   name_prefix = "${var.project_name}-${terraform.workspace}"
 }

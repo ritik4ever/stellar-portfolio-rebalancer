@@ -185,6 +185,12 @@ class CredentialManager {
         return creds.url;
     }
 
+    /**
+     * Synchronously resolves Redis credentials with a TTL cache. Prefers
+     * REDIS_URL, then REDIS_HOST (the ElastiCache replication-group endpoint
+     * injected by Terraform), then localhost; the AUTH token and TLS scheme are
+     * composed by buildRedisUrl so failover never changes the endpoint name.
+     */
     public getRedisCredentialsSync(forceRefresh = false): RedisCredentials {
         const now = Date.now();
         if (!forceRefresh && this.redisCredsCache && now - this.lastRedisRefresh < this.cacheTtlMs) {
@@ -219,6 +225,12 @@ class CredentialManager {
         return result;
     }
 
+    /**
+     * Asynchronously resolves Redis credentials. When REDIS_SECRET_ARN /
+     * USE_AWS_SECRETS_MANAGER is configured, fetches the AUTH token from AWS
+     * Secrets Manager so it tracks the rotated ElastiCache token; otherwise
+     * delegates to getRedisCredentialsSync. Results are cached for cacheTtlMs.
+     */
     public async getRedisCredentials(forceRefresh = false): Promise<RedisCredentials> {
         const now = Date.now();
         if (!forceRefresh && this.redisCredsCache && now - this.lastRedisRefresh < this.cacheTtlMs) {

@@ -158,6 +158,13 @@ export interface RedisClientOptionsOverrides {
  *
  * Callers override only what they genuinely need (e.g. BullMQ sets
  * `maxRetriesPerRequest: null`, short-lived probes disable retries entirely).
+ *
+ * `autoResendUnfulfilledCommands` is deliberately **false**: on reconnect
+ * ioredis would otherwise replay every command still buffered when the socket
+ * dropped. Many of those are non-idempotent writes (INCR, RPUSH, DEL, PEXPIRE,
+ * lock acquisitions), so replaying them after a Multi-AZ failover can
+ * double-apply side effects. Failing them instead lets each caller decide how
+ * to retry safely.
  */
 export function getRedisClientOptions(overrides: RedisClientOptionsOverrides = {}): RedisOptions {
     return {
@@ -172,7 +179,9 @@ export function getRedisClientOptions(overrides: RedisClientOptionsOverrides = {
         enableOfflineQueue: true,
         // Re-establish subscriptions automatically after a reconnect.
         autoResubscribe: true,
-        autoResendUnfulfilledCommands: true,
+        // Never silently replay buffered commands on reconnect: they may be
+        // non-idempotent writes. Callers handle their own safe retries.
+        autoResendUnfulfilledCommands: false,
         ...overrides,
     } as RedisOptions
 }

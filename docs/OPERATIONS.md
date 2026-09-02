@@ -33,7 +33,7 @@ The alert clears automatically once the backlog drains below the threshold.
 ### ElastiCache Multi-AZ Failover
 
 Terraform provisions Redis as an ElastiCache **replication group with Multi-AZ and automatic failover enabled**, with at least one read replica pinned to a **different availability zone** from the primary
-(`deployment/terraform/modules/elasticache`). Losing the primary node — or the entire AZ hosting it — promotes a replica in another AZ and repoints the endpoint DNS at it.
+(`deployment/terraform/modules/elasticache`). Losing the primary node promotes the available replica with the least replication lag (in the same or another AZ); losing the primary's entire AZ promotes a replica in a surviving AZ. In both cases the endpoint DNS is repointed at the promoted node.
 
 The backend connects to the **replication-group endpoint**, never to a single node address:
 

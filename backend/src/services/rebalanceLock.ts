@@ -44,7 +44,13 @@ export class RebalanceLockService {
             // Options are failover-aware: during an ElastiCache Multi-AZ
             // failover the connection drops and commands fail, so the client
             // reconnects with bounded backoff instead of giving up.
-            this.redis = new Redis(REDIS_URL, getRedisClientOptions())
+            // autoResendUnfulfilledCommands is explicitly disabled (it is also
+            // the shared default): replaying an in-flight DEL/PEXPIRE after a
+            // reconnect could release or shrink a lock that another holder
+            // re-acquired while this client was disconnected.
+            this.redis = new Redis(REDIS_URL, getRedisClientOptions({
+                autoResendUnfulfilledCommands: false,
+            }))
             
             this.redis.on('error', (err) => {
                 logger.error('[LOCK_SERVICE] Redis connection error', { error: err.message })

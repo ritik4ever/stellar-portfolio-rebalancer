@@ -106,7 +106,7 @@ The `elasticache` module provisions Redis as a **Multi-AZ replication group with
 | `replica_count` | `1` staging / `2` production (minimum `1`) |
 | `availability_zones` | `var.azs` — the same AZs the VPC subnets use |
 
-If the primary node or its whole AZ fails, ElastiCache promotes a replica in another AZ and repoints the replication-group endpoint at it. The endpoint name never changes, so the backend only needs to reconnect — no Terraform or application change.
+If the primary node fails, ElastiCache promotes the available replica with the least replication lag (in the same or another AZ) and repoints the replication-group endpoint at it; if the primary's whole AZ fails, the promoted replica is necessarily in a surviving AZ. The endpoint name never changes, so the backend only needs to reconnect — no Terraform or application change.
 
 Per-workspace knobs in the tfvars files:
 
