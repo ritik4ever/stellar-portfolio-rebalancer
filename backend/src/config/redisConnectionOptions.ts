@@ -165,6 +165,18 @@ export interface RedisClientOptionsOverrides {
  * lock acquisitions), so replaying them after a Multi-AZ failover can
  * double-apply side effects. Failing them instead lets each caller decide how
  * to retry safely.
+ *
+ * `enableOfflineQueue` is deliberately **false** for the same class of reason
+ * (review #1728): in ioredis v5 a command queued while the client is
+ * disconnected stays in the offline queue even after `commandTimeout` rejects
+ * the caller's promise, and is flushed to the server once the connection
+ * recovers. The caller has already handled the rejection — typically by
+ * falling back to its in-memory store — so the late write is a stray side
+ * effect nobody is awaiting (e.g. a rebalance-lock `SET` or a dead-letter
+ * `RPUSH` landing *after* the fallback path ran). Rejecting disconnected
+ * writes immediately keeps the fallback decision deterministic. Verified by
+ * `src/test/redisOfflineQueue.integration.test.ts`. BullMQ opts back in via
+ * {@link getBullMqConnectionOptions}.
  */
 export function getRedisClientOptions(overrides: RedisClientOptionsOverrides = {}): RedisOptions {
     return {
@@ -174,9 +186,11 @@ export function getRedisClientOptions(overrides: RedisClientOptionsOverrides = {
         commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
         maxRetriesPerRequest: REDIS_MAX_RETRIES_PER_REQUEST,
         enableReadyCheck: true,
-        // Queue commands issued during the failover window instead of rejecting
-        // them, so callers simply observe latency rather than an error.
-        enableOfflineQueue: true,
+        // Reject commands issued while disconnected instead of queueing them:
+        // a queued command is flushed after the reconnect even when
+        // commandTimeout already rejected it, replaying a write the caller
+        // has fallen back from (see docstring above).
+        enableOfflineQueue: false,
         // Re-establish subscriptions automatically after a reconnect.
         autoResubscribe: true,
         // Never silently replay buffered commands on reconnect: they may be
@@ -207,6 +221,12 @@ export function getBullMqConnectionOptions(overrides: RedisClientOptionsOverride
         // BullMQ requires `null`: it manages its own retry/blocking semantics
         // and a finite value breaks blocking commands.
         maxRetriesPerRequest: null,
+        // BullMQ opts back into the offline queue (its documented default):
+        // queue operations are idempotent by job ID and BullMQ relies on
+        // buffering commands across brief failover windows instead of
+        // failing jobs. The delayed-flush hazard that rules the offline
+        // queue out for one-shot service writes does not apply here.
+        enableOfflineQueue: true,
         enableReadyCheck: false,
         lazyConnect: false,
         ...overrides,

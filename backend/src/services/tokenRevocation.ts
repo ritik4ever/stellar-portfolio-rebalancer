@@ -13,27 +13,51 @@ class TokenRevocationService {
     private fallbackUserSet: Set<string> = new Set()
     private useRedis = false
     private initialized = false
+    /** Single in-flight init promise shared by all concurrent callers. */
+    private initPromise: Promise<void> | null = null
 
     /**
      * Initializes the revocation store: Redis with the shared failover-aware
      * options when available, otherwise a per-process in-memory fallback
      * (single-node deployments only).
+     *
+     * Review #1728 (round 2): `initialized` used to flip to true *before* the
+     * async Redis probe completed. A concurrent `addRevokedToken()` during
+     * that window saw `initialized && !useRedis`, wrote the revocation only
+     * to the in-memory fallback set, and every later `isRevoked()` read went
+     * to Redis — which never received it, silently losing the revocation.
+     * Init is now memoized in a shared promise and `initialized` is set only
+     * after the probe resolves, so concurrent callers all await the same
+     * fully-initialized outcome.
      */
     async init(): Promise<void> {
         if (this.initialized) return
-        this.initialized = true
+        this.initPromise ??= this.performInit()
+        return this.initPromise
+    }
 
-        this.useRedis = await isRedisAvailable()
+    private async performInit(): Promise<void> {
+        try {
+            this.useRedis = await isRedisAvailable()
 
-        if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, getRedisClientOptions())
-            this.redis.on('error', (err) => {
-                logger.error('[TOKEN_REVOCATION] Redis error', { error: err.message })
+            if (this.useRedis) {
+                this.redis = new Redis(REDIS_URL, getRedisClientOptions())
+                this.redis.on('error', (err) => {
+                    logger.error('[TOKEN_REVOCATION] Redis error', { error: err.message })
+                })
+                logger.info('[TOKEN_REVOCATION] Initialized with Redis')
+            } else {
+                logger.warn('[TOKEN_REVOCATION] Redis unavailable, using in-memory fallback')
+            }
+        } catch (err) {
+            this.redis = null
+            this.useRedis = false
+            logger.error('[TOKEN_REVOCATION] Initialization failed, using in-memory fallback', {
+                error: err instanceof Error ? err.message : String(err),
             })
-            logger.info('[TOKEN_REVOCATION] Initialized with Redis')
-        } else {
-            logger.warn('[TOKEN_REVOCATION] Redis unavailable, using in-memory fallback')
         }
+
+        this.initialized = true
     }
 
     private async ensureInit(): Promise<void> {
@@ -95,12 +119,14 @@ class TokenRevocationService {
             this.redis = null
         }
         this.initialized = false
+        this.initPromise = null
     }
 
     _resetForTest(): void {
         this.fallbackSet.clear()
         this.fallbackUserSet.clear()
         this.initialized = false
+        this.initPromise = null
         this.useRedis = false
         this.redis = null
     }

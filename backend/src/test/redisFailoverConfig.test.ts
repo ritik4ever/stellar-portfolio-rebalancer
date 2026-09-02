@@ -167,7 +167,11 @@ describe('redisConnectionOptions', () => {
             const options = getRedisClientOptions() as Record<string, unknown>
             expect(options.retryStrategy).toBe(redisRetryStrategy)
             expect(options.reconnectOnError).toBe(redisReconnectOnError)
-            expect(options.enableOfflineQueue).toBe(true)
+            // Review #1728 (round 2): the offline queue must be OFF for
+            // service clients — ioredis v5 flushes queued commands on
+            // reconnect even after commandTimeout already rejected them,
+            // replaying writes the caller had fallen back from.
+            expect(options.enableOfflineQueue).toBe(false)
             expect(options.autoResubscribe).toBe(true)
             // Non-idempotent commands (DEL, RPUSH, INCR, ...) must never be
             // silently replayed after a failover reconnect.
@@ -178,6 +182,16 @@ describe('redisConnectionOptions', () => {
         it('BullMQ options keep maxRetriesPerRequest null', () => {
             const options = getBullMqConnectionOptions() as Record<string, unknown>
             expect(options.maxRetriesPerRequest).toBeNull()
+        })
+
+        it('BullMQ options opt back into the offline queue', () => {
+            // BullMQ buffers queue commands across brief failover windows;
+            // its operations are idempotent by job ID, so the delayed-flush
+            // hazard that rules the offline queue out for one-shot service
+            // writes does not apply here.
+            const options = getBullMqConnectionOptions() as Record<string, unknown>
+            expect(options.enableOfflineQueue).toBe(true)
+            expect(options.autoResendUnfulfilledCommands).toBe(false)
         })
 
         it('probe options fail fast', () => {
