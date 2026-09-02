@@ -210,6 +210,14 @@ resource "aws_ecs_task_definition" "main" {
           value = var.redis_host
         },
         {
+          name  = "REDIS_READER_HOST"
+          value = coalesce(var.redis_reader_host, var.redis_host)
+        },
+        {
+          name  = "REDIS_TLS"
+          value = tostring(var.redis_tls_enabled)
+        },
+        {
           name  = "DB_SECRET_ARN"
           value = var.db_secret_arn
         },
@@ -452,9 +460,9 @@ resource "aws_codedeploy_app" "main" {
 # Use CodeDeployDefault.ECSCanary10Percent5Minutes or a custom config for
 # gradual canary-style shifts.
 resource "aws_codedeploy_deployment_config" "main" {
-  count                      = var.enable_blue_green ? 1 : 0
-  deployment_config_name     = "${var.name_prefix}-ecs-deployment-config"
-  compute_platform           = "ECS"
+  count                  = var.enable_blue_green ? 1 : 0
+  deployment_config_name = "${var.name_prefix}-ecs-deployment-config"
+  compute_platform       = "ECS"
 
   traffic_routing_config {
     type = "AllAtOnce"

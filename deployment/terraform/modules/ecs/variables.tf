@@ -35,7 +35,20 @@ variable "db_host" {
 }
 
 variable "redis_host" {
-  type = string
+  description = "Redis replication-group primary endpoint (host:port). Clients must use this cluster endpoint, not an individual node address, so they follow the primary across a failover."
+  type        = string
+}
+
+variable "redis_reader_host" {
+  description = "Redis replication-group reader endpoint (host:port) for read-only clients."
+  type        = string
+  default     = null
+}
+
+variable "redis_tls_enabled" {
+  description = "Whether the ElastiCache replication group requires TLS (transit encryption). When true the backend connects with the rediss:// scheme."
+  type        = bool
+  default     = false
 }
 
 variable "enable_blue_green" {

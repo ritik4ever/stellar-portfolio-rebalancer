@@ -1,6 +1,7 @@
 import Redis from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
+import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 
 const REVOKED_PREFIX = 'revoked_token:'
 const REVOKED_USER_PREFIX = 'revoked_user:'
@@ -20,10 +21,7 @@ class TokenRevocationService {
         this.useRedis = await isRedisAvailable()
 
         if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, {
-                lazyConnect: false,
-                maxRetriesPerRequest: 3,
-            })
+            this.redis = new Redis(REDIS_URL, getRedisClientOptions())
             this.redis.on('error', (err) => {
                 logger.error('[TOKEN_REVOCATION] Redis error', { error: err.message })
             })

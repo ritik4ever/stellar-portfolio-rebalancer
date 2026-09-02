@@ -41,6 +41,6 @@ enable_blue_green = {
 # Rotate secrets every 30 days in staging.
 # Set create_rotation_lambda = true to auto-deploy the rotation Lambdas,
 # or leave false and provide secret_rotation_lambda_arn manually.
-secret_rotation_days       = 30
-create_rotation_lambda     = false
+secret_rotation_days   = 30
+create_rotation_lambda = false
 # secret_rotation_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:staging-rds-rotation"

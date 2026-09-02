@@ -2,6 +2,7 @@ import Redis from 'ioredis'
 import { REDIS_URL, redisProbe } from '../queue/connection.js'
 import { dbStoreIdempotencyResult, dbGetIdempotencyResult } from '../db/idempotencyDb.js'
 import { logger } from '../utils/logger.js'
+import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 import type { IdempotencyRecord } from '../types/index.js'
 
 let redis: Redis | null = null
@@ -18,17 +19,25 @@ async function getRedis(): Promise<Redis | null> {
     }
     if (!redisAvailable) return null
     if (!redis) {
-        redis = new Redis(REDIS_URL, {
-            lazyConnect: false,
-            maxRetriesPerRequest: 2,
-            enableReadyCheck: false
-        })
+        redis = new Redis(REDIS_URL, getRedisClientOptions({ maxRetriesPerRequest: 2 }))
         redis.on('error', () => {
             if (redisAvailable) {
                 logger.warn('[IDEMPOTENCY-REDIS] Redis connection error, activating DB failover')
             }
             redisAvailable = false
             failoverActive = true
+        })
+        // An ElastiCache Multi-AZ failover is transient: the endpoint name is
+        // unchanged and ElastiCache promotes a replica in another AZ. Once the
+        // client reconnects, stop routing through the DB fallback so idempotency
+        // records are shared across instances again.
+        redis.on('ready', () => {
+            const wasDown = !redisAvailable
+            redisAvailable = true
+            if (wasDown) {
+                logger.info('[IDEMPOTENCY-REDIS] Redis connection restored, deactivating DB failover')
+            }
+            failoverActive = false
         })
     }
     return redis

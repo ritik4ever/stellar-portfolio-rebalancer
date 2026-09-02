@@ -205,6 +205,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 |---|---|---|---|---|---|
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for BullMQ queues and workers. | `redis://localhost:6379` | ⚠️ SECRET if your Redis instance requires a password (`redis://:password@host:port`). |
 | `REDIS_HOST` | No | `localhost` | Discrete Redis host. | `localhost` | |
+| `REDIS_READER_HOST` | No | _(empty)_ | ElastiCache replication-group **reader** endpoint (`host:port`) for read-only traffic. Falls back to `REDIS_HOST` when unset. | _(empty)_ | |
+| `REDIS_TLS` | No | `false` | Use the `rediss://` (TLS) scheme. Enable when the ElastiCache replication group has encryption in transit enabled. | `true` | |
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
 
 ### Risk Controls

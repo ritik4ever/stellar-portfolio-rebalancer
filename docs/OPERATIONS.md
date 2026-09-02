@@ -32,14 +32,32 @@ The alert clears automatically once the backlog drains below the threshold.
 
 ### ElastiCache Multi-AZ Failover
 
-Production Terraform now provisions Redis as an ElastiCache replication group with automatic failover enabled and at least one read replica. The backend should connect to the replication group's primary endpoint through `REDIS_URL` or the Terraform-injected `REDIS_HOST`; after an AZ failure, AWS promotes a replica and keeps the primary endpoint stable for reconnecting clients.
+Terraform provisions Redis as an ElastiCache **replication group with Multi-AZ and automatic failover enabled**, with at least one read replica pinned to a **different availability zone** from the primary
+(`deployment/terraform/modules/elasticache`). Losing the primary node — or the entire AZ hosting it — promotes a replica in another AZ and repoints the endpoint DNS at it.
+
+The backend connects to the **replication-group endpoint**, never to a single node address:
+
+- `REDIS_HOST` — primary endpoint (`host:port`), injected by Terraform from `module.elasticache.redis_primary_endpoint`.
+- `REDIS_READER_HOST` — reader endpoint for read-only traffic (falls back to `REDIS_HOST`).
+- `REDIS_TLS` — `true` when the replication group has encryption in transit enabled, so the client dials `rediss://`.
+- `REDIS_URL` still wins when set (local dev, docker-compose). Resolution order: `REDIS_URL` → `REDIS_HOST` → `redis://localhost:6379`.
 
 Expected client behavior during failover:
 
-- Existing BullMQ and Redis connections may see a brief disconnect while the replica is promoted.
+- Existing BullMQ and Redis connections see a brief disconnect (typically a few seconds, up to a couple of minutes)
+  while the replica is promoted. In-flight commands fail with `READONLY`, `CLUSTERDOWN`, `MASTERDOWN`, `LOADING` or `ECONNRESET`.
+- **The endpoint name does not change**, so no redeploy or config change is needed — clients only reconnect.
+- All clients are built with `getRedisClientOptions()` (`backend/src/config/redisConnectionOptions.ts`), which sets a bounded
+  exponential `retryStrategy` (200 ms → 5 s, never giving up) and a `reconnectOnError` handler that replays commands the
+  server provably rejected (`READONLY`, `CLUSTERDOWN`, `LOADING`) and reconnects without replaying after socket drops.
+- Queue workers reconnect using `getConnectionOptions()` instead of pinning a single cache node hostname.
 - Backend probes call `getRedisUrl(true)` on retry paths so rotated credentials and endpoint-derived URLs are refreshed.
-- Queue workers should reconnect using `getConnectionOptions()` instead of pinning a single cache node hostname.
-- If Redis remains unavailable, queue-backed features degrade and idempotency falls back to the database-backed store.
+- The idempotency store falls back to the database while Redis is down and **automatically returns to Redis** once the
+  client emits `ready` after the failover.
+- If Redis remains unavailable, queue-backed features degrade and idempotency keeps using the database-backed store.
+
+See `deployment/terraform/modules/elasticache/README.md` for the full failover description, the Terraform variables, and a
+`aws elasticache test-failover` drill procedure.
 
 - **BullMQ** drives scheduled work: portfolio checks, rebalance jobs, analytics snapshots, and idempotency key cleanup.
 - **Connection:** `REDIS_URL` (default `redis://localhost:6379`). If Redis is unreachable, `probeRedis()` reports unavailable and the HTTP API still starts; queue-backed features are degraded.

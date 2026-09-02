@@ -2,6 +2,7 @@ import Redis from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 import { getRebalanceLockConfig } from '../config/rebalanceLockConfig.js'
+import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 import { recordLockContention, recordLockHoldDuration, type LockBackend } from '../observability/metrics.js'
 
 /**
@@ -40,10 +41,10 @@ export class RebalanceLockService {
         this.useRedis = await isRedisAvailable()
         
         if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, {
-                lazyConnect: false,
-                maxRetriesPerRequest: 3,
-            })
+            // Options are failover-aware: during an ElastiCache Multi-AZ
+            // failover the connection drops and commands fail, so the client
+            // reconnects with bounded backoff instead of giving up.
+            this.redis = new Redis(REDIS_URL, getRedisClientOptions())
             
             this.redis.on('error', (err) => {
                 logger.error('[LOCK_SERVICE] Redis connection error', { error: err.message })

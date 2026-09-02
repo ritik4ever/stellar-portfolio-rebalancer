@@ -51,6 +51,21 @@ Our infrastructure strategy aims to meet the following Recovery Time Objective (
 
 ---
 
+## 2.2 Redis Availability-Zone Failover (ElastiCache)
+
+Before any cross-region step is considered, a **single-AZ** Redis event is handled automatically by ElastiCache:
+
+- The replication group runs with **Multi-AZ + automatic failover** enabled and at least one read replica in a different AZ
+  (`deployment/terraform/modules/elasticache`).
+- On loss of the primary node **or its entire AZ**, ElastiCache promotes a replica in another AZ and repoints the
+  replication-group endpoint DNS at it.
+- **RTO:** seconds to a couple of minutes (writes fail during the switchover; reads continue via replicas).
+  **RPO:** the last replicated write — ElastiCache replication is asynchronous, so a small amount of data may be lost.
+- **Action required:** none. The endpoint name is unchanged, so the backend reconnects on its own using the bounded-backoff
+  settings in `backend/src/config/redisConnectionOptions.ts`.
+
+Escalate to the multi-region procedures below only when the **whole region** is unavailable.
+
 ## 3. Infrastructure Overview
 
 The multi-region architecture utilizes the `dr_multi_region` Terraform module to orchestrate:

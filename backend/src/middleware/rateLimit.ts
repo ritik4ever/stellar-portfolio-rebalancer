@@ -7,6 +7,7 @@ import { fail } from "../utils/apiResponse.js";
 import { logger } from "../utils/logger.js";
 import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getRedisUrl, refreshRedisCredentials, getCachedRedisAvailability } from "../queue/connection.js";
+import { getRedisClientOptions } from "../config/redisConnectionOptions.js";
 
 const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
 const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
@@ -39,12 +40,16 @@ function initRedisClient() {
   }
   try {
     const url = typeof getRedisUrl === 'function' ? getRedisUrl() : REDIS_URL;
-    redisClient = new IORedis(url, {
+    // Fail fast (maxRetriesPerRequest: 0) so a Redis outage degrades to the
+    // in-memory store instead of hanging requests, but inherit the shared
+    // retryStrategy/reconnectOnError so the client reconnects by itself once
+    // ElastiCache has promoted a new primary.
+    redisClient = new IORedis(url, getRedisClientOptions({
       lazyConnect: true,
       connectTimeout: 3000,
       maxRetriesPerRequest: 0,
       enableReadyCheck: false,
-    });
+    }));
     // Absorb all connection errors so a missing Redis never crashes the process.
     // express-rate-limit will degrade gracefully to its in-memory store if any
     // Redis command fails.
