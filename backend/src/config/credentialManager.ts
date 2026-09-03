@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { buildRedisUrl, isRedisTlsEnabled } from './redisConnectionOptions.js';
 
 export interface DbCredentials {
     user?: string;
@@ -184,25 +185,37 @@ class CredentialManager {
         return creds.url;
     }
 
+    /**
+     * Synchronously resolves Redis credentials with a TTL cache. Prefers
+     * REDIS_URL, then REDIS_HOST (the ElastiCache replication-group endpoint
+     * injected by Terraform), then localhost; the AUTH token and TLS scheme are
+     * composed by buildRedisUrl so failover never changes the endpoint name.
+     */
     public getRedisCredentialsSync(forceRefresh = false): RedisCredentials {
         const now = Date.now();
         if (!forceRefresh && this.redisCredsCache && now - this.lastRedisRefresh < this.cacheTtlMs) {
             return this.redisCredsCache;
         }
 
+        // REDIS_HOST is the ElastiCache *replication-group* endpoint (host:port)
+        // exported by Terraform. Because it is a cluster endpoint rather than a
+        // node address, clients keep working unchanged after a Multi-AZ failover.
         const rawHost = process.env.REDIS_HOST?.trim();
-        const rawUrl = process.env.REDIS_URL?.trim() || (rawHost ? 'redis://' + rawHost : 'redis://localhost:6379');
         const authToken = (process.env.REDIS_AUTH_TOKEN || process.env.REDIS_PASSWORD)?.trim();
+        const tls = isRedisTlsEnabled();
 
-        let url = rawUrl;
-        if (authToken && url && !url.includes('@')) {
-            // Inject AUTH token into redis:// or rediss:// URL if not already present
-            url = url.replace(/^(rediss?:\/\/)/, `$1:${encodeURIComponent(authToken)}@`);
-        }
+        const url = buildRedisUrl({
+            url: process.env.REDIS_URL,
+            host: rawHost,
+            authToken,
+            tls,
+        });
 
         const result: RedisCredentials = {
             url,
+            host: rawHost,
             authToken,
+            tls,
             source: 'env',
             lastRefreshed: new Date(now),
         };
@@ -212,6 +225,12 @@ class CredentialManager {
         return result;
     }
 
+    /**
+     * Asynchronously resolves Redis credentials. When REDIS_SECRET_ARN /
+     * USE_AWS_SECRETS_MANAGER is configured, fetches the AUTH token from AWS
+     * Secrets Manager so it tracks the rotated ElastiCache token; otherwise
+     * delegates to getRedisCredentialsSync. Results are cached for cacheTtlMs.
+     */
     public async getRedisCredentials(forceRefresh = false): Promise<RedisCredentials> {
         const now = Date.now();
         if (!forceRefresh && this.redisCredsCache && now - this.lastRedisRefresh < this.cacheTtlMs) {
@@ -228,14 +247,18 @@ class CredentialManager {
                     const parsed = JSON.parse(secretValue);
                     const authToken = parsed.auth_token || parsed.authToken || parsed.password || '';
                     const rawHost = process.env.REDIS_HOST?.trim();
-        const rawUrl = process.env.REDIS_URL?.trim() || (rawHost ? 'redis://' + rawHost : 'redis://localhost:6379');
-                    let url = rawUrl;
-                    if (authToken && !url.includes('@')) {
-                        url = url.replace(/^(rediss?:\/\/)/, `$1:${encodeURIComponent(authToken)}@`);
-                    }
+                    const tls = isRedisTlsEnabled();
+                    const url = buildRedisUrl({
+                        url: process.env.REDIS_URL,
+                        host: rawHost,
+                        authToken,
+                        tls,
+                    });
                     const creds: RedisCredentials = {
                         url,
+                        host: rawHost,
                         authToken,
+                        tls,
                         source: 'secrets_manager',
                         lastRefreshed: new Date(now),
                     };

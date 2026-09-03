@@ -44,12 +44,34 @@ Our infrastructure strategy aims to meet the following Recovery Time Objective (
 |---|---|---|---|
 | **Database (RDS)** | 30 minutes | 5 minutes | Multi-AZ + Cross-Region Replication |
 | **Backend API** | 15 minutes | N/A (stateless) | Multi-Region ECS Deployment |
-| **Redis Cache** | 5 minutes | 0 (ephemeral) | Cross-Region Replication Group |
+| **Redis Cache** | 5 minutes | Last replicated write (small loss window - replication is asynchronous, see 2.2) | Multi-AZ Replication Group + Cross-Region Replication |
 | **Frontend** | 5 minutes | N/A | Global CloudFront CDN |
 
 *Note: Infrastructure capabilities are currently being upgraded to support these targets via the `dr_multi_region` Terraform module.*
 
 ---
+
+## 2.2 Redis Availability-Zone Failover (ElastiCache)
+
+Before any cross-region step is considered, a **single-AZ** Redis event is handled automatically by ElastiCache:
+
+- The replication group runs with **Multi-AZ + automatic failover** enabled and at least one read replica in a different AZ
+  (`deployment/terraform/modules/elasticache`).
+- On loss of the primary node, ElastiCache promotes the available replica with the **least replication lag**
+  (in the same or another AZ); on loss of the primary's **entire AZ** the promoted replica is necessarily in a
+  surviving AZ. The replication-group endpoint DNS is repointed at the promoted node.
+- **RTO:** seconds to a couple of minutes (writes fail during the switchover; reads continue via replicas).
+  **RPO:** the last replicated write — ElastiCache replication is asynchronous, so a small amount of data may be lost.
+- **Action required:** none. The endpoint name is unchanged, so the backend reconnects on its own using the bounded-backoff
+  settings in `backend/src/config/redisConnectionOptions.ts`.
+- **Recovery validation:** once the endpoint accepts writes again, verify the Redis-backed subsystems before
+  declaring the incident closed: BullMQ queue depths are draining and no jobs are stuck, the webhook dead-letter
+  queue accepts pushes, idempotency-key lookups resolve (the store falls back to the database while Redis is down
+  and switches back automatically on `ready`), rebalance locks are not stuck (TTL expiry clears stale locks), and
+  rate-limit counters respond. Treat writes issued during the failover window as possibly lost and let clients
+  retry through idempotent operations.
+
+Escalate to the multi-region procedures below only when the **whole region** is unavailable.
 
 ## 3. Infrastructure Overview
 

@@ -46,8 +46,8 @@ resource "aws_serverlessapplicationrepository_cloudformation_stack" "rds_rotatio
   capabilities     = ["CAPABILITY_IAM", "CAPABILITY_RESOURCE_POLICY"]
 
   parameters = {
-    endpoint           = "https://secretsmanager.${data.aws_region.current.name}.amazonaws.com"
-    functionName       = "${var.name_prefix}-rds-rotation"
+    endpoint            = "https://secretsmanager.${data.aws_region.current.name}.amazonaws.com"
+    functionName        = "${var.name_prefix}-rds-rotation"
     vpcSecurityGroupIds = var.rotation_sg_id
     vpcSubnetIds        = join(",", var.private_subnet_ids)
   }
@@ -191,15 +191,15 @@ resource "aws_iam_role_policy" "redis_rotation_lambda" {
 }
 
 resource "aws_lambda_function" "redis_rotation" {
-  count         = var.enable_redis_rotation ? 1 : 0
-  function_name = "${var.name_prefix}-redis-rotation"
-  role          = aws_iam_role.redis_rotation_lambda[0].arn
-  handler       = "handler.lambda_handler"
-  runtime       = "python3.12"
-  timeout       = 30
-  filename      = data.archive_file.redis_rotation[0].output_path
+  count            = var.enable_redis_rotation ? 1 : 0
+  function_name    = "${var.name_prefix}-redis-rotation"
+  role             = aws_iam_role.redis_rotation_lambda[0].arn
+  handler          = "handler.lambda_handler"
+  runtime          = "python3.12"
+  timeout          = 30
+  filename         = data.archive_file.redis_rotation[0].output_path
   source_code_hash = data.archive_file.redis_rotation[0].output_base64sha256
-  description   = "Rotates the Redis AUTH token in Secrets Manager and updates ElastiCache"
+  description      = "Rotates the Redis AUTH token in Secrets Manager and updates ElastiCache"
 
   environment {
     variables = {
