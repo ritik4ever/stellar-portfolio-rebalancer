@@ -95,6 +95,33 @@ terraform workspace select production
 terraform destroy -var-file=production.tfvars
 ```
 
+## Redis High Availability (ElastiCache)
+
+The `elasticache` module provisions Redis as a **Multi-AZ replication group with automatic failover** and at least one read replica in a **different availability zone** from the primary:
+
+| Setting | Value |
+| --- | --- |
+| `multi_az_enabled` | `true` (default) |
+| `automatic_failover_enabled` | `true` (default) |
+| `replica_count` | `1` staging / `2` production (minimum `1`) |
+| `availability_zones` | `var.azs` — the same AZs the VPC subnets use |
+
+If the primary node fails, ElastiCache promotes the available replica with the least replication lag (in the same or another AZ) and repoints the replication-group endpoint at it; if the primary's whole AZ fails, the promoted replica is necessarily in a surviving AZ. The endpoint name never changes, so the backend only needs to reconnect — no Terraform or application change.
+
+Per-workspace knobs in the tfvars files:
+
+```hcl
+redis_multi_az_enabled           = true   # Multi-AZ + automatic failover
+redis_automatic_failover_enabled = true
+redis_replica_count = {
+  staging    = 1
+  production = 2
+}
+azs = ["us-east-1a", "us-east-1b"]
+```
+
+Full detail — including what clients observe during a switchover and how to run a failover drill — is in [`modules/elasticache/README.md`](modules/elasticache/README.md).
+
 ## Modules
 
 - `vpc`: VPC and networking configuration

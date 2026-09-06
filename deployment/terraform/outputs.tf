@@ -38,3 +38,33 @@ output "secret_rotation_schedule_days" {
   value       = var.secret_rotation_days
   description = "Configured rotation interval in days for both RDS and Redis secrets."
 }
+
+output "redis_primary_endpoint" {
+  value       = module.elasticache.redis_primary_endpoint
+  description = "ElastiCache replication-group primary endpoint (host:port) used by the backend for reads and writes."
+}
+
+output "redis_reader_endpoint" {
+  value       = module.elasticache.redis_reader_endpoint
+  description = "ElastiCache replication-group reader endpoint (host:port) for read-only clients."
+}
+
+output "redis_multi_az_enabled" {
+  value       = module.elasticache.multi_az_enabled
+  description = "Whether Multi-AZ is enabled on the ElastiCache replication group."
+}
+
+output "redis_automatic_failover_enabled" {
+  value       = module.elasticache.automatic_failover_enabled
+  description = "Whether automatic failover is enabled on the ElastiCache replication group."
+}
+
+output "redis_num_cache_clusters" {
+  value       = module.elasticache.num_cache_clusters
+  description = "Total ElastiCache node count (1 primary + N read replicas)."
+}
+
+output "redis_preferred_cache_cluster_azs" {
+  value       = module.elasticache.preferred_cache_cluster_azs
+  description = "Availability zones the primary and each read replica are pinned to."
+}

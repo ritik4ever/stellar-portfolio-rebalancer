@@ -16,6 +16,45 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "azs" {
+  description = "Availability zones used for VPC subnets. Also used to spread ElastiCache primary/replica nodes across distinct AZs, so it must contain at least two entries."
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
+
+  validation {
+    condition     = length(var.azs) >= 2
+    error_message = "azs must contain at least two availability zones so ElastiCache can place a read replica in a different AZ from the primary."
+  }
+}
+
+# ─── ElastiCache high availability ────────────────────────────────────────────
+
+variable "redis_multi_az_enabled" {
+  description = "Enable Multi-AZ on the ElastiCache Redis replication group (requires redis_replica_count >= 1)."
+  type        = bool
+  default     = true
+}
+
+variable "redis_automatic_failover_enabled" {
+  description = "Promote a read replica automatically when the Redis primary becomes unreachable. Must stay true when Multi-AZ is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "redis_replica_count" {
+  description = "Number of ElastiCache Redis read replicas per workspace. Must be at least 1 so the replication group can fail over to a replica in another AZ."
+  type        = map(number)
+  default = {
+    staging    = 1
+    production = 2
+  }
+
+  validation {
+    condition     = alltrue([for v in values(var.redis_replica_count) : v >= 1 && v <= 5])
+    error_message = "Every redis_replica_count value must be between 1 and 5 (at least one replica is required for Multi-AZ failover)."
+  }
+}
+
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = map(string)
@@ -34,18 +73,6 @@ variable "backup_retention_period" {
   }
 }
 
-variable "secret_rotation_days" {
-  description = "Days between automatic secret rotations"
-  type        = number
-  default     = 30
-}
-
-variable "secret_rotation_lambda_arn" {
-  description = "ARN of the Lambda that rotates DB/Redis secrets (optional; null = AWS managed rotation)"
-  type        = string
-  default     = null
-}
-
 variable "redis_node_type" {
   description = "ElastiCache node type"
   type        = map(string)
@@ -53,18 +80,6 @@ variable "redis_node_type" {
     staging    = "cache.t4g.micro"
     production = "cache.t4g.small"
   }
-}
-
-variable "secret_rotation_days" {
-  description = "Days between automatic secret rotations"
-  type        = number
-  default     = 30
-}
-
-variable "secret_rotation_lambda_arn" {
-  description = "ARN of the Lambda that rotates DB/Redis secrets (optional; null = AWS managed rotation)"
-  type        = string
-  default     = null
 }
 
 variable "snapshot_cleanup_schedule" {

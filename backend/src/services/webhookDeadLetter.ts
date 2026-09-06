@@ -1,6 +1,7 @@
 import Redis from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
+import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 
 const DLQ_KEY = 'dead_letter:webhook'
 
@@ -20,25 +21,55 @@ class WebhookDeadLetterQueue {
     private fallbackList: DeadLetterItem[] = []
     private useRedis = false
     private initialized = false
+    /** Single in-flight init promise shared by all concurrent callers. */
+    private initPromise: Promise<void> | null = null
 
+    /**
+     * Initializes the dead-letter store: Redis with the shared failover-aware
+     * options (command replay explicitly disabled so a buffered RPUSH is never
+     * resent after a failover) when available, otherwise an in-memory list.
+     *
+     * Review #1728 (round 2): `initialized` used to flip to true *before* the
+     * async Redis probe completed. A concurrent `push()` during that window
+     * wrote only to the in-memory fallback list while every later read went
+     * to Redis — silently losing the dead-letter item. Init is now memoized
+     * in a shared promise and `initialized` is set only after the probe
+     * resolves.
+     */
     async init(): Promise<void> {
         if (this.initialized) return
-        this.initialized = true
+        this.initPromise ??= this.performInit()
+        return this.initPromise
+    }
 
-        this.useRedis = await isRedisAvailable()
+    private async performInit(): Promise<void> {
+        try {
+            this.useRedis = await isRedisAvailable()
 
-        if (this.useRedis) {
-            this.redis = new Redis(REDIS_URL, {
-                lazyConnect: false,
-                maxRetriesPerRequest: 3,
+            if (this.useRedis) {
+                // autoResendUnfulfilledCommands is explicitly disabled (also the
+                // shared default): push() issues RPUSH, and replaying a buffered
+                // RPUSH after a failover would enqueue the same dead-letter item
+                // twice.
+                this.redis = new Redis(REDIS_URL, getRedisClientOptions({
+                    autoResendUnfulfilledCommands: false,
+                }))
+                this.redis.on('error', (err) => {
+                    logger.error('[DLQ] Redis error', { error: err.message })
+                })
+                logger.info('[DLQ] Initialized with Redis')
+            } else {
+                logger.warn('[DLQ] Redis unavailable, using in-memory fallback')
+            }
+        } catch (err) {
+            this.redis = null
+            this.useRedis = false
+            logger.error('[DLQ] Initialization failed, using in-memory fallback', {
+                error: err instanceof Error ? err.message : String(err),
             })
-            this.redis.on('error', (err) => {
-                logger.error('[DLQ] Redis error', { error: err.message })
-            })
-            logger.info('[DLQ] Initialized with Redis')
-        } else {
-            logger.warn('[DLQ] Redis unavailable, using in-memory fallback')
         }
+
+        this.initialized = true
     }
 
     async push(item: DeadLetterItem): Promise<void> {
@@ -144,11 +175,13 @@ class WebhookDeadLetterQueue {
             this.redis = null
         }
         this.initialized = false
+        this.initPromise = null
     }
 
     _resetForTest(): void {
         this.fallbackList = []
         this.initialized = false
+        this.initPromise = null
         this.useRedis = false
         this.redis = null
     }
