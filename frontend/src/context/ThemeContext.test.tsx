@@ -98,6 +98,30 @@ describe('ThemeContext', () => {
         expect(screen.getByTestId('is-dark')).toHaveTextContent('true')
     })
 
+    it('immediately reflects OS theme when switching back to system preference', () => {
+        // Start with OS in dark mode but preference set to light
+        prefersDark = true
+        localStorage.setItem('theme-preference', 'light')
+
+        render(
+            <ThemeProvider>
+                <ThemeProbe />
+            </ThemeProvider>,
+        )
+
+        // Should be light because preference overrides OS
+        expect(screen.getByTestId('is-dark')).toHaveTextContent('false')
+
+        // Cycle through: light -> dark -> system
+        fireEvent.click(screen.getByRole('button', { name: 'cycle' }))
+        fireEvent.click(screen.getByRole('button', { name: 'cycle' }))
+
+        // Now preference is system and OS is dark — must reflect immediately
+        // without waiting for a change event
+        expect(screen.getByTestId('preference')).toHaveTextContent('system')
+        expect(screen.getByTestId('is-dark')).toHaveTextContent('true')
+    })
+
     it('cycles theme preference on toggle', () => {
         render(
             <ThemeProvider>
@@ -117,11 +141,9 @@ describe('ThemeContext', () => {
                 <ThemeProbe />
             </ThemeProvider>,
         )
-        // After mount there should be at least one listener for the system theme
         expect(matchMediaListeners.length).toBeGreaterThan(before)
 
         unmount()
-        // After unmount all listeners should have been removed
         expect(matchMediaListeners.length).toBe(before)
     })
 
