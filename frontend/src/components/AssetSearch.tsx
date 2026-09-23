@@ -196,7 +196,7 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
           setIsSearching(false)
         }
       })
-      .catch((err) => {
+      .catch(() => {
         if (!cancelled) {
           setDynamicError('Search failed')
           setDynamicResults([])
@@ -236,11 +236,6 @@ const AssetSearch: React.FC<AssetSearchProps> = ({
 
     return Array.from(combined.values())
   }, [staticAssets, dynamicResults, debouncedSearch, supportedContracts])
-
-  const selectedAsset = useMemo(
-    () => allResults.find(a => a.symbol === value),
-    [allResults, value]
-  )
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

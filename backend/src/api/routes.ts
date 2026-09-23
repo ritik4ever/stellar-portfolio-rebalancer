@@ -15,8 +15,8 @@ import { taxReportRouter } from './taxReport.routes.js'
 export const portfolioRouter = Router()
 
 portfolioRouter.use(taxReportRouter)
+portfolioRouter.use('/portfolio/import', portfolioImportRouter)
 portfolioRouter.use(portfoliosRouter)
-portfolioRouter.use(portfolioImportRouter)
 portfolioRouter.use(rebalancingRouter)
 portfolioRouter.use(opsRouter)
 portfolioRouter.use(notificationsRouter)

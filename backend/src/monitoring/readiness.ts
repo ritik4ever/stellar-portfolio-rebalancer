@@ -92,6 +92,67 @@ async function checkQueueReady(
   }
 }
 
+// ── Queue backlog depth readiness (#1404) ──────────────────────────────────
+//
+// A queue can report "ready" (connected, waitUntilReady() resolves) while
+// still carrying a backlog so deep that new jobs will sit for minutes before
+// a worker picks them up. That's a real degradation the connectivity check
+// above can't see. This adds a `waiting + delayed` count check against a
+// configurable threshold so orchestrators can route traffic away from an
+// instance whose queue is falling behind, before it becomes a customer-
+// visible incident.
+let backlogReadyThreshold = parseInt(
+  process.env.QUEUE_BACKLOG_READY_THRESHOLD || "500",
+  10,
+);
+if (!Number.isInteger(backlogReadyThreshold) || backlogReadyThreshold < 0) {
+  backlogReadyThreshold = 500;
+}
+
+export function setQueueBacklogReadyThreshold(threshold: number): void {
+  backlogReadyThreshold = threshold;
+}
+
+interface BacklogQueueLike {
+  getJobCounts(...types: string[]): Promise<Record<string, number>>;
+}
+
+async function checkQueueBacklogDepth(
+  name: string,
+  queue: BacklogQueueLike | null,
+): Promise<ReadinessCheck> {
+  if (!queue) {
+    // Connectivity check above already reports "not_ready" for a missing
+    // queue — backlog depth is meaningless without a queue to measure, so
+    // this sub-check is simply disabled rather than double-reporting.
+    return buildCheck("disabled", false, `${name} queue is not initialized`);
+  }
+
+  try {
+    const counts = await withTimeout(
+      queue.getJobCounts("waiting", "delayed"),
+      3000,
+      `${name} queue backlog depth check timed out`,
+    );
+    const depth = (counts.waiting || 0) + (counts.delayed || 0);
+    const status: ReadinessState = depth > backlogReadyThreshold ? "not_ready" : "ready";
+    return buildCheck(
+      status,
+      true,
+      status === "ready"
+        ? `${name} queue backlog is within threshold`
+        : `${name} queue backlog (${depth}) exceeds threshold (${backlogReadyThreshold})`,
+      { depth, threshold: backlogReadyThreshold, waiting: counts.waiting || 0, delayed: counts.delayed || 0 },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return buildCheck("not_ready", true, `${name} queue backlog depth check failed`, {
+      error: message,
+      degradedReason: message,
+    });
+  }
+}
+
 export async function buildReadinessReport() {
   const now = Date.now()
   if (cache && cache.expiresAt > now) {
@@ -305,9 +366,32 @@ export async function buildReadinessReport() {
           autoRebalancerStatus as unknown as Record<string, unknown>,
         );
 
+  const queueBacklogCheck = !redisConnected
+    ? buildCheck("disabled", false, "Queue backlog check disabled — Redis unavailable")
+    : await (async () => {
+        const [portfolioBacklog, rebalanceBacklog] = await Promise.all([
+          checkQueueBacklogDepth(QUEUE_NAMES.PORTFOLIO_CHECK, getPortfolioCheckQueue()),
+          checkQueueBacklogDepth(QUEUE_NAMES.REBALANCE, getRebalanceQueue()),
+        ]);
+        const queues = {
+          [QUEUE_NAMES.PORTFOLIO_CHECK]: portfolioBacklog,
+          [QUEUE_NAMES.REBALANCE]: rebalanceBacklog,
+        };
+        const allReady = [portfolioBacklog, rebalanceBacklog].every(
+          (c) => !c.required || c.status === "ready",
+        );
+        return buildCheck(
+          allReady ? "ready" : "not_ready",
+          true,
+          allReady ? "Queue backlogs are within threshold" : "One or more queue backlogs exceed threshold",
+          { queues },
+        );
+      })();
+
   const checks = {
     database: databaseCheck,
     queue: queueCheck,
+    queueBacklog: queueBacklogCheck,
     workers: workersCheck,
     contractEventIndexer: indexerCheck,
     autoRebalancer: autoRebalancerCheck,

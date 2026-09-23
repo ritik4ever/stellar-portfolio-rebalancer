@@ -38,10 +38,7 @@ const NETWORK_GUIDE: Record<string, { action: string; detail: string }> = {
     action: 'Switch your wallet to Standalone',
     detail: 'Open your wallet extension and switch the network to your local Standalone network.',
   },
-  futurenet: {
-    action: 'Switch your wallet to Futurenet',
-    detail: 'Open your wallet extension and switch to "Futurenet" mode.',
-  },
+  
   unknown: {
     action: 'Check your wallet network',
     detail: 'Open your wallet extension and verify the selected network matches the configured environment.',

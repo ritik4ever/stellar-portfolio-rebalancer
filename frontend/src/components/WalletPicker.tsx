@@ -27,6 +27,10 @@ export const WalletPicker: React.FC<WalletPickerProps> = ({ onConnect, onError, 
       case 'freighter': return !!window.freighter
       case 'rabet': return !!window.rabet
       case 'xbull': return !!window.xBull
+      case 'hana': {
+        const stellar = window.stellar as any
+        return !!window.hana || String(stellar?.provider ?? '').toLowerCase().includes('hana') || String(stellar?.platform ?? '').toLowerCase().includes('hana')
+      }
       case 'lobstr': return !!window.lobstr
       case 'walletconnect': return false // Requires QR flow
       default: return false

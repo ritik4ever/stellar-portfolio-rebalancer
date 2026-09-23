@@ -39,6 +39,7 @@
     "lint:frontend": "cd frontend && npm run lint",
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
+    "sbom": "bash scripts/generate-sbom.sh",
 
     "test:chaos": "node scripts/chaos/kill-backend-mid-rebalance.mjs",
 

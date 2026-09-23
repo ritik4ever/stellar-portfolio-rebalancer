@@ -37,7 +37,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Verify OpenAPI spec and docs
         working-directory: ./backend
@@ -72,7 +72,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Run tests (shard ${{ matrix.shard }})
         working-directory: ./backend
@@ -109,7 +109,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Download shard blob reports
         uses: actions/download-artifact@v4

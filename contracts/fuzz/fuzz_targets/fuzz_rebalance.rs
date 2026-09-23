@@ -6,7 +6,8 @@ use soroban_sdk::{Address, Env, Map};
 
 use portfolio_rebalancer::portfolio::{calculate_rebalance_trades, validate_allocations};
 use portfolio_rebalancer::types::{
-    PauseReason, Portfolio, MAX_PORTFOLIO_ASSETS, MIN_TRADE_AMOUNT_STROOPS,
+    CircuitBreakerConfig, PauseReason, Portfolio, StrategyConfig, StrategyType,
+    MAX_PORTFOLIO_ASSETS, MIN_TRADE_AMOUNT_STROOPS,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -85,6 +86,13 @@ fuzz_target!(|data: &[u8]| {
         },
         is_active: true,
         pause_reason: PauseReason::None,
+        circuit_breaker_config: CircuitBreakerConfig {
+            window_seconds: 3600,
+            spike_threshold_bps: 100,
+        },
+        global_max_slippage_bps: 300,
+        strategy: StrategyType::Threshold,
+        strategy_config: StrategyConfig::default(),
     };
 
     // Must never panic for any input

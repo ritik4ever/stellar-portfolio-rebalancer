@@ -123,6 +123,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `LOG_PRETTY` | No | `false` | Pretty-prints logs when `true`; emits JSON lines when `false`. | `true` | |
 | `LOG_DEPLOYMENT_ENV` | No | `local` | Deployment-tier label included in log records and telemetry. | `production` | |
 | `ENABLE_API_LOGGING` | No | `true` | Enables verbose per-request logging. | `false` | Disable in high-throughput production to reduce log volume. |
+| `ENABLE_API_DOCS` | No | `false` | Exposes interactive Swagger/OpenAPI documentation endpoints. | `true` | |
 | `DEBUG_PRICE_FEEDS` | No | `false` | Emits extra upstream price-feed debug logs. | `true` | |
 | `WS_PORT` | No | `3001` | WebSocket listen port (typically shares the HTTP port). | `3001` | |
 | `WS_HEARTBEAT_INTERVAL` | No | `30000` | WebSocket ping/pong heartbeat interval (ms). | `30000` | |
@@ -165,7 +166,10 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `COINGECKO_API_KEY` | No | _(empty)_ | CoinGecko API key for production-grade rate limits. | _(use secrets manager)_ | ⚠️ SECRET — rotate via CoinGecko dashboard. See [rotation guide](#coingecko_api_key--vite_coingecko_api_key). |
+| `COINGECKO_BASE_URL` | No | `https://api.coingecko.com/api/v3` | CoinGecko base URL for price requests. | `https://pro-api.coingecko.com/api/v3` | |
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
+| `REFLECTOR_ADDRESS` | No | _(empty)_ | Soroban contract address for Reflector on-chain oracle. | `CABC...` | |
+| `REFLECTOR_SERVICE_URL` | No | _(empty)_ | Off-chain service URL for Reflector oracle. | `https://reflector.example.com` | |
 | `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
 | `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
 
@@ -174,6 +178,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `ENABLE_AUTO_REBALANCER` | No | `false` | Enables queue-backed automatic rebalance scheduling. | `true` | |
+| `AUTO_REBALANCE_DRY_RUN` | No | `false` | Computes and reports scheduled rebalance plans without submitting on-chain transactions. A portfolio's `strategyConfig.dryRun` value overrides this global setting. | `true` | |
 | `AUTO_REBALANCE_CHECK_INTERVAL` | No | `3600000` | How often the auto-rebalancer checks all portfolios (ms). | `3600000` | |
 | `MIN_REBALANCE_INTERVAL` | No | `86400000` | Minimum time between successful rebalances per portfolio (ms). | `86400000` | |
 | `MAX_AUTO_REBALANCES_PER_DAY` | No | `3` | Daily cap for automatic rebalances per portfolio. | `3` | |
@@ -199,7 +204,11 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for BullMQ queues and workers. | `redis://localhost:6379` | ⚠️ SECRET if your Redis instance requires a password (`redis://:password@host:port`). |
+| `REDIS_HOST` | No | `localhost` | Discrete Redis host. | `localhost` | |
+| `REDIS_READER_HOST` | No | _(empty)_ | ElastiCache replication-group **reader** endpoint (`host:port`) for read-only traffic. Falls back to `REDIS_HOST` when unset. | _(empty)_ | |
+| `REDIS_TLS` | No | `false` | Use the `rediss://` (TLS) scheme. Enable when the ElastiCache replication group has encryption in transit enabled. | `true` | |
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
+| `QUEUE_BACKLOG_READY_THRESHOLD` | No | `500` | Readiness gate: when the BullMQ `waiting + delayed` depth exceeds this value the instance reports not-ready, so orchestrators route traffic away before the backlog becomes customer-visible. | `500` | |
 
 ### Risk Controls
 
@@ -224,6 +233,9 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `RISK_CONCENTRATION_CRITICAL` | No | `80` | Concentration percentage threshold for critical-risk classification. | `80` | |
 | `RISK_LIQUIDITY_LOW` | No | `1000` | USD liquidity level below which a low-liquidity warning is issued. | `1000` | |
 | `RISK_LIQUIDITY_CRITICAL` | No | `500` | USD liquidity level below which a critical alert is issued. | `500` | |
+| `RISK_AUTOPAUSE_VAR95` | No | `0.12` | VaR95 threshold that triggers an automatic rebalance pause. | `0.12` | |
+| `RISK_AUTOPAUSE_CVAR95` | No | `0.16` | CVaR95 threshold that triggers an automatic rebalance pause. | `0.16` | |
+| `RISK_AUTOPAUSE_DURATION_MS` | No | `86400000` | Duration (ms) of an automatic risk-triggered rebalance pause. | `86400000` | |
 
 ### Security & Auth
 
@@ -265,6 +277,9 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
+| `OTEL_ENABLED` | No | `false` | Enables OpenTelemetry tracing. | `true` | |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OpenTelemetry OTLP exporter endpoint. | `http://localhost:4318` | |
+| `OTEL_SERVICE_NAME` | No | `stellar-portfolio-backend` | OpenTelemetry service name. | `stellar-portfolio-backend` | |
 | `SENTRY_ENABLED` | No | `false` | Enables the backend Sentry integration. | `true` | |
 | `SENTRY_DSN` | No | _(empty)_ | Sentry project DSN for error and performance reporting. | _(see Sentry dashboard)_ | ⚠️ SECRET — if exposed publicly, rotate via Sentry project settings. See [rotation guide](#sentry_dsn--vite_sentry_dsn). |
 | `SENTRY_ENVIRONMENT` | No | `development` | Sentry environment tag. Set to the deployed tier, not the local shell mode. | `production` | |
@@ -288,6 +303,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 |---|---|---|---|---|---|
 | `ANALYTICS_SNAPSHOT_INTERVAL` | No | `300000` | Interval between background portfolio snapshot jobs (ms). | `300000` | |
 | `MAX_SNAPSHOTS_PER_PORTFOLIO` | No | `1000` | Maximum analytics snapshots retained per portfolio before pruning. | `1000` | |
+| `ANALYTICS_COMPACTION_CUTOFF_DAYS` | No | `90` | Retention window for analytics snapshots before pruning (days). Valid range: 1–3650. Must be >= `ANALYTICS_COMPACTION_RECENT_DAYS`; if violated, both settings fall back to their defaults (90 and 7). | `90` | |
+| `ANALYTICS_COMPACTION_RECENT_DAYS` | No | `7` | Days of raw high-frequency snapshots to retain before daily rollup (days). Valid range: 1–365. Must be <= `ANALYTICS_COMPACTION_CUTOFF_DAYS`; if violated, both settings fall back to their defaults (90 and 7). | `7` | |
 | `CONSENT_AUDIT_RETENTION_DAYS` | No | `365` | Retention period for consent audit log records (days). | `365` | |
 
 ### Demo Mode
@@ -340,6 +357,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `VITE_SENTRY_DSN` | No | _(empty)_ | Sentry DSN for browser error and session replay reporting. | _(see Sentry dashboard)_ | ⚠️ SECRET — if exposed beyond your app bundle, rotate via Sentry project settings. See [rotation guide](#sentry_dsn--vite_sentry_dsn). |
 | `VITE_SENTRY_ENVIRONMENT` | No | `development` | Sentry environment tag. Set to the deployed tier, not the local Vite mode. | `production` | |
 | `VITE_SENTRY_RELEASE` | No | _(empty)_ | Sentry release identifier. Use the full git SHA for deployed builds. | `abc1234def5678` | |
+| `VITE_APP_VERSION` | No | _(empty)_ | Optional app version shown in error reports; falls back to `VITE_SENTRY_RELEASE` when unset. | `1.4.2` | |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | No | `0.1` | Fraction of page transactions sent to Sentry as traces (0–1). | `0.05` | |
 | `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | No | `0` | Sentry Session Replay sample rate for normal sessions (0–1). | `0.01` | |
 | `VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | No | `1` | Sentry Session Replay sample rate for sessions with errors (0–1). | `1` | |

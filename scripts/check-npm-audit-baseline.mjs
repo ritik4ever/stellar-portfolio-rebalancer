@@ -71,6 +71,10 @@ for (const scopeName of requestedScopes) {
     .filter((severity) => current[severity] > expected[severity])
     .map((severity) => `${severity}: ${current[severity]} > ${expected[severity]}`)
 
+  if (writeBaseline) {
+    nextBaseline.scopes[scopeName].baseline = current
+  }
+
   if (deltas.length > 0) {
     hasFailure = true
     console.error(`[audit-policy] ${scopeName} exceeded the reviewed baseline`)
@@ -83,9 +87,6 @@ for (const scopeName of requestedScopes) {
   }
 
   console.log(`[audit-policy] ${scopeName} OK (${formatCounts(current)})`)
-  if (writeBaseline) {
-    nextBaseline.scopes[scopeName].baseline = current
-  }
 }
 
 if (writeBaseline) {
@@ -94,7 +95,7 @@ if (writeBaseline) {
   console.log(`[audit-policy] Baseline refreshed at ${baselinePath}`)
 }
 
-if (hasFailure) {
+if (hasFailure && !writeBaseline) {
   console.error('[audit-policy] Update the baseline only after the findings are reviewed and accepted.')
   process.exit(1)
 }

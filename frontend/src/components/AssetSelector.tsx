@@ -29,6 +29,8 @@ interface MatchInfo {
     reason?: 'code' | 'domain' | 'issuer'
 }
 
+const getAssetKey = (asset: Pick<Asset, 'symbol' | 'issuer'>) => `${asset.symbol}-${asset.issuer || 'native'}`
+
 const AssetSelector: React.FC<AssetSelectorProps> = ({
     value,
     onChange,
@@ -86,7 +88,7 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
     const matchByDomain = useMemo(() => {
         const map: Record<string, boolean> = {}
         for (const item of filteredWithMatch) {
-            map[item.asset.symbol] = item.match?.reason === 'domain'
+            map[getAssetKey(item.asset)] = item.match?.reason === 'domain'
         }
         return map
     }, [filteredWithMatch])
@@ -253,7 +255,7 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
                         ) : (
                             filteredAssets.map((asset, index) => (
                                 <button
-                                    key={`${asset.symbol}-${asset.issuer || 'native'}`}
+                                    key={getAssetKey(asset)}
                                     type="button"
                                     onClick={() => handleSelect(asset)}
                                     className={`
@@ -283,7 +285,7 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
                                                 <Check className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                                             )}
                                             <AssetVerificationBadge status={asset.verificationStatus} />
-                                            {matchByDomain[asset.symbol] && (
+                                            {matchByDomain[getAssetKey(asset)] && (
                                                 <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
                                                     <Globe className="w-3 h-3" />
                                                     Domain match
@@ -300,7 +302,7 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
                                                 <span>Issuer: {formatIssuer(asset.issuer)}</span>
                                                 {asset.domain && (
                                                     <span className="text-blue-600 dark:text-blue-400">
-                                                        {asset.domain}
+                                                        {matchByDomain[getAssetKey(asset)] ? `Matched domain: ${asset.domain}` : asset.domain}
                                                     </span>
                                                 )}
                                             </div>

@@ -58,54 +58,192 @@ export function parseJsonPayload(payload: unknown): { rows: AllocationInputRow[]
   return { rows: [], formatError: 'JSON payload must be an array of {asset, allocation_pct} or an object with allocations: [...]' }
 }
 
-export function parseCsvText(csvText: string): { rows: AllocationInputRow[]; errors: BulkImportRowError[] } {
-  // Minimal CSV parser: supports commas and newlines, with optional double-quoted fields.
-  // No external deps.
+export type CsvParseOptions = {
+  /** Field delimiter. Defaults to ','. */
+  delimiter?: string
+  /**
+   * Maps a raw (lowercased, trimmed) header cell to a canonical field name
+   * ('asset' | 'allocation_pct'), so CSVs don't have to use those exact
+   * header names. Example: { symbol: 'asset', 'weight_pct': 'allocation_pct' }
+   */
+  headerMap?: Record<string, string>
+}
 
+/**
+ * Single-pass, dependency-free CSV state machine.
+ *
+ * Processes input one character at a time and emits a complete row as soon
+ * as its terminator is seen, so callers never have to materialize the whole
+ * file as an array of lines before parsing can begin. `push()` accepts
+ * successive chunks (e.g. from a file/network stream) and correctly resumes
+ * state across chunk boundaries, including a quote or CRLF pair split
+ * across two chunks.
+ */
+class IncrementalCsvParser {
+  private readonly delimiter: string
+  private field = ''
+  private row: string[] = []
+  private rowHasContent = false
+  private inQuotes = false
+  private pendingCr = false
+  private pendingQuoteBoundary = false
+
+  constructor(delimiter: string) {
+    this.delimiter = delimiter
+  }
+
+  *push(chunk: string): Generator<string[]> {
+    let i = 0
+
+    if (this.pendingCr) {
+      this.pendingCr = false
+      if (chunk[0] === '\n') i = 1
+    }
+
+    if (this.pendingQuoteBoundary) {
+      this.pendingQuoteBoundary = false
+      if (chunk[0] === '"') {
+        this.field += '"'
+        i = 1
+      } else {
+        this.inQuotes = false
+      }
+    }
+
+    for (; i < chunk.length; i++) {
+      const ch = chunk[i]
+
+      if (this.inQuotes) {
+        if (ch === '"') {
+          if (i + 1 < chunk.length) {
+            if (chunk[i + 1] === '"') {
+              this.field += '"'
+              i++
+              continue
+            }
+            this.inQuotes = false
+            continue
+          }
+          // Quote is the last char of this chunk: whether it closes the
+          // field or starts an escaped "" pair depends on the next chunk.
+          this.pendingQuoteBoundary = true
+          return
+        }
+        this.field += ch
+        this.rowHasContent = true
+        continue
+      }
+
+      if (ch === '"') {
+        this.inQuotes = true
+        this.rowHasContent = true
+        continue
+      }
+      if (ch === this.delimiter) {
+        this.row.push(this.field.trim())
+        this.field = ''
+        this.rowHasContent = true
+        continue
+      }
+      if (ch === '\r') {
+        if (i + 1 < chunk.length) {
+          if (chunk[i + 1] === '\n') i++
+          yield* this.endRow()
+          continue
+        }
+        this.pendingCr = true
+        yield* this.endRow()
+        return
+      }
+      if (ch === '\n') {
+        yield* this.endRow()
+        continue
+      }
+
+      this.field += ch
+      this.rowHasContent = true
+    }
+  }
+
+  /** Flush any trailing partial row once the input is exhausted. */
+  *end(): Generator<string[]> {
+    if (this.rowHasContent || this.field.length > 0 || this.row.length > 0) {
+      yield* this.endRow()
+    }
+  }
+
+  private *endRow(): Generator<string[]> {
+    // A genuinely blank line (no delimiters, no content) is skipped rather
+    // than emitted as a row -- matches CRLF/LF and trailing-empty-line handling.
+    if (!this.rowHasContent && this.field === '' && this.row.length === 0) {
+      return
+    }
+    this.row.push(this.field.trim())
+    const result = this.row
+    this.row = []
+    this.field = ''
+    this.rowHasContent = false
+    yield result
+  }
+}
+
+function resolveHeaderIndex(header: string[], canonicalField: string, headerMap?: Record<string, string>): number {
+  const direct = header.findIndex(h => h === canonicalField)
+  if (direct !== -1) return direct
+
+  if (headerMap) {
+    for (const [raw, mapped] of Object.entries(headerMap)) {
+      if (mapped !== canonicalField) continue
+      const idx = header.findIndex(h => h === raw.toLowerCase().trim())
+      if (idx !== -1) return idx
+    }
+  }
+
+  return -1
+}
+
+function toAllocationRow(
+  cols: string[],
+  assetIdx: number,
+  pctIdx: number,
+  rowNum: number,
+): { row: AllocationInputRow; errors: BulkImportRowError[] } {
   const errors: BulkImportRowError[] = []
+  const assetRaw = cols[assetIdx]
+  const pctRaw = cols[pctIdx]
 
-  const trimmed = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = trimmed
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 0)
+  const asset = typeof assetRaw === 'string' ? normalizeAssetCode(assetRaw) : ''
+  const pctStr = typeof pctRaw === 'string' ? pctRaw : ''
+  const pctNum = pctStr === '' ? NaN : Number(pctStr)
 
-  if (lines.length === 0) {
+  if (!asset) {
+    errors.push({ row: rowNum, field: 'asset', message: 'Asset is required' })
+  }
+  if (!Number.isFinite(pctNum)) {
+    errors.push({ row: rowNum, field: 'allocation_pct', message: 'allocation_pct must be a number' })
+  }
+
+  return { row: { asset, allocation_pct: pctNum }, errors }
+}
+
+export function parseCsvText(
+  csvText: string,
+  options: CsvParseOptions = {},
+): { rows: AllocationInputRow[]; errors: BulkImportRowError[] } {
+  const delimiter = options.delimiter ?? ','
+  const parser = new IncrementalCsvParser(delimiter)
+
+  const allRows: string[][] = []
+  for (const cols of parser.push(csvText)) allRows.push(cols)
+  for (const cols of parser.end()) allRows.push(cols)
+
+  if (allRows.length === 0) {
     return { rows: [], errors: [{ row: 1, field: 'csv', message: 'CSV is empty' }] }
   }
 
-  const parseLine = (line: string): string[] => {
-    const out: string[] = []
-    let cur = ''
-    let inQuotes = false
-
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i]
-      if (ch === '"') {
-        const next = line[i + 1]
-        // Handle escaped quote "" inside quotes
-        if (inQuotes && next === '"') {
-          cur += '"'
-          i++
-          continue
-        }
-        inQuotes = !inQuotes
-        continue
-      }
-      if (ch === ',' && !inQuotes) {
-        out.push(cur.trim())
-        cur = ''
-        continue
-      }
-      cur += ch
-    }
-    out.push(cur.trim())
-    return out
-  }
-
-  const header = parseLine(lines[0]).map(h => h.replace(/^\uFEFF/, '').trim().toLowerCase())
-  const assetIdx = header.findIndex(h => h === 'asset')
-  const pctIdx = header.findIndex(h => h === 'allocation_pct')
+  const header = allRows[0].map(h => h.replace(/^\uFEFF/, '').trim().toLowerCase())
+  const assetIdx = resolveHeaderIndex(header, 'asset', options.headerMap)
+  const pctIdx = resolveHeaderIndex(header, 'allocation_pct', options.headerMap)
 
   if (assetIdx === -1 || pctIdx === -1) {
     return {
@@ -121,29 +259,73 @@ export function parseCsvText(csvText: string): { rows: AllocationInputRow[]; err
   }
 
   const rows: AllocationInputRow[] = []
+  const errors: BulkImportRowError[] = []
 
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseLine(lines[i])
+  for (let i = 1; i < allRows.length; i++) {
     const rowNum = i + 1 // 1-based data row (including header row at 1)
-    const assetRaw = cols[assetIdx]
-    const pctRaw = cols[pctIdx]
-
-    const asset = typeof assetRaw === 'string' ? normalizeAssetCode(assetRaw) : ''
-    const pctStr = typeof pctRaw === 'string' ? pctRaw : ''
-
-    const pctNum = pctStr === '' ? NaN : Number(pctStr)
-
-    rows.push({ asset, allocation_pct: pctNum })
-
-    if (!asset) {
-      errors.push({ row: rowNum, field: 'asset', message: 'Asset is required' })
-    }
-    if (!Number.isFinite(pctNum)) {
-      errors.push({ row: rowNum, field: 'allocation_pct', message: 'allocation_pct must be a number' })
-    }
+    const { row, errors: rowErrors } = toAllocationRow(allRows[i], assetIdx, pctIdx, rowNum)
+    rows.push(row)
+    errors.push(...rowErrors)
   }
 
   return { rows, errors }
+}
+
+export type CsvStreamRowResult =
+  | { row: AllocationInputRow; error?: undefined }
+  | { row?: undefined; error: BulkImportRowError }
+
+/**
+ * Streaming counterpart to {@link parseCsvText}: consumes an (async) iterable
+ * of string chunks -- e.g. a large file/upload stream -- and yields each
+ * parsed row (or header error) as soon as it's available, so a caller never
+ * has to hold the whole CSV in memory at once.
+ */
+export async function* parseCsvStream(
+  source: AsyncIterable<string> | Iterable<string>,
+  options: CsvParseOptions = {},
+): AsyncGenerator<CsvStreamRowResult> {
+  const delimiter = options.delimiter ?? ','
+  const parser = new IncrementalCsvParser(delimiter)
+
+  let header: string[] | null = null
+  let assetIdx = -1
+  let pctIdx = -1
+  let dataRowCount = 0
+  let headerErrored = false
+
+  function* handleRow(cols: string[]): Generator<CsvStreamRowResult> {
+    if (!header) {
+      header = cols.map(h => h.replace(/^\uFEFF/, '').trim().toLowerCase())
+      assetIdx = resolveHeaderIndex(header, 'asset', options.headerMap)
+      pctIdx = resolveHeaderIndex(header, 'allocation_pct', options.headerMap)
+      if (assetIdx === -1 || pctIdx === -1) {
+        headerErrored = true
+        yield { error: { row: 1, field: 'header', message: 'CSV header must include columns: asset, allocation_pct' } }
+      }
+      return
+    }
+    if (headerErrored) return
+
+    dataRowCount++
+    const rowNum = dataRowCount + 1
+    const { row, errors } = toAllocationRow(cols, assetIdx, pctIdx, rowNum)
+    for (const error of errors) yield { error }
+    yield { row }
+  }
+
+  for await (const chunk of source) {
+    for (const cols of parser.push(chunk)) {
+      yield* handleRow(cols)
+    }
+  }
+  for (const cols of parser.end()) {
+    yield* handleRow(cols)
+  }
+
+  if (!header) {
+    yield { error: { row: 1, field: 'csv', message: 'CSV is empty' } }
+  }
 }
 
 async function validateAssetCodes(assets: string[]): Promise<{ valid: Set<string>; errors: BulkImportRowError[] }> {
@@ -321,8 +503,9 @@ export function coerceJsonRows(jsonRows: any[]): { rows: AllocationInputRow[]; e
 export async function buildAllocationsFromAnyPayload(params: {
   body: any
   contentType?: string
+  csvOptions?: CsvParseOptions
 }): Promise<{ format: 'csv' | 'json'; allocations?: Record<string, number>; validationError?: BulkImportValidationError }> {
-  const { body, contentType } = params
+  const { body, contentType, csvOptions } = params
   const format = guessFormat(body, contentType)
 
   if (format === 'json') {
@@ -348,9 +531,32 @@ export async function buildAllocationsFromAnyPayload(params: {
 
   // CSV
   const csvText = typeof body === 'string' ? body : (body?.csvText ?? '')
-  const parsed = parseCsvText(csvText)
+  const parsed = parseCsvText(csvText, csvOptions)
   const validated = await validateAndBuildAllocations({ rows: parsed.rows, initialRowErrors: parsed.errors })
   if ('errors' in validated) return { format, validationError: validated }
   return { format, allocations: validated.allocations }
+}
+
+/**
+ * Streaming counterpart to {@link buildAllocationsFromAnyPayload} for CSV
+ * sources too large to buffer as a single string (e.g. a large file/upload
+ * stream). Rows are validated as they're parsed; only the accumulated
+ * allocation map and any errors are held in memory, not the raw file.
+ */
+export async function buildAllocationsFromCsvStream(
+  source: AsyncIterable<string> | Iterable<string>,
+  options: CsvParseOptions = {},
+): Promise<{ allocations?: Record<string, number>; validationError?: BulkImportValidationError }> {
+  const rows: AllocationInputRow[] = []
+  const initialRowErrors: BulkImportRowError[] = []
+
+  for await (const result of parseCsvStream(source, options)) {
+    if (result.error) initialRowErrors.push(result.error)
+    if (result.row) rows.push(result.row)
+  }
+
+  const validated = await validateAndBuildAllocations({ rows, initialRowErrors })
+  if ('errors' in validated) return { validationError: validated }
+  return { allocations: validated.allocations }
 }
 

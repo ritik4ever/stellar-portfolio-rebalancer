@@ -3,9 +3,9 @@
  *
  * OHLCV candlestick chart for individual asset price history.
  *
- * - Interval selector: 1H · 4H · 1D · 1W
+ * - Interval selector: 1H / 1D / 1W
  * - Vertical markers for portfolio creation date and rebalance events
- * - Rebalance markers are clickable — fires onRebalanceClick(event)
+ * - Rebalance markers are clickable and fire onRebalanceClick(event)
  * - Custom SVG candlesticks rendered via Recharts ComposedChart + customized Bar
  * - Performance: renders 500+ candles well inside 200 ms (no per-candle React elements;
  *   single <g> path batch via Recharts customized shape)
@@ -55,11 +55,10 @@ export interface PriceCandlestickProps {
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
-const INTERVALS: CandlestickInterval[] = ['1H', '4H', '1D', '1W']
+const INTERVALS: CandlestickInterval[] = ['1H', '1D', '1W']
 
 const INTERVAL_LABEL_FORMAT: Record<CandlestickInterval, Intl.DateTimeFormatOptions> = {
     '1H': { hour: '2-digit', minute: '2-digit' },
-    '4H': { month: 'short', day: 'numeric', hour: '2-digit' },
     '1D': { month: 'short', day: 'numeric' },
     '1W': { month: 'short', day: 'numeric', year: '2-digit' },
 }
@@ -229,7 +228,7 @@ const PriceCandlestick: React.FC<PriceCandlestickProps> = ({
     const [interval, setInterval] = useState<CandlestickInterval>(() => {
         try {
             const saved = sessionStorage.getItem('priceCandlestickInterval')
-            if (saved && (['1H', '4H', '1D', '1W'] as CandlestickInterval[]).includes(saved as CandlestickInterval)) {
+            if (saved && INTERVALS.includes(saved as CandlestickInterval)) {
                 return saved as CandlestickInterval
             }
         } catch { /* ignore */ }
@@ -486,7 +485,7 @@ const PriceCandlestick: React.FC<PriceCandlestickProps> = ({
                             cursor={{ stroke: isDark ? '#6b7280' : '#d1d5db', strokeWidth: 1 }}
                         />
 
-                        {/* Candlestick bars — custom shape handles wick + body */}
+                        {/* Candlestick bars: custom shape handles wick + body */}
                         <Bar
                             dataKey="_bodyValue"
                             shape={(p: any) => <CandleShape {...p} isDark={isDark} />}
@@ -502,7 +501,7 @@ const PriceCandlestick: React.FC<PriceCandlestickProps> = ({
                                 strokeWidth={1.5}
                                 strokeDasharray="4 3"
                                 label={{
-                                    value: '📅 Created',
+                                    value: 'Portfolio created',
                                     position: 'insideTopRight',
                                     fontSize: 10,
                                     fill: '#3b82f6',
@@ -603,7 +602,7 @@ const PriceCandlestick: React.FC<PriceCandlestickProps> = ({
                                             <div className="flex justify-between">
                                                 <span className="text-gray-400 dark:text-gray-400">ID</span>
                                                 <code className="font-mono text-[10px]">
-                                                    {ev.id.slice(0, 12)}…
+                                                    {ev.id.slice(0, 12)}...
                                                 </code>
                                             </div>
                                             {ev.gasUsed && (

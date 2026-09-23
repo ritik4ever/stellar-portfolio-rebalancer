@@ -46,6 +46,74 @@ function readBaseFeeXlm(): number {
     return Dec.roundStellar(stroops / STROOPS_PER_XLM)
 }
 
+export interface BatchRebalancePlanResult {
+    plans: RebalancePlan[]
+    failed: { portfolioId: string; error: string }[]
+    summary: {
+        totalPortfolios: number
+        plansGenerated: number
+        failedCount: number
+        totalTrades: number
+        totalEstimatedFeesXlm: number
+        totalEstimatedFeesUsd: number
+        maxSlippageBps: number
+    }
+}
+
+/**
+ * Compute rebalance plans for several portfolios in a single batch.
+ *
+ * Each portfolio is planned in isolation: a failure for one portfolio is
+ * captured in `failed` and never prevents the remaining portfolios from
+ * being planned. A combined summary (total trades and estimated fees) is
+ * aggregated from the successful plans.
+ */
+export function buildBatchRebalancePlan(
+    portfolios: Portfolio[],
+    prices: PricesMap,
+    priceFeedMeta: PriceFeedMeta
+): BatchRebalancePlanResult {
+    const plans: RebalancePlan[] = []
+    const failed: { portfolioId: string; error: string }[] = []
+
+    for (const portfolio of portfolios) {
+        try {
+            plans.push(buildRebalancePlan(portfolio, prices, priceFeedMeta))
+        } catch (error) {
+            failed.push({
+                portfolioId: portfolio.id,
+                error: error instanceof Error ? error.message : String(error),
+            })
+        }
+    }
+
+    const totalTrades = plans.reduce((sum, plan) => sum + plan.estimatedFees.tradeCount, 0)
+    const totalEstimatedFeesXlm = Dec.roundStellar(
+        plans.reduce((sum, plan) => Dec.add(sum, plan.estimatedFees.xlm), 0),
+    )
+    const totalEstimatedFeesUsd = Dec.roundStellar(
+        plans.reduce((sum, plan) => Dec.add(sum, plan.estimatedFees.usd), 0),
+    )
+    const maxSlippageBps = plans.reduce(
+        (max, plan) => Math.max(max, plan.estimatedSlippageBps),
+        0,
+    )
+
+    return {
+        plans,
+        failed,
+        summary: {
+            totalPortfolios: portfolios.length,
+            plansGenerated: plans.length,
+            failedCount: failed.length,
+            totalTrades,
+            totalEstimatedFeesXlm,
+            totalEstimatedFeesUsd,
+            maxSlippageBps,
+        },
+    }
+}
+
 export function buildRebalancePlan(
     portfolio: Portfolio,
     prices: PricesMap,

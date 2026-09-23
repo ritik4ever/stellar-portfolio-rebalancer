@@ -56,7 +56,10 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
         app.use(express.json())
         app.set('trust proxy', 1)
         app.use('/api', portfolioRouter)
-    })
+    }, 60000)
+
+
+
 
     afterAll(() => {
         vi.unstubAllEnvs()
@@ -313,6 +316,208 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
             expect(res.body.data.queries.length).toBeGreaterThan(0)
             expect(res.body.data.queries[0]).toHaveProperty('id')
             expect(res.body.data.queries[0]).toHaveProperty('query')
+        })
+    })
+
+    // ── Issuer metadata cache endpoints (TTL + stale-serve + refresh) ─────────
+
+    const META_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+
+    describe('GET /api/admin/issuer-metadata/:issuer', () => {
+        afterEach(() => { vi.restoreAllMocks() })
+
+        it('returns 401 without admin headers', async () => {
+            const res = await request(app).get(`/api/admin/issuer-metadata/${META_ISSUER}`)
+            expect(res.status).toBe(401)
+        })
+
+        it('returns 403 for a key not in ADMIN_PUBLIC_KEYS', async () => {
+            const res = await request(app)
+                .get(`/api/admin/issuer-metadata/${META_ISSUER}`)
+                .set(makeAdminHeaders(nonAdminKp))
+            expect(res.status).toBe(403)
+        })
+
+        it('returns 404 when no metadata is available for the account', async () => {
+            const routesSvc = (await import('../services/issuerMetadataService.js')).issuerMetadataService
+            vi.spyOn(routesSvc, 'getMetadataWithStatus')
+                .mockResolvedValue(undefined as never)
+            const res = await request(app)
+                .get(`/api/admin/issuer-metadata/${META_ISSUER}`)
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(404)
+            expect(res.body.error.code).toBe('NOT_FOUND')
+        })
+
+        it('returns 200 with metadata and staleness flags', async () => {
+            const routesSvc = (await import('../services/issuerMetadataService.js')).issuerMetadataService
+            vi.spyOn(routesSvc, 'getMetadataWithStatus')
+                .mockResolvedValue({
+                    data: { org_name: 'Stellar Foundation' } as any,
+                    stale: false,
+                    fetchedAtMs: 1234,
+                    expiresAtMs: 7654321,
+                    source: 'network',
+                })
+            const res = await request(app)
+                .get(`/api/admin/issuer-metadata/${META_ISSUER}`)
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(200)
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.issuer).toBe(META_ISSUER)
+            expect(res.body.data.stale).toBe(false)
+            expect(res.body.data.source).toBe('network')
+            expect(res.body.data.data.org_name).toBe('Stellar Foundation')
+        })
+    })
+
+    describe('POST /api/admin/issuer-metadata/:issuer/refresh', () => {
+        afterEach(() => { vi.restoreAllMocks() })
+
+        it('returns 401 without admin headers', async () => {
+            const res = await request(app).post(`/api/admin/issuer-metadata/${META_ISSUER}/refresh`)
+            expect(res.status).toBe(401)
+        })
+
+        it('returns 403 for a key not in ADMIN_PUBLIC_KEYS', async () => {
+            const res = await request(app)
+                .post(`/api/admin/issuer-metadata/${META_ISSUER}/refresh`)
+                .set(makeAdminHeaders(nonAdminKp))
+            expect(res.status).toBe(403)
+        })
+
+        it('returns 200 with refreshed metadata for a valid admin', async () => {
+            const routesSvc = (await import('../services/issuerMetadataService.js')).issuerMetadataService
+            const forceRefreshSpy = vi.spyOn(routesSvc, 'forceRefreshMetadata')
+                .mockResolvedValue({
+                    data: { org_name: 'Refreshed Org' } as any,
+                    stale: false,
+                    fetchedAtMs: 99,
+                    expiresAtMs: 123456,
+                    source: 'network',
+                })
+            const res = await request(app)
+                .post(`/api/admin/issuer-metadata/${META_ISSUER}/refresh`)
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(200)
+            expect(forceRefreshSpy).toHaveBeenCalledWith(META_ISSUER)
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.stale).toBe(false)
+            expect(res.body.data.source).toBe('network')
+            expect(res.body.data.data.org_name).toBe('Refreshed Org')
+        })
+
+        it('signals stale data in the response when the upstream refetch fails', async () => {
+            const routesSvc = (await import('../services/issuerMetadataService.js')).issuerMetadataService
+            vi.spyOn(routesSvc, 'forceRefreshMetadata')
+                .mockResolvedValue({
+                    data: { org_name: 'Stale Org' } as any,
+                    stale: true,
+                    fetchedAtMs: 1,
+                    expiresAtMs: 2,
+                    source: 'stale',
+                })
+            const res = await request(app)
+                .post(`/api/admin/issuer-metadata/${META_ISSUER}/refresh`)
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(200)
+            expect(res.body.data.stale).toBe(true)
+            expect(res.body.data.source).toBe('stale')
+            expect(res.body.data.data.org_name).toBe('Stale Org')
+        })
+
+        it('returns 502 when the refresh fails with nothing cached to serve', async () => {
+            const routesSvc = (await import('../services/issuerMetadataService.js')).issuerMetadataService
+            vi.spyOn(routesSvc, 'forceRefreshMetadata')
+                .mockRejectedValue(new Error('TOML host unreachable'))
+            const res = await request(app)
+                .post(`/api/admin/issuer-metadata/${META_ISSUER}/refresh`)
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(502)
+            expect(res.body.error.code).toBe('UPSTREAM_ERROR')
+        })
+    })
+
+    // ── GET/PUT /api/admin/config/volatility-threshold (#1386) ─────────────
+
+    describe('GET/PUT /api/admin/config/volatility-threshold', () => {
+        beforeEach(async () => {
+            const { databaseService } = await import('../services/databaseService.js')
+            const { VOLATILITY_THRESHOLD_KV_KEY } = await import('../config/volatilityConfig.js')
+            databaseService.deleteKvValue(VOLATILITY_THRESHOLD_KV_KEY)
+        })
+
+        it('GET returns 401 without admin headers', async () => {
+            const res = await request(app).get('/api/admin/config/volatility-threshold')
+            expect(res.status).toBe(401)
+        })
+
+        it('GET returns 403 for a key not in ADMIN_PUBLIC_KEYS', async () => {
+            const res = await request(app)
+                .get('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(nonAdminKp))
+            expect(res.status).toBe(403)
+        })
+
+        it('GET returns the default threshold with min/max bounds for a valid admin', async () => {
+            const res = await request(app)
+                .get('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+            expect(res.status).toBe(200)
+            expect(res.body.data.thresholdPct).toBe(15)
+            expect(res.body.data.min).toBe(1)
+            expect(res.body.data.max).toBe(50)
+        })
+
+        it('PUT updates the threshold and GET reports the persisted value', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 25 })
+            expect(putRes.status).toBe(200)
+            expect(putRes.body.data.thresholdPct).toBe(25)
+
+            const getRes = await request(app)
+                .get('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+            expect(getRes.status).toBe(200)
+            expect(getRes.body.data.thresholdPct).toBe(25)
+        })
+
+        it('PUT accepts thresholdPct as the body field', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ thresholdPct: 30 })
+            expect(putRes.status).toBe(200)
+            expect(putRes.body.data.thresholdPct).toBe(30)
+        })
+
+        it('PUT rejects thresholds below the 1% minimum', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 0.5 })
+            expect(putRes.status).toBe(400)
+            expect(putRes.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('PUT rejects thresholds above the 50% maximum', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 51 })
+            expect(putRes.status).toBe(400)
+            expect(putRes.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('PUT rejects a non-numeric threshold', async () => {
+            const putRes = await request(app)
+                .put('/api/admin/config/volatility-threshold')
+                .set(makeAdminHeaders(adminKp))
+                .send({ threshold: 'twenty' })
+            expect(putRes.status).toBe(400)
+            expect(putRes.body.error.code).toBe('VALIDATION_ERROR')
         })
     })
 })
