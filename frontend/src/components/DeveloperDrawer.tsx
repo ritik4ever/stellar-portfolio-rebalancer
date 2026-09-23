@@ -15,10 +15,7 @@ const CAPABILITY_SNAPSHOT_KEY = 'contract-capability-snapshot'
 
 type CapabilityDiffType = 'added' | 'removed' | 'unchanged'
 
-interface CapabilityDiff {
-    method: string
-    type: CapabilityDiffType
-}
+
 
 function computeCapabilityDiff(
     current: ContractCapabilityReport,
