@@ -17,6 +17,28 @@ interface ExtWebSocket extends WebSocket {
   isSubscribed?: boolean;
   userId?: string;
   sessionMetadata?: WSSessionMetadata;
+  messageTimestamps?: number[];
+}
+
+export interface WebSocketRateLimitConfig {
+  enabled: boolean;
+  maxMessagesPerWindow: number;
+  windowMs: number;
+}
+
+let wsRateLimitConfig: WebSocketRateLimitConfig = {
+  enabled: true,
+  maxMessagesPerWindow: 10,
+  windowMs: 1000
+};
+
+export function getWebSocketRateLimitConfig(): WebSocketRateLimitConfig {
+  return { ...wsRateLimitConfig };
+}
+
+export function setWebSocketRateLimitConfig(config: Partial<WebSocketRateLimitConfig>): WebSocketRateLimitConfig {
+  wsRateLimitConfig = { ...wsRateLimitConfig, ...config };
+  return getWebSocketRateLimitConfig();
 }
 
 let attachedServer: WebSocketServer | null = null;
@@ -61,10 +83,7 @@ export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
   });
 }
 
-/**
- * Extract JWT token from WebSocket upgrade request
- * Supports both Authorization header and query parameter (for browsers)
- */
+
 function extractTokenFromRequest(req: any): string | null {
   // Try Authorization header first (standard)
   const authHeader = req.headers.authorization;
@@ -220,6 +239,26 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
 
     ws.on('message', (rawData) => {
       extWs.isAlive = true;
+
+      // Rate limit check per connection
+      const rateConfig = getWebSocketRateLimitConfig();
+      if (rateConfig.enabled) {
+        const now = Date.now();
+        if (!extWs.messageTimestamps) {
+          extWs.messageTimestamps = [];
+        }
+        extWs.messageTimestamps = extWs.messageTimestamps.filter(t => now - t < rateConfig.windowMs);
+        if (extWs.messageTimestamps.length >= rateConfig.maxMessagesPerWindow) {
+          logger.warn('[WS] Rate limit exceeded for client connection', {
+            userId: extWs.userId,
+            messageCount: extWs.messageTimestamps.length,
+            maxMessages: rateConfig.maxMessagesPerWindow
+          });
+          ws.close(1008, 'Rate limit exceeded');
+          return;
+        }
+        extWs.messageTimestamps.push(now);
+      }
 
       // Re-validate token on each message if auth is enabled
       if (authConfig.enabled && extWs.sessionMetadata) {

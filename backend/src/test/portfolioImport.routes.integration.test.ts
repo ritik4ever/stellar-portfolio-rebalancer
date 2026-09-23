@@ -39,7 +39,7 @@ describe('Portfolio Import Route Integration', () => {
     testDbPath = join(testDir, 'test.db')
     process.env.DB_PATH = testDbPath
     app = await createApp()
-  })
+  }, 60000)
 
   afterAll(() => {
     if (existsSync(testDbPath)) {

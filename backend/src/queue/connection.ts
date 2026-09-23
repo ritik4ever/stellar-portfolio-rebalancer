@@ -1,6 +1,10 @@
 import { logger } from "../utils/logger.js";
 import type { StartupConfig } from "../config/startupConfig.js";
 import { credentialManager } from "../config/credentialManager.js";
+import {
+  getBullMqConnectionOptions,
+  getRedisProbeOptions,
+} from "../config/redisConnectionOptions.js";
 
 // BullMQ bundles its own ioredis internally.
 // We pass the REDIS_URL string to BullMQ connection options directly.
@@ -19,12 +23,16 @@ export function getRedisUrl(forceRefresh = false): string {
  * Pass this to every Queue and Worker constructor.
  */
 export function getConnectionOptions(forceRefresh = false) {
-  return {
+  // `url` is the ElastiCache replication-group (cluster) endpoint, so BullMQ
+  // keeps using the same address across a Multi-AZ failover; the shared
+  // options add bounded reconnect backoff + reconnectOnError handling so the
+  // switchover is absorbed instead of surfacing as a job failure.
+  return getBullMqConnectionOptions({
     url: getRedisUrl(forceRefresh),
     maxRetriesPerRequest: null, // required by BullMQ
     enableReadyCheck: false,
     lazyConnect: false,
-  };
+  });
 }
 
 export async function refreshRedisCredentials(): Promise<string> {
@@ -47,13 +55,8 @@ export const redisProbe = {
       const ioredisMod = await import("ioredis");
       const IORedis = (ioredisMod as any).default || ioredisMod;
       const url = getRedisUrl(forceRefresh);
-      const probe = new IORedis(url, {
-        lazyConnect: true,
-        connectTimeout: 3000,
-        maxRetriesPerRequest: 1,
-        enableReadyCheck: false,
-        retryStrategy: () => null,
-      });
+      // Reachability probes deliberately fail fast: no reconnect backoff.
+      const probe = new IORedis(url, getRedisProbeOptions());
       probe.on("error", () => {});
       await probe.connect();
       await probe.ping();

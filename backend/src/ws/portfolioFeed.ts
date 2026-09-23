@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { verifyAccessTokenForWebSocket } from '../middleware/requireJwt.js';
 import { logger } from '../utils/logger.js';
 import { ReflectorService } from '../services/reflector.js';
+import { portfolioStorage } from '../services/portfolioStorage.js';
 
 interface PortfolioWebSocket extends WebSocket {
     isAlive: boolean;
@@ -89,7 +90,7 @@ export const initPortfolioFeedWebSocket = (wss: WebSocketServer) => {
         clearInterval(broadcastInterval);
     });
 
-    wss.on('connection', (ws: WebSocket, req: any) => {
+    wss.on('connection', async (ws: WebSocket, req: any) => {
         const client = ws as PortfolioWebSocket;
         client.isAlive = true;
         client.lastActivityTime = Date.now();
@@ -117,6 +118,32 @@ export const initPortfolioFeedWebSocket = (wss: WebSocketServer) => {
         }
 
         client.userId = verification.payload.sub;
+
+        // Verify portfolio ownership
+        try {
+            const portfolio = await portfolioStorage.getPortfolio(client.portfolioId);
+            if (!portfolio) {
+                logger.warn('[WS Portfolio] Portfolio not found', { userId: client.userId, portfolioId: client.portfolioId });
+                ws.close(1008, 'Portfolio not found');
+                return;
+            }
+
+            const ownerAddress = (portfolio as any).userAddress || (portfolio as any).userId;
+            if (ownerAddress && ownerAddress !== client.userId) {
+                logger.warn('[WS Portfolio] Ownership verification failed — user does not own portfolio', {
+                    userId: client.userId,
+                    portfolioId: client.portfolioId,
+                    ownerAddress
+                });
+                ws.close(1008, 'Unauthorized portfolio feed access');
+                return;
+            }
+        } catch (err) {
+            logger.error('[WS Portfolio] Portfolio ownership check failed', { error: String(err) });
+            ws.close(1008, 'Portfolio lookup error');
+            return;
+        }
+
         logger.info('[WS Portfolio] Client authenticated and connected', { userId: client.userId, portfolioId: client.portfolioId });
 
         ws.send(JSON.stringify({

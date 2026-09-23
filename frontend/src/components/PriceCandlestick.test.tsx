@@ -82,13 +82,13 @@ describe('PriceCandlestick', () => {
   it('renders interval toggle buttons', () => {
     render(<PriceCandlestick asset="XLM" />)
     expect(screen.getByText('1H')).toBeTruthy()
-    expect(screen.getByText('4H')).toBeTruthy()
     expect(screen.getByText('1D')).toBeTruthy()
     expect(screen.getByText('1W')).toBeTruthy()
+    expect(screen.queryByText('4H')).not.toBeInTheDocument()
   })
 
   it('re-renders with correct data when timeframe changes', () => {
-    const { rerender } = render(<PriceCandlestick asset="XLM" />)
+    render(<PriceCandlestick asset="XLM" />)
 
     mocks.usePriceCandlestick.mockReturnValue({
       data: { asset: 'XLM', interval: '1H', candles: CANDLES_1H },
@@ -99,6 +99,7 @@ describe('PriceCandlestick', () => {
 
     fireEvent.click(screen.getByText('1H'))
 
+    expect(mocks.usePriceCandlestick).toHaveBeenLastCalledWith('XLM', '1H')
     expect(screen.getByTestId('composed-chart').getAttribute('data-candle-count')).toBe('24')
   })
 
@@ -107,6 +108,7 @@ describe('PriceCandlestick', () => {
 
     fireEvent.click(screen.getByText('1W'))
 
+    expect(mocks.usePriceCandlestick).toHaveBeenLastCalledWith('XLM', '1W')
     expect(sessionStorage.getItem('priceCandlestickInterval')).toBe('1W')
   })
 

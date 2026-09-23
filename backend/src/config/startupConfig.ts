@@ -3,6 +3,10 @@ import {
   parseNotificationDeliveryConfig,
   type NotificationDeliveryConfig,
 } from "./notificationDeliveryConfig.js";
+import {
+  parseAnalyticsCompactionConfig,
+  type AnalyticsCompactionConfig,
+} from "./analyticsCompactionConfig.js";
 import { logger } from "../utils/logger.js";
 
 export interface StartupConfig {
@@ -28,6 +32,7 @@ export interface StartupConfig {
   priceDataMaxAgeSeconds: number;
   minRequestIntervalMs: number;
   notificationDelivery: NotificationDeliveryConfig;
+  analyticsCompaction: AnalyticsCompactionConfig;
 }
 
 const NODE_ENVS = new Set(["development", "test", "production"]);
@@ -245,6 +250,10 @@ export function validateStartupConfigOrThrow(
 
   const notificationDelivery = parseNotificationDeliveryConfig(env).config;
 
+  const { config: analyticsCompaction, errors: analyticsCompactionErrors } =
+    parseAnalyticsCompactionConfig(env);
+  errors.push(...analyticsCompactionErrors);
+
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
 
@@ -295,6 +304,7 @@ export function validateStartupConfigOrThrow(
     priceDataMaxAgeSeconds,
     minRequestIntervalMs,
     notificationDelivery,
+    analyticsCompaction,
   };
 }
 
@@ -337,6 +347,10 @@ export function buildStartupSummary(
     webhookSigning: config.webhookSigningSecret ? "enabled" : "disabled",
     readinessCacheTtlMs: config.readinessCacheTtlMs,
     consentAuditRetentionDays: config.consentAuditRetentionDays,
+    analyticsCompaction: {
+      cutoffDays: config.analyticsCompaction.cutoffDays,
+      recentDays: config.analyticsCompaction.recentDays,
+    },
     notificationDelivery: {
       email: {
         maxAttempts: config.notificationDelivery.email.maxAttempts,

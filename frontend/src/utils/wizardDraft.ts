@@ -6,10 +6,14 @@ export interface WizardDraftAllocation {
 export interface WizardDraft {
   step: number;
   selectedTemplateId: string;
+  strategy?: 'threshold' | 'dca';
   allocations: WizardDraftAllocation[];
   threshold: number;
   cooldown: number;
   autoRebalance: boolean;
+  dcaAmount?: number;
+  dcaIntervalDays?: number;
+  dcaStartDate?: string;
   savedAt: string;
 }
 
