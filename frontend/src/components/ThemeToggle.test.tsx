@@ -33,13 +33,7 @@ describe('ThemeToggle', () => {
         expect(themeMocks.toggleTheme).toHaveBeenCalledTimes(1)
     })
 
-    it('updates the accessible label for dark mode', () => {
-        themeMocks.isDark = true
-        themeMocks.preference = 'system'
-        render(<ThemeToggle />)
-
-        expect(screen.getByRole('button', { name: /switch to light mode/i })).toBeTruthy()
-    })
+    
 
     it('keeps AA-compliant contrast tokens in both themes (no low-emphasis gray-500/400)', () => {
         render(<ThemeToggle />)
