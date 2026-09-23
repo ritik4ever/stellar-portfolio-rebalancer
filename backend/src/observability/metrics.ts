@@ -407,6 +407,24 @@ const lockHoldDuration = new Histogram({
 
 export type LockBackend = 'redis' | 'memory'
 
+/**
+ * Bucket a portfolio identifier into a small, bounded label value so the
+ * per-portfolio lock metrics (#1399) stay low-cardinality.
+ *
+ * Raw portfolio ids are unbounded and must never be used as Prometheus label
+ * values.  16 deterministic buckets (`00`–`0f`) keep the series count fixed
+ * (per bucket x outcome) while still allowing contention hotspots to be
+ * localised to a slice of portfolios (combine with slow-acquire warning logs,
+ * which carry the full portfolio id, to drill into a specific portfolio).
+ */
+export function bucketPortfolioId(portfolioId: string): string {
+    let hash = 0
+    for (let i = 0; i < portfolioId.length; i++) {
+        hash = ((hash << 5) - hash + portfolioId.charCodeAt(i)) | 0
+    }
+    return (hash & 0xf).toString(16).padStart(2, '0')
+}
+
 /** Call when `acquireLock` returns false — the lock was already held. */
 export function recordLockContention(backend: LockBackend): void {
     lockContentionTotal.inc({ backend })
@@ -415,4 +433,57 @@ export function recordLockContention(backend: LockBackend): void {
 /** Call from `releaseLock` with the elapsed time since the matching `acquireLock` succeeded. */
 export function recordLockHoldDuration(backend: LockBackend, durationSeconds: number): void {
     lockHoldDuration.observe({ backend }, durationSeconds)
+}
+
+// ── Per-portfolio advisory-lock acquisition metrics (#1399) ─────────────────
+//
+// The `acquireWorkerLock` path in `rebalanceWorker.ts` (pg advisory locks)
+// previously had no visibility: a lock-already-held rejection was only
+// inferable from info logs, and slow acquisitions (stuck lock / saturated DB
+// pool) were invisible entirely.  These series make contention observable via
+// metrics:
+//
+// - `rebalance_lock_wait_seconds` — histogram of acquisition wall time,
+//   labelled by bucketed portfolio id + outcome (`acquired`|`contended`).
+// - `rebalance_lock_contention_count` — counter of lock-already-held
+//   rejections, same bucket label.  The counter makes "how often are we
+//   colliding" answerable from a dashboard; the existing
+//   `rebalance_lock_contention_total` (backend-labelled) is the Redis/memory
+//   `rebalanceLockService` counterpart and is intentionally left untouched.
+
+const workerLockWaitDuration = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}rebalance_lock_wait_seconds`,
+    help: 'Wall-clock time spent acquiring a per-portfolio rebalance lock (rebalanceWorker advisory lock path)',
+    labelNames: ['portfolio_bucket', 'outcome'] as const,
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    registers: [register],
+})
+
+const workerLockContentionCount = new Counter({
+    name: `${observabilityConfig.metrics.prefix}rebalance_lock_contention_count`,
+    help: 'Total per-portfolio rebalance lock acquisitions rejected because the lock was already held',
+    labelNames: ['portfolio_bucket'] as const,
+    registers: [register],
+})
+
+export type WorkerLockOutcome = 'acquired' | 'contended'
+
+/**
+ * Record one `acquireWorkerLock` attempt: wait-time histogram sample plus, on
+ * the contended path, a contention counter increment.  Both are labelled by
+ * the bucketed portfolio id.
+ */
+export function recordWorkerLockAcquisition(input: {
+    portfolioId: string
+    outcome: WorkerLockOutcome
+    waitMs: number
+}): void {
+    const bucket = bucketPortfolioId(input.portfolioId)
+    workerLockWaitDuration.observe(
+        { portfolio_bucket: bucket, outcome: input.outcome },
+        Math.max(0, input.waitMs) / 1000,
+    )
+    if (input.outcome === 'contended') {
+        workerLockContentionCount.inc({ portfolio_bucket: bucket })
+    }
 }
