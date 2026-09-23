@@ -14,7 +14,7 @@ export const WalletPicker: React.FC<WalletPickerProps> = ({ onConnect, onError, 
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null)
 
   useEffect(() => {
-    // Check if already connected
+   
     const currentType = walletManager.getWalletType()
     if (currentType) {
       setConnectedWallet(currentType)
@@ -37,7 +37,7 @@ export const WalletPicker: React.FC<WalletPickerProps> = ({ onConnect, onError, 
     setConnecting(wallet.type)
 
     try {
-      // Disconnect previous if switching
+      
       if (connectedWallet && connectedWallet !== wallet.type) {
         await walletManager.disconnect()
         if (onDisconnect) onDisconnect()
