@@ -6,11 +6,7 @@ export type CorrelationTimeRange = '7D' | '30D' | '90D'
 
 export type CorrelationMatrix = number[][]
 
-interface CorrelationHeatmapProps {
-  assets: string[]
-  correlations: Partial<Record<CorrelationTimeRange, CorrelationMatrix>>
-  defaultRange?: CorrelationTimeRange
-}
+
 
 interface HeatmapCell {
   rowAsset: string
