@@ -84,10 +84,10 @@ const TEMPLATES: Template[] = [
 const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey }) => {
   const createPortfolioMutation = useCreatePortfolioMutation();
 
-  // Wizard state (steps 1 to 5)
+ 
   const [step, setStep] = useState<number>(1);
 
-  // Form states preserved across steps
+ 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('custom');
   const [strategy, setStrategy] = useState<WizardStrategy>('threshold');
   const [allocations, setAllocations] = useState<Allocation[]>([
@@ -100,18 +100,18 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [dcaIntervalDays, setDcaIntervalDays] = useState<number>(7);
   const [dcaStartDate, setDcaStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
-  // UX states
+  
   const [error, setError] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState<boolean>(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [shareHash, setShareHash] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState<boolean>(false);
 
-  // Draft resume state
+ 
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ReturnType<typeof loadWizardDraft> | null>(null);
 
-  // Check for existing draft on mount
+  
   useEffect(() => {
     const draft = loadWizardDraft();
     if (draft && draft.step >= 1 && draft.step <= (draft.strategy === 'dca' ? 5 : 4)) {
@@ -120,7 +120,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   }, []);
 
-  // Save draft on state changes (persist wizard progress)
+  
   useEffect(() => {
     if (step >= 1 && step <= (strategy === 'dca' ? 5 : 4) && !showResumePrompt) {
       saveWizardDraft({
@@ -161,7 +161,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setPendingDraft(null);
   }, []);
 
-  // Live sum validation calculations
+ 
   const totalPercentage = allocations.reduce((sum, item) => sum + (item.percentage || 0), 0);
   const remaining = remainingAllocation(allocations);
   const isAllocationValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.every(item => item.percentage > 0);
@@ -169,7 +169,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     && Number.isInteger(dcaIntervalDays) && dcaIntervalDays >= 1 && dcaIntervalDays <= 365
     && Boolean(dcaStartDate) && !Number.isNaN(new Date(`${dcaStartDate}T00:00:00`).getTime());
 
-  // Handle template selection
+  
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (templateId === 'custom') {
