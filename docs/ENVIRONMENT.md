@@ -219,6 +219,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `REBALANCE_ALLOW_PARTIAL_FILL` | No | `true` | Allows partial order fills when a full fill is unavailable. | `true` | |
 | `REBALANCE_ROLLBACK_ON_FAILURE` | No | `true` | Attempts to roll back all changes if execution fails mid-flow. | `true` | |
 | `REBALANCE_LOCK_TTL_MS` | No | `300000` | Time-to-live for rebalancing concurrency locks (ms). Valid range: 1000–1800000. | `600000` | |
+| `REBALANCE_LOCK_WAIT_WARN_MS` | No | `1000` | Wait-time threshold (ms) after which a slow per-portfolio advisory-lock acquisition logs a warning (possible stuck lock or saturated DB pool). Valid range: 0–60000. | `2000` | |
 | `RISK_VOLATILITY_HIGH` | No | `10` | Volatility percentage threshold for high-risk classification. | `10` | |
 | `RISK_VOLATILITY_CRITICAL` | No | `15` | Volatility percentage threshold for critical-risk classification. | `15` | |
 | `RISK_CONCENTRATION_HIGH` | No | `60` | Concentration percentage threshold for high-risk classification. | `60` | |
