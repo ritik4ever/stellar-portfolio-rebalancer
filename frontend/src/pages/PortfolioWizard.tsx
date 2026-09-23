@@ -82,10 +82,10 @@ const TEMPLATES: Template[] = [
 const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey }) => {
   const createPortfolioMutation = useCreatePortfolioMutation();
 
-  // Wizard state (steps 1 to 5)
+ 
   const [step, setStep] = useState<number>(1);
 
-  // Form states preserved across steps
+ 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('custom');
   const [allocations, setAllocations] = useState<Allocation[]>([
     { asset: 'XLM', percentage: 100 }
@@ -94,18 +94,18 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [cooldown, setCooldown] = useState<number>(24);
   const [autoRebalance, setAutoRebalance] = useState<boolean>(true);
 
-  // UX states
+  
   const [error, setError] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState<boolean>(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [shareHash, setShareHash] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState<boolean>(false);
 
-  // Draft resume state
+ 
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ReturnType<typeof loadWizardDraft> | null>(null);
 
-  // Check for existing draft on mount
+  
   useEffect(() => {
     const draft = loadWizardDraft();
     if (draft && draft.step >= 1 && draft.step <= 4) {
@@ -114,7 +114,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   }, []);
 
-  // Save draft on state changes (persist wizard progress)
+  
   useEffect(() => {
     if (step >= 1 && step <= 4 && !showResumePrompt) {
       saveWizardDraft({
@@ -147,12 +147,12 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setPendingDraft(null);
   }, []);
 
-  // Live sum validation calculations
+ 
   const totalPercentage = allocations.reduce((sum, item) => sum + (item.percentage || 0), 0);
   const remaining = remainingAllocation(allocations);
   const isAllocationValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.every(item => item.percentage > 0);
 
-  // Handle template selection
+  
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (templateId === 'custom') {
