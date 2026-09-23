@@ -38,9 +38,7 @@ interface RebalanceEvent {
     }
 }
 
-interface RebalanceTimelineProps {
-    portfolioId?: string
-}
+
 
 const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) => {
     // We use a large limit to render up to 100 entries without lag as per AC
