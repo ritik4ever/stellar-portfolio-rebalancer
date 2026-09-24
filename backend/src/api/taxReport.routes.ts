@@ -43,12 +43,7 @@ interface TaxReportEntry {
   realizedGainLoss: number
 }
 
-/**
- * A single lot-level disposal produced while matching a sell against tax lots.
- * One sell can produce several disposals when it spans multiple lots.
- * This is the granularity required by consumer tax software (TurboTax et al.),
- * which needs an acquisition date per disposed lot.
- */
+
 interface TaxDisposal {
   asset: string
   acquiredDate: string
@@ -66,23 +61,7 @@ interface TaxReportResult {
 
 const DUST = 0.00000001
 
-/**
- * Cost-basis lot matching.
- *
- * Every "buy" creates a tax lot (asset, date, amount, unit price, total cost basis).
- * When the same asset is later sold, lots are consumed in an order determined by the
- * selected cost-basis method:
- *
- *   - FIFO: oldest lot first (chronological)
- *   - LIFO: most recently acquired lot first
- *   - HIFO: highest unit cost first (ties broken by the older lot)
- *
- * The cost basis taken from each lot is proportional to the amount consumed.
- * Realized gain/loss = (sell price × sell amount) − matched cost basis.
- *
- * Only completed rebalance events with trade details (fromAsset, toAsset, amount)
- * are included. Events without explicit trade details are skipped.
- */
+
 export function computeReport(events: any[], method: CostBasisMethod = 'fifo'): TaxReportResult {
   const lots: Map<string, TaxLot[]> = new Map()
   const entries: TaxReportEntry[] = []
