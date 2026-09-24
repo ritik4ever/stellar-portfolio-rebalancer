@@ -1,13 +1,4 @@
-/**
- * PortfolioSetup.tsx
- *
- * Allows users to configure and create a new portfolio rebalancing strategy.
- * Updated to include real-time inline validation for allocation inputs:
- *   - Per-field error if value is < 0 or > 100
- *   - Live summary showing how far the total deviates from 100%
- *   - Red border highlight on invalid inputs
- *   - Submit blocked until all fields and total are valid
- */
+
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
@@ -300,16 +291,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation()
 
-  // ── Validation ─────────────────────────────────────────────────────────────
-
-  /**
-   * Validates a single allocation percentage.
-   * Returns an error string if the value is out of range, or null if acceptable.
-   *
-   * Rules:
-   *   - Must not be negative (< 0)
-   *   - Must not exceed 100 (> 100)
-   */
+ 
   const getAllocationError = (percentage: number): string | null => {
     if (percentage < 0) return 'Cannot be negative'
     if (percentage > 100) return 'Cannot exceed 100%'
@@ -322,11 +304,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     0,
   )
 
-  /**
-   * True when the total is within 0.01% of 100.
-   * The small tolerance prevents false negatives from floating-point arithmetic
-   * e.g. 33.3 + 33.3 + 33.4 = 100.00000000000001 without this guard.
-   */
+ 
   const isValidTotal = Math.abs(totalPercentage - 100) < 0.01
 
   /**
