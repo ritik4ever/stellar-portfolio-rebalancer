@@ -115,13 +115,7 @@ export function generateAccessToken(address: string): string {
   );
 }
 
-/**
- * Issue a fresh access/refresh pair.
- *
- * When `family` is omitted a brand-new token family is opened (a new login).
- * `refreshTokens` passes the existing family so a rotation stays inside the
- * chain it belongs to.
- */
+
 export async function issueTokens(
   address: string,
   metadata?: RefreshTokenMetadata | null,
