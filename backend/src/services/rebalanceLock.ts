@@ -6,17 +6,7 @@ import { getRebalanceLockConfig } from '../config/rebalanceLockConfig.js'
 import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 import { recordLockContention, recordLockHoldDuration, type LockBackend } from '../observability/metrics.js'
 
-/**
- * Owner-token scripts (review #1728, round 2).
- *
- * The lock value is a random owner token minted at acquire time. Release and
- * renew must be bound to that token: an unconditional DEL/PEXPIRE from a
- * holder whose lock already expired (slow GC pause, network stall, or a
- * Multi-AZ failover window) could delete or extend a *different* holder's
- * freshly acquired lock, breaking mutual exclusion. Both operations run as
- * atomic compare-and-act Lua scripts so the check and the mutation cannot
- * interleave with another client.
- */
+
 const RELEASE_LOCK_SCRIPT = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
     return redis.call("DEL", KEYS[1])
@@ -31,11 +21,7 @@ else
     return 0
 end`
 
-/**
- * Service to manage concurrency locks for portfolio rebalancing.
- * Prevents multiple rebalancing instances (auto or manual) from running
- * simultaneously for the same portfolio.
- */
+
 export class RebalanceLockService {
     private redis: Redis | null = null
     /** In-memory fallback locks: lockKey -> { owner token, expiry }. */
@@ -63,14 +49,7 @@ export class RebalanceLockService {
         return RebalanceLockService.instance
     }
 
-    /**
-     * Initializes the locking service, deciding whether to use Redis or fallback.
-     *
-     * Review #1728 (round 2): init is memoized in a shared promise and
-     * `isInitialized` flips only after the probe resolves, so concurrent
-     * callers cannot observe a half-initialized service (or create duplicate
-     * Redis clients) while the availability probe is still in flight.
-     */
+    
     public async init(): Promise<void> {
         if (this.isInitialized) return
         this.initPromise ??= this.performInit()
@@ -82,13 +61,7 @@ export class RebalanceLockService {
             this.useRedis = await isRedisAvailable()
 
             if (this.useRedis) {
-                // Options are failover-aware: during an ElastiCache Multi-AZ
-                // failover the connection drops and commands fail, so the client
-                // reconnects with bounded backoff instead of giving up.
-                // autoResendUnfulfilledCommands is explicitly disabled (it is also
-                // the shared default): replaying an in-flight DEL/PEXPIRE after a
-                // reconnect could release or shrink a lock that another holder
-                // re-acquired while this client was disconnected.
+                
                 this.redis = new Redis(REDIS_URL, getRedisClientOptions({
                     autoResendUnfulfilledCommands: false,
                 }))
