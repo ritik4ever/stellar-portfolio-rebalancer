@@ -172,11 +172,7 @@ export function computeReport(events: any[], method: CostBasisMethod = 'fifo'): 
   return { entries, disposals }
 }
 
-/**
- * Pick which lot to consume next. Lots are stored in acquisition order, so
- * FIFO is the head and LIFO is the tail. HIFO scans for the highest unit cost,
- * keeping the earlier lot on a tie so results stay deterministic.
- */
+
 function selectLotIndex(lots: TaxLot[], method: CostBasisMethod): number {
   if (method === 'lifo') return lots.length - 1
   if (method === 'fifo') return 0
@@ -258,15 +254,7 @@ function toCSV(entries: TaxReportEntry[]): string {
   return [headers, ...rows].join('\n')
 }
 
-/**
- * TurboTax cryptocurrency CSV import schema — column order is fixed and must
- * match exactly for the import template to be accepted:
- *
- *   Currency Name, Purchase Date, Cost Basis, Date Sold, Proceeds
- *
- * Dates are MM/DD/YYYY and monetary amounts are plain decimals with no
- * currency symbol or thousands separators. One row per disposed lot.
- */
+
 export const TURBOTAX_HEADERS = [
   'Currency Name',
   'Purchase Date',
