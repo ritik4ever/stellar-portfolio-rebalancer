@@ -15,7 +15,7 @@ interface RateLimitMetrics {
 
 export type RateLimitIdentifierType = 'ip' | 'apiKey'
 
-/** ok → below the near-limit ratio, near-limit → at/above it, throttled → already 429'd this window. */
+
 export type RateLimitStatus = 'ok' | 'near-limit' | 'throttled'
 
 export interface RateLimitConsumptionEntry {
