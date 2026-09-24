@@ -30,11 +30,7 @@ import {
 import { deliverWithBackoff } from "./notificationDelivery.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
 
-/** Nodemailer-compatible attachment (used by the scheduled CSV export, #1411). */
 export interface EmailAttachment {
   filename: string;
   content: string | Buffer;
@@ -43,7 +39,7 @@ export interface EmailAttachment {
 
 export interface NotificationPayload {
   userId: string;
-  /** When set, portfolio-level preference overrides apply to this delivery (#1395). */
+ 
   portfolioId?: string;
   eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
   title: string;
@@ -52,9 +48,7 @@ export interface NotificationPayload {
   timestamp: string;
 }
 
-// ─────────────────────────────────────────────
-// Provider Interface
-// ─────────────────────────────────────────────
+
 
 interface NotificationProvider {
   send(
@@ -63,9 +57,7 @@ interface NotificationProvider {
   ): Promise<void>;
 }
 
-// ─────────────────────────────────────────────
-// Webhook Provider
-// ─────────────────────────────────────────────
+
 
 class WebhookProvider implements NotificationProvider {
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}

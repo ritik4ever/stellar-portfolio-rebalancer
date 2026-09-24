@@ -11,12 +11,7 @@ type ParsedRow = {
 
 type RowStatus = 'pending' | 'error' | 'corrected' | 'success'
 
-type EditableRow = {
-  original: ParsedRow
-  current: ParsedRow
-  status: RowStatus
-  errors: BulkImportRowError[]
-}
+
 
 type SuccessSummary = {
   portfolioId: string
