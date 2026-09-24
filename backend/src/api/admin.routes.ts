@@ -136,7 +136,7 @@ function handleUpdateAnomalyThresholds(req: Request, res: Response) {
   }
 }
 
-// GET & PUT/PATCH routes for anomaly-thresholds (and anomaly-detection/thresholds alias)
+
 adminRouter.get('/anomaly-thresholds', requireAdmin, handleGetAnomalyThresholds)
 adminRouter.get('/anomaly-detection/thresholds', requireAdmin, handleGetAnomalyThresholds)
 
