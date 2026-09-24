@@ -7,10 +7,7 @@ import { ok, fail } from '../utils/apiResponse.js'
 
 export const pricesRouter = Router()
 
-interface PriceRow {
-    price: number
-    recorded_at: Date
-}
+
 
 export interface OhlcvCandle {
     timestamp: number
