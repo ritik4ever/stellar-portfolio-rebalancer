@@ -11,6 +11,8 @@ import { recordIndexerLag, recordIndexerError } from "../observability/metrics.j
 
 const INDEXER_CURSOR_KEY = "soroban_event_indexer.cursor";
 const INDEXER_LATEST_LEDGER_KEY = "soroban_event_indexer.latest_ledger";
+// #1214 on startup the cursor is compared with the chain tip and any gap is backfilled
+// in bounded batches, so downtime gaps are replayed without overwhelming the indexer.
 
 type IndexedEventKind = "portfolio_created" | "deposit" | "rebalance_executed";
 

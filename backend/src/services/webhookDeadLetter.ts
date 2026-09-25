@@ -5,6 +5,9 @@ import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 
 const DLQ_KEY = 'dead_letter:webhook'
 
+// #1207 seed-then-replay integration coverage: replay() re-delivers the original
+// payload and drops the entry on success, or bumps attemptsExhausted on repeat failure.
+
 export interface DeadLetterItem {
     id: string
     payload: unknown
