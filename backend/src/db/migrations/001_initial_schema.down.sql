@@ -2,6 +2,7 @@
 -- Rollback: Drop tables in reverse dependency order to respect foreign keys.
 
 DROP INDEX IF EXISTS idx_notification_preferences_user;
+DROP TABLE IF EXISTS sms_verifications;
 DROP TABLE IF EXISTS notification_preferences;
 
 DROP INDEX IF EXISTS idx_analytics_portfolio_time;

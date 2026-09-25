@@ -13,6 +13,9 @@ import {
   dbSavePortfolioNotificationOverride,
   dbListPortfolioNotificationOverrides,
   dbDeletePortfolioNotificationOverride,
+  dbSaveSmsVerification,
+  dbGetSmsVerification,
+  dbConfirmSmsVerification,
   type PortfolioNotificationOverride,
   type NotificationPreferences,
   type NotificationLog,
@@ -20,6 +23,7 @@ import {
 import nodemailer from "nodemailer";
 import {
   normalizeNotificationPreferences,
+  notificationPreferencesSchema,
   resolvePortfolioNotificationPreferences,
 } from "./notificationPreferences.js";
 import { databaseService } from "./databaseService.js";
@@ -29,6 +33,8 @@ import {
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
+import { sendSlackNotification } from '../notifications/slack.js'
+import { createTwilioClient, generateVerificationCode, hashVerificationCode, normalizePhoneNumber, sendSms, verifyCodeHash, type SmsClient } from '../notifications/sms.js'
 
 
 export interface EmailAttachment {
@@ -41,7 +47,7 @@ export interface NotificationPayload {
   userId: string;
  
   portfolioId?: string;
-  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
+  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "correlation_breakdown" | "digest";
   title: string;
   message: string;
   data?: any;
@@ -55,6 +61,39 @@ interface NotificationProvider {
     payload: NotificationPayload,
     preferences: NotificationPreferences,
   ): Promise<void>;
+}
+
+class SlackProvider implements NotificationProvider {
+  constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}
+  async send(payload: NotificationPayload, preferences: NotificationPreferences): Promise<void> {
+    if (!preferences.slackEnabled || !preferences.slackWebhookUrl) {
+      dbLogNotificationOutcome(payload.userId, 'slack', payload.eventType, 'skipped', 'Slack disabled or missing URL')
+      return
+    }
+    await sendSlackNotification(preferences.slackWebhookUrl, payload, this.deliveryConfig.webhook)
+  }
+}
+
+class SmsProvider implements NotificationProvider {
+  private readonly sentAt = new Map<string, number[]>()
+  constructor(private readonly client: SmsClient | null, private readonly deliveryConfig: NotificationDeliveryConfig) {}
+  async send(payload: NotificationPayload, preferences: NotificationPreferences): Promise<void> {
+    if (!preferences.smsEnabled || !preferences.phoneVerified || !preferences.phoneNumber || !this.client) {
+      dbLogNotificationOutcome(payload.userId, 'sms', payload.eventType, 'skipped', 'SMS disabled, unverified, or missing config')
+      return
+    }
+    const critical = payload.eventType === 'circuitBreaker' || payload.eventType === 'riskChange' || payload.eventType === 'correlation_breakdown'
+    if (!critical) return
+    const cutoff = Date.now() - 60 * 60 * 1000
+    const recent = (this.sentAt.get(payload.userId) ?? []).filter((at) => at > cutoff)
+    if (recent.length >= 5) {
+      dbLogNotificationOutcome(payload.userId, 'sms', payload.eventType, 'skipped', 'Hourly SMS rate limit reached')
+      return
+    }
+    await sendSms(this.client, { userId: payload.userId, phone: preferences.phoneNumber, eventType: payload.eventType, body: `${payload.title}: ${payload.message}` }, { ...this.deliveryConfig.webhook, maxAttempts: 1 })
+    recent.push(Date.now())
+    this.sentAt.set(payload.userId, recent)
+  }
 }
 
 
@@ -356,6 +395,8 @@ export class NotificationService {
     this.deliveryConfig = deliveryConfig;
     this.providers.push(new WebhookProvider(deliveryConfig));
     this.providers.push(new EmailProvider(deliveryConfig));
+    this.providers.push(new SlackProvider(deliveryConfig));
+    this.providers.push(new SmsProvider(createTwilioClient(), deliveryConfig));
 
     logger.info("Notification service initialized", {
       providerCount: this.providers.length,
@@ -382,13 +423,38 @@ export class NotificationService {
    * Subscribe or update notification preferences
    */
   subscribe(preferences: NotificationPreferences): void {
-    dbSaveNotificationPreferences(normalizeNotificationPreferences(preferences));
+    const parsed = notificationPreferencesSchema.parse(preferences)
+    const normalized = normalizeNotificationPreferences({ ...parsed, userId: preferences.userId })
+    const existing = dbGetNotificationPreferences(preferences.userId)
+    if (existing?.phoneVerified && existing.phoneNumber === normalized.phoneNumber) {
+      normalized.phoneVerified = true
+    }
+    dbSaveNotificationPreferences(normalized);
 
     logger.info("User subscribed to notifications", {
       userId: preferences.userId,
       emailEnabled: preferences.emailEnabled,
       webhookEnabled: preferences.webhookEnabled,
     });
+  }
+
+  async requestSmsVerification(userId: string, phone: string): Promise<void> {
+    const client = createTwilioClient()
+    if (!client) throw new Error('Twilio is not configured')
+    const normalized = normalizePhoneNumber(phone)
+    this.getPreferences(userId)
+    const code = generateVerificationCode()
+    dbSaveSmsVerification({ userId, phoneNumber: normalized, codeHash: hashVerificationCode(userId, normalized, code), expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() })
+    await sendSms(client, { userId, phone: normalized, eventType: 'phone_verification', body: `Your Stellar Portfolio verification code is ${code}` }, { ...this.deliveryConfig.webhook, maxAttempts: 1 })
+  }
+
+  confirmSmsVerification(userId: string, code: string): boolean {
+    const pending = dbGetSmsVerification(userId)
+    if (!pending || Date.parse(pending.expiresAt) < Date.now()) return false
+    const actual = hashVerificationCode(userId, pending.phoneNumber, code)
+    if (!verifyCodeHash(pending.codeHash, actual)) return false
+    dbConfirmSmsVerification(userId, pending.phoneNumber)
+    return true
   }
 
   /**
@@ -519,6 +585,8 @@ export class NotificationService {
     const prefs = this.getPreferences(userId);
     prefs.emailEnabled = false;
     prefs.webhookEnabled = false;
+    prefs.slackEnabled = false;
+    prefs.smsEnabled = false;
     dbSaveNotificationPreferences(prefs);
     logger.info("User unsubscribed from notifications", { userId });
   }
@@ -533,7 +601,7 @@ export class NotificationService {
     );
 
     const eventKey = payload.eventType as keyof typeof preferences.events;
-    if (!preferences.events[eventKey]) {
+    if (preferences.events[eventKey] === false) {
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,

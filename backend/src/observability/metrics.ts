@@ -373,6 +373,35 @@ export function recordNotificationDeliveryAttempt(
     notificationDeliveryAttemptsTotal.inc({ channel, outcome })
 }
 
+const idempotencyCleanupRunsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_runs_total`,
+    help: 'Idempotency cleanup worker runs by outcome',
+    labelNames: ['outcome'] as const,
+    registers: [register],
+})
+const idempotencyCleanupRecordsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_records_total`,
+    help: 'Expired idempotency records removed',
+    registers: [register],
+})
+const idempotencyCleanupLastRun = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_last_run_timestamp_seconds`,
+    help: 'Unix timestamp of the latest cleanup attempt',
+    registers: [register],
+})
+const idempotencyCleanupConsecutiveFailures = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_consecutive_failures`,
+    help: 'Current consecutive cleanup failure count',
+    registers: [register],
+})
+
+export function recordIdempotencyCleanupRun(success: boolean, recordsCleaned: number, failures: number): void {
+    idempotencyCleanupRunsTotal.inc({ outcome: success ? 'success' : 'failure' })
+    if (recordsCleaned > 0) idempotencyCleanupRecordsTotal.inc(recordsCleaned)
+    idempotencyCleanupLastRun.set(Date.now() / 1000)
+    idempotencyCleanupConsecutiveFailures.set(failures)
+}
+
 // ── Per-portfolio rebalance lock contention metrics (#1399) ─────────────────
 //
 // `rebalanceLockService.acquireLock` returning false means a second caller
