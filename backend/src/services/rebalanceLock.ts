@@ -6,6 +6,8 @@ import { getRebalanceLockConfig } from '../config/rebalanceLockConfig.js'
 import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 import { recordLockContention, recordLockHoldDuration, type LockBackend } from '../observability/metrics.js'
 
+// #1213 configurable lock TTL: getRebalanceLockConfig() supplies the TTL and the
+// renewal interval used by the heartbeat, so it is tunable via env without a code change.
 
 const RELEASE_LOCK_SCRIPT = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
