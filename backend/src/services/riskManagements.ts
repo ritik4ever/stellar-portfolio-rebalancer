@@ -68,6 +68,14 @@ export interface CVaRVaRCheckResult {
     riskMetrics: ReturnType<RiskManagementService['analyzePortfolioRisk']>
 }
 
+export interface CorrelationBreakdownPair {
+    assetA: string
+    assetB: string
+    baseline: number
+    current: number
+    delta: number
+}
+
 type ReturnPoint = { value: number, timestamp: number }
 type PricePoint = { price: number, timestamp: number }
 
@@ -75,6 +83,7 @@ export class RiskManagementService {
     private priceHistory: Map<string, PricePoint[]> = new Map()
     private returnSeries: Map<string, ReturnPoint[]> = new Map()
     private circuitBreakers: Map<string, CircuitBreakerStatus> = new Map()
+    private correlationBaselines: Map<string, number> = new Map()
 
     private readonly MAX_PRICE_HISTORY = 400
     private readonly MAX_RETURN_HISTORY = 400
@@ -89,6 +98,7 @@ export class RiskManagementService {
     private readonly CONCENTRATION_LIMIT = 0.70
     private readonly CIRCUIT_BREAKER_THRESHOLD = 0.20
     private readonly CIRCUIT_BREAKER_COOLDOWN = 300000 // 5 minutes
+    private readonly CORRELATION_BREAKDOWN_THRESHOLD = 0.35
 
     /** Configurable CVaR/VaR auto-pause thresholds (fall back to class defaults when not set). */
     private readonly autoPauseVar95Threshold: number
@@ -389,6 +399,7 @@ export class RiskManagementService {
         userId: string
     ): Promise<CVaRVaRCheckResult> {
         const riskMetrics = this.analyzePortfolioRisk(allocations, prices)
+        await this.detectAndNotifyCorrelationBreakdown(userId, portfolioId, riskMetrics.correlations)
 
         // Only run the threshold check once we have enough data for reliable stats
         if (riskMetrics.sampleSize < this.MIN_RETURNS_FOR_STATS) {
@@ -494,6 +505,48 @@ export class RiskManagementService {
             paused: true,
             riskMetrics
         }
+    }
+
+    /** Compare current pair correlations with their exponentially-smoothed historical baseline. */
+    async detectAndNotifyCorrelationBreakdown(
+        userId: string,
+        portfolioId: string,
+        correlations: Record<string, Record<string, number>>,
+    ): Promise<CorrelationBreakdownPair[]> {
+        const assets = Object.keys(correlations).sort()
+        const affectedPairs: CorrelationBreakdownPair[] = []
+        for (let i = 0; i < assets.length; i++) {
+            for (let j = i + 1; j < assets.length; j++) {
+                const assetA = assets[i]
+                const assetB = assets[j]
+                const current = correlations[assetA]?.[assetB]
+                if (!Number.isFinite(current)) continue
+                const key = `${assetA}:${assetB}`
+                const baseline = this.correlationBaselines.get(key)
+                if (baseline !== undefined) {
+                    const delta = current - baseline
+                    if (Math.abs(delta) >= this.CORRELATION_BREAKDOWN_THRESHOLD) {
+                        affectedPairs.push({ assetA, assetB, baseline, current, delta })
+                    }
+                    this.correlationBaselines.set(key, baseline * 0.9 + current * 0.1)
+                } else {
+                    this.correlationBaselines.set(key, current)
+                }
+            }
+        }
+
+        if (affectedPairs.length > 0) {
+            await notificationService.notify({
+                userId,
+                portfolioId,
+                eventType: 'correlation_breakdown',
+                title: 'Portfolio correlation breakdown detected',
+                message: `${affectedPairs.length} asset correlation pair${affectedPairs.length === 1 ? '' : 's'} deviated significantly from the historical baseline.`,
+                data: { affectedPairs, threshold: this.CORRELATION_BREAKDOWN_THRESHOLD },
+                timestamp: new Date().toISOString(),
+            })
+        }
+        return affectedPairs
     }
 
     getCircuitBreakerStatus(): Record<string, CircuitBreakerStatus> {

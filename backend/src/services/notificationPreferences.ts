@@ -14,6 +14,7 @@ export const notificationEventsSchema = z.object({
   circuitBreaker: z.boolean(),
   priceMovement: z.boolean(),
   riskChange: z.boolean(),
+  correlation_breakdown: z.boolean().optional(),
 });
 
 const webhookUrlSchema = z
@@ -22,6 +23,15 @@ const webhookUrlSchema = z
   .refine((u) => u.startsWith("http://") || u.startsWith("https://"), {
     message: "webhookUrl must use http or https",
   });
+
+export const slackWebhookUrlSchema = z.string().url().refine((value) => {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'hooks.slack.com' && url.pathname.startsWith('/services/')
+  } catch { return false }
+}, { message: 'slackWebhookUrl must be an https://hooks.slack.com/services/... URL' })
+
+const phoneNumberSchema = z.string().regex(/^\+[1-9]\d{7,14}$/, 'phoneNumber must use E.164 format')
 
 export const priceAlertThresholdsSchema = z
   .record(
@@ -35,6 +45,8 @@ export const notificationPreferencesSchema = z
     userId: z.string().min(1, "userId is required").optional(),
     emailEnabled: z.boolean(),
     webhookEnabled: z.boolean(),
+    slackEnabled: z.boolean().optional(),
+    smsEnabled: z.boolean().optional(),
     digestMode: z.enum(['immediate','daily','weekly']).optional(),
     priceAlertThresholds: priceAlertThresholdsSchema,
     emailAddress: z.preprocess(
@@ -45,6 +57,8 @@ export const notificationPreferencesSchema = z
       (v) => (v === "" ? undefined : v),
       webhookUrlSchema.optional(),
     ),
+    slackWebhookUrl: z.preprocess((v) => (v === '' ? undefined : v), slackWebhookUrlSchema.optional()),
+    phoneNumber: z.preprocess((v) => (v === '' ? undefined : v), phoneNumberSchema.optional()),
     events: notificationEventsSchema,
   })
   .superRefine((data, ctx) => {
@@ -61,6 +75,9 @@ export const notificationPreferencesSchema = z
         message: "webhookUrl is required when webhookEnabled is true",
         path: ["webhookUrl"],
       });
+    }
+    if (data.slackEnabled && !data.slackWebhookUrl) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'slackWebhookUrl is required when slackEnabled is true', path: ['slackWebhookUrl'] })
     }
   });
 
@@ -81,6 +98,10 @@ export function normalizeNotificationPreferences(
     webhookUrl: input.webhookEnabled
       ? input.webhookUrl?.trim() || undefined
       : undefined,
+    slackEnabled: input.slackEnabled ?? false,
+    slackWebhookUrl: input.slackEnabled ? input.slackWebhookUrl?.trim() : undefined,
+    smsEnabled: input.smsEnabled ?? false,
+    phoneNumber: input.phoneNumber?.trim(),
     digestMode: input.digestMode || 'immediate',
     priceAlertThresholds: input.priceAlertThresholds,
     events: {
@@ -88,6 +109,7 @@ export function normalizeNotificationPreferences(
       circuitBreaker: input.events.circuitBreaker,
       priceMovement: input.events.priceMovement,
       riskChange: input.events.riskChange,
+      ...(input.events.correlation_breakdown === undefined ? {} : { correlation_breakdown: input.events.correlation_breakdown }),
     },
   };
 }
