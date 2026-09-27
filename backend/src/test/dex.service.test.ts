@@ -1045,6 +1045,85 @@ describe("StellarDEXService", () => {
     });
   });
 
+  // ── Cumulative slippage guard leg accounting (#1380) ──────────────────────
+
+  describe("Cumulative slippage guard accounting (#1380)", () => {
+    const MOCK_KEYPAIR = Keypair.random();
+
+    // `observedPrice` well below the orderbook reference price so every leg
+    // books measurable slippage and the cumulative guard trips.
+    function setupMocks(observedPrice: number) {
+      const orderbook = createOrderbook(
+        [{ price: 0.185, amount: 5000 }],
+        [{ price: 0.1855, amount: 5000 }],
+      );
+      vi.spyOn(service["server"], "orderbook").mockReturnValue({
+        call: vi.fn().mockResolvedValue(orderbook),
+      } as any);
+      vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
+      vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
+        id: MOCK_KEYPAIR.publicKey(),
+        sequence: "1",
+        incrementSequenceNumber: () => {},
+      } as any);
+      vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({
+        hash: "tx-slip",
+      } as any);
+      vi.spyOn(service["server"], "offers").mockReturnValue({
+        forAccount: () => ({
+          limit: () => ({ call: vi.fn().mockResolvedValue({ records: [] }) }),
+        }),
+      } as any);
+      vi.spyOn(service as any, "tryGetAverageTradePrice").mockResolvedValue(observedPrice);
+    }
+
+    const TWO_LEGS = [
+      { tradeId: "slip-1", fromAsset: "BTC", toAsset: "USDC", amount: 1 },
+      { tradeId: "slip-2", fromAsset: "XLM", toAsset: "USDC", amount: 1000 },
+    ];
+
+    it("does not report the guard-tripping leg as both executed and failed", async () => {
+      setupMocks(0.18);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        TWO_LEGS,
+        { allowPartialFill: true, rollbackOnFailure: false, maxSlippageBpsPerRebalance: 50 },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.failureReason).toContain("exceeds max");
+
+      const executedIds = result.executedTrades.map((t) => t.tradeId);
+      const failedIds = result.failedTrades.map((t) => t.tradeId);
+      const overlap = executedIds.filter((id) => failedIds.includes(id));
+
+      expect(overlap).toEqual([]);
+      // Only the first leg ever ran, so it must be counted exactly once.
+      expect(result.executedTrades).toHaveLength(1);
+      expect(result.explanation.routeLength).toBe(1);
+    });
+
+    it("still flags the executed leg for reconciliation via rebalance_partial_failure", async () => {
+      setupMocks(0.18);
+      (logger.warn as any).mockClear();
+
+      await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        TWO_LEGS,
+        { allowPartialFill: true, rollbackOnFailure: false, maxSlippageBpsPerRebalance: 50 },
+      );
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        "[DEX] rebalance_partial_failure",
+        expect.objectContaining({
+          succeededLegs: [expect.objectContaining({ tradeId: "slip-1" })],
+        }),
+      );
+    });
+  });
+
   // ── Multi-hop path payments (#1382) ──────────────────────────────────────
 
   describe("Multi-hop path payments (#1382)", () => {

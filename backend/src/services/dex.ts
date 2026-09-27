@@ -216,6 +216,7 @@ export class StellarDEXService {
         const executedTrades: DEXTradeExecutionResult[] = []
         const failedTrades: DEXTradeExecutionResult[] = []
         const partialFills: DEXTradeExecutionResult[] = []
+        let slippageGuardFailure: string | undefined
 
         let slippageWeightedSum = 0
         let slippageWeight = 0
@@ -264,22 +265,10 @@ export class StellarDEXService {
 
             const cumulativeSlippageBps = slippageWeight > 0 ? (slippageWeightedSum / slippageWeight) : 0
             if (cumulativeSlippageBps > config.maxSlippageBpsPerRebalance) {
-                failedTrades.push({
-                    tradeId: trade.tradeId,
-                    fromAsset: trade.fromAsset,
-                    toAsset: trade.toAsset,
-                    requestedAmount: trade.amount,
-                    executedAmount: 0,
-                    estimatedReceivedAmount: 0,
-                    remainingAmount: trade.amount,
-                    referencePrice: tradeResult.referencePrice,
-                    priceLimit: tradeResult.priceLimit,
-                    spreadBps: tradeResult.spreadBps,
-                    slippageBps: cumulativeSlippageBps,
-                    liquidityCoverage: tradeResult.liquidityCoverage,
-                    status: 'failed',
-                    failureReason: `Rebalance slippage ${Dec.formatBps(cumulativeSlippageBps)} bps exceeds max ${config.maxSlippageBpsPerRebalance} bps`
-                })
+                // The guard-tripping leg did execute, so it stays in
+                // `executedTrades` for rollback to reverse; carrying only the
+                // reason here avoids double-counting it in routeLength.
+                slippageGuardFailure = `Rebalance slippage ${Dec.formatBps(cumulativeSlippageBps)} bps exceeds max ${config.maxSlippageBpsPerRebalance} bps`
                 break
             }
         }
@@ -287,7 +276,10 @@ export class StellarDEXService {
         let status: DEXRebalanceExecutionResult['status'] = 'success'
         let failureReason: string | undefined
 
-        if (failedTrades.length > 0) {
+        if (slippageGuardFailure) {
+            status = 'failed'
+            failureReason = slippageGuardFailure
+        } else if (failedTrades.length > 0) {
             status = 'failed'
             failureReason = failedTrades[0].failureReason || 'Trade execution failed'
         } else if (partialFills.length > 0) {
@@ -303,7 +295,7 @@ export class StellarDEXService {
         }
 
         
-        if (executedTrades.length > 0 && (failedTrades.length > 0 || partialFills.length > 0)) {
+        if (executedTrades.length > 0 && (failedTrades.length > 0 || partialFills.length > 0 || slippageGuardFailure)) {
             logger.warn('[DEX] rebalance_partial_failure', {
                 userAddress,
                 succeededLegs: executedTrades.map(t => ({
