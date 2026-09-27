@@ -15,6 +15,13 @@ interface RebalanceConfirmProps {
 
 
 
+interface TradeEstimate {
+  fromAsset: string
+  toAsset: string
+  amount: number
+  estimatedSlippageBps: number
+}
+
 interface RebalanceSimulationData {
   trades: TradeEstimate[]
   totalGasXlm: number

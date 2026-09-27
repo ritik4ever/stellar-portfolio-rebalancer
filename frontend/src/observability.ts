@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/react'
-import type { Event } from '@sentry/react'
+import type { ErrorEvent } from '@sentry/react'
 
 const enabled = import.meta.env.VITE_SENTRY_ENABLED === 'true' && !!import.meta.env.VITE_SENTRY_DSN
 const REDACTED = '[REDACTED]'
@@ -35,7 +35,7 @@ export function sanitizeError(error: Error): Error {
     return safeError
 }
 
-function scrubEvent(event: Event): Event {
+function scrubEvent(event: ErrorEvent): ErrorEvent {
     const safeEvent = { ...event }
     if (safeEvent.message) safeEvent.message = sanitizeObservabilityText(safeEvent.message)
     if (safeEvent.exception?.values) {

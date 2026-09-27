@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { api, ENDPOINTS } from '../config/api'
-import { appCopy } from '../content/uiCopy'
 
 type WidgetSize = 'small' | 'medium' | 'large'
 type WidgetTheme = 'light' | 'dark'

@@ -75,6 +75,12 @@ interface SelectedPair {
   columnAsset: string
 }
 
+interface CorrelationHeatmapProps {
+  assets: string[]
+  correlations: Partial<Record<CorrelationTimeRange, CorrelationMatrix>>
+  defaultRange?: CorrelationTimeRange
+}
+
 const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({
   assets,
   correlations,
@@ -123,18 +129,6 @@ const CorrelationHeatmap: React.FC<CorrelationHeatmapProps> = ({
 
   const visibleAssets = useMemo(() => assets.slice(0, MAX_ASSETS), [assets])
   const selectedMatrix = correlations[selectedRange]
-
-  const cells = useMemo(() => {
-    return visibleAssets.flatMap((rowAsset, rowIndex) =>
-      visibleAssets.map((columnAsset, columnIndex) => ({
-        rowAsset,
-        columnAsset,
-        rowIndex,
-        columnIndex,
-        coefficient: getCoefficient(selectedMatrix, rowIndex, columnIndex),
-      })),
-    )
-  }, [selectedMatrix, visibleAssets])
 
   const gridTemplateColumns = `minmax(3rem, 4rem) repeat(${visibleAssets.length}, minmax(2.75rem, 1fr))`
 

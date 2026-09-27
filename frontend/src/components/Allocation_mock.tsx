@@ -109,7 +109,7 @@ const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) =>
     })
   }
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null
     const data = payload[0].payload
     const visiblePayload = payload.filter((p: any) => !hiddenAssets.has(p.dataKey))

@@ -166,18 +166,6 @@ const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) =>
     })
   }
 
-  const handlePointSelect = (index: number) => {
-    if (!diffMode) return
-    if (selectedFromIndex === null) {
-      setSelectedFromIndex(index)
-    } else if (selectedToIndex === null && index !== selectedFromIndex) {
-      setSelectedToIndex(index)
-    } else {
-      setSelectedFromIndex(index)
-      setSelectedToIndex(null)
-    }
-  }
-
   const exitDiffMode = () => {
     setDiffMode(false)
     setSelectedFromIndex(null)
@@ -191,7 +179,7 @@ const AllocationHistory: React.FC<AllocationHistoryProps> = ({ portfolioId }) =>
     return computeAllocationDiff(fromSnapshot, toSnapshot, assetNames)
   }, [selectedFromIndex, selectedToIndex, dailyValues, assetNames])
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null
     const data = payload[0].payload
     const visiblePayload = payload.filter((p: any) => !hiddenAssets.has(p.dataKey))
