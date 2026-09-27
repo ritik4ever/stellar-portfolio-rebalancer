@@ -60,14 +60,7 @@ export interface BatchRebalancePlanResult {
     }
 }
 
-/**
- * Compute rebalance plans for several portfolios in a single batch.
- *
- * Each portfolio is planned in isolation: a failure for one portfolio is
- * captured in `failed` and never prevents the remaining portfolios from
- * being planned. A combined summary (total trades and estimated fees) is
- * aggregated from the successful plans.
- */
+
 export function buildBatchRebalancePlan(
     portfolios: Portfolio[],
     prices: PricesMap,

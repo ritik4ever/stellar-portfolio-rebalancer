@@ -35,13 +35,20 @@ variable "db_host" {
 }
 
 variable "redis_host" {
-  type = string
+  description = "Redis replication-group primary endpoint (host:port). Clients must use this cluster endpoint, not an individual node address, so they follow the primary across a failover."
+  type        = string
 }
 
-variable "deployment_type" {
-  description = "Deployment type: BLUE_GREEN or ROLLING"
+variable "redis_reader_host" {
+  description = "Redis replication-group reader endpoint (host:port) for read-only clients."
   type        = string
-  default     = "ROLLING"
+  default     = null
+}
+
+variable "redis_tls_enabled" {
+  description = "Whether the ElastiCache replication group requires TLS (transit encryption). When true the backend connects with the rediss:// scheme."
+  type        = bool
+  default     = false
 }
 
 variable "enable_blue_green" {
@@ -57,14 +64,15 @@ variable "blue_green_deployment_config" {
     deployment_ready_option = optional(object({
       action_on_timeout = optional(string, "CONTINUE_DEPLOYMENT")
     }), {})
-    lifecycle_hooks = optional(list(object({
-      lifecycle_hook_name     = string
-      target_group_name      = string
-      container_name         = string
-      container_port         = number
-    })), [])
   })
-  default = {}
+  default = {
+    termination_wait_time_in_minutes = 30
+    deployment_ready_option = {
+      action_on_timeout = "CONTINUE_DEPLOYMENT"
+    }
+  }
+}
+
 variable "ecs_min_capacity" {
   description = "Minimum number of tasks to run"
   type        = number

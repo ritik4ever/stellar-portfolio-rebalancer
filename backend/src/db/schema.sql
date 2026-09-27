@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     email_address VARCHAR(512),
     webhook_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     webhook_url VARCHAR(1024),
+    slack_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    slack_webhook_url VARCHAR(1024),
+    sms_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    phone_number VARCHAR(32),
+    phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
     event_rebalance BOOLEAN NOT NULL DEFAULT TRUE,
     event_circuit_breaker BOOLEAN NOT NULL DEFAULT TRUE,
     event_price_movement BOOLEAN NOT NULL DEFAULT TRUE,
@@ -66,6 +71,14 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notification_preferences_user ON notification_preferences(user_id);
+
+CREATE TABLE IF NOT EXISTS sms_verifications (
+    user_id VARCHAR(256) PRIMARY KEY,
+    phone_number VARCHAR(32) NOT NULL,
+    code_hash VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE IF NOT EXISTS notification_logs (
     id SERIAL PRIMARY KEY,

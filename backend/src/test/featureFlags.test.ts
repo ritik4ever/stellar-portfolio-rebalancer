@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 import { logger } from '../utils/logger.js'
+import { clearFeatureFlagsCache, getFeatureFlags, isFeatureFlagEnabled } from '../config/featureFlags.js'
+import {
+    buildStartupSummary,
+    logStartupSubsystems,
+    validateStartupConfigOrThrow
+} from '../config/startupConfig.js'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -81,7 +87,11 @@ describe('featureFlags', () => {
             'allowPublicUserPortfoliosInDemo',
             'demoMode',
             'enableDebugRoutes',
-            'enableDemoDbSeed'
+            'enableDemoDbSeed',
+            'enableIssuerMetadata',
+            'enableRebalanceCrossCheck',
+            'enableShadowMode',
+            'requireRebalanceCrossCheckAgreement'
         ])
     })
 

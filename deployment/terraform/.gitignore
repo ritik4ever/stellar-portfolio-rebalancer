@@ -1,0 +1,17 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Generated artifacts (built by `terraform archive_file` / plan-time data sources)
+modules/rds/lambda/*.zip
+
+# Variable files containing secrets (examples are fine)
+*.auto.tfvars

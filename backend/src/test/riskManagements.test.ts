@@ -155,6 +155,29 @@ describe('RiskManagementService statistical model', () => {
         expect(Math.abs(risk.ewmaVolatility - expectedEwma)).toBeLessThanOrEqual(tolerance)
     })
 
+    it('uses the configurable EWMA volatility alert threshold instead of a hardcoded value', () => {
+        const service = new RiskManagementService()
+
+        // ±30% daily swings drive EWMA volatility well above the default 15%
+        // and below a raised 50% threshold.
+        const feedSeriesBeforeRaise = () => feedSeries(service, {
+            BTC: buildSeries(100, Array.from({ length: 60 }, (_, i) => (i % 2 === 0 ? 0.3 : -0.3))),
+            USDC: buildSeries(1, Array.from({ length: 60 }, () => 0.0001))
+        })
+
+        // Raised threshold via env: no volatility alert fires
+        vi.stubEnv('CIRCUIT_BREAKER_VOLATILITY_THRESHOLD_PCT', '50')
+        feedSeriesBeforeRaise()
+        expect((service as any).checkVolatility('BTC')).toBeNull()
+
+        // Default 15% (0.15) threshold: alert fires
+        vi.unstubAllEnvs()
+        const alert = (service as any).checkVolatility('BTC')
+        expect(alert).not.toBeNull()
+        expect(alert.type).toBe('volatility')
+        expect(alert.asset).toBe('BTC')
+    })
+
     it('returns safe fallback metrics when fewer than MIN_RETURNS_FOR_STATS points exist', () => {
         const service = new RiskManagementService()
         const smallSampleReturns = Array.from({ length: 20 }, (_, i) => (i % 2 === 0 ? 0.2 : -0.2))

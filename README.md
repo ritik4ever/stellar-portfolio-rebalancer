@@ -10,6 +10,10 @@
 [![GitHub Repo](https://img.shields.io/badge/repo-Stellar%20Portfolio%20Rebalancer-blue?style=flat-square)](https://github.com/ritik4ever/stellar-portfolio-rebalancer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+**Docs:** [English](README.md) · [Español](docs/README.es.md) · [Português](docs/README.pt.md)
+
+**UI languages:** English · Español · Português · Français · Deutsch
+
 ---
 
 ## Overview

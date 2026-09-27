@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Stellar Portfolio Rebalancer includes a comprehensive notification system that alerts users about important portfolio events via email and webhooks.
+The Stellar Portfolio Rebalancer includes a comprehensive notification system that alerts users about important portfolio events via email, webhooks, Slack, and SMS.
 
 ## Features
 
@@ -12,7 +12,7 @@ The Stellar Portfolio Rebalancer includes a comprehensive notification system th
 - **SMS Notifications**: Send text message alerts via Twilio
 - **Event Filtering**: Subscribe to specific event types
 - **User Preferences**: Per-user notification configuration
-- **Configurable backoff**: Provider-specific retry timing for email and webhooks (max attempts, initial delay, exponential multiplier, cap)
+- **Configurable backoff**: Provider-specific retry timing for email, webhooks, Slack, and SMS (max attempts, initial delay, exponential multiplier, cap)
 - **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
 - **Non-blocking**: Notification failures don't affect core operations
 
@@ -533,6 +533,10 @@ GET /api/notifications/preferences?userId=GXXXXXXX...
     "emailAddress": "user@example.com",
     "webhookEnabled": true,
     "webhookUrl": "https://your-domain.com/webhook",
+    "slackEnabled": true,
+    "slackWebhookUrl": "<your-slack-incoming-webhook-url>",
+    "smsEnabled": true,
+    "smsPhoneNumber": "+15559876543",
     "events": {
       "rebalance": true,
       "circuitBreaker": true,
@@ -579,7 +583,9 @@ X-Signature: <base64_signature_of_message>
   "message": "Test notification sent successfully",
   "sentTo": {
     "email": "user@example.com",
-    "webhook": "https://your-domain.com/webhook"
+    "webhook": "https://your-domain.com/webhook",
+    "slack": "<your-slack-incoming-webhook-url>",
+    "sms": "+15559876543"
   },
   "eventType": "rebalance",
   "timestamp": "2024-02-20T10:30:00.000Z"
@@ -816,6 +822,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 ### Slack Delivery Failures
 
+> **Implementation module:** `backend/src/notifications/slack.ts`
+
 **Problem**: Slack notifications not appearing in channel
 
 **Solutions**:
@@ -841,6 +849,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 ### SMS Delivery Failures
 
+> **Implementation module:** `backend/src/notifications/sms.ts`
+
 **Problem**: SMS not being delivered to phone
 
 **Solutions**:
@@ -849,7 +859,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 3. Check that `SMS_ENABLED=true` is set in environment variables
 4. Verify Twilio credentials: confirm `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are correct
 5. Check the Twilio console (https://console.twilio.com) for message logs and error details
-6. Twilio trial accounts can only send to verified numbers — upgrade to a paid account for unrestricted delivery
+6. Check backend logs for `sms` provider entries
+7. Twilio trial accounts can only send to verified numbers — upgrade to a paid account for unrestricted delivery
 
 **Problem**: Twilio returns error `21603` ("A 'From' phone number is required") or `21211` ("Invalid 'To' phone number")
 

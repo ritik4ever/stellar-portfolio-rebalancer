@@ -1,14 +1,10 @@
-// src/services/issuerMetadataService.ts
-// Service to fetch and cache issuer metadata from stellar.toml
+
 
 import { Horizon, StellarToml } from '@stellar/stellar-sdk';
 import type { IssuerMetadata } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 
-/**
- * Configuration for the issuer metadata cache.
- * TTL is taken from environment variable ISSUER_METADATA_TTL_MS (default 6h).
- */
+
 const CACHE_TTL_MS = Number(process.env.ISSUER_METADATA_TTL_MS) || 6 * 60 * 60 * 1000; // 6 hours
 
 type CacheEntry = {
@@ -24,11 +20,7 @@ const horizonUrl = process.env.STELLAR_HORIZON_URL ||
   (network === 'mainnet' ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org');
 const server = new Horizon.Server(horizonUrl);
 
-/**
- * Result of a metadata fetch that conveys cache provenance, so callers can tell
- * a live response from stale (expired) data that was only served because the
- * network refetch failed.
- */
+
 export interface IssuerMetadataResult {
   data: IssuerMetadata;
   stale: boolean;
@@ -47,15 +39,7 @@ function toMetadata(toml: Awaited<ReturnType<typeof StellarToml.Resolver.resolve
   };
 }
 
-/**
- * Resolve metadata for a domain with cache semantics.
- *
- * - A fresh cache entry is returned immediately (source: 'cache').
- * - A miss (or forced refresh) fetches from the network and repopulates the cache.
- * - If the network fetch fails and a (possibly expired) entry exists, the stale
- *   entry is served with `stale: true` (source: 'stale') instead of erroring.
- * - If the fetch fails and there is nothing cached, the error propagates.
- */
+
 async function loadIssuerMetadataWithStatus(
   domain: string,
   options?: { forceRefresh?: boolean }
@@ -105,10 +89,7 @@ async function loadIssuerMetadataWithStatus(
   }
 }
 
-/**
- * Resolve the home domain from the issuer account and fetch its stellar.toml.
- * Returns parsed metadata or throws an error if fetching/parsing fails.
- */
+
 export async function fetchIssuerMetadata(
   domain: string,
   options?: { forceRefresh?: boolean }
@@ -117,9 +98,7 @@ export async function fetchIssuerMetadata(
   return result.data;
 }
 
-/**
- * Domain-level variant that surfaces cache provenance / staleness.
- */
+
 export async function fetchIssuerMetadataWithStatus(
   domain: string,
   options?: { forceRefresh?: boolean }
@@ -127,9 +106,7 @@ export async function fetchIssuerMetadataWithStatus(
   return loadIssuerMetadataWithStatus(domain, options);
 }
 
-/**
- * Helper to get cached metadata without network request.
- */
+
 export function getCachedMetadata(domain: string): IssuerMetadata | undefined {
   const entry = cache.get(domain);
   if (entry && entry.expires > Date.now()) {
@@ -138,10 +115,7 @@ export function getCachedMetadata(domain: string): IssuerMetadata | undefined {
   return undefined;
 }
 
-/**
- * Main entry point: Get metadata for an issuer account by resolving its home domain.
- * Kept backward compatible — failures resolve to `undefined`.
- */
+
 export async function getMetadata(issuerAccount: string): Promise<IssuerMetadata | undefined> {
   try {
     logger.debug('[IssuerMetadata] Loading account from Horizon', { issuerAccount });
@@ -158,9 +132,7 @@ export async function getMetadata(issuerAccount: string): Promise<IssuerMetadata
   }
 }
 
-/**
- * Account-level variant that surfaces cache provenance / staleness.
- */
+
 export async function getMetadataWithStatus(issuerAccount: string): Promise<IssuerMetadataResult | undefined> {
   try {
     logger.debug('[IssuerMetadata] Loading account from Horizon', { issuerAccount });
@@ -177,11 +149,7 @@ export async function getMetadataWithStatus(issuerAccount: string): Promise<Issu
   }
 }
 
-/**
- * Force a manual refresh of the metadata for an issuer account, bypassing a
- * fresh cache entry. If the network fetch fails, an existing cached entry is
- * served flagged as stale (the caller decides how to surface that).
- */
+
 export async function forceRefreshMetadata(issuerAccount: string): Promise<IssuerMetadataResult> {
   const account = await server.loadAccount(issuerAccount);
   const homeDomain = account.home_domain;
@@ -192,12 +160,7 @@ export async function forceRefreshMetadata(issuerAccount: string): Promise<Issue
   return loadIssuerMetadataWithStatus(homeDomain, { forceRefresh: true });
 }
 
-/**
- * Stage-warming: prefetch metadata for the given issuer accounts so the cache is
- * hot before real traffic arrives (avoids serving stale/missing metadata right
- * after a deployment). Failures are logged and skipped without aborting the
- * startup sequence.
- */
+
 export async function warmIssuerMetadataCache(issuerAccounts: string[]): Promise<number> {
   let warmed = 0;
   for (const issuerAccount of issuerAccounts) {

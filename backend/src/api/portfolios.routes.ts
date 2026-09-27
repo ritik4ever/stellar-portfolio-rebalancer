@@ -11,7 +11,7 @@ import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema } from './validation.js'
+import { clonePortfolioSchema } from './validation.js'
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'

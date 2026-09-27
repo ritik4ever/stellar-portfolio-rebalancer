@@ -1,7 +1,7 @@
 /**
  * Wallet adapter implementations for Stellar Portfolio Rebalancer.
  * 
- * Supported wallets: Freighter, Rabet, xBull, Mock (E2E)
+ * Supported wallets: Freighter, Rabet, xBull, Hana, Mock (E2E)
  * 
  * For user-facing troubleshooting, see: docs/WALLET_TROUBLESHOOTING.md
  * For error codes and their meanings, see the "Error codes reference" table in that doc.
@@ -12,7 +12,39 @@
  * 3. Update docs/WALLET_TROUBLESHOOTING.md with wallet-specific quirks
  */
 
+export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'hana' | 'mock'
 
+type HanaWalletApi = {
+    requestAccess?: () => Promise<{ publicKey?: string } | string>
+    connect?: () => Promise<{ publicKey?: string; address?: string } | string>
+    getAddress?: () => Promise<{ address?: string; publicKey?: string } | string>
+    isConnected?: () => Promise<boolean>
+    disconnect?: () => Promise<void>
+    signTransaction?: (
+        xdr: string,
+        options?: { network?: string; networkPassphrase?: string }
+    ) => Promise<{ signedTxXdr?: string; signedXDR?: string } | string>
+}
+
+function readPublicKey(result: unknown): string | null {
+    if (typeof result === 'string') return result
+    if (result && typeof result === 'object') {
+        const value = result as { publicKey?: unknown; address?: unknown }
+        if (typeof value.publicKey === 'string') return value.publicKey
+        if (typeof value.address === 'string') return value.address
+    }
+    return null
+}
+
+function readSignedXdr(result: unknown): string | null {
+    if (typeof result === 'string') return result
+    if (result && typeof result === 'object') {
+        const value = result as { signedTxXdr?: unknown; signedXDR?: unknown }
+        if (typeof value.signedTxXdr === 'string') return value.signedTxXdr
+        if (typeof value.signedXDR === 'string') return value.signedXDR
+    }
+    return null
+}
 export interface WalletAdapter {
     readonly name: string
     readonly type: WalletType
@@ -216,6 +248,88 @@ export class XBullAdapter implements WalletAdapter {
     }
 }
 
+export class HanaAdapter implements WalletAdapter {
+    readonly name = 'Hana'
+    readonly type: WalletType = 'hana'
+
+    private getProvider(): HanaWalletApi | null {
+        if (typeof window === 'undefined') return null
+        const hana = (window as any).hana
+        if (hana) return hana
+
+        const stellar = (window as any).stellar
+        const provider = String(stellar?.provider ?? '').toLowerCase()
+        const platform = String(stellar?.platform ?? '').toLowerCase()
+        return provider.includes('hana') || platform.includes('hana') ? stellar : null
+    }
+
+    isAvailable(): boolean {
+        return this.getProvider() !== null
+    }
+
+    async connect(): Promise<string> {
+        const provider = this.getProvider()
+        if (!provider) {
+            throw new WalletError('Hana wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            const result = provider.connect
+                ? await provider.connect()
+                : provider.requestAccess
+                    ? await provider.requestAccess()
+                    : provider.getAddress
+                        ? await provider.getAddress()
+                        : null
+            const publicKey = readPublicKey(result)
+            if (!publicKey) {
+                throw new Error('No public key returned')
+            }
+            return publicKey
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+
+    async isConnected(): Promise<boolean> {
+        const provider = this.getProvider()
+        if (!provider) return false
+        if (provider.isConnected) {
+            try {
+                return await provider.isConnected()
+            } catch {
+                return false
+            }
+        }
+        return localStorage.getItem('wallet_type') === this.type
+    }
+
+    async disconnect(): Promise<void> {
+        const provider = this.getProvider()
+        if (provider?.disconnect) {
+            await provider.disconnect()
+        }
+    }
+
+    async signTransaction(xdr: string, network?: string): Promise<string> {
+        const provider = this.getProvider()
+        if (!provider?.signTransaction) {
+            throw new WalletError('Hana wallet is not installed', 'WALLET_NOT_INSTALLED', this.type)
+        }
+
+        try {
+            const result = await provider.signTransaction(xdr, { network, networkPassphrase: network })
+            const signedXdr = readSignedXdr(result)
+            if (!signedXdr) {
+                throw new Error('No signed transaction returned')
+            }
+            return signedXdr
+        } catch (error) {
+            throw normalizeError(error, this.type)
+        }
+    }
+}
+
 export class MockAdapter implements WalletAdapter {
     readonly name = 'Mock Wallet (Test)'
     readonly type: WalletType = 'mock'
@@ -252,6 +366,7 @@ export const walletAdapters: WalletAdapter[] = [
     new FreighterAdapter(),
     new RabetAdapter(),
     new XBullAdapter(),
+    new HanaAdapter(),
 
 ]
 

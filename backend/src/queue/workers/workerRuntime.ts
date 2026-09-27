@@ -3,15 +3,7 @@ import { persistWorkerStatus } from './workerHeartbeat.js';
 import { getDLQQueue, DLQJobData } from '../queues.js';
 import { logger } from '../../utils/logger.js';
 import { query } from '../../db/client.js';
-import { startPortfolioCheckWorker } from './portfolioCheckWorker.js'
-import { startRebalanceWorker } from './rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker } from './analyticsSnapshotWorker.js'
-import { startAnalyticsCompactionWorker } from './analyticsCompactionWorker.js'
-import { startIdempotencyCleanupWorker } from './idempotencyCleanupWorker.js'
-import { startPortfolioExportWorker } from './portfolioExportWorker.js'
-import { startUserAlertsWorker } from './userAlertsWorker.js'
-import { startScheduledExportWorker } from './scheduledExportWorker.js'
-import { startPriceHistoryWorkers, stopPriceHistoryWorkers } from './priceHistoryWorker.js'
+
 
 export interface WorkerRuntimeStatus {
     name: string
@@ -27,6 +19,30 @@ export interface WorkerRuntimeStatus {
     schedulerRegistered: boolean
 }
 
+/**
+ * Lazy accessors for the lock-instrumentation dependencies. They are imported
+ * lazily (rather than at module top level) so `workerRuntime` stays light:
+ * importing the lock helpers from a test must not pull in the whole worker
+ * graph (portfolioStorage → better-sqlite3, Stellar SDK, …). See #1399.
+ */
+async function getLockInstrumentation(): Promise<{
+    recordWorkerLockAcquisition: (input: {
+        portfolioId: string
+        outcome: 'acquired' | 'contended'
+        waitMs: number
+    }) => void
+    getWaitWarnMs: () => number
+}> {
+    const [{ recordWorkerLockAcquisition }, { getRebalanceLockConfig }] = await Promise.all([
+        import('../../observability/metrics.js'),
+        import('../../config/rebalanceLockConfig.js'),
+    ])
+    return {
+        recordWorkerLockAcquisition,
+        getWaitWarnMs: () => getRebalanceLockConfig().waitWarnMs,
+    }
+}
+
 /** Simple deterministic hash to map a string into a 32‑bit integer for advisory lock keys. */
 function stringHash32(str: string): number {
     let hash = 0
@@ -38,19 +54,42 @@ function stringHash32(str: string): number {
 }
 
 /** Acquire a PostgreSQL advisory lock for the given worker name.
+ * Records wait time + contention (lock-already-held) metrics labelled by a
+ * bucketed portfolio identifier (#1399), and logs a warning when acquisition
+ * exceeds the configurable `REBALANCE_LOCK_WAIT_WARN_MS` threshold —
+ * indicating a possibly stuck lock or saturated DB pool.
  * Returns true when the lock is successfully obtained; otherwise false.
  */
 export async function acquireWorkerLock(name: string): Promise<boolean> {
     const key = stringHash32(name)
+    const startedAt = Date.now()
+    let acquired: boolean
     try {
         const res = await query('SELECT pg_try_advisory_lock($1) AS locked', [key])
         // pg returns a column named "locked" with a boolean value
-        return (res.rows[0] as any).locked === true
+        acquired = (res.rows[0] as any).locked === true
     } catch (err) {
         // If the DB is not configured or the query fails, treat as lock unavailable
         console.error('[LOCK] Failed to acquire advisory lock', { name, err })
-        return false
+        acquired = false
     }
+    const waitMs = Date.now() - startedAt
+    const { recordWorkerLockAcquisition, getWaitWarnMs } = await getLockInstrumentation()
+    recordWorkerLockAcquisition({
+        portfolioId: name,
+        outcome: acquired ? 'acquired' : 'contended',
+        waitMs,
+    })
+    const waitWarnMs = getWaitWarnMs()
+    if (waitMs > waitWarnMs) {
+        logger.warn('[LOCK] Slow lock acquisition — possible stuck lock', {
+            portfolioId: name,
+            waitMs,
+            waitWarnMs,
+            acquired,
+        })
+    }
+    return acquired
 }
 
 /** Release a previously acquired advisory lock for the given worker name. */
@@ -156,10 +195,32 @@ export async function handleFinalFailure(job: Job, error: unknown): Promise<void
 
 let workers: Worker[] = []
 
-export function startAllWorkers(): void {
+export async function startAllWorkers(): Promise<void> {
     logger.info('[WORKER] Starting all background workers...')
 
     try {
+        const [
+            { startPortfolioCheckWorker },
+            { startRebalanceWorker },
+            { startAnalyticsSnapshotWorker },
+            { startAnalyticsCompactionWorker },
+            { startIdempotencyCleanupWorker },
+            { startPortfolioExportWorker },
+            { startUserAlertsWorker },
+            { startScheduledExportWorker },
+            { startPriceHistoryWorkers },
+        ] = await Promise.all([
+            import('./portfolioCheckWorker.js'),
+            import('./rebalanceWorker.js'),
+            import('./analyticsSnapshotWorker.js'),
+            import('./analyticsCompactionWorker.js'),
+            import('./idempotencyCleanupWorker.js'),
+            import('./portfolioExportWorker.js'),
+            import('./userAlertsWorker.js'),
+            import('./scheduledExportWorker.js'),
+            import('./priceHistoryWorker.js'),
+        ])
+
         workers.push(
             startPortfolioCheckWorker() as Worker,
             startRebalanceWorker() as Worker,
@@ -184,6 +245,7 @@ export async function stopAllWorkers(): Promise<void> {
     logger.info('[WORKER] Stopping all background workers...')
     
     try {
+        const { stopPriceHistoryWorkers } = await import('./priceHistoryWorker.js')
         await Promise.all([
             ...workers.map(w => w.close()),
             stopPriceHistoryWorkers()

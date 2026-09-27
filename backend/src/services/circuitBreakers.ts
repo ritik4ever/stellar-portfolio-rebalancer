@@ -1,3 +1,5 @@
+import { checkVolatilityThreshold, getVolatilityThresholdPct } from '../config/volatilityConfig.js'
+
 export class CircuitBreakers {
     static checkMarketConditions(prices: Record<string, any>): { safe: boolean, reason?: string } {
         // Check for extreme volatility
@@ -16,18 +18,9 @@ export class CircuitBreakers {
     }
 
     private static checkVolatility(prices: Record<string, any>): { safe: boolean, reason?: string } {
-        const volatilityThreshold = 15 // 15% change triggers circuit breaker
-
-        for (const [asset, data] of Object.entries(prices)) {
-            if (Math.abs(data.change) > volatilityThreshold) {
-                return {
-                    safe: false,
-                    reason: `High volatility detected: ${asset} moved ${data.change.toFixed(2)}% in 24h`
-                }
-            }
-        }
-
-        return { safe: true }
+        // Threshold is configurable (env / admin config store), defaults to 15%
+        const volatilityThreshold = getVolatilityThresholdPct()
+        return checkVolatilityThreshold(prices, volatilityThreshold)
     }
 
     private static checkDataFreshness(prices: Record<string, any>): { safe: boolean, reason?: string } {

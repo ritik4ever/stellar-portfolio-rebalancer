@@ -454,53 +454,7 @@
       ]
     ],
     [],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "execute_rebalance",
-              "args": [
-                {
-                  "u64": "1"
-                },
-                {
-                  "map": [
-                    {
-                      "key": {
-                        "address": "CACMVW2KK4H5FZDFF2AUCAKQTEJMZZWJUIZF23XMRVYQBSXYLHZ6BKWN"
-                      },
-                      "val": {
-                        "i128": "99000000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
-                      },
-                      "val": {
-                        "i128": "99000000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "address": "CDS3FDGQ4JA2V3F26Y4BMWWJEC5TT26RJBN7KIQKUMVO2MAOCMDTSZ7A"
-                      },
-                      "val": {
-                        "i128": "99000000"
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ]
+    []
   ],
   "ledger": {
     "protocol_version": 27,
@@ -726,62 +680,6 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "NavHistory"
-                  },
-                  {
-                    "u64": "1"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "vec": [
-                  {
-                    "map": [
-                      {
-                        "key": {
-                          "symbol": "sequence"
-                        },
-                        "val": {
-                          "u32": 0
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "timestamp"
-                        },
-                        "val": {
-                          "u64": "3601"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "usd_nav"
-                        },
-                        "val": {
-                          "i128": "30000000000"
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
                     "symbol": "NextPortfolioId"
                   }
                 ]
@@ -928,7 +826,7 @@
                       "symbol": "last_rebalance"
                     },
                     "val": {
-                      "u64": "3601"
+                      "u64": "0"
                     }
                   },
                   {
@@ -1042,7 +940,7 @@
                       "symbol": "total_value"
                     },
                     "val": {
-                      "i128": "30000000000"
+                      "i128": "0"
                     }
                   },
                   {
@@ -1121,7 +1019,7 @@
                         ]
                       },
                       "val": {
-                        "u64": "3601"
+                        "u64": "0"
                       }
                     },
                     {
@@ -1134,6 +1032,18 @@
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "SchemaVersion"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     }
                   ]
@@ -1298,26 +1208,6 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "1301173170172112462"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "2781962168096793370"
                 }
               },
               "durability": "temporary",
@@ -2045,72 +1935,5 @@
       }
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "portfolio"
-              },
-              {
-                "symbol": "rebalanced"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "u64": "1"
-                },
-                {
-                  "u64": "3601"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "portfolio"
-              },
-              {
-                "symbol": "nav_snapshot"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "u64": "1"
-                },
-                {
-                  "i128": "30000000000"
-                },
-                {
-                  "u32": 0
-                },
-                {
-                  "u64": "3601"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }

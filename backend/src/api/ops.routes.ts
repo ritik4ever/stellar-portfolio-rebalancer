@@ -38,7 +38,7 @@ const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 const publicFeatureFlags = getPublicFeatureFlags()
 
-/** Comprehensive health check for API clients and monitoring tools (mounted at /api/health, /api/v1/health). */
+
 opsRouter.get('/health', async (_req: Request, res: Response) => {
     const checkedAt = new Date().toISOString()
     const deps: Record<string, { status: 'ok' | 'degraded' | 'down'; latency_ms: number; last_checked: string }> = {}

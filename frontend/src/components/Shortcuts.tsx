@@ -8,12 +8,7 @@ import {
   type ShortcutAction,
 } from '../hooks/useKeybindings'
 
-interface ShortcutsProps {
-  onNewPortfolio?: () => void
-  onExecuteRebalance?: () => void
-  onOpenSettings?: () => void
-  onNavigatePortfolios?: (direction: 'next' | 'prev') => void
-}
+
 
 /** Maps a ShortcutAction to the callback it should invoke. */
 function buildActionMap(props: ShortcutsProps): Partial<Record<ShortcutAction, () => void>> {

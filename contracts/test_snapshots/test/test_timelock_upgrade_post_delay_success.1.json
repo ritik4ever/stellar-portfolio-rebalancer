@@ -120,6 +120,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "SchemaVersion"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "UpgradeAuthority"
                           }
                         ]

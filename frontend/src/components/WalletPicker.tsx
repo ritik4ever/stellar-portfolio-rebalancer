@@ -14,7 +14,7 @@ export const WalletPicker: React.FC<WalletPickerProps> = ({ onConnect, onError, 
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null)
 
   useEffect(() => {
-    // Check if already connected
+   
     const currentType = walletManager.getWalletType()
     if (currentType) {
       setConnectedWallet(currentType)
@@ -27,6 +27,10 @@ export const WalletPicker: React.FC<WalletPickerProps> = ({ onConnect, onError, 
       case 'freighter': return !!window.freighter
       case 'rabet': return !!window.rabet
       case 'xbull': return !!window.xBull
+      case 'hana': {
+        const stellar = window.stellar as any
+        return !!window.hana || String(stellar?.provider ?? '').toLowerCase().includes('hana') || String(stellar?.platform ?? '').toLowerCase().includes('hana')
+      }
       case 'lobstr': return !!window.lobstr
       case 'walletconnect': return false // Requires QR flow
       default: return false
@@ -37,7 +41,7 @@ export const WalletPicker: React.FC<WalletPickerProps> = ({ onConnect, onError, 
     setConnecting(wallet.type)
 
     try {
-      // Disconnect previous if switching
+      
       if (connectedWallet && connectedWallet !== wallet.type) {
         await walletManager.disconnect()
         if (onDisconnect) onDisconnect()

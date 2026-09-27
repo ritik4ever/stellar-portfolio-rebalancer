@@ -598,13 +598,13 @@ Use this for mainnet deployment. **This is irreversible and uses real XLM.**
 
 Every deployment (testnet, staging, and production) must be verified post-deploy by calling the read-only `capability_summary` contract method (`contracts/CONTRACT_ABI.md`) before initialization or traffic cutover. This is the single cheapest way to confirm the deployed WASM matches the intended release — a stale or mismatched deploy is caught here before it reaches `initialize` or the auto-rebalancer.
 
-An automated equivalent of this check is planned for the contract-deploy pipeline (`deployment/contract-deploy.sh`), which would fail the deployment job automatically if `capability_summary` doesn't match expectations after `soroban contract deploy`. Until that automation lands, the manual checklist step above is required for every environment.
+The automated deployment entry point is [`deployment/contract-deploy.sh`](../deployment/contract-deploy.sh), which is invoked by the [`contract-deploy` workflow](../.github/workflows/contract-deploy.yml). Its post-deploy capability verification step should run immediately after `soroban contract deploy` and must complete successfully before initialization or traffic cutover. For manual deployments, complete the environment-specific `capability_summary` command above and compare every field with this table.
 
 ### Expected capability set (current release)
 
 | Field                        | Expected value                                                       |
 | ----------------------------- | ---------------------------------------------------------------------- |
-| `version`                     | `1` (`CONTRACT_VERSION`, `contracts/src/types.rs`)                     |
+| `version`                     | `2` (`CONTRACT_VERSION`, `contracts/src/types.rs`)                     |
 | `schema_version`              | `1` (`CONTRACT_EVENT_SCHEMA_VERSION`, `contracts/src/types.rs`)        |
 | `capability_flags`            | `7` (`PerPortfolioSteward \| DifferentiatedPricing \| EmergencyStop`)  |
 | `min_rebalance_threshold`     | `1`                                                                    |

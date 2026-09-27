@@ -38,22 +38,74 @@ describe('Analytics Compaction Worker', () => {
             expect(vi.mocked(analyticsService.compactAllPortfolios)).toHaveBeenCalledWith(90, 7)
         })
 
-        it('should call compactAllPortfolios with custom parameters', async () => {
-            const mockJob = {
-                id: 'test-job-2',
-                data: {
-                    triggeredBy: 'manual',
-                    correlationId: 'corr-456',
-                    cutoffDays: 60,
-                    recentDays: 14,
+        it('should respect configured retention window from environment variables when not specified in job', async () => {
+            const originalCutoff = process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+            const originalRecent = process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+            try {
+                process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = '180'
+                process.env.ANALYTICS_COMPACTION_RECENT_DAYS = '14'
+
+                const mockJob = {
+                    id: 'test-job-configured',
+                    data: {
+                        triggeredBy: 'scheduler',
+                        correlationId: 'corr-configured',
+                    }
+                } as unknown as Job
+
+                vi.mocked(analyticsService.compactAllPortfolios).mockResolvedValue([])
+
+                await processAnalyticsCompactionJob(mockJob)
+
+                expect(vi.mocked(analyticsService.compactAllPortfolios)).toHaveBeenCalledWith(180, 14)
+            } finally {
+                if (originalCutoff === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = originalCutoff
                 }
-            } as unknown as Job
+                if (originalRecent === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_RECENT_DAYS = originalRecent
+                }
+            }
+        })
 
-            vi.mocked(analyticsService.compactAllPortfolios).mockResolvedValue([])
+        it('should call compactAllPortfolios with custom parameters overriding configured retention', async () => {
+            const originalCutoff = process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+            const originalRecent = process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+            try {
+                process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = '180'
+                process.env.ANALYTICS_COMPACTION_RECENT_DAYS = '14'
 
-            await processAnalyticsCompactionJob(mockJob)
+                const mockJob = {
+                    id: 'test-job-2',
+                    data: {
+                        triggeredBy: 'manual',
+                        correlationId: 'corr-456',
+                        cutoffDays: 60,
+                        recentDays: 3,
+                    }
+                } as unknown as Job
 
-            expect(vi.mocked(analyticsService.compactAllPortfolios)).toHaveBeenCalledWith(60, 14)
+                vi.mocked(analyticsService.compactAllPortfolios).mockResolvedValue([])
+
+                await processAnalyticsCompactionJob(mockJob)
+
+                expect(vi.mocked(analyticsService.compactAllPortfolios)).toHaveBeenCalledWith(60, 3)
+            } finally {
+                if (originalCutoff === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = originalCutoff
+                }
+                if (originalRecent === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_RECENT_DAYS = originalRecent
+                }
+            }
         })
 
         it('should handle empty portfolio results', async () => {

@@ -13,13 +13,7 @@ interface RebalanceConfirmProps {
   maxSlippageThresholdBps?: number
 }
 
-interface TradeEstimate {
-  fromAsset: string
-  toAsset: string
-  amount: number
-  expectedPrice: number
-  estimatedSlippageBps: number
-}
+
 
 interface RebalanceSimulationData {
   trades: TradeEstimate[]
@@ -61,12 +55,7 @@ const RebalanceConfirm: React.FC<RebalanceConfirmProps> = ({
   const { data: plan } = useRebalancePlan(portfolioId)
   const executeRebalance = useExecuteRebalanceMutation(portfolioId)
 
-  useEffect(() => {
-    if (!open) {
-      setConfirmed(false)
-      setCooldownRemaining(0)
-    }
-  }, [open])
+ 
 
   useEffect(() => {
     if (!estimate?.lastRebalanceTimestamp) return

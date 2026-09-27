@@ -70,7 +70,7 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
         onDirtyChange?.(isDirty)
     }, [isDirty, onDirtyChange])
 
-    // Warn before browser-level navigation (tab close, refresh, address bar)
+    
     useEffect(() => {
         if (!isDirty) return undefined
         const handler = (e: BeforeUnloadEvent) => {
@@ -81,7 +81,7 @@ const Settings: React.FC<SettingsProps> = ({ onNavigate, onDirtyChange }) => {
         return () => window.removeEventListener('beforeunload', handler)
     }, [isDirty])
 
-    // Wrap in-app navigation with a confirmation guard
+    
     const guardedNavigate = useCallback(
         (view: string) => {
             if (isDirty && !window.confirm('You have unsaved changes. Leave without saving?')) return

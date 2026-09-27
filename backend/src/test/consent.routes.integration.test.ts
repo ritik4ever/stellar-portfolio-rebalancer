@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import type { Express } from 'express'
 import request from 'supertest'
+import { Keypair } from '@stellar/stellar-sdk'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -12,6 +13,16 @@ let databaseService: typeof import('../services/databaseService.js').databaseSer
 const envBackup: NodeJS.ProcessEnv = { ...process.env }
 
 const testUser = (prefix: string) => `G${prefix}${Math.random().toString(36).slice(2, 12).toUpperCase()}`
+
+function makeAdminHeaders(kp: Keypair) {
+    const msg = Date.now().toString()
+    const sig = kp.sign(Buffer.from(msg, 'utf8')).toString('base64')
+    return {
+        'x-public-key': kp.publicKey(),
+        'x-message': msg,
+        'x-signature': sig,
+    }
+}
 
 beforeAll(async () => {
     const testDir = join(tmpdir(), `stellar-consent-routes-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -302,5 +313,198 @@ describe('consent routes integration', () => {
             .expect(400)
 
         expect(purge.body.error?.code).toBe('VALIDATION_ERROR')
+    })
+
+    describe('GET /api/v1/consent/export audit-trail export', () => {
+        it('allows a user to self-export full consent audit trail with timestamps, versions, and categories', async () => {
+            const userId = testUser('SELFEXP')
+            const token = generateAccessToken(userId)
+
+            // Step 1: Initial grant with analytics enabled, marketing disabled
+            await request(app)
+                .post('/api/v1/consent/grant')
+                .set('Authorization', `Bearer ${token}`)
+                .send({
+                    analytics: true,
+                    marketing: false,
+                    documentText: 'Consent Terms Document Version 1.0'
+                })
+                .expect(200)
+
+            // Step 2: Revoke consent
+            await request(app)
+                .post('/api/v1/consent/revoke')
+                .set('Authorization', `Bearer ${token}`)
+                .send({
+                    documentText: 'Revocation Terms v1.0'
+                })
+                .expect(200)
+
+            // Step 3: Grant consent again with marketing enabled
+            await request(app)
+                .post('/api/v1/consent/grant')
+                .set('Authorization', `Bearer ${token}`)
+                .send({
+                    analytics: true,
+                    marketing: true,
+                    documentText: 'Consent Terms Document Version 2.0'
+                })
+                .expect(200)
+
+            // Step 4: Self-export consent trail
+            const exportRes = await request(app)
+                .get('/api/v1/consent/export')
+                .set('Authorization', `Bearer ${token}`)
+                .expect(200)
+
+            const data = exportRes.body.data
+            expect(data.userId).toBe(userId)
+            expect(data.exportedAt).toBeTruthy()
+            expect(data.consent).not.toBeNull()
+            expect(data.consent.active).toBe(true)
+            expect(data.consent.termsAcceptedAt).toBeTruthy()
+            expect(data.consent.privacyAcceptedAt).toBeTruthy()
+            expect(data.consent.cookieAcceptedAt).toBeTruthy()
+            expect(data.consent.analyticsAcceptedAt).toBeTruthy()
+            expect(data.consent.marketingAcceptedAt).toBeTruthy()
+            expect(data.consent.categories).toContain('terms')
+            expect(data.consent.categories).toContain('privacy')
+            expect(data.consent.categories).toContain('cookies')
+            expect(data.consent.categories).toContain('analytics')
+            expect(data.consent.categories).toContain('marketing')
+
+            // Audit history
+            expect(data.events).toHaveLength(3)
+            expect(data.history).toHaveLength(3)
+
+            // Event 1: grant (analytics only)
+            const event1 = data.events[0]
+            expect(event1.action).toBe('grant')
+            expect(event1.timestamp).toBeTruthy()
+            expect(event1.documentVersion).toBeTruthy()
+            expect(event1.version).toBe(event1.documentVersion)
+            expect(event1.categories).toContain('terms')
+            expect(event1.categories).toContain('privacy')
+            expect(event1.categories).toContain('cookies')
+            expect(event1.categories).toContain('analytics')
+            expect(event1.categories).not.toContain('marketing')
+            expect(event1.categoryDetails.analytics).toBe(true)
+            expect(event1.categoryDetails.marketing).toBe(false)
+
+            // Event 2: revoke
+            const event2 = data.events[1]
+            expect(event2.action).toBe('revoke')
+            expect(event2.timestamp).toBeTruthy()
+            expect(event2.documentVersion).toBeTruthy()
+
+            // Event 3: grant (analytics + marketing)
+            const event3 = data.events[2]
+            expect(event3.action).toBe('grant')
+            expect(event3.timestamp).toBeTruthy()
+            expect(event3.documentVersion).toBeTruthy()
+            expect(event3.categories).toContain('marketing')
+            expect(event3.categoryDetails.marketing).toBe(true)
+        })
+
+        it('allows admin to export another user consent trail via admin signed headers', async () => {
+            const adminKp = Keypair.random()
+            const previousAdminKeys = process.env.ADMIN_PUBLIC_KEYS
+            process.env.ADMIN_PUBLIC_KEYS = adminKp.publicKey()
+
+            try {
+                const targetUserId = testUser('TARGET')
+                const targetToken = generateAccessToken(targetUserId)
+
+                await request(app)
+                    .post('/api/v1/consent/grant')
+                    .set('Authorization', `Bearer ${targetToken}`)
+                    .send({
+                        analytics: true,
+                        marketing: false,
+                        documentText: 'Target User Policy v1'
+                    })
+                    .expect(200)
+
+                const adminRes = await request(app)
+                    .get('/api/v1/consent/export')
+                    .query({ userId: targetUserId })
+                    .set(makeAdminHeaders(adminKp))
+                    .expect(200)
+
+                expect(adminRes.body.data.userId).toBe(targetUserId)
+                expect(adminRes.body.data.consent).not.toBeNull()
+                expect(adminRes.body.data.events).toHaveLength(1)
+                expect(adminRes.body.data.events[0].action).toBe('grant')
+                expect(adminRes.body.data.events[0].timestamp).toBeTruthy()
+                expect(adminRes.body.data.events[0].documentVersion).toBeTruthy()
+                expect(adminRes.body.data.events[0].categories).toContain('analytics')
+            } finally {
+                if (previousAdminKeys !== undefined) {
+                    process.env.ADMIN_PUBLIC_KEYS = previousAdminKeys
+                } else {
+                    delete process.env.ADMIN_PUBLIC_KEYS
+                }
+            }
+        })
+
+        it('allows admin to export another user consent trail via admin JWT token', async () => {
+            const adminKp = Keypair.random()
+            const previousAdminKeys = process.env.ADMIN_PUBLIC_KEYS
+            process.env.ADMIN_PUBLIC_KEYS = adminKp.publicKey()
+
+            try {
+                const targetUserId = testUser('TARGETJWT')
+                const targetToken = generateAccessToken(targetUserId)
+                const adminToken = generateAccessToken(adminKp.publicKey())
+
+                await request(app)
+                    .post('/api/v1/consent/grant')
+                    .set('Authorization', `Bearer ${targetToken}`)
+                    .send({
+                        analytics: false,
+                        marketing: true,
+                        documentText: 'Marketing Consent v1'
+                    })
+                    .expect(200)
+
+                const adminRes = await request(app)
+                    .get('/api/v1/consent/export')
+                    .query({ userId: targetUserId })
+                    .set('Authorization', `Bearer ${adminToken}`)
+                    .expect(200)
+
+                expect(adminRes.body.data.userId).toBe(targetUserId)
+                expect(adminRes.body.data.consent.marketingAcceptedAt).toBeTruthy()
+                expect(adminRes.body.data.events[0].categories).toContain('marketing')
+            } finally {
+                if (previousAdminKeys !== undefined) {
+                    process.env.ADMIN_PUBLIC_KEYS = previousAdminKeys
+                } else {
+                    delete process.env.ADMIN_PUBLIC_KEYS
+                }
+            }
+        })
+
+        it('returns 403 when non-admin user attempts to export another user consent trail', async () => {
+            const userA = testUser('USERA')
+            const userB = testUser('USERB')
+            const tokenA = generateAccessToken(userA)
+
+            const res = await request(app)
+                .get('/api/v1/consent/export')
+                .query({ userId: userB })
+                .set('Authorization', `Bearer ${tokenA}`)
+                .expect(403)
+
+            expect(res.body.error?.code).toBe('FORBIDDEN')
+        })
+
+        it('returns 401 when export is requested without authentication', async () => {
+            const targetUserId = testUser('NOAUTH')
+            await request(app)
+                .get('/api/v1/consent/export')
+                .query({ userId: targetUserId })
+                .expect(401)
+        })
     })
 })

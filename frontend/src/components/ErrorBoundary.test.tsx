@@ -1,16 +1,20 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
+const captureException = vi.fn()
+const getAppVersion = vi.fn(() => 'test-release')
+const sanitizeError = vi.fn((error: Error) => error)
+const sanitizeObservabilityText = vi.fn((value: string) => value)
+
 vi.mock('../observability', () => ({
-    Sentry: {
-        captureException: vi.fn(),
-    },
+    Sentry: { captureException },
+    getAppVersion,
+    sanitizeError,
+    sanitizeObservabilityText,
 }))
 
+const getPublicKey = vi.fn(() => null)
 vi.mock('../utils/walletManager', () => ({
-    walletManager: {
-        getPublicKey: vi.fn(() => null),
-    },
+    walletManager: { getPublicKey },
 }))
 
 import { ErrorBoundary } from './ErrorBoundary'
@@ -28,6 +32,7 @@ describe('ErrorBoundary', () => {
     afterEach(() => {
         cleanup()
         vi.clearAllMocks()
+        window.history.replaceState({}, '', '/')
     })
 
     it('renders children when no error occurs', () => {
@@ -54,8 +59,10 @@ describe('ErrorBoundary', () => {
         consoleError.mockRestore()
     })
 
-    it('reports the error to Sentry with context', () => {
+    it('reports the error to Sentry with safe context when a child throws', () => {
         const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+        getPublicKey.mockReturnValue('GABC123')
+        window.history.replaceState({}, '', '/portfolio?token=must-not-be-reported#private-key')
 
         render(
             <ErrorBoundary fallbackTitle="PortfolioSection">
@@ -69,10 +76,14 @@ describe('ErrorBoundary', () => {
             expect.objectContaining({
                 extra: expect.objectContaining({
                     componentStack: expect.any(String),
+                    route: '/portfolio',
+                    userId: 'GABC123',
+                    appVersion: 'test-release',
                     section: 'PortfolioSection',
                 }),
             }),
         )
+        expect(JSON.stringify(Sentry.captureException.mock.calls[0])).not.toContain('must-not-be-reported')
 
         consoleError.mockRestore()
     })

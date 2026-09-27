@@ -69,7 +69,7 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Run backend tests (shard ${{ matrix.shard }}/${{ matrix.total }})
         working-directory: backend
@@ -110,7 +110,7 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Download all blob reports
         uses: actions/download-artifact@v4

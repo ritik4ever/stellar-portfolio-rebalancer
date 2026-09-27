@@ -184,6 +184,18 @@ const workerStatus = new Gauge({
   registers: [register],
 });
 
+const indexerLagGauge = new Gauge({
+  name: `${observabilityConfig.metrics.prefix}contract_event_indexer_lag_ledgers`,
+  help: "Gap between chain tip ledger and last-indexed ledger",
+  registers: [register],
+});
+
+const indexerErrorsTotal = new Counter({
+  name: `${observabilityConfig.metrics.prefix}contract_event_indexer_errors_total`,
+  help: "Total errors encountered by the contract event indexer",
+  registers: [register],
+});
+
 export const dbQueryDuration = new Histogram({
   name: `${observabilityConfig.metrics.prefix}db_query_duration_seconds`,
   help: "Database query duration in seconds",
@@ -277,6 +289,14 @@ export function recordCacheEntries(count: number): void {
   cacheEntriesGauge.set(count);
 }
 
+export function recordIndexerLag(lagLedgers: number): void {
+  indexerLagGauge.set(lagLedgers);
+}
+
+export function recordIndexerError(): void {
+  indexerErrorsTotal.inc();
+}
+
 // ── Auth security event metrics (Issue #423) ─────────────────────────────────
 
 const authSecurityEventsTotal = new Counter({
@@ -353,6 +373,35 @@ export function recordNotificationDeliveryAttempt(
     notificationDeliveryAttemptsTotal.inc({ channel, outcome })
 }
 
+const idempotencyCleanupRunsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_runs_total`,
+    help: 'Idempotency cleanup worker runs by outcome',
+    labelNames: ['outcome'] as const,
+    registers: [register],
+})
+const idempotencyCleanupRecordsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_records_total`,
+    help: 'Expired idempotency records removed',
+    registers: [register],
+})
+const idempotencyCleanupLastRun = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_last_run_timestamp_seconds`,
+    help: 'Unix timestamp of the latest cleanup attempt',
+    registers: [register],
+})
+const idempotencyCleanupConsecutiveFailures = new Gauge({
+    name: `${observabilityConfig.metrics.prefix}idempotency_cleanup_consecutive_failures`,
+    help: 'Current consecutive cleanup failure count',
+    registers: [register],
+})
+
+export function recordIdempotencyCleanupRun(success: boolean, recordsCleaned: number, failures: number): void {
+    idempotencyCleanupRunsTotal.inc({ outcome: success ? 'success' : 'failure' })
+    if (recordsCleaned > 0) idempotencyCleanupRecordsTotal.inc(recordsCleaned)
+    idempotencyCleanupLastRun.set(Date.now() / 1000)
+    idempotencyCleanupConsecutiveFailures.set(failures)
+}
+
 // ── Per-portfolio rebalance lock contention metrics (#1399) ─────────────────
 //
 // `rebalanceLockService.acquireLock` returning false means a second caller
@@ -386,6 +435,24 @@ const lockHoldDuration = new Histogram({
 })
 
 export type LockBackend = 'redis' | 'memory'
+
+/**
+ * Bucket a portfolio identifier into a small, bounded label value so the
+ * per-portfolio lock metrics (#1399) stay low-cardinality.
+ *
+ * Raw portfolio ids are unbounded and must never be used as Prometheus label
+ * values.  16 deterministic buckets (`00`–`0f`) keep the series count fixed
+ * (per bucket x outcome) while still allowing contention hotspots to be
+ * localised to a slice of portfolios (combine with slow-acquire warning logs,
+ * which carry the full portfolio id, to drill into a specific portfolio).
+ */
+export function bucketPortfolioId(portfolioId: string): string {
+    let hash = 0
+    for (let i = 0; i < portfolioId.length; i++) {
+        hash = ((hash << 5) - hash + portfolioId.charCodeAt(i)) | 0
+    }
+    return (hash & 0xf).toString(16).padStart(2, '0')
+}
 
 /** Call when `acquireLock` returns false — the lock was already held. */
 export function recordLockContention(backend: LockBackend): void {
@@ -432,6 +499,132 @@ const rebalanceWorkerLockWaitSeconds = new Histogram({
     help: 'Time spent acquiring the rebalance worker advisory lock, by outcome',
     labelNames: ['portfolio_bucket', 'outcome'] as const,
     buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+// ── Per-portfolio advisory-lock acquisition metrics (#1399) ─────────────────
+//
+// The `acquireWorkerLock` path in `rebalanceWorker.ts` (pg advisory locks)
+// previously had no visibility: a lock-already-held rejection was only
+// inferable from info logs, and slow acquisitions (stuck lock / saturated DB
+// pool) were invisible entirely.  These series make contention observable via
+// metrics:
+//
+// - `rebalance_lock_wait_seconds` — histogram of acquisition wall time,
+//   labelled by bucketed portfolio id + outcome (`acquired`|`contended`).
+// - `rebalance_lock_contention_count` — counter of lock-already-held
+//   rejections, same bucket label.  The counter makes "how often are we
+//   colliding" answerable from a dashboard; the existing
+//   `rebalance_lock_contention_total` (backend-labelled) is the Redis/memory
+//   `rebalanceLockService` counterpart and is intentionally left untouched.
+
+const workerLockWaitDuration = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}rebalance_lock_wait_seconds`,
+    help: 'Wall-clock time spent acquiring a per-portfolio rebalance lock (rebalanceWorker advisory lock path)',
+    labelNames: ['portfolio_bucket', 'outcome'] as const,
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    registers: [register],
+})
+
+const workerLockContentionCount = new Counter({
+    name: `${observabilityConfig.metrics.prefix}rebalance_lock_contention_count`,
+    help: 'Total per-portfolio rebalance lock acquisitions rejected because the lock was already held',
+    labelNames: ['portfolio_bucket'] as const,
+    registers: [register],
+})
+
+export type WorkerLockOutcome = 'acquired' | 'contended'
+
+/**
+ * Record one `acquireWorkerLock` attempt: wait-time histogram sample plus, on
+ * the contended path, a contention counter increment.  Both are labelled by
+ * the bucketed portfolio id.
+ */
+export function recordWorkerLockAcquisition(input: {
+    portfolioId: string
+    outcome: WorkerLockOutcome
+    waitMs: number
+}): void {
+    const bucket = bucketPortfolioId(input.portfolioId)
+    workerLockWaitDuration.observe(
+        { portfolio_bucket: bucket, outcome: input.outcome },
+        Math.max(0, input.waitMs) / 1000,
+    )
+    if (input.outcome === 'contended') {
+        workerLockContentionCount.inc({ portfolio_bucket: bucket })
+    }
+}
+
+// ── Per-trade slippage telemetry (#1178) ─────────────────────────────────────
+//
+// Tracks slippage for each executed trade with portfolio and asset-pair labels.
+// This enables analysis of execution quality across different trading pairs and
+// portfolios without blocking trade execution on metric emission failure.
+
+const tradeSlippageBps = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}trade_slippage_bps`,
+    help: 'Slippage in basis points for each executed trade',
+    labelNames: ['portfolio_bucket', 'asset_pair'] as const,
+    buckets: [0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    registers: [register],
+})
+
+const tradeExecutionPrice = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}trade_execution_price`,
+    help: 'Execution price for each trade (normalized to USD equivalent)',
+    labelNames: ['portfolio_bucket', 'asset_pair'] as const,
+    buckets: [0.01, 0.1, 1, 10, 100, 1000, 10000, 100000],
+    registers: [register],
+})
+
+/**
+ * Record slippage metrics for a successfully executed trade.
+ * Uses bucketed portfolio ID to keep cardinality bounded.
+ * Metric emission failures are caught and logged to avoid blocking trade execution.
+ */
+export function recordTradeSlippage(input: {
+    portfolioId: string
+    fromAsset: string
+    toAsset: string
+    slippageBps: number
+    executionPrice: number
+}): void {
+    try {
+        const bucket = bucketPortfolioId(input.portfolioId)
+        const assetPair = `${input.fromAsset}/${input.toAsset}`
+        
+        tradeSlippageBps.observe(
+            { portfolio_bucket: bucket, asset_pair: assetPair },
+            Math.max(0, input.slippageBps),
+        )
+        
+        if (input.executionPrice > 0) {
+            tradeExecutionPrice.observe(
+                { portfolio_bucket: bucket, asset_pair: assetPair },
+                input.executionPrice,
+            )
+        }
+    } catch (error) {
+        // Log but don't throw - metric emission should never block trade execution
+        console.error('[METRICS] Failed to record trade slippage:', error)
+    }
+}
+
+// ── Horizon submission retry metrics (#1177) ─────────────────────────────────
+//
+// Tracks retry attempts for Horizon transaction submissions when rate-limited (429)
+// or when Horizon is unavailable (503). This helps operators see submission pressure
+// and identify when Horizon is rejecting requests.
+
+const horizonSubmissionRetriesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}horizon_submission_retries_total`,
+    help: 'Total Horizon transaction submission retry attempts by status code',
+    labelNames: ['status_code'] as const,
+    registers: [register],
+})
+
+const horizonSubmissionRetryDuration = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}horizon_submission_retry_duration_seconds`,
+    help: 'Duration of Horizon submission retry attempts (including backoff delays)',
+    labelNames: ['status_code', 'outcome'] as const,
+    buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
     registers: [register],
 })
 
@@ -451,5 +644,20 @@ export function recordRebalanceWorkerLockAcquisition(
     rebalanceWorkerLockWaitSeconds.observe({ portfolio_bucket, outcome }, waitSeconds)
     if (!acquired) {
         rebalanceWorkerLockContentionTotal.inc({ portfolio_bucket })
+ * Record a Horizon submission retry attempt.
+ */
+export function recordHorizonSubmissionRetry(input: {
+    statusCode: number
+    durationSeconds: number
+    outcome: 'success' | 'failure'
+}): void {
+    try {
+        horizonSubmissionRetriesTotal.inc({ status_code: String(input.statusCode) })
+        horizonSubmissionRetryDuration.observe(
+            { status_code: String(input.statusCode), outcome: input.outcome },
+            input.durationSeconds,
+        )
+    } catch (error) {
+        console.error('[METRICS] Failed to record Horizon retry:', error)
     }
 }

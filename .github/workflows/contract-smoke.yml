@@ -1,6 +1,7 @@
 name: Contract Smoke Test
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 2 * * *'
   pull_request:
@@ -108,30 +109,8 @@ jobs:
           header: benchmark
           path: contracts/bench_summary.md
 
-      - name: Deploy and initialize on testnet
-        working-directory: ./contracts
+      - name: Deploy and run smoke tests on testnet
+        working-directory: ./
         run: |
-          soroban network add testnet --global \
-            --rpc-url "${SOROBAN_RPC_URL}" \
-            --network-passphrase "${SOROBAN_NETWORK_PASSPHRASE}" || true
-
-          soroban keys add ci-deployer --global --secret-key "${STELLAR_SECRET_KEY}" || true
-          ADMIN_ADDRESS="$(soroban keys address ci-deployer --global)"
-
-          CONTRACT_ID="$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \
-            --source ci-deployer \
-            --network testnet)"
-
-          if [ -z "${CONTRACT_ID}" ]; then
-            echo "::error::Contract deployment did not return a contract ID"
-            exit 1
-          fi
-
-          soroban contract invoke \
-            --id "${CONTRACT_ID}" \
-            --source ci-deployer \
-            --network testnet \
-            -- initialize \
-            --admin "${ADMIN_ADDRESS}" \
-            --reflector_address "${ADMIN_ADDRESS}"
+          chmod +x scripts/testnet-smoke.sh
+          ./scripts/testnet-smoke.sh

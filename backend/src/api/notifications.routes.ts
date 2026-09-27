@@ -39,7 +39,7 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, idem
         if (!userId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
-        const { emailEnabled, webhookEnabled, webhookUrl, events, emailAddress, digestMode } = req.body
+        const { emailEnabled, webhookEnabled, webhookUrl, slackEnabled, slackWebhookUrl, smsEnabled, phoneNumber, events, emailAddress, digestMode } = req.body
 
         if (emailEnabled && !notificationService.isEmailTransportAvailable()) {
             return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Email notification transport is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables.')
@@ -51,6 +51,10 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, idem
             emailAddress,
             webhookEnabled,
             webhookUrl,
+            slackEnabled,
+            slackWebhookUrl,
+            smsEnabled,
+            phoneNumber,
             digestMode,
             events
         })
@@ -62,6 +66,25 @@ notificationsRouter.post('/notifications/subscribe', requireJwtWhenEnabled, idem
         logger.error('Failed to subscribe to notifications', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
+})
+
+notificationsRouter.post('/notifications/sms/verification', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+    try {
+        const userId = getAuthConfig().enabled ? req.user!.address : req.body?.userId
+        if (!userId || !req.body?.phoneNumber) return fail(res, 400, 'VALIDATION_ERROR', 'userId and phoneNumber are required')
+        await notificationService.requestSmsVerification(userId, req.body.phoneNumber)
+        return ok(res, { message: 'Verification code sent' })
+    } catch (error) {
+        return fail(res, 400, 'SMS_VERIFICATION_FAILED', getErrorMessage(error))
+    }
+})
+
+notificationsRouter.post('/notifications/sms/verification/confirm', requireJwtWhenEnabled, async (req: Request, res: Response) => {
+    const userId = getAuthConfig().enabled ? req.user!.address : req.body?.userId
+    if (!userId || !req.body?.code) return fail(res, 400, 'VALIDATION_ERROR', 'userId and code are required')
+    return notificationService.confirmSmsVerification(userId, req.body.code)
+        ? ok(res, { message: 'Phone verified and SMS enabled' })
+        : fail(res, 400, 'INVALID_VERIFICATION_CODE', 'Code is invalid or expired')
 })
 
 // Get notification preferences

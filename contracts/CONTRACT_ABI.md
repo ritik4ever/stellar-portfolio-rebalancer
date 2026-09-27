@@ -345,6 +345,16 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `portfolio_id`: Target portfolio ID.
   - `reason`: `PauseReason` enum value.
 
+### `resume_portfolio(env: Env, portfolio_id: u64) -> ()`
+
+- **Purpose:** Resumes a paused portfolio, clearing the `is_active` flag and resetting the pause reason to `PauseReason::None`. Rebalancing and deposits become available again after a successful resume.
+- **Parameters:**
+  - `portfolio_id`: Target portfolio ID.
+- **Preconditions:**
+  - The caller must be the portfolio owner or a designated steward (`require_auth`).
+- **Events:** Emits `("portfolio", "resumed", (portfolio_id, steward))`.
+- **See also:** [`pause_portfolio`](#pause_portfolioenv-env-portfolio_id-u64-reason-pausereason----)
+
 ### `get_contract_pause_reason(env: Env) -> PauseReason`
 
 - **Purpose:** Returns the current contract-level pause reason.

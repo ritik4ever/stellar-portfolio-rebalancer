@@ -1,0 +1,213 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "name": "stellar-portfolio-backend",
+      "version": "0.1.0",
+      "type": "application"
+    },
+    "timestamp": "2026-08-30T23:26:41.050Z"
+  },
+  "components": [
+    {
+      "name": "@aws-sdk/client-secrets-manager",
+      "version": "^3.1098.0",
+      "type": "library",
+      "purl": "pkg:npm/@aws-sdk/client-secrets-manager@3.1098.0"
+    },
+    {
+      "name": "@opentelemetry/api",
+      "version": "^1.9.1",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/api@1.9.1"
+    },
+    {
+      "name": "@opentelemetry/exporter-trace-otlp-http",
+      "version": "^0.219.0",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/exporter-trace-otlp-http@0.219.0"
+    },
+    {
+      "name": "@opentelemetry/instrumentation",
+      "version": "^0.219.0",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/instrumentation@0.219.0"
+    },
+    {
+      "name": "@opentelemetry/instrumentation-express",
+      "version": "^0.67.0",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/instrumentation-express@0.67.0"
+    },
+    {
+      "name": "@opentelemetry/instrumentation-http",
+      "version": "^0.219.0",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/instrumentation-http@0.219.0"
+    },
+    {
+      "name": "@opentelemetry/resources",
+      "version": "^2.8.0",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/resources@2.8.0"
+    },
+    {
+      "name": "@opentelemetry/sdk-node",
+      "version": "^0.219.0",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/sdk-node@0.219.0"
+    },
+    {
+      "name": "@opentelemetry/semantic-conventions",
+      "version": "^1.41.1",
+      "type": "library",
+      "purl": "pkg:npm/@opentelemetry/semantic-conventions@1.41.1"
+    },
+    {
+      "name": "@sentry/node",
+      "version": "^9.14.0",
+      "type": "library",
+      "purl": "pkg:npm/@sentry/node@9.14.0"
+    },
+    {
+      "name": "@sentry/profiling-node",
+      "version": "^9.14.0",
+      "type": "library",
+      "purl": "pkg:npm/@sentry/profiling-node@9.14.0"
+    },
+    {
+      "name": "@stellar/stellar-sdk",
+      "version": "^12.0.1",
+      "type": "library",
+      "purl": "pkg:npm/@stellar/stellar-sdk@12.0.1"
+    },
+    {
+      "name": "axios",
+      "version": "^1.7.9",
+      "type": "library",
+      "purl": "pkg:npm/axios@1.7.9"
+    },
+    {
+      "name": "better-sqlite3",
+      "version": "^12.11.1",
+      "type": "library",
+      "purl": "pkg:npm/better-sqlite3@12.11.1"
+    },
+    {
+      "name": "bullmq",
+      "version": "^5.69.3",
+      "type": "library",
+      "purl": "pkg:npm/bullmq@5.69.3"
+    },
+    {
+      "name": "cors",
+      "version": "^2.8.5",
+      "type": "library",
+      "purl": "pkg:npm/cors@2.8.5"
+    },
+    {
+      "name": "dotenv",
+      "version": "^16.3.1",
+      "type": "library",
+      "purl": "pkg:npm/dotenv@16.3.1"
+    },
+    {
+      "name": "express",
+      "version": "^4.18.2",
+      "type": "library",
+      "purl": "pkg:npm/express@4.18.2"
+    },
+    {
+      "name": "express-rate-limit",
+      "version": "^7.4.1",
+      "type": "library",
+      "purl": "pkg:npm/express-rate-limit@7.4.1"
+    },
+    {
+      "name": "ioredis",
+      "version": "^5.9.3",
+      "type": "library",
+      "purl": "pkg:npm/ioredis@5.9.3"
+    },
+    {
+      "name": "jsonwebtoken",
+      "version": "^9.0.3",
+      "type": "library",
+      "purl": "pkg:npm/jsonwebtoken@9.0.3"
+    },
+    {
+      "name": "newrelic",
+      "version": "^12.24.0",
+      "type": "library",
+      "purl": "pkg:npm/newrelic@12.24.0"
+    },
+    {
+      "name": "node-cron",
+      "version": "^3.0.3",
+      "type": "library",
+      "purl": "pkg:npm/node-cron@3.0.3"
+    },
+    {
+      "name": "node-telegram-bot-api",
+      "version": "^0.67.0",
+      "type": "library",
+      "purl": "pkg:npm/node-telegram-bot-api@0.67.0"
+    },
+    {
+      "name": "nodemailer",
+      "version": "^8.0.1",
+      "type": "library",
+      "purl": "pkg:npm/nodemailer@8.0.1"
+    },
+    {
+      "name": "pdfkit",
+      "version": "^0.17.2",
+      "type": "library",
+      "purl": "pkg:npm/pdfkit@0.17.2"
+    },
+    {
+      "name": "pg",
+      "version": "^8.11.3",
+      "type": "library",
+      "purl": "pkg:npm/pg@8.11.3"
+    },
+    {
+      "name": "pino",
+      "version": "^9.6.0",
+      "type": "library",
+      "purl": "pkg:npm/pino@9.6.0"
+    },
+    {
+      "name": "prom-client",
+      "version": "^15.1.3",
+      "type": "library",
+      "purl": "pkg:npm/prom-client@15.1.3"
+    },
+    {
+      "name": "rate-limit-redis",
+      "version": "^4.2.0",
+      "type": "library",
+      "purl": "pkg:npm/rate-limit-redis@4.2.0"
+    },
+    {
+      "name": "swagger-ui-express",
+      "version": "^5.0.1",
+      "type": "library",
+      "purl": "pkg:npm/swagger-ui-express@5.0.1"
+    },
+    {
+      "name": "ws",
+      "version": "^8.14.2",
+      "type": "library",
+      "purl": "pkg:npm/ws@8.14.2"
+    },
+    {
+      "name": "zod",
+      "version": "^4.3.6",
+      "type": "library",
+      "purl": "pkg:npm/zod@4.3.6"
+    }
+  ]
+}

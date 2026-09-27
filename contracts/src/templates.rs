@@ -32,7 +32,12 @@ fn validate_template_allocations(allocations: &Map<Address, u32>) -> bool {
 /// unrelated entries in `asset_decimals` at `create_portfolio_from_template`
 /// time can still exceed the limit despite the template being accepted here.
 fn validate_template_size(env: &Env, allocations: &Map<Address, u32>) -> Result<(), Error> {
-    if allocations.len() > MAX_PORTFOLIO_ASSETS {
+    let max_assets = env
+        .storage()
+        .instance()
+        .get(&DataKey::MaxPortfolioAssets)
+        .unwrap_or(MAX_PORTFOLIO_ASSETS);
+    if allocations.len() > max_assets {
         return Err(Error::TooManyAssets);
     }
 

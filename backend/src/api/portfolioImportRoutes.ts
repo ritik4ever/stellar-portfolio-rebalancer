@@ -22,7 +22,7 @@ export const portfolioImportRouter = Router()
 //
 // CSV examples (headers required):
 //   asset,allocation_pct\nUSDC,50\nXLM,50
-portfolioImportRouter.post('/portfolio/import', async (req: Request, res: Response) => {
+portfolioImportRouter.post('/', async (req: Request, res: Response) => {
   try {
     // Determine content-type + body type.
     const contentType = (req.headers['content-type'] ?? '').toString()

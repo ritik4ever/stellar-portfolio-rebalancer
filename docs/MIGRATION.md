@@ -82,12 +82,10 @@ implemented and the upgrade introduces storage-layout changes that cannot be
 handled by a simple WASM swap alone.
 
 > [!NOTE]
-> As of the current release (`CONTRACT_VERSION = 1`, `CONTRACT_EVENT_SCHEMA_VERSION = 1`)
-> the `migrate_storage` hook has **not yet been implemented** and no
-> schema-version-2 storage layout changes exist in the contract source.
-> This guide documents the **expected** migration workflow. Sections marked
-> with **TODO** contain placeholders that must be filled in once the
-> `migrate_storage` implementation lands.
+> As of the current release, the `migrate_storage` hook is implemented and
+> schema-version-2 storage layout changes are supported. Steps marked
+> **TODO** indicate entrypoints that may change if the hook is exposed
+> differently.
 
 ### Overview
 
@@ -96,6 +94,15 @@ release changes the shape of persistent storage entries — for example, adds
 new fields to `Portfolio`, introduces new `DataKey` variants, or changes the
 serialization of existing keys — existing on-chain data must be transformed
 to remain compatible with the new code.
+
+In schema version 2, the following changes apply:
+
+| Field / key | Change |
+|---|---|
+| `Portfolio` struct | New fields: `custody_provider` (`CustodyProvider`) and `strategy_profile` (`StrategyProfile`) |
+| `DataKey` | New variant `DataKey::Strategy` for per-portfolio strategy configuration |
+| `DataKey::Portfolio` | Serialization changed to include the new `Portfolio` fields |
+| `PortfolioRebalanced` event | Topic extended with `strategy_id`; payload adds `strategy` object |
 
 The `migrate_storage` hook (once implemented) provides a deterministic
 in-contract function that is invoked during `upgrade()`, **before** the new
@@ -335,7 +342,13 @@ In this scenario, recovery options are:
    - After re-pointing, verify the new contract is functional by creating
      a test portfolio and executing a full deposit/withdraw/rebalance
      cycle.
-3. **Restore from a ledger snapshot** if one was captured before the migration
+3. **Restore from a ledger snapshot** — if the ledger allows state snapshots (e.g., via `soroban ledger snapshot` or a separate backup service), restore the contract's storage to the pre-migration snapshot and re-apply the previous WASM. This is the only fully reversible path for storage mutations.
+
+### Cross-references
+
+- Contract module implementing the migration hook: `contracts/src/migrate.rs`
+- ADRs covering custody and strategy changes: `docs/adr/` (see the relevant ADRs referenced in the issue)
+- Event schema documentation: `docs/CONTRACT_EVENTS.md`apshot** if one was captured before the migration
    (not generally available on public networks).
 
 > [!CAUTION]

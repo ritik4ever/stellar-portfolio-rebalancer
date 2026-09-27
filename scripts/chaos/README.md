@@ -35,6 +35,26 @@ CHAOS_ENVIRONMENT=staging node scripts/chaos/reflector-oracle-outage.mjs
 CHAOS_ENVIRONMENT=staging CHAOS_VERBOSE=1 node scripts/chaos/reflector-oracle-outage.mjs
 ```
 
+### ws-portfolio-feed-load.mjs
+
+Simulates high-concurrency WebSocket subscribers to the portfolio update feed, evaluating handshake latency, message dispatch latency, and identifying infrastructure capacity limits.
+
+**Usage:**
+```bash
+# Default (50 concurrent clients, 10s duration)
+node scripts/chaos/ws-portfolio-feed-load.mjs
+
+# Custom load profile
+CHAOS_CLIENTS=250 CHAOS_DURATION=30 CHAOS_PORTFOLIOS=5 node scripts/chaos/ws-portfolio-feed-load.mjs
+```
+
+**Environment Variables:**
+- `WS_URL` - Target WebSocket feed URL (default: `ws://localhost:3001/ws/portfolio-feed`)
+- `CHAOS_CLIENTS` - Number of concurrent clients (default: 50)
+- `CHAOS_DURATION` - Duration of load test in seconds (default: 10)
+- `CHAOS_PORTFOLIOS` - Portfolio channels subscribed per client (default: 3)
+- `CHAOS_VERBOSE` - Enable detailed logging per connection event
+
 **Environment Variables:**
 - `CHAOS_BACKEND_PORT` - Backend port (default: 3001)
 - `CHAOS_OUTAGE_DELAY_MS` - Delay before simulating outage in ms (default: 1000)

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import EmbedWidget, { parseWidgetParams } from '../EmbedWidget'
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
+import EmbedWidget, { parseWidgetParams, resolveInitialTheme, THEME_STORAGE_KEY } from '../EmbedWidget'
 
 const mockApiGet = vi.hoisted(() => vi.fn())
 const mockEndpoints = vi.hoisted(() => ({ PORTFOLIO_SHARE_VIEW: (id: string) => `/share/${id}`, PORTFOLIO_PERFORMANCE_SUMMARY: (id: string) => `/perf/${id}` }))
@@ -77,5 +77,38 @@ describe('EmbedWidget', () => {
       expect(screen.getByText('ETH')).toBeTruthy()
       expect(screen.getByText('XLM')).toBeTruthy()
     })
+  })
+})
+
+describe('EmbedWidget theme persistence', () => {
+  beforeEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    window.localStorage.clear()
+    mockApiGet.mockResolvedValue(sampleData)
+  })
+
+  it('keeps the selected theme across a simulated reload', async () => {
+    const { unmount } = render(<EmbedWidget id="test-id" />)
+    const toggle = await screen.findByRole('button', { name: /switch to dark theme/i })
+    fireEvent.click(toggle)
+
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
+    unmount()
+
+    render(<EmbedWidget id="test-id" />)
+    expect(await screen.findByRole('button', { name: /switch to light theme/i })).toBeTruthy()
+  })
+
+  it('falls back to system preference when nothing is persisted', () => {
+    const original = window.matchMedia
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as unknown as typeof window.matchMedia
+    expect(resolveInitialTheme('')).toBe('dark')
+    window.matchMedia = original
+  })
+
+  it('prefers the theme query param over the persisted value', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark')
+    expect(resolveInitialTheme('?theme=light')).toBe('light')
   })
 })

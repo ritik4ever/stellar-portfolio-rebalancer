@@ -149,4 +149,42 @@ describe('Modal', () => {
     expect(modal).toHaveAttribute('aria-labelledby', titleElement.id)
     expect(modal).toHaveAttribute('aria-describedby', descriptionElement.id)
   })
+
+  it('moves focus into modal when container is focused and Tab is pressed', () => {
+    render(
+      <Modal open={true} onClose={mockOnClose} title="Test Modal">
+        <input type="text" placeholder="Enter text" />
+        <button>Inner Button</button>
+      </Modal>
+    )
+
+    const modal = screen.getByRole('dialog') as HTMLElement
+    const input = screen.getByPlaceholderText('Enter text') as HTMLElement
+
+    // Focus the modal container itself (simulating initial focus)
+    modal.focus()
+
+    // Press Tab - focus should move into the first focusable element
+    fireEvent.keyDown(document, { key: 'Tab' })
+
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('keeps focus on modal when no focusable elements exist and Tab is pressed', () => {
+    render(
+      <Modal open={true} onClose={mockOnClose} title="Test Modal">
+        <div>Static content</div>
+      </Modal>
+    )
+
+    const modal = screen.getByRole('dialog') as HTMLElement
+
+    // Focus the modal container
+    modal.focus()
+
+    // Press Tab - with no focusable elements, focus should remain on modal
+    fireEvent.keyDown(document, { key: 'Tab' })
+
+    expect(document.activeElement).toBe(modal)
+  })
 })

@@ -12,6 +12,10 @@ export interface FeatureFlags {
     allowPublicUserPortfoliosInDemo: boolean
     enableIssuerMetadata: boolean
     enableShadowMode: boolean
+    /** When enabled, the scheduler cross-checks backend `shouldRebalanceByStrategy` against the on-chain `check_rebalance_needed` before enqueueing. */
+    enableRebalanceCrossCheck: boolean
+    /** When true (fail-safe rollout), cross-check disagreements block execution. When false, disagreements warn only. */
+    requireRebalanceCrossCheckAgreement: boolean
 }
 
 let cachedOverrides: Partial<FeatureFlags> | null = null
@@ -54,7 +58,11 @@ export const loadFeatureFlagsOverrides = (filePath: string): Partial<FeatureFlag
             allowPublicUserPortfoliosInDemo: 'allowPublicUserPortfoliosInDemo',
             ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: 'allowPublicUserPortfoliosInDemo',
             enableShadowMode: 'enableShadowMode',
-            ENABLE_SHADOW_MODE: 'enableShadowMode'
+            ENABLE_SHADOW_MODE: 'enableShadowMode',
+            enableRebalanceCrossCheck: 'enableRebalanceCrossCheck',
+            ENABLE_REBALANCE_CROSS_CHECK: 'enableRebalanceCrossCheck',
+            requireRebalanceCrossCheckAgreement: 'requireRebalanceCrossCheckAgreement',
+            REBALANCE_CROSS_CHECK_REQUIRE_AGREEMENT: 'requireRebalanceCrossCheckAgreement'
         }
 
         for (const [key, value] of Object.entries(data)) {
@@ -95,6 +103,8 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
     const allowPublicUserPortfoliosInDemo = parseBoolean(env.ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO, false)
     const enableIssuerMetadata = parseBoolean(env.ENABLE_ISSUER_METADATA, true)
     const enableShadowMode = parseBoolean(env.ENABLE_SHADOW_MODE, false)
+    const enableRebalanceCrossCheck = parseBoolean(env.ENABLE_REBALANCE_CROSS_CHECK, false)
+    const requireRebalanceCrossCheckAgreement = parseBoolean(env.REBALANCE_CROSS_CHECK_REQUIRE_AGREEMENT, false)
 
     const flags: FeatureFlags = {
         demoMode,
@@ -105,7 +115,9 @@ export const getFeatureFlags = (env: NodeJS.ProcessEnv = process.env): FeatureFl
         enableDemoDbSeed,
         allowPublicUserPortfoliosInDemo,
         enableIssuerMetadata,
-        enableShadowMode
+        enableShadowMode,
+        enableRebalanceCrossCheck,
+        requireRebalanceCrossCheckAgreement
     }
 
     const overrideFile = env.FEATURE_FLAGS_FILE ? env.FEATURE_FLAGS_FILE.trim() : ''
@@ -141,7 +153,9 @@ export const getPublicFeatureFlags = (env: NodeJS.ProcessEnv = process.env): Rec
         ENABLE_DEMO_DB_SEED: flags.enableDemoDbSeed,
         ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO: flags.allowPublicUserPortfoliosInDemo,
         ENABLE_ISSUER_METADATA: flags.enableIssuerMetadata,
-        ENABLE_SHADOW_MODE: flags.enableShadowMode
+        ENABLE_SHADOW_MODE: flags.enableShadowMode,
+        ENABLE_REBALANCE_CROSS_CHECK: flags.enableRebalanceCrossCheck,
+        REBALANCE_CROSS_CHECK_REQUIRE_AGREEMENT: flags.requireRebalanceCrossCheckAgreement
     }
 }
 

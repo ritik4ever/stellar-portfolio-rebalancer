@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+arbitrary = { version = "1.3", features = ["derive"] }
 
 [dependencies.portfolio-rebalancer]
 path = ".."
@@ -35,6 +36,13 @@ bench = false
 [[bin]]
 name = "fuzz_allocations"
 path = "fuzz_targets/fuzz_allocations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_rebalance_trades"
+path = "fuzz_targets/fuzz_rebalance_trades.rs"
 test = false
 doc = false
 bench = false

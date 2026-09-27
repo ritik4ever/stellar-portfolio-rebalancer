@@ -95,17 +95,30 @@ if (exitCode === 0) {
 process.exit(exitCode)
 
 function extractMdEndpoints(md: string) {
-    const regex = /- \*\*([A-Z]+) ([^ \*\*]+)\*\*/g
-    const endpoints = []
+    const endpoints: { method: string; path: string }[] = []
+    
+    // Match "- **METHOD /path**"
+    const listRegex = /- \*\*([A-Z]+) ([^ \*\*]+)\*\*/g
     let match
-    while ((match = regex.exec(md)) !== null) {
+    while ((match = listRegex.exec(md)) !== null) {
         const method = match[1]
-        let path = match[2]
-        
-        // Clean up path if it has trailing characters like period or dash
-        path = path.replace(/[\-—\.]$/, '')
-        
+        let path = match[2].replace(/[\-—\.]$/, '').trim()
         endpoints.push({ method, path })
+        if (path.startsWith('/api/v1/')) {
+            endpoints.push({ method, path: path.replace('/api/v1/', '/api/') })
+        }
     }
+
+    // Match code block / command lines e.g. "GET /api/v1/rebalance/history" or indented "  POST /api/v1/portfolio"
+    const blockRegex = /(?:```(?:bash|sh|http)?\n|\n)[ \t]*(GET|POST|PUT|DELETE|PATCH)\s+([^\s\?\n]+)/g
+    while ((match = blockRegex.exec(md)) !== null) {
+        const method = match[1]
+        let rawPath = match[2].trim()
+        endpoints.push({ method, path: rawPath })
+        if (rawPath.startsWith('/api/v1/')) {
+            endpoints.push({ method, path: rawPath.replace('/api/v1/', '/api/') })
+        }
+    }
+
     return endpoints
 }

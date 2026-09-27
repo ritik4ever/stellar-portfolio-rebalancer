@@ -238,3 +238,4 @@ backend/test_results.txt
 frontend/tsc-output.txt
 
 *storybook.log
+.opencode

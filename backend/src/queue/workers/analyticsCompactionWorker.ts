@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { runWithRequestContext } from "../../utils/requestContext.js";
 import { getConnectionOptions } from "../connection.js";
 import { analyticsService } from "../../services/analyticsService.js";
+import { getAnalyticsCompactionConfig } from "../../config/analyticsCompactionConfig.js";
 import { logger } from "../../utils/logger.js";
 import type { AnalyticsCompactionJobData } from "../queues.js";
 import {
@@ -29,8 +30,9 @@ export async function processAnalyticsCompactionJob(
 ): Promise<void> {
   const correlationId = (job.data as AnalyticsCompactionJobData).correlationId;
   const requestId = correlationId ?? randomUUID();
-  const cutoffDays = (job.data as AnalyticsCompactionJobData).cutoffDays ?? 90;
-  const recentDays = (job.data as AnalyticsCompactionJobData).recentDays ?? 7;
+  const config = getAnalyticsCompactionConfig();
+  const cutoffDays = (job.data as AnalyticsCompactionJobData).cutoffDays ?? config.cutoffDays;
+  const recentDays = (job.data as AnalyticsCompactionJobData).recentDays ?? config.recentDays;
 
   return runWithRequestContext({ requestId }, async () => {
     logger.info("[WORKER:analytics-compaction] Starting analytics snapshot compaction", {

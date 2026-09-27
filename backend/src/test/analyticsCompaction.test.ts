@@ -69,6 +69,100 @@ describe('Analytics Compaction Service', () => {
             )
         })
 
+        it('should respect configured retention settings from environment when parameters are omitted', async () => {
+            const originalCutoff = process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+            const originalRecent = process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+            try {
+                process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = '30'
+                process.env.ANALYTICS_COMPACTION_RECENT_DAYS = '3'
+
+                const portfolioId = 'test-portfolio-configured'
+                vi.mocked(dbCompactAnalyticsSnapshots).mockResolvedValue({
+                    portfolioId,
+                    deletedCount: 20,
+                    retainedCount: 15,
+                    compactionCutoffTimestamp: new Date().toISOString(),
+                })
+
+                await analyticsService.compactAnalyticsForPortfolio(portfolioId)
+
+                expect(vi.mocked(dbCompactAnalyticsSnapshots)).toHaveBeenCalledWith(
+                    portfolioId,
+                    30,
+                    3
+                )
+            } finally {
+                if (originalCutoff === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = originalCutoff
+                }
+                if (originalRecent === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_RECENT_DAYS = originalRecent
+                }
+            }
+        })
+
+        it('should verify boundary behavior for short retention settings (30 days cutoff, 3 days recent)', async () => {
+            const portfolioId = 'short-retention-portfolio'
+            vi.mocked(dbCompactAnalyticsSnapshots).mockResolvedValue({
+                portfolioId,
+                deletedCount: 500,
+                retainedCount: 72,
+                compactionCutoffTimestamp: new Date().toISOString(),
+            })
+
+            const result = await analyticsService.compactAnalyticsForPortfolio(portfolioId, 30, 3)
+
+            expect(vi.mocked(dbCompactAnalyticsSnapshots)).toHaveBeenCalledWith(
+                portfolioId,
+                30,
+                3
+            )
+            expect(result.deletedCount).toBe(500)
+            expect(result.retainedCount).toBe(72)
+        })
+
+        it('should verify boundary behavior for long retention settings (180 days cutoff, 14 days recent)', async () => {
+            const portfolioId = 'long-retention-portfolio'
+            vi.mocked(dbCompactAnalyticsSnapshots).mockResolvedValue({
+                portfolioId,
+                deletedCount: 120,
+                retainedCount: 336,
+                compactionCutoffTimestamp: new Date().toISOString(),
+            })
+
+            const result = await analyticsService.compactAnalyticsForPortfolio(portfolioId, 180, 14)
+
+            expect(vi.mocked(dbCompactAnalyticsSnapshots)).toHaveBeenCalledWith(
+                portfolioId,
+                180,
+                14
+            )
+            expect(result.deletedCount).toBe(120)
+            expect(result.retainedCount).toBe(336)
+        })
+
+        it('should allow equal cutoffDays and recentDays (exact boundary)', async () => {
+            const portfolioId = 'boundary-retention-portfolio'
+            vi.mocked(dbCompactAnalyticsSnapshots).mockResolvedValue({
+                portfolioId,
+                deletedCount: 10,
+                retainedCount: 20,
+                compactionCutoffTimestamp: new Date().toISOString(),
+            })
+
+            await analyticsService.compactAnalyticsForPortfolio(portfolioId, 14, 14)
+
+            expect(vi.mocked(dbCompactAnalyticsSnapshots)).toHaveBeenCalledWith(
+                portfolioId,
+                14,
+                14
+            )
+        })
+
         it('should reject when cutoffDays < recentDays', async () => {
             const portfolioId = 'test-portfolio'
 
@@ -155,6 +249,47 @@ describe('Analytics Compaction Service', () => {
                 90, // default cutoffDays
                 7   // default recentDays
             )
+        })
+
+        it('should respect environment retention settings in compactAllPortfolios when not provided', async () => {
+            const { portfolioStorage } = await import('../services/portfolioStorage.js')
+            const originalCutoff = process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+            const originalRecent = process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+
+            try {
+                process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = '60'
+                process.env.ANALYTICS_COMPACTION_RECENT_DAYS = '5'
+
+                vi.mocked(portfolioStorage.getAllPortfolios).mockReturnValue([
+                    { id: 'portfolio-env-1', name: 'P-ENV', balances: {} },
+                ] as any[])
+
+                vi.mocked(dbCompactAnalyticsSnapshots).mockResolvedValue({
+                    portfolioId: 'portfolio-env-1',
+                    deletedCount: 30,
+                    retainedCount: 20,
+                    compactionCutoffTimestamp: new Date().toISOString(),
+                })
+
+                await analyticsService.compactAllPortfolios()
+
+                expect(vi.mocked(dbCompactAnalyticsSnapshots)).toHaveBeenCalledWith(
+                    'portfolio-env-1',
+                    60,
+                    5
+                )
+            } finally {
+                if (originalCutoff === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_CUTOFF_DAYS = originalCutoff
+                }
+                if (originalRecent === undefined) {
+                    delete process.env.ANALYTICS_COMPACTION_RECENT_DAYS
+                } else {
+                    process.env.ANALYTICS_COMPACTION_RECENT_DAYS = originalRecent
+                }
+            }
         })
 
         it('should handle empty portfolio list', async () => {

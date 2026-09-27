@@ -16,12 +16,60 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "azs" {
+  description = "Availability zones used for VPC subnets. Also used to spread ElastiCache primary/replica nodes across distinct AZs, so it must contain at least two entries."
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
+
+  validation {
+    condition     = length(var.azs) >= 2
+    error_message = "azs must contain at least two availability zones so ElastiCache can place a read replica in a different AZ from the primary."
+  }
+}
+
+# ─── ElastiCache high availability ────────────────────────────────────────────
+
+variable "redis_multi_az_enabled" {
+  description = "Enable Multi-AZ on the ElastiCache Redis replication group (requires redis_replica_count >= 1)."
+  type        = bool
+  default     = true
+}
+
+variable "redis_automatic_failover_enabled" {
+  description = "Promote a read replica automatically when the Redis primary becomes unreachable. Must stay true when Multi-AZ is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "redis_replica_count" {
+  description = "Number of ElastiCache Redis read replicas per workspace. Must be at least 1 so the replication group can fail over to a replica in another AZ."
+  type        = map(number)
+  default = {
+    staging    = 1
+    production = 2
+  }
+
+  validation {
+    condition     = alltrue([for v in values(var.redis_replica_count) : v >= 1 && v <= 5])
+    error_message = "Every redis_replica_count value must be between 1 and 5 (at least one replica is required for Multi-AZ failover)."
+  }
+}
+
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = map(string)
   default = {
     staging    = "db.t4g.micro"
     production = "db.t4g.small"
+  }
+}
+
+variable "backup_retention_period" {
+  description = "Days of RDS automated backups + snapshot retention, per workspace"
+  type        = map(number)
+  default = {
+    staging    = 7
+    production = 14
   }
 }
 
@@ -32,6 +80,12 @@ variable "redis_node_type" {
     staging    = "cache.t4g.micro"
     production = "cache.t4g.small"
   }
+}
+
+variable "snapshot_cleanup_schedule" {
+  description = "EventBridge schedule for the RDS snapshot cleanup Lambda"
+  type        = string
+  default     = "cron(0 21 * * ? *)"
 }
 
 variable "ecs_task_cpu" {
@@ -112,6 +166,44 @@ variable "enable_blue_green" {
   }
 }
 
+# ─── Secret Rotation ──────────────────────────────────────────────────────────
+
+variable "secret_rotation_days" {
+  description = "Number of days between automatic AWS Secrets Manager rotations for RDS and Redis credentials. Applies to both modules."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.secret_rotation_days >= 1 && var.secret_rotation_days <= 365
+    error_message = "secret_rotation_days must be between 1 and 365."
+  }
+}
+
+variable "secret_rotation_lambda_arn" {
+  description = <<-EOT
+    ARN of an existing Lambda function used to rotate secrets.
+    When null (the default), automatic rotation is disabled and the
+    aws_secretsmanager_secret_rotation resources are not created.
+    Provide the ARN of the AWS-managed rotation Lambda deployed in your
+    account, e.g. the SecretsManagerRDSPostgreSQLRotationSingleUser Lambda,
+    or your own custom rotation function.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "create_rotation_lambda" {
+  description = <<-EOT
+    When true, deploys the rotation_lambda Terraform module which provisions
+    the AWS Secrets Manager managed rotation Lambda for RDS PostgreSQL
+    (single-user strategy) and a custom rotation Lambda for the Redis AUTH
+    token.  Set to false (the default) when you prefer to supply an existing
+    rotation Lambda via secret_rotation_lambda_arn.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "blue_green_deployment_config" {
   description = "Blue/green deployment configuration"
   type = object({
@@ -125,6 +217,8 @@ variable "blue_green_deployment_config" {
     deployment_ready_option = {
       action_on_timeout = "CONTINUE_DEPLOYMENT"
     }
+  }
+}
 variable "ecs_min_capacity" {
   description = "Minimum number of ECS tasks"
   type        = map(number)

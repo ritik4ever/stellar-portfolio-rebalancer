@@ -1,6 +1,4 @@
-import { WalletType } from '../utils/walletAdapters'
-
-export type SupportedWallet = 'freighter' | 'rabet' | 'xbull' | 'lobstr' | 'walletconnect'
+export type SupportedWallet = 'freighter' | 'rabet' | 'xbull' | 'hana' | 'lobstr' | 'walletconnect'
 
 export interface WalletInfo {
   name: string
@@ -13,6 +11,7 @@ export const SUPPORTED_WALLETS: WalletInfo[] = [
   { name: 'Freighter', type: 'freighter', installUrl: 'https://www.freighter.app/' },
   { name: 'Rabet', type: 'rabet', installUrl: 'https://rabet.io/' },
   { name: 'xBull', type: 'xbull', installUrl: 'https://xbull.app/' },
+  { name: 'Hana', type: 'hana', installUrl: 'https://www.hanawallet.io/' },
   { name: 'LOBSTR', type: 'lobstr', installUrl: 'https://lobstr.co/' },
   { name: 'WalletConnect', type: 'walletconnect', installUrl: 'https://walletconnect.com/' },
 ]

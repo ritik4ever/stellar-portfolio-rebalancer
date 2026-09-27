@@ -85,6 +85,7 @@ describe('AssetSelector', () => {
     await waitFor(() => {
       expect(screen.getByText('USDC')).toBeInTheDocument();
       expect(screen.getByText('Domain match')).toBeInTheDocument();
+      expect(screen.getByText('Matched domain: centre.io')).toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.queryByText('XLM')).not.toBeInTheDocument();

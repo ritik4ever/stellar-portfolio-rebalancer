@@ -13,6 +13,8 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import PriceTicker from './PriceTicker'
+import ExportPDF from './ExportPDF'
 
 import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
@@ -529,6 +531,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors">Export CSV</button>
                                     <button onClick={() => exportFromApi('pdf')}
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors">Export PDF</button>
+                                    <ExportPDF
+                                        portfolioData={portfolioData as any}
+                                        allocationData={allocationData}
+                                        prices={prices}
+                                        performanceData={performanceData}
+                                        publicKey={publicKey}
+                                    />
                                 </>
                             ) : (
                                 <>
@@ -536,6 +545,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50">Export CSV</button>
                                     <button onClick={exportPortfolioJSON} disabled={!portfolioData}
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50">Export JSON</button>
+                                    <ExportPDF
+                                        portfolioData={portfolioData as any}
+                                        allocationData={allocationData}
+                                        prices={prices}
+                                        performanceData={performanceData}
+                                        publicKey={publicKey}
+                                    />
                                     <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Connect wallet for full export (PDF + history)</span>
                                 </>
                             )}
@@ -725,6 +741,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
                 </div>
             )}
+
+            {/* Price Ticker Banner */}
+            <PriceTicker />
 
             <div className="p-6 max-w-7xl mx-auto">
                 {/* Tab Navigation */}

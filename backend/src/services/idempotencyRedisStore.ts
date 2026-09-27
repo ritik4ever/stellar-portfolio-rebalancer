@@ -2,11 +2,13 @@ import Redis from 'ioredis'
 import { REDIS_URL, redisProbe } from '../queue/connection.js'
 import { dbStoreIdempotencyResult, dbGetIdempotencyResult } from '../db/idempotencyDb.js'
 import { logger } from '../utils/logger.js'
+import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 import type { IdempotencyRecord } from '../types/index.js'
 
 let redis: Redis | null = null
 let redisAvailable: boolean | null = null
 let failoverActive = false
+
 
 async function getRedis(): Promise<Redis | null> {
     if (redisAvailable === null) {
@@ -18,17 +20,22 @@ async function getRedis(): Promise<Redis | null> {
     }
     if (!redisAvailable) return null
     if (!redis) {
-        redis = new Redis(REDIS_URL, {
-            lazyConnect: false,
-            maxRetriesPerRequest: 2,
-            enableReadyCheck: false
-        })
+        redis = new Redis(REDIS_URL, getRedisClientOptions({ maxRetriesPerRequest: 2 }))
         redis.on('error', () => {
             if (redisAvailable) {
                 logger.warn('[IDEMPOTENCY-REDIS] Redis connection error, activating DB failover')
             }
             redisAvailable = false
             failoverActive = true
+        })
+        
+        redis.on('ready', () => {
+            const wasDown = !redisAvailable
+            redisAvailable = true
+            if (wasDown) {
+                logger.info('[IDEMPOTENCY-REDIS] Redis connection restored, deactivating DB failover')
+            }
+            failoverActive = false
         })
     }
     return redis

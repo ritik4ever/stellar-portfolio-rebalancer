@@ -83,18 +83,15 @@ export function broadcastPortfolioEvent(payload: PortfolioEventPayload): void {
   });
 }
 
-/**
- * Extract JWT token from WebSocket upgrade request
- * Supports both Authorization header and query parameter (for browsers)
- */
+
 function extractTokenFromRequest(req: any): string | null {
-  // Try Authorization header first (standard)
+
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7);
   }
 
-  // Fall back to query parameter (for browser WebSocket clients)
+ 
   const url = new URL(req.url || '', 'ws://localhost');
   return url.searchParams.get('token');
 }
@@ -107,7 +104,7 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
     wss.clients.forEach((ws) => {
       const client = ws as ExtWebSocket;
       
-      // Check token expiry
+     
       if (client.sessionMetadata) {
         const now = Date.now();
         if (now >= client.sessionMetadata.tokenExpiryTimestamp * 1000) {
@@ -116,7 +113,7 @@ export const initRobustWebSocket = (wss: WebSocketServer) => {
             expiredAt: client.sessionMetadata.tokenExpiresAt
           });
           ws.close(
-            1008, // Policy Violation
+            1008, 
             `Token expired at ${client.sessionMetadata.tokenExpiresAt}`
           );
           return;

@@ -1,0 +1,58 @@
+name: Merge new PR and close its issues
+
+on:
+  pull_request_target:
+    types: [opened]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  merge:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge PR and close referenced issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
+            --json body --jq '.body // ""' |
+            python3 -c 'import re,sys; body=sys.stdin.read(); pattern=r"(?im)^[ \t]*(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)[ \t]+#([1-9][0-9]*)\b"; print("\n".join(sorted(set(re.findall(pattern,body)),key=int)))' \
+            > "$RUNNER_TEMP/issues"
+
+          for attempt in 1 2 3 4 5; do
+            if gh pr merge "$PR_NUMBER" --repo "$GH_REPO" \
+              --squash --match-head-commit "$HEAD_SHA"; then
+              break
+            fi
+            sleep 15
+          done
+
+          state="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
+            --json state --jq .state)"
+          if [ "$state" != "MERGED" ]; then
+            echo "PR was not merged; issues remain open."
+            exit 1
+          fi
+
+          while read -r issue; do
+            [ -n "$issue" ] || continue
+
+            state="$(gh issue view "$issue" --repo "$GH_REPO" \
+              --json state --jq .state)"
+            if [ "$state" = "OPEN" ]; then
+              gh issue close "$issue" --repo "$GH_REPO" \
+                --reason completed
+            fi
+
+            state="$(gh issue view "$issue" --repo "$GH_REPO" \
+              --json state --jq .state)"
+            [ "$state" = "CLOSED" ] || exit 1
+          done < "$RUNNER_TEMP/issues"

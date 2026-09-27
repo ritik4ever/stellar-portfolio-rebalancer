@@ -11,10 +11,7 @@ const TRACKED_ASSETS = ['XLM', 'BTC', 'ETH', 'USDC']
 
 const reflector = new ReflectorService()
 
-/**
- * Snapshot current oracle prices for all tracked assets and persist them.
- * Called every 5 minutes by the price-history BullMQ worker.
- */
+
 export async function snapshotPrices(): Promise<void> {
     let prices: Record<string, number>
     try {
@@ -53,16 +50,7 @@ export async function pruneStaleSnapshots(): Promise<void> {
     logger.info('[priceHistory] Daily prune complete', { deleted })
 }
 
-/**
- * Backfill historical price points for a single asset from the price
- * oracle's market-chart history. The lookback window is clamped to the
- * configured bounds (default 90 days, min 1, max 365), so a large or
- * malformed `days` value can never trigger an unbounded history request.
- *
- * Called from the price-history-backfill BullMQ worker, typically right
- * after a new asset is added to the registry so its history exists before
- * the regular 5-minute snapshots start accumulating.
- */
+
 export async function backfillPriceHistory(
     asset: string,
     days?: number,

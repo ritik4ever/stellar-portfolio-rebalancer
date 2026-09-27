@@ -46,7 +46,7 @@ export const initPortfolioFeedWebSocket = (wss: WebSocketServer) => {
             client.isAlive = false;
             ws.ping();
             
-            // Server-side heartbeat sent to client
+            
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now() }));
             }
@@ -64,13 +64,7 @@ export const initPortfolioFeedWebSocket = (wss: WebSocketServer) => {
                 const client = ws as PortfolioWebSocket;
                 if (ws.readyState !== WebSocket.OPEN || !client.portfolioId) return;
 
-                // Here we would ideally calculate the portfolio value, 
-                // but since we only have prices from reflector service and we don't have
-                // the portfolio assets in memory easily without a DB query,
-                // we'll send a tick update. The frontend might compute or the backend does.
-                // Assuming we just broadcast that a price update happened or a mock value for now
-                // based on standard requirements if we can't fetch real portfolio value instantly.
-                // Actually, let's just send the prices tick to all portfolios.
+               
                 const message = JSON.stringify({
                     type: 'PORTFOLIO_VALUE_UPDATE',
                     portfolioId: client.portfolioId,

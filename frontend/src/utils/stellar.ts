@@ -17,6 +17,31 @@ declare global {
             signTransaction(xdr: string): Promise<{ signedXDR: string }>
             getNetwork(): Promise<string | { network: string; networkPassphrase?: string }>
         }
+        hana?: {
+            requestAccess?: () => Promise<{ publicKey?: string } | string>
+            connect?: () => Promise<{ publicKey?: string; address?: string } | string>
+            getAddress?: () => Promise<{ address?: string; publicKey?: string } | string>
+            isConnected?: () => Promise<boolean>
+            disconnect?: () => Promise<void>
+            signTransaction?: (
+                xdr: string,
+                options?: { network?: string; networkPassphrase?: string }
+            ) => Promise<{ signedTxXdr?: string; signedXDR?: string } | string>
+            getNetwork?: () => Promise<string | { network: string; networkPassphrase?: string }>
+        }
+        stellar?: {
+            provider?: string
+            platform?: string
+            requestAccess?: () => Promise<{ publicKey?: string } | string>
+            connect?: () => Promise<{ publicKey?: string; address?: string } | string>
+            getAddress?: () => Promise<{ address?: string; publicKey?: string } | string>
+            isConnected?: () => Promise<boolean>
+            disconnect?: () => Promise<void>
+            signTransaction?: (
+                xdr: string,
+                options?: { network?: string; networkPassphrase?: string }
+            ) => Promise<{ signedTxXdr?: string; signedXDR?: string } | string>
+        }
         lobstr?: {
             requestAccess(): Promise<{ publicKey: string }>
             signTransaction(xdr: string, opts?: { networkPassphrase?: string }): Promise<string>
