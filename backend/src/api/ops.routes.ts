@@ -17,6 +17,7 @@ import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
 import { getQueueByName } from '../queue/queues.js'
+import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -297,8 +298,10 @@ opsRouter.get('/workers/health', async (_req: Request, res: Response) => {
                 healthy: summary.healthy,
                 unhealthy: summary.unhealthy,
                 idle: summary.idle,
-                lagging: summary.lagging
+                lagging: summary.lagging,
+                crashLooping: summary.crashLooping
             },
+            supervisor: summary.supervisor,
             workers: summary.workers
         })
     } catch (error) {
