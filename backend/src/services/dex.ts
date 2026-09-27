@@ -10,6 +10,7 @@ import {
 import { Dec } from '../utils/decimal.js'
 import { logger } from '../utils/logger.js'
 import type { ExecutionExplanation } from '../types/index.js'
+import { recordTradeSlippage, recordHorizonSubmissionRetry } from '../observability/metrics.js'
 
 export interface DEXTradeRequest {
     tradeId: string
@@ -18,6 +19,7 @@ export interface DEXTradeRequest {
     amount: number
     maxSlippageBps?: number
     maxHops?: number
+    portfolioId?: string
 }
 
 export interface RebalanceExecutionConfig {
@@ -29,6 +31,9 @@ export interface RebalanceExecutionConfig {
     rollbackOnFailure: boolean
     maxHops: number
     signerSecret?: string
+    horizonMaxRetries?: number
+    horizonBaseRetryDelayMs?: number
+    horizonMaxRetryDelayMs?: number
 }
 
 export interface DEXTradeExecutionResult {
@@ -168,7 +173,10 @@ export class StellarDEXService {
             minLiquidityCoverage: this.readNumberEnv('REBALANCE_MIN_LIQUIDITY_COVERAGE', 1, 0.1, 100),
             allowPartialFill: this.readBooleanEnv('REBALANCE_ALLOW_PARTIAL_FILL', true),
             rollbackOnFailure: this.readBooleanEnv('REBALANCE_ROLLBACK_ON_FAILURE', true),
-            maxHops: this.readNumberEnv('REBALANCE_MAX_HOPS', 3, 1, 6)
+            maxHops: this.readNumberEnv('REBALANCE_MAX_HOPS', 3, 1, 6),
+            horizonMaxRetries: this.readNumberEnv('HORIZON_MAX_RETRIES', 5, 0, 10),
+            horizonBaseRetryDelayMs: this.readNumberEnv('HORIZON_BASE_RETRY_DELAY_MS', 1000, 100, 10000),
+            horizonMaxRetryDelayMs: this.readNumberEnv('HORIZON_MAX_RETRY_DELAY_MS', 30000, 1000, 120000)
         }
     }
 
@@ -224,7 +232,10 @@ export class StellarDEXService {
                 config.minLiquidityCoverage,
                 config.allowPartialFill,
                 effectiveMaxHops,
-                fee
+                fee,
+                config.horizonMaxRetries,
+                config.horizonBaseRetryDelayMs,
+                config.horizonMaxRetryDelayMs
             )
 
             totalEstimatedFeeXLM = Dec.addStroopFee(totalEstimatedFeeXLM, fee)
@@ -588,7 +599,10 @@ export class StellarDEXService {
         minLiquidityCoverage: number,
         allowPartialFill: boolean,
         maxHops: number,
-        baseFee: number
+        baseFee: number,
+        horizonMaxRetries?: number,
+        horizonBaseRetryDelayMs?: number,
+        horizonMaxRetryDelayMs?: number
     ): Promise<DEXTradeExecutionResult> {
         const requestedAmount = this.roundAmount(trade.amount)
         let fromAsset: Asset
@@ -762,7 +776,12 @@ export class StellarDEXService {
             const tx = txBuilder.build()
             tx.sign(signer)
 
-            const submitResponse = await this.server.submitTransaction(tx)
+            const submitResponse = await this.submitTransactionWithRetry(
+                tx,
+                horizonMaxRetries,
+                horizonBaseRetryDelayMs,
+                horizonMaxRetryDelayMs
+            )
             const txHash = submitResponse.hash
 
             let executedAmount = requestedAmount
@@ -804,6 +823,17 @@ export class StellarDEXService {
             const slippageBps = market.referencePrice > 0
                 ? Math.max(0, ((market.referencePrice - executionPrice) / market.referencePrice) * 10000)
                 : 0
+
+            // Emit slippage telemetry for successful trades (#1178)
+            if (status === 'executed' || status === 'partial') {
+                recordTradeSlippage({
+                    portfolioId: trade.portfolioId || 'unknown',
+                    fromAsset: trade.fromAsset,
+                    toAsset: trade.toAsset,
+                    slippageBps,
+                    executionPrice
+                })
+            }
 
             return {
                 tradeId: trade.tradeId,
@@ -879,7 +909,10 @@ export class StellarDEXService {
                 config.minLiquidityCoverage,
                 config.allowPartialFill,
                 this.getEffectiveMaxHops(config),
-                baseFee
+                baseFee,
+                config.horizonMaxRetries,
+                config.horizonBaseRetryDelayMs,
+                config.horizonMaxRetryDelayMs
             )
 
             if (rollbackExec.status === 'executed' || rollbackExec.status === 'partial') {
@@ -1226,5 +1259,77 @@ export class StellarDEXService {
 
     private async delay(ms: number): Promise<void> {
         await new Promise(resolve => setTimeout(resolve, ms))
+    }
+
+    /**
+     * Submit transaction to Horizon with retry logic for rate-limit (429) and service unavailable (503) responses (#1177)
+     * Implements exponential backoff with jitter and bounded retry count.
+     */
+    private async submitTransactionWithRetry(
+        tx: any,
+        maxRetries?: number,
+        baseDelayMs?: number,
+        maxDelayMs?: number
+    ): Promise<any> {
+        const actualMaxRetries = maxRetries ?? 5
+        const actualBaseDelayMs = baseDelayMs ?? 1000
+        const actualMaxDelayMs = maxDelayMs ?? 30000
+        const startTime = Date.now()
+
+        for (let attempt = 0; attempt <= actualMaxRetries; attempt++) {
+            try {
+                const response = await this.server.submitTransaction(tx)
+                
+                // On success, record metrics if this was a retry
+                if (attempt > 0) {
+                    const durationSeconds = (Date.now() - startTime) / 1000
+                    recordHorizonSubmissionRetry({
+                        statusCode: 200,
+                        durationSeconds,
+                        outcome: 'success'
+                    })
+                    logger.info('[DEX] Horizon submission succeeded after retry', {
+                        attempt,
+                        durationSeconds
+                    })
+                }
+                
+                return response
+            } catch (error: any) {
+                const isRateLimit = error?.response?.status === 429
+                const isServiceUnavailable = error?.response?.status === 503
+                const shouldRetry = (isRateLimit || isServiceUnavailable) && attempt < actualMaxRetries
+
+                if (!shouldRetry) {
+                    // Record failure for non-retryable errors or after max retries
+                    if (attempt > 0) {
+                        const durationSeconds = (Date.now() - startTime) / 1000
+                        recordHorizonSubmissionRetry({
+                            statusCode: error?.response?.status || 500,
+                            durationSeconds,
+                            outcome: 'failure'
+                        })
+                    }
+                    throw error
+                }
+
+                // Calculate exponential backoff with jitter
+                const exponentialDelay = actualBaseDelayMs * Math.pow(2, attempt)
+                const jitter = Math.random() * 0.3 * exponentialDelay // Add up to 30% jitter
+                const delayMs = Math.min(actualMaxDelayMs, exponentialDelay + jitter)
+
+                logger.warn('[DEX] Horizon submission rate-limited, retrying with backoff', {
+                    attempt: attempt + 1,
+                    maxRetries: actualMaxRetries,
+                    statusCode: error?.response?.status,
+                    delayMs: Math.round(delayMs)
+                })
+
+                await this.delay(delayMs)
+            }
+        }
+
+        // This should never be reached, but TypeScript needs it
+        throw new Error('Horizon submission failed after all retries')
     }
 }
