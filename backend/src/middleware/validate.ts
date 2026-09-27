@@ -52,7 +52,14 @@ export const validateQuery = (schema: ZodSchema) => {
                 return fail(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
             }
 
-            req.query = result.data as typeof req.query;
+            // Express 5 exposes `req.query` as a getter-only accessor, so a plain
+            // assignment throws in ESM strict mode. Redefine the property instead.
+            Object.defineProperty(req, 'query', {
+                value: result.data,
+                writable: true,
+                configurable: true,
+                enumerable: true,
+            });
             next();
         } catch (error) {
             logger.error('Unexpected query validation error', { error });
