@@ -516,3 +516,98 @@ export function recordWorkerLockAcquisition(input: {
         workerLockContentionCount.inc({ portfolio_bucket: bucket })
     }
 }
+
+// ── Per-trade slippage telemetry (#1178) ─────────────────────────────────────
+//
+// Tracks slippage for each executed trade with portfolio and asset-pair labels.
+// This enables analysis of execution quality across different trading pairs and
+// portfolios without blocking trade execution on metric emission failure.
+
+const tradeSlippageBps = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}trade_slippage_bps`,
+    help: 'Slippage in basis points for each executed trade',
+    labelNames: ['portfolio_bucket', 'asset_pair'] as const,
+    buckets: [0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    registers: [register],
+})
+
+const tradeExecutionPrice = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}trade_execution_price`,
+    help: 'Execution price for each trade (normalized to USD equivalent)',
+    labelNames: ['portfolio_bucket', 'asset_pair'] as const,
+    buckets: [0.01, 0.1, 1, 10, 100, 1000, 10000, 100000],
+    registers: [register],
+})
+
+/**
+ * Record slippage metrics for a successfully executed trade.
+ * Uses bucketed portfolio ID to keep cardinality bounded.
+ * Metric emission failures are caught and logged to avoid blocking trade execution.
+ */
+export function recordTradeSlippage(input: {
+    portfolioId: string
+    fromAsset: string
+    toAsset: string
+    slippageBps: number
+    executionPrice: number
+}): void {
+    try {
+        const bucket = bucketPortfolioId(input.portfolioId)
+        const assetPair = `${input.fromAsset}/${input.toAsset}`
+        
+        tradeSlippageBps.observe(
+            { portfolio_bucket: bucket, asset_pair: assetPair },
+            Math.max(0, input.slippageBps),
+        )
+        
+        if (input.executionPrice > 0) {
+            tradeExecutionPrice.observe(
+                { portfolio_bucket: bucket, asset_pair: assetPair },
+                input.executionPrice,
+            )
+        }
+    } catch (error) {
+        // Log but don't throw - metric emission should never block trade execution
+        console.error('[METRICS] Failed to record trade slippage:', error)
+    }
+}
+
+// ── Horizon submission retry metrics (#1177) ─────────────────────────────────
+//
+// Tracks retry attempts for Horizon transaction submissions when rate-limited (429)
+// or when Horizon is unavailable (503). This helps operators see submission pressure
+// and identify when Horizon is rejecting requests.
+
+const horizonSubmissionRetriesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}horizon_submission_retries_total`,
+    help: 'Total Horizon transaction submission retry attempts by status code',
+    labelNames: ['status_code'] as const,
+    registers: [register],
+})
+
+const horizonSubmissionRetryDuration = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}horizon_submission_retry_duration_seconds`,
+    help: 'Duration of Horizon submission retry attempts (including backoff delays)',
+    labelNames: ['status_code', 'outcome'] as const,
+    buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
+    registers: [register],
+})
+
+/**
+ * Record a Horizon submission retry attempt.
+ */
+export function recordHorizonSubmissionRetry(input: {
+    statusCode: number
+    durationSeconds: number
+    outcome: 'success' | 'failure'
+}): void {
+    try {
+        horizonSubmissionRetriesTotal.inc({ status_code: String(input.statusCode) })
+        horizonSubmissionRetryDuration.observe(
+            { status_code: String(input.statusCode), outcome: input.outcome },
+            input.durationSeconds,
+        )
+    } catch (error) {
+        console.error('[METRICS] Failed to record Horizon retry:', error)
+    }
+}
