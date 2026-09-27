@@ -790,7 +790,7 @@ export class StellarDEXService {
 
                 if (newOffer) {
                     remainingAmount = this.roundAmount(parseFloat(newOffer.amount))
-                    if (remainingAmount > 0) {
+                    if (remainingAmount > 0 && !allowPartialFill) {
                         await this.cancelOffer(signer, newOffer, fromAsset, toAsset, baseFee)
                     }
                 }

@@ -1043,6 +1043,42 @@ describe("StellarDEXService", () => {
       expect(result.explanation.partialFill).toBe(true);
       expect(result.explanation.filledAmount).toBe(600);
     });
+
+    it("leaves the unfilled remainder live when allowPartialFill is true", async () => {
+      setupHealthyMarket();
+      setupExecutionMocks(400);
+      const cancelSpy = vi
+        .spyOn(service as any, "cancelOffer")
+        .mockResolvedValue(undefined);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "pf-keep", fromAsset: "XLM", toAsset: "USDC", amount: 1000 }],
+        { allowPartialFill: true, rollbackOnFailure: false },
+      );
+
+      expect(result.status).toBe("partial");
+      expect(result.executedTrades[0].remainingAmount).toBe(400);
+      // Cancelling the remainder would unwind the accepted partial fill.
+      expect(cancelSpy).not.toHaveBeenCalled();
+    });
+
+    it("cancels the unfilled remainder when allowPartialFill is false", async () => {
+      setupHealthyMarket();
+      setupExecutionMocks(400);
+      const cancelSpy = vi
+        .spyOn(service as any, "cancelOffer")
+        .mockResolvedValue(undefined);
+
+      const result = await service.executeRebalanceTrades(
+        MOCK_KEYPAIR.publicKey(),
+        [{ tradeId: "pf-cancel", fromAsset: "XLM", toAsset: "USDC", amount: 1000 }],
+        { allowPartialFill: false, rollbackOnFailure: false },
+      );
+
+      expect(result.status).toBe("failed");
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── Cumulative slippage guard leg accounting (#1380) ──────────────────────
