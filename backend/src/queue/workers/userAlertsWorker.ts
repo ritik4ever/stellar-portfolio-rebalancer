@@ -17,14 +17,18 @@ import {
 
 export const userAlertsRuntimeStatus = createWorkerRuntimeStatus('user-alerts', 1);
 
+let worker: Worker | null = null;
+
 export function setUserAlertsSchedulerRegistered(registered: boolean): void {
     setSchedulerRegistered(userAlertsRuntimeStatus, registered);
 }
 
 export function startUserAlertsWorker(): Worker {
+    if (worker) return worker;
+
     markWorkerStarting(userAlertsRuntimeStatus);
 
-    const worker = new Worker<UserAlertsJobData>(
+    worker = new Worker<UserAlertsJobData>(
         QUEUE_NAMES.USER_ALERTS,
         async (job: Job<UserAlertsJobData>) => {
             logger.info(`[WORKER] Starting user alerts evaluation job ${job.id}`, {
@@ -81,4 +85,17 @@ export function startUserAlertsWorker(): Worker {
     });
     
     return worker;
+}
+
+/**
+ * Close the user alerts worker. Used by the runtime shutdown path and by the
+ * heartbeat supervisor when a supervised restart is required (#1194).
+ */
+export async function stopUserAlertsWorker(): Promise<void> {
+    if (worker) {
+        await worker.close();
+        worker = null;
+        markWorkerStopped(userAlertsRuntimeStatus);
+        logger.info('[WORKER] User alerts worker stopped');
+    }
 }
