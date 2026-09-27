@@ -42,6 +42,28 @@ export function parseWidgetParams(search?: string): { size: WidgetSize; theme: W
   return { size, theme }
 }
 
+export const THEME_STORAGE_KEY = 'embedWidgetTheme'
+
+function isWidgetTheme(value: unknown): value is WidgetTheme {
+  return VALID_THEMES.includes(value as WidgetTheme)
+}
+
+export function resolveInitialTheme(search?: string): WidgetTheme {
+  const rawTheme = new URLSearchParams(search ?? window.location.search).get('theme')?.toLowerCase()
+  if (isWidgetTheme(rawTheme)) return rawTheme
+
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY)
+    if (isWidgetTheme(stored)) return stored
+  } catch {
+    // storage unavailable; fall through to system preference
+  }
+
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light'
+}
+
 interface PublicPortfolioData {
   portfolio: {
     id: string
@@ -66,7 +88,8 @@ function EmbedWidget({ id }: EmbedWidgetProps) {
   const [performancePercent, setPerformancePercent] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const { size, theme } = useMemo(() => parseWidgetParams(), [])
+  const { size } = useMemo(() => parseWidgetParams(), [])
+  const [theme, setTheme] = useState<WidgetTheme>(() => resolveInitialTheme())
   const s = SIZE_CLASSES[size]
   const isDark = theme === 'dark'
 
@@ -99,6 +122,16 @@ function EmbedWidget({ id }: EmbedWidgetProps) {
     }
     fetchSharedPortfolio()
   }, [id])
+
+  const toggleTheme = () => {
+    const next: WidgetTheme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next)
+    } catch {
+      // storage unavailable; theme still applies for this session
+    }
+  }
 
   if (loading) {
     return (
@@ -198,6 +231,14 @@ function EmbedWidget({ id }: EmbedWidgetProps) {
 
       <div className={`px-3 sm:px-4 py-2 sm:py-3 ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-slate-50/50 border-slate-100'} border-t ${s.footer} flex justify-between items-center shrink-0`}>
         <span className={`font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Rebalanced: {lastRebalanceDate}</span>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+          className={`font-semibold transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          {isDark ? 'Light' : 'Dark'}
+        </button>
         <a 
           href={`/public/${id}`} 
           target="_blank" 
