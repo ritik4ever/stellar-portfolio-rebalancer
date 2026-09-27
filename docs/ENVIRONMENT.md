@@ -210,6 +210,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
 | `QUEUE_BACKLOG_READY_THRESHOLD` | No | `500` | Readiness gate: when the BullMQ `waiting + delayed` depth exceeds this value the instance reports not-ready, so orchestrators route traffic away before the backlog becomes customer-visible. | `500` | |
 
+### Worker Supervisor
+
+| Variable | Required | Default | Description | Example | Security Note |
+|---|---|---|---|---|---|
+| `WORKER_SUPERVISOR_ENABLED` | No | `true` | Enables the heartbeat supervisor that automatically restarts workers which stop sending heartbeats. Set to `false` to only log missed heartbeats. | `true` | |
+| `WORKER_SUPERVISOR_INTERVAL_MS` | No | `30000` | How often the supervisor sweeps persisted worker heartbeats (ms). | `30000` | |
+| `WORKER_SUPERVISOR_MISSED_HEARTBEATS` | No | `3` | Consecutive missed heartbeats tolerated before a supervised restart is triggered. | `3` | |
+| `WORKER_SUPERVISOR_MAX_RESTARTS` | No | `3` | Maximum supervised restarts per worker inside the restart window; further attempts are blocked until the window slides to keep crash loops from exhausting resources. | `3` | |
+| `WORKER_SUPERVISOR_RESTART_WINDOW_MS` | No | `300000` | Sliding window (ms) used to count supervised restarts per worker. | `300000` | |
+
 ### Risk Controls
 
 | Variable | Required | Default | Description | Example | Security Note |
