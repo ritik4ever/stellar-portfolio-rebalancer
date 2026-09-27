@@ -13,19 +13,23 @@ interface PortfolioCompareProps {
 }
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899']
+export const MAX_COMPARE_PORTFOLIOS = 5
 
 const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedPortfolioIds, setSelectedPortfolioIds] = useState<string[]>(() => {
     const params = searchParams.get('portfolios')
-    return params ? params.split(',') : []
+    return params ? params.split(',').filter(Boolean).slice(0, MAX_COMPARE_PORTFOLIOS) : []
   })
 
   const { data: portfolios } = useUserPortfolios(publicKey)
   const { data: compareData, isLoading, error } = usePortfolioCompare(selectedPortfolioIds)
 
-  const selectedPortfolios = portfolios?.filter(p => selectedPortfolioIds.includes(p.id)) || []
+  const selectedPortfolios = selectedPortfolioIds
+    .map(id => portfolios?.find(p => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p))
+  const maxReached = selectedPortfolioIds.length >= MAX_COMPARE_PORTFOLIOS
 
   useEffect(() => {
     if (selectedPortfolioIds.length > 0) {
@@ -38,7 +42,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
   const togglePortfolio = (portfolioId: string) => {
     if (selectedPortfolioIds.includes(portfolioId)) {
       setSelectedPortfolioIds(prev => prev.filter(id => id !== portfolioId))
-    } else if (selectedPortfolioIds.length < 5) {
+    } else if (!maxReached) {
       setSelectedPortfolioIds(prev => [...prev, portfolioId])
     }
   }
@@ -101,7 +105,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
             </div>
           </div>
           <div className="text-sm text-gray-600 dark:text-gray-400">
-            {selectedPortfolioIds.length}/5 {t('compare.selectPortfolios')}
+            {selectedPortfolioIds.length}/{MAX_COMPARE_PORTFOLIOS} {t('compare.selectPortfolios')}
           </div>
         </div>
 
@@ -115,10 +119,13 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => togglePortfolio(portfolio.id)}
+                  aria-disabled={maxReached && !selectedPortfolioIds.includes(portfolio.id)}
                   className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
                     selectedPortfolioIds.includes(portfolio.id)
                       ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      : maxReached
+                        ? 'border-gray-200 dark:border-gray-700 opacity-50 cursor-not-allowed'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
