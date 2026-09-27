@@ -577,25 +577,21 @@ impl PortfolioRebalancer {
     /// `upgrade`, `set_fee_config` remain Admin-only).
     pub fn add_operator(env: Env, operator: Address) {
         require_admin(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         env.storage()
             .persistent()
             .set(&DataKey::Operator(operator.clone()), &true);
-        env.events().publish(
-            (Symbol::new(&env, "operator_added"),),
-            operator,
-        );
+        events::emit_operator_added(&env, &admin, &operator);
     }
 
     /// Admin-only: revoke a previously registered operator.
     pub fn remove_operator(env: Env, operator: Address) {
         require_admin(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         env.storage()
             .persistent()
             .remove(&DataKey::Operator(operator.clone()));
-        env.events().publish(
-            (Symbol::new(&env, "operator_removed"),),
-            operator,
-        );
+        events::emit_operator_removed(&env, &admin, &operator);
     }
 
     /// Whether `address` is currently a registered operator.

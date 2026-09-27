@@ -26,3 +26,21 @@ pub fn emit_admin_transferred(env: &Env, previous_admin: &Address, new_admin: &A
         new_admin.clone(),
     );
 }
+
+/// Admin `admin` registered `operator` as a scoped operator: from here it may
+/// call `admin_force_rebalance` and nothing else that is admin-gated.
+pub fn emit_operator_added(env: &Env, admin: &Address, operator: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "operator_added"), admin.clone()),
+        operator.clone(),
+    );
+}
+
+/// Admin `admin` revoked a previously registered `operator`; it can no longer
+/// call `admin_force_rebalance`.
+pub fn emit_operator_removed(env: &Env, admin: &Address, operator: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "operator_removed"), admin.clone()),
+        operator.clone(),
+    );
+}
