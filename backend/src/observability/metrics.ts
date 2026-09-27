@@ -396,3 +396,60 @@ export function recordLockContention(backend: LockBackend): void {
 export function recordLockHoldDuration(backend: LockBackend, durationSeconds: number): void {
     lockHoldDuration.observe({ backend }, durationSeconds)
 }
+
+// ── Rebalance worker advisory-lock acquisition metrics ──────────────────────
+//
+// Distinct from the `rebalance_lock_*` metrics above: those cover
+// `rebalanceLockService`'s Redis/memory lock, while these cover the
+// Postgres advisory lock (`acquireWorkerLock`) that `rebalanceWorker.ts`
+// takes before processing a job. Wait time here is the round-trip time of
+// the (non-blocking) `pg_try_advisory_lock` call — a slow acquisition
+// usually means DB contention or a saturated pool, which is otherwise only
+// inferable from logs.
+//
+// Labeled by a bucketed portfolio identifier (not the raw portfolio id) to
+// keep cardinality bounded while still giving some per-portfolio signal.
+
+const REBALANCE_WORKER_LOCK_ID_BUCKETS = 16
+
+function bucketPortfolioId(portfolioId: string): string {
+    let hash = 0
+    for (let i = 0; i < portfolioId.length; i++) {
+        hash = (hash * 31 + portfolioId.charCodeAt(i)) | 0
+    }
+    return String(Math.abs(hash) % REBALANCE_WORKER_LOCK_ID_BUCKETS)
+}
+
+const rebalanceWorkerLockContentionTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}rebalance_worker_lock_contention_total`,
+    help: 'Total rebalance worker advisory-lock acquisitions that found the lock already held',
+    labelNames: ['portfolio_bucket'] as const,
+    registers: [register],
+})
+
+const rebalanceWorkerLockWaitSeconds = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}rebalance_worker_lock_wait_seconds`,
+    help: 'Time spent acquiring the rebalance worker advisory lock, by outcome',
+    labelNames: ['portfolio_bucket', 'outcome'] as const,
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    registers: [register],
+})
+
+/**
+ * Record one advisory-lock acquisition attempt from `rebalanceWorker.ts`.
+ * @param portfolioId The portfolio the lock was requested for.
+ * @param waitSeconds Time spent waiting on the acquisition call.
+ * @param acquired Whether the lock was successfully acquired.
+ */
+export function recordRebalanceWorkerLockAcquisition(
+    portfolioId: string,
+    waitSeconds: number,
+    acquired: boolean,
+): void {
+    const portfolio_bucket = bucketPortfolioId(portfolioId)
+    const outcome = acquired ? 'acquired' : 'contended'
+    rebalanceWorkerLockWaitSeconds.observe({ portfolio_bucket, outcome }, waitSeconds)
+    if (!acquired) {
+        rebalanceWorkerLockContentionTotal.inc({ portfolio_bucket })
+    }
+}

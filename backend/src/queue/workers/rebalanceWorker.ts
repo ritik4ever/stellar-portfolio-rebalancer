@@ -23,6 +23,8 @@ import {
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
+import { recordRebalanceWorkerLockAcquisition } from "../../observability/metrics.js";
+import { getRebalanceLockConfig } from "../../config/rebalanceLockConfig.js";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
@@ -76,7 +78,25 @@ export async function processRebalanceJob(
       });
     }
 
+    const lockWaitStart = process.hrtime.bigint();
     const lockAcquired = await acquireWorkerLock(portfolioId);
+    const lockWaitMs = Number(process.hrtime.bigint() - lockWaitStart) / 1_000_000;
+
+    recordRebalanceWorkerLockAcquisition(portfolioId, lockWaitMs / 1000, lockAcquired);
+
+    const { lockWaitWarnMs } = getRebalanceLockConfig();
+    if (lockWaitMs > lockWaitWarnMs) {
+      logger.warn(
+        "[WORKER:rebalance] Lock acquisition took longer than expected — possible stuck lock",
+        {
+          portfolioId,
+          lockWaitMs,
+          lockWaitWarnMs,
+          lockAcquired,
+        },
+      );
+    }
+
     if (!lockAcquired) {
       logger.info(
         "[WORKER:rebalance] Rebalance already in progress. Aborting.",

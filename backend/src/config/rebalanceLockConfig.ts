@@ -15,11 +15,20 @@
 export interface RebalanceLockConfig {
     /** Time-to-live for rebalancing locks in milliseconds. */
     ttlMs: number
+    /**
+     * Lock-acquisition wait time (ms) beyond which a warning is logged,
+     * flagging possible stuck locks in the worker's advisory-lock path.
+     */
+    lockWaitWarnMs: number
 }
 
 export const DEFAULT_REBALANCE_LOCK_TTL_MS = 5 * 60 * 1000
 export const MIN_REBALANCE_LOCK_TTL_MS = 1_000
 export const MAX_REBALANCE_LOCK_TTL_MS = 30 * 60 * 1000
+
+export const DEFAULT_REBALANCE_LOCK_WAIT_WARN_MS = 2_000
+export const MIN_REBALANCE_LOCK_WAIT_WARN_MS = 100
+export const MAX_REBALANCE_LOCK_WAIT_WARN_MS = 60_000
 
 function parsePositiveInt(
     value: string | undefined,
@@ -56,8 +65,17 @@ export function parseRebalanceLockConfig(
         MAX_REBALANCE_LOCK_TTL_MS,
     )
 
+    const lockWaitWarnMs = parsePositiveInt(
+        env.REBALANCE_LOCK_WAIT_WARN_MS,
+        DEFAULT_REBALANCE_LOCK_WAIT_WARN_MS,
+        'REBALANCE_LOCK_WAIT_WARN_MS',
+        errors,
+        MIN_REBALANCE_LOCK_WAIT_WARN_MS,
+        MAX_REBALANCE_LOCK_WAIT_WARN_MS,
+    )
+
     return {
-        config: { ttlMs },
+        config: { ttlMs, lockWaitWarnMs },
         errors,
     }
 }
