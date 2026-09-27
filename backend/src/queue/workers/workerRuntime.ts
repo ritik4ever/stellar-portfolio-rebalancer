@@ -3,15 +3,7 @@ import { persistWorkerStatus } from './workerHeartbeat.js';
 import { getDLQQueue, DLQJobData } from '../queues.js';
 import { logger } from '../../utils/logger.js';
 import { query } from '../../db/client.js';
-import { startPortfolioCheckWorker } from './portfolioCheckWorker.js'
-import { startRebalanceWorker } from './rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker } from './analyticsSnapshotWorker.js'
-import { startAnalyticsCompactionWorker } from './analyticsCompactionWorker.js'
-import { startIdempotencyCleanupWorker } from './idempotencyCleanupWorker.js'
-import { startPortfolioExportWorker } from './portfolioExportWorker.js'
-import { startUserAlertsWorker } from './userAlertsWorker.js'
-import { startScheduledExportWorker } from './scheduledExportWorker.js'
-import { startPriceHistoryWorkers, stopPriceHistoryWorkers } from './priceHistoryWorker.js'
+
 
 export interface WorkerRuntimeStatus {
     name: string
@@ -203,10 +195,32 @@ export async function handleFinalFailure(job: Job, error: unknown): Promise<void
 
 let workers: Worker[] = []
 
-export function startAllWorkers(): void {
+export async function startAllWorkers(): Promise<void> {
     logger.info('[WORKER] Starting all background workers...')
 
     try {
+        const [
+            { startPortfolioCheckWorker },
+            { startRebalanceWorker },
+            { startAnalyticsSnapshotWorker },
+            { startAnalyticsCompactionWorker },
+            { startIdempotencyCleanupWorker },
+            { startPortfolioExportWorker },
+            { startUserAlertsWorker },
+            { startScheduledExportWorker },
+            { startPriceHistoryWorkers },
+        ] = await Promise.all([
+            import('./portfolioCheckWorker.js'),
+            import('./rebalanceWorker.js'),
+            import('./analyticsSnapshotWorker.js'),
+            import('./analyticsCompactionWorker.js'),
+            import('./idempotencyCleanupWorker.js'),
+            import('./portfolioExportWorker.js'),
+            import('./userAlertsWorker.js'),
+            import('./scheduledExportWorker.js'),
+            import('./priceHistoryWorker.js'),
+        ])
+
         workers.push(
             startPortfolioCheckWorker() as Worker,
             startRebalanceWorker() as Worker,
@@ -231,6 +245,7 @@ export async function stopAllWorkers(): Promise<void> {
     logger.info('[WORKER] Stopping all background workers...')
     
     try {
+        const { stopPriceHistoryWorkers } = await import('./priceHistoryWorker.js')
         await Promise.all([
             ...workers.map(w => w.close()),
             stopPriceHistoryWorkers()
