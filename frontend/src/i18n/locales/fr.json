@@ -131,7 +131,7 @@
   },
   "compare": {
     "title": "Comparer les portefeuilles",
-    "subtitle": "Sélectionnez 2 à 3 portefeuilles à comparer côte à côte",
+    "subtitle": "Sélectionnez 2 à 5 portefeuilles à comparer côte à côte",
     "selectPortfolios": "Sélectionner les portefeuilles",
     "noPortfolios": "Aucun portefeuille disponible à comparer",
     "selectAtLeastTwo": "Sélectionnez au moins 2 portefeuilles à comparer",
