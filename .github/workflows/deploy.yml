@@ -199,6 +199,11 @@ jobs:
         run: |
           aws s3 sync frontend/dist "s3://${{ env.S3_BUCKET }}" --delete
 
+      - name: Post-deploy smoke test
+        run: |
+          curl -fsS --retry 5 --retry-delay 10 "https://${{ env.FRONTEND_URL }}/" > /dev/null
+          curl -fsS --retry 5 --retry-delay 10 "${{ env.BACKEND_URL }}/api/health" > /dev/null
+
       - name: Create CloudFront invalidation
         run: |
           DIST_ID="${{ env.CF_DIST_ID }}"
