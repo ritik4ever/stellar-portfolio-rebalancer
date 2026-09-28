@@ -19,6 +19,18 @@ on:
       - 'docs/CONTRIBUTING.md'
 
 jobs:
+  wasm-hash-verify:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare deployed WASM hash against source build
+        working-directory: ./contracts
+        run: |
+          npm run build --silent
+          LOCAL=$(sha256sum target/wasm/*.wasm | cut -d' ' -f1)
+          DEPLOYED=$(curl -s "$SOROBAN_RPC_URL/getLedgerEntries" | jq -r '.. | .wasm_hash? // empty' | head -1)
+          [ -n "$DEPLOYED" ] && [ "$LOCAL" != "$DEPLOYED" ] && { echo "::error::WASM hash mismatch: $LOCAL != $DEPLOYED"; exit 1; }
+
   soroban-testnet-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10

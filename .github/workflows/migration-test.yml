@@ -83,6 +83,13 @@ jobs:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/test_db'
         run: npm run db:migrate -- --status
 
+      - name: Dry-run migration preview
+        if: always()
+        working-directory: ./backend
+        env:
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/test_db'
+        run: npm run db:migrate -- --dry-run
+
       - name: Generate summary
         if: always()
         run: |

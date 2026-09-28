@@ -16,7 +16,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 1. **During development**: Use Conventional Commit messages for every commit.
 2. **Before PR**: Select the PR commit type and flag breaking changes in the PR template when applicable.
 3. **PR review**: Commitlint validates PR commit messages in CI.
-4. **Release preparation**: release-please opens or updates a release PR after changes merge to `main`.
+4. **Per-PR requirement**: Every PR must include a `CHANGELOG.md` entry, or a `chore: skip changelog` commit explaining why the change is invisible to users.
+5. **Release preparation**: release-please opens or updates a release PR after changes merge to `main`.
 
 ### Automated Collection
 
