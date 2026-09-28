@@ -61,6 +61,22 @@ The contract stores a portfolio's `current_balances` as `Map<Address, i128>`.
 A numeric `portfolio_id` returned by `create_portfolio`.
 - Used by API routes such as `GET /api/v1/portfolio/:id` and contract calls like `execute_rebalance`.
 
+### Steward
+The address authorized to sign `execute_rebalance` and `deposit` calls for a specific portfolio.
+
+- By default the steward is the portfolio owner (the `user` address supplied to `create_portfolio`).
+- The owner can delegate stewardship to another address (a multisig, an automation contract, or a hot wallet) by calling `transfer_stewardship`.
+- Only the current steward can authorize rebalance transactions for that portfolio. There is no way to rebalance a portfolio without the steward's active signature.
+- See [`transfer_stewardship` in CONTRACT_ABI.md](../contracts/CONTRACT_ABI.md#transfer_stewardship) for the full function signature.
+
+### Stewardship delegation
+The act of transferring the steward role to a different address via `transfer_stewardship`.
+
+- Use this when you want rebalancing to continue without your primary wallet (for example, via an automation service or multisig).
+- The original owner retains the right to call `transfer_stewardship`, but only while they are still the current steward.
+- To revoke a delegation, the current steward calls `transfer_stewardship` again with the owner's address as `new_steward`.
+- For a full explanation of what happens when a wallet is not reconnected, see [DISCONNECTED_WALLET_BEHAVIOR.md](DISCONNECTED_WALLET_BEHAVIOR.md).
+
 ### Emergency stop
 A contract-level safety flag toggled by `set_emergency_stop`.
 - When active, deposit and rebalance calls are blocked.

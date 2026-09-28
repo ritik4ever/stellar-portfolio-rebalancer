@@ -332,6 +332,9 @@ Network mismatch between wallet and app
 
 Wallet-specific quirks (Freighter, Rabet, xBull)
 
+Disconnected Wallet Behavior
+Wondering what happens if you set up a portfolio and never reconnect? See [Disconnected Wallet Behavior](docs/DISCONNECTED_WALLET_BEHAVIOR.md) for a full explanation of how rebalancing authorization works and how to delegate signing authority to another address.
+
 Common Setup Issues
 See CONTRIBUTING.md §10 "Common setup failures" for backend, database, and environment issues.
 
