@@ -27,6 +27,7 @@
     "changelog:update": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
     "changelog:preview": "conventional-changelog -p conventionalcommits",
     "validate:env-examples": "node scripts/validate-env-examples.mjs",
+    "validate:compose-resources": "node scripts/validate-compose-resources.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "quick:pre-commit": "node scripts/run-local-checks.mjs pre-commit",
     "quick:pre-push": "node scripts/run-local-checks.mjs pre-push",
