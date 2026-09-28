@@ -107,6 +107,27 @@ describe('rateLimit middleware', () => {
         expect(fourth.headers['x-ratelimit-limit-type']).toBe('authentication')
     })
 
+    it('limits GET /api/v1/prices to two thirds of the CoinGecko free-tier ceiling', async () => {
+        vi.stubEnv('COINGECKO_FREE_TIER_PER_MINUTE', '3')
+        vi.resetModules()
+
+        const { dynamicRateLimiter, pricesRouteLimit } = await import('../middleware/rateLimit.js')
+        expect(pricesRouteLimit(3)).toBe(2)
+        expect(pricesRouteLimit(30)).toBe(20)
+
+        const app = express()
+        app.get('/api/v1/prices', dynamicRateLimiter, (_req, res) => {
+            res.json({ ok: true })
+        })
+
+        await request(app).get('/api/v1/prices').expect(200)
+        await request(app).get('/api/v1/prices').expect(200)
+        const third = await request(app).get('/api/v1/prices').expect(429)
+        expect(third.headers['x-ratelimit-limit-type']).toBe('prices')
+        expect(third.headers['x-ratelimit-limit']).toBe('2')
+        expect(Number(third.headers['retry-after'])).toBeGreaterThan(0)
+    })
+
     it('dynamicRateLimiter falls back to globalRateLimiter for unmapped routes', async () => {
         vi.stubEnv('RATE_LIMIT_WINDOW_MS', '60000')
         vi.stubEnv('RATE_LIMIT_MAX', '2')
