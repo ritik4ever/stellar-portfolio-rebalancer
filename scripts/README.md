@@ -108,6 +108,7 @@ The `RebalancerClient` class supports these endpoints:
 | `run-local-checks.mjs`          | Pre-commit / pre-push local checks           |
 | `validate-env-examples.mjs`     | Validate `.env.example` files                |
 | `validate-compose-resources.mjs` | Check `docker-compose.resources.yml` mirrors the limits in `deployment/docker-compose.yml` |
+| `validate-funding.mjs`          | Validate `FUNDING.json` (Drips config, EIP-55 addresses) |
 | `install-git-hooks.mjs`         | Install git hooks from `scripts/hooks/`      |
 | `check-commit-messages.sh`      | Validate commit message format               |
 | `check-generated-artifacts.sh`  | Verify generated files are up-to-date        |

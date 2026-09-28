@@ -8,6 +8,7 @@ const CHECKS = {
   'pre-commit': [
     { cwd: '.', script: 'validate:env-examples', label: 'Environment examples and docs validation' },
     { cwd: '.', script: 'validate:compose-resources', label: 'Compose resource limits mirror' },
+    { cwd: '.', script: 'validate:funding', label: 'FUNDING.json validation' },
     { cwd: 'backend', script: 'lint', label: 'Backend lint', optional: true },
     { cwd: 'frontend', script: 'lint', label: 'Frontend lint', optional: true },
     { cwd: '.', script: 'format', label: 'Workspace format check', optional: true },
@@ -15,6 +16,7 @@ const CHECKS = {
   'pre-push': [
     { cwd: '.', script: 'validate:env-examples', label: 'Environment examples and docs validation' },
     { cwd: '.', script: 'validate:compose-resources', label: 'Compose resource limits mirror' },
+    { cwd: '.', script: 'validate:funding', label: 'FUNDING.json validation' },
     { cwd: 'backend', script: 'lint', label: 'Backend lint', optional: true },
     { cwd: 'frontend', script: 'lint', label: 'Frontend lint', optional: true },
     { cwd: 'frontend', script: 'test', label: 'Frontend quick tests' },
