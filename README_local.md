@@ -14,7 +14,7 @@ An intelligent portfolio rebalancing service built for the Stellar ecosystem, le
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.22.2 (see `.nvmrc`)
 - Rust (for smart contracts)
 - Stellar account with testnet lumens
 - **Windows Users:** See the [Windows/WSL Local Development Workflow](docs/windows-wsl-workflow.md) for environment setup recommendations.
@@ -137,4 +137,3 @@ curl -X POST http://localhost:8080/config \
 - Clients must send a `SUBSCRIBE` request to confirm they are ready to receive live updates.
 - The backend responds with `SUBSCRIBED`, including `heartbeatIntervalMs` and `reconnectPolicy`.
 - The server emits `HEARTBEAT` events regularly so both sides agree on liveness and reconnect expectations.
-

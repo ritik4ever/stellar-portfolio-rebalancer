@@ -2,6 +2,9 @@
     "name": "stellar-portfolio-backend",
     "version": "0.1.0",
     "type": "module",
+    "engines": {
+        "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+    },
     "scripts": {
         "dev": "tsx watch --import ./src/observability/register-tracing.ts --import ./src/observability/apm-register.ts src/index.ts",
         "build": "tsc --noEmitOnError false",

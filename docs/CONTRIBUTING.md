@@ -8,8 +8,8 @@ One path to a fully running local stack. Follow each section in order; services 
 
 | Tool         | Version | Notes                                                       |
 | ------------ | ------- | ----------------------------------------------------------- |
-| Node.js      | 18+     | Use [nvm](https://github.com/nvm-sh/nvm) to manage versions |
-| npm          | 9+      | Comes with Node 18                                          |
+| Node.js      | 22.22.2 | Use [nvm](https://github.com/nvm-sh/nvm) and `.nvmrc`       |
+| npm          | 10+     | Comes with Node 22                                          |
 | PostgreSQL   | 14+     | Optional — SQLite fallback works for most dev work          |
 | Redis        | 6+      | Optional — queue workers are skipped when unavailable       |
 | Rust + Cargo | stable  | Only needed for contract development                        |

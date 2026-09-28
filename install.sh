@@ -10,7 +10,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-REQUIRED_NODE_VERSION="20.19.0"
+REQUIRED_NODE_VERSION="22.22.2"
 REQUIRED_NPM_VERSION="10.0.0"
 
 print_status() {
@@ -80,8 +80,15 @@ check_node() {
 
     local node_version
     node_version="$(node -p "process.versions.node")"
-    if ! version_at_least "${node_version}" "${REQUIRED_NODE_VERSION}"; then
-        fail "Node.js ${node_version} is not supported. Please install Node.js ${REQUIRED_NODE_VERSION} or later."
+    local node_major="${node_version%%.*}"
+    if [[ "${node_major}" == "22" ]] && version_at_least "${node_version}" "${REQUIRED_NODE_VERSION}"; then
+        :
+    elif [[ "${node_major}" == "24" ]] && version_at_least "${node_version}" "24.15.0"; then
+        :
+    elif (( node_major >= 26 )); then
+        :
+    else
+        fail "Node.js ${node_version} is not supported. Use ${REQUIRED_NODE_VERSION}, Node.js 24.15.0 through 24.x, or Node.js 26+."
     fi
 
     local npm_version
