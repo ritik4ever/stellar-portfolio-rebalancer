@@ -212,6 +212,46 @@ Response:
 }
 ```
 
+### Public Connectivity Status
+
+Unauthenticated, cache-friendly report on the two upstreams a rebalance depends on: the Reflector oracle and the Stellar DEX. Built from live probes — oracle reachability plus Horizon strict-send route finding — never from a static claim. Always answers `200`; the body carries the health.
+
+```bash
+GET /api/v1/status
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy",
+    "timestamp": "2025-01-01T00:00:00.000Z",
+    "checks": {
+      "reflector_oracle": {
+        "status": "ok",
+        "last_checked": "2025-01-01T00:00:00.000Z",
+        "latency_ms": 84,
+        "reason": "ok",
+        "message": "Reflector oracle is reachable and serving fresh quotes.",
+        "details": { "asset": "XLM", "endpoint": "https://reflector.example" }
+      },
+      "stellar_dex": {
+        "status": "ok",
+        "last_checked": "2025-01-01T00:00:00.000Z",
+        "latency_ms": 132,
+        "reason": "ok",
+        "message": "Stellar DEX is reachable and quoting the probed pair.",
+        "details": { "from_asset": "XLM", "to_asset": "USDC:GBBD…", "path_count": 3 }
+      }
+    },
+    "cache": { "cached": false, "age_ms": 0, "ttl_ms": 15000 }
+  },
+  "error": null,
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
 ### System Status
 
 ```bash

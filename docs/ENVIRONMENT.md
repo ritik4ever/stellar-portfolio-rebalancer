@@ -167,11 +167,21 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 |---|---|---|---|---|---|
 | `COINGECKO_API_KEY` | No | _(empty)_ | CoinGecko API key for production-grade rate limits. | _(use secrets manager)_ | ⚠️ SECRET — rotate via CoinGecko dashboard. See [rotation guide](#coingecko_api_key--vite_coingecko_api_key). |
 | `COINGECKO_BASE_URL` | No | `https://api.coingecko.com/api/v3` | CoinGecko base URL for price requests. | `https://pro-api.coingecko.com/api/v3` | |
+| `COINGECKO_FALLBACK_CACHE_TTL_MS` | No | `30000` | TTL for the CoinGecko fallback price cache only (ms). | `30000` | |
+| `COINGECKO_FREE_TIER_PER_MINUTE` | No | `30` | CoinGecko Demo free-tier ceiling; `/api/v1/prices` allows two thirds of this per minute. | `30` | |
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
 | `REFLECTOR_ADDRESS` | No | _(empty)_ | Soroban contract address for Reflector on-chain oracle. | `CABC...` | |
 | `REFLECTOR_SERVICE_URL` | No | _(empty)_ | Off-chain service URL for Reflector oracle. | `https://reflector.example.com` | |
 | `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
 | `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
+
+### Public Status
+
+| Variable | Required | Default | Description | Example | Security Note |
+|---|---|---|---|---|---|
+| `PUBLIC_STATUS_CACHE_TTL_MS` | No | `15000` | Cache TTL for the public `/api/v1/status` oracle and DEX connectivity report (ms). `0` disables caching. | `15000` | |
+| `PUBLIC_STATUS_DEX_FROM_ASSET` | No | `XLM` | Asset sold by the Stellar DEX connectivity probe on the public status page. | `XLM` | |
+| `PUBLIC_STATUS_DEX_TO_ASSET` | No | `USDC` | Asset bought by the Stellar DEX connectivity probe on the public status page. | `USDC` | |
 
 ### Auto-Rebalancer
 

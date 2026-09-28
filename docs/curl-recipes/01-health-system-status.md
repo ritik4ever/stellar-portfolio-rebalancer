@@ -27,6 +27,42 @@ Expected response:
 }
 ```
 
+## Public Connectivity Status (oracle + DEX)
+
+Unauthenticated report on the Reflector oracle and the Stellar DEX behind the public status page, built from live probes rather than a static claim. Always answers `200` — the body carries the health — and results are cached for `PUBLIC_STATUS_CACHE_TTL_MS` (default 15s).
+
+```bash
+curl -s "$API_BASE/api/v1/status" | jq
+```
+
+Expected response (when healthy):
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy",
+    "timestamp": "2024-01-01T00:00:00.000Z",
+    "checks": {
+      "reflector_oracle": {
+        "status": "ok",
+        "last_checked": "2024-01-01T00:00:00.000Z",
+        "latency_ms": 84,
+        "reason": "ok",
+        "message": "Reflector oracle is reachable and serving fresh quotes."
+      },
+      "stellar_dex": {
+        "status": "ok",
+        "last_checked": "2024-01-01T00:00:00.000Z",
+        "latency_ms": 132,
+        "reason": "ok",
+        "message": "Stellar DEX is reachable and quoting the probed pair."
+      }
+    },
+    "cache": { "cached": false, "age_ms": 0, "ttl_ms": 15000 }
+  }
+}
+```
+
 ## Readiness Check
 
 Checks database, Redis/queues, workers, and indexer status.

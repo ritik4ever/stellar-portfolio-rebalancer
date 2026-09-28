@@ -3,6 +3,7 @@ import { portfoliosRouter } from './portfolios.routes.js'
 import { portfolioImportRouter } from './portfolioImportRoutes.js'
 import { rebalancingRouter } from './rebalancing.routes.js'
 import { opsRouter } from './ops.routes.js'
+import { statusRouter } from './status.routes.js'
 import { notificationsRouter } from './notifications.routes.js'
 import { debugRouter } from './debug.routes.js'
 import { consentRouter } from './consent.routes.js'
@@ -19,6 +20,7 @@ portfolioRouter.use('/portfolio/import', portfolioImportRouter)
 portfolioRouter.use(portfoliosRouter)
 portfolioRouter.use(rebalancingRouter)
 portfolioRouter.use(opsRouter)
+portfolioRouter.use(statusRouter)
 portfolioRouter.use(notificationsRouter)
 portfolioRouter.use(debugRouter)
 portfolioRouter.use(consentRouter)

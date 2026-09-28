@@ -23,6 +23,7 @@ import { api, ENDPOINTS } from './config/api'
 import type { LegalDocType } from './components/Legal'
 import RealtimeStatusBanner from './components/RealtimeStatusBanner'
 import BackendCapabilitiesBanner from './components/BackendCapabilitiesBanner'
+import SystemStatusPanel from './components/SystemStatusPanel'
 import StartupSplash from './components/StartupSplash'
 import { useReadinessReport } from './hooks/useReadinessReport'
 import {
@@ -55,6 +56,9 @@ function App() {
     const [currentView, setCurrentView] = useState(() => {
         if (typeof window !== 'undefined' && window.location.pathname === '/visual-test-components') {
             return 'visual-test-components'
+        }
+        if (typeof window !== 'undefined' && window.location.pathname === '/status') {
+            return 'status'
         }
         return 'landing'
     })
@@ -467,6 +471,19 @@ function App() {
                 <EmbedWidget id={embedPortfolioId} />
             ) : publicShareHash ? (
                 <PublicPortfolio hash={publicShareHash} />
+            ) : currentView === 'status' ? (
+                <div className="min-h-screen bg-gray-50 dark:bg-gray-900 px-6 py-12">
+                    <div className="mx-auto max-w-3xl">
+                        <button
+                            type="button"
+                            onClick={() => handleNavigate('landing')}
+                            className="mb-6 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                            &larr; Back to home
+                        </button>
+                        <SystemStatusPanel variant="full" />
+                    </div>
+                </div>
             ) : currentView === 'landing' ? (
                 <div className="relative">
                     <Landing
