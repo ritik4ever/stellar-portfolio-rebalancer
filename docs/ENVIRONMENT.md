@@ -283,6 +283,9 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `EMAIL_MAX_BACKOFF_MS` | No | `30000` | Exponential backoff ceiling for email retries (ms). | `30000` | |
 | `EMAIL_BACKOFF_MULTIPLIER` | No | `2` | Exponential multiplier for email retry delays. Must be ≥ 1. | `2` | |
 | `NOTIFICATION_RATE_LIMIT_PER_HOUR` | No | `10` | Maximum notifications sent per user per hour. | `10` | |
+| `TWILIO_ACCOUNT_SID` | No | _(empty)_ | Twilio account SID used to send SMS notifications. | _(see Twilio console)_ | ⚠️ SECRET — rotate via Twilio console. |
+| `TWILIO_AUTH_TOKEN` | No | _(empty)_ | Twilio auth token. | _(use secrets manager)_ | ⚠️ SECRET — rotate via Twilio console. |
+| `TWILIO_FROM_NUMBER` | No | _(empty)_ | Twilio sender phone number for outbound SMS. | `+15551234567` | |
 
 ### Observability
 
@@ -306,6 +309,10 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `METRICS_PREFIX` | No | `stellar_portfolio_` | Prefix applied to all emitted metric names. | `stellar_portfolio_` | |
 | `METRICS_DEFAULT_LABELS_SERVICE` | No | `stellar-portfolio-backend` | Default service label attached to all emitted metrics. | `stellar-portfolio-backend` | |
 | `ALERT_CONTACT` | No | `platform-oncall` | Alert-routing metadata label for operations tooling. | `platform-oncall` | |
+| `MONITORING_SLACK_WEBHOOK_URL` | No | _(empty)_ | Slack incoming webhook URL for operational alerts. | _(use secrets manager)_ | ⚠️ SECRET — rotate via Slack app settings. |
+| `PAGERDUTY_ROUTING_KEY` | No | _(empty)_ | PagerDuty Events API v2 routing key for operational alerts. | _(use secrets manager)_ | ⚠️ SECRET — rotate via PagerDuty service settings. |
+| `IDEMPOTENCY_CLEANUP_EXPECTED_INTERVAL_MS` | No | `3600000` | Expected interval between idempotency cleanup worker runs, used to detect missed runs. | `3600000` | |
+| `IDEMPOTENCY_CLEANUP_FAILURE_ALERT_THRESHOLD` | No | `3` | Consecutive idempotency cleanup failures before alerting. | `3` | |
 | `READINESS_CACHE_TTL_MS` | No | `2000` | Cache TTL for the `/readiness` health endpoint (ms). | `2000` | |
 
 ### Analytics & Snapshots

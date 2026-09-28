@@ -23,11 +23,13 @@ export default defineConfig({
         sourcemap: true,
         rollupOptions: {
             output: {
-                manualChunks: {
-                    vendor: ['react', 'react-dom'],
-                    stellar: ['@stellar/stellar-sdk'],
-                    charts: ['recharts'],
-                    ui: ['framer-motion', 'lucide-react']
+                manualChunks(id) {
+                    if (id.includes('node_modules')) {
+                        if (id.includes('react') || id.includes('react-dom')) return 'vendor'
+                        if (id.includes('@stellar/stellar-sdk')) return 'stellar'
+                        if (id.includes('recharts')) return 'charts'
+                        if (id.includes('framer-motion') || id.includes('lucide-react')) return 'ui'
+                    }
                 }
             }
         }

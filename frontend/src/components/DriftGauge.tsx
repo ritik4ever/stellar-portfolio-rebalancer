@@ -14,6 +14,11 @@ interface DriftGaugeGridProps {
   title?: string
 }
 
+interface DriftGaugeProps {
+  asset: DriftGaugeAsset
+  size?: number
+}
+
 type DriftStatus = 'ok' | 'warning' | 'critical'
 
 function getDriftStatus(drift: number, threshold: number): DriftStatus {
@@ -36,7 +41,12 @@ const STATUS_COLORS: Record<DriftStatus, { stroke: string; text: string; bg: str
     bg: '#fef9c3',
     label: 'Approaching threshold',
   },
-  
+  critical: {
+    stroke: '#ef4444',
+    text: 'text-red-600 dark:text-red-400',
+    bg: '#fee2e2',
+    label: 'Above threshold',
+  },
 }
 
 function describeArc(

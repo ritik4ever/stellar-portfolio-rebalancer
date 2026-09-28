@@ -1,6 +1,6 @@
 
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
 // TanStack Query Mutations
 import {
@@ -15,24 +15,32 @@ import {
   CheckCircle,
   Save,
   User,
-  Zap,
   RefreshCw,
+  RotateCcw,
+  X,
 } from "lucide-react";
 
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 import { percentageToBps } from "../utils/calculations";
 import BulkPortfolioImport from "./BulkPortfolioImport";
+import { useAssets } from "../hooks/queries/useAssetsQuery";
+import {
+  loadPortfolioSetupDraft,
+  savePortfolioSetupDraft,
+  clearPortfolioSetupDraft,
+  type PortfolioSetupDraft,
+} from "../hooks/usePortfolio";
+import {
+  loadPortfolioCloneDraft,
+  clearPortfolioCloneDraft,
+  type PortfolioCloneDraft,
+} from "../utils/portfolioCloneDraft";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 
-
-interface AssetOption {
-  value: string
-  label: string
-}
 
 interface PortfolioSetupProps {
   onNavigate: (view: string) => void
@@ -43,13 +51,6 @@ interface Allocation {
   asset: string
   percentage: number
 }
-
-const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
-  { value: 'XLM', label: 'XLM (Stellar Lumens)' },
-  { value: 'USDC', label: 'USDC (USD Coin)' },
-  { value: 'BTC', label: 'BTC (Bitcoin)' },
-  { value: 'ETH', label: 'ETH (Ethereum)' },
-]
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
@@ -174,6 +175,22 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   );
   const [entryMode, setEntryMode] = useState<'manual' | 'bulk'>('manual');
 
+  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(
+    () => {
+      const result = loadPortfolioSetupDraft(publicKey);
+      return result.status === 'loaded' ? result.draft : null;
+    },
+  );
+  const [draftError, setDraftError] = useState<string | null>(() => {
+    const result = loadPortfolioSetupDraft(publicKey);
+    return result.status === 'failed' ? result.error : null;
+  });
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftPromptResolved, setDraftPromptResolved] = useState(
+    () => loadPortfolioSetupDraft(publicKey).status !== 'loaded',
+  );
+  const hasMountedDraftSaver = useRef(false);
+
 
 
   useEffect(() => {
@@ -290,6 +307,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   }
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation()
+  const { data: selectableAssets = [], isLoading: assetsLoading } = useAssets()
 
  
   const getAllocationError = (percentage: number): string | null => {
@@ -393,6 +411,10 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   ) || hasStrategyConfigError;
 
   /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
+  const remainingAllocation = (rows: Allocation[]): number =>
+    parseFloat(
+      (100 - rows.reduce((sum, alloc) => sum + alloc.percentage, 0)).toFixed(2),
+    );
   const remaining = remainingAllocation(allocations);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -536,10 +558,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
-  // Alias so the mobile action bar can reference the same submit handler
-  const handleSubmit = createPortfolio;
 
-  const handleBulkImportSuccess = (portfolioId: string) => {
+  const handleBulkImportSuccess = (_portfolioId: string) => {
     setSuccess(true)
     setTimeout(() => {
       onNavigate('dashboard')

@@ -18,7 +18,6 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
     const [showWalletSelector, setShowWalletSelector] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [showWalletDropdown, setShowWalletDropdown] = useState(false)
-    const [walletNetwork,] = useState<string | null>(null)
     const dropdownRef = useRef<HTMLDivElement>(null)
     const configuredNetwork = getConfiguredNetwork()
 

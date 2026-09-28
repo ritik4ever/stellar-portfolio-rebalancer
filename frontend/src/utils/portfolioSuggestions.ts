@@ -46,8 +46,6 @@ const STABLECOIN_SYMBOLS = new Set([
   'BUSD',
 ])
 
-const CORE_ASSET_ORDER = ['USDC', 'XLM', 'BTC', 'ETH']
-
 const storageKey = (userId: string | null | undefined) =>
   `portfolio-suggestions-dismissed-v${PORTFOLIO_SUGGESTION_DISMISS_VERSION}-${userId || 'anonymous'}`
 

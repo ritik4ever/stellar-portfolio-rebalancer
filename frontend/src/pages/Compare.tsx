@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
-import { ArrowLeft, CheckCircle2, XCircle, TrendingUp, TrendingDown, Activity, Gauge, RotateCcw } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, TrendingUp, TrendingDown, Activity, Gauge, RotateCcw } from 'lucide-react'
 import { useUserPortfolios } from '../hooks/queries/usePortfolioQuery'
 import { usePortfolioCompare } from '../hooks/queries/useAnalyticsQuery'
 import { useTranslation } from 'react-i18next'
@@ -150,7 +150,7 @@ const Compare: React.FC<PortfolioCompareProps> = ({ onNavigate, publicKey }) => 
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('compare.allocation')}</h2>
               <div className={`grid gap-6 ${selectedPortfolioIds.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
-                {selectedPortfolios.map((portfolio, index) => {
+                {selectedPortfolios.map((portfolio) => {
                   const allocationData = getAllocationData(portfolio)
                   return (
                     <div key={portfolio.id} className="text-center">

@@ -2,7 +2,9 @@
  * Soroban contract invocation wrapper.
  * Resolves issue #856: Missing error handling when Soroban invoke response is empty.
  */
-import { toast } from 'react-hot-toast'; // assuming react-hot-toast or similar is used, or just console.error
+// No app-wide imperative toast API is available outside React components here,
+// so fall back to console.error (this module is a plain lib, not a component).
+const toast = { error: (message: string) => console.error(message) };
 import {
     blockedWriteFallback,
     type ContractCapabilityReport,

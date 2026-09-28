@@ -38,6 +38,8 @@ import {
 } from './lib/contractCapabilities'
 import { appCopy } from './content/uiCopy'
 import PublicPortfolio from './pages/PublicPortfolio'
+import EmbedWidget from './pages/EmbedWidget'
+import VisualTestComponents from './pages/VisualTestComponents'
 import PortfolioWizard from './pages/PortfolioWizard'
 import Compare from './pages/Compare'
 import AnalyticsPage from './pages/Analytics'
@@ -101,7 +103,7 @@ function App() {
     const [showBootDiagnostics, setShowBootDiagnostics] = useState(false)
     const settingsDirtyRef = useRef(false)
 
-    const [publicShareHash, setPublicShareHash] = useState<string | null>(() => {
+    const [publicShareHash] = useState<string | null>(() => {
         if (typeof window !== 'undefined') {
             const match = window.location.pathname.match(/^\/public\/([a-zA-Z0-9-]+)/)
             return match ? match[1] : null
@@ -109,7 +111,7 @@ function App() {
         return null
     })
 
-    const [embedPortfolioId, setEmbedPortfolioId] = useState<string | null>(() => {
+    const [embedPortfolioId] = useState<string | null>(() => {
         if (typeof window !== 'undefined') {
             const match = window.location.pathname.match(/^\/embed\/portfolio\/([a-zA-Z0-9-]+)/)
             return match ? match[1] : null
@@ -230,6 +232,7 @@ function App() {
             reconnect: () => walletManager.reconnect(),
             checkConsent,
             authLogin,
+            getAutoReconnect: () => walletManager.getAutoReconnect(),
         })
 
         if (result.outcome === 'no_wallet') {

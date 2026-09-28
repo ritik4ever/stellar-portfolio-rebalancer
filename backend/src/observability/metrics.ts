@@ -554,12 +554,12 @@ export function recordTradeSlippage(input: {
     try {
         const bucket = bucketPortfolioId(input.portfolioId)
         const assetPair = `${input.fromAsset}/${input.toAsset}`
-        
+
         tradeSlippageBps.observe(
             { portfolio_bucket: bucket, asset_pair: assetPair },
             Math.max(0, input.slippageBps),
         )
-        
+
         if (input.executionPrice > 0) {
             tradeExecutionPrice.observe(
                 { portfolio_bucket: bucket, asset_pair: assetPair },

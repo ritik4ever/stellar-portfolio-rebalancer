@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Plus, 
-  Trash2, 
-  ArrowLeft, 
-  ArrowRight, 
-  Check, 
+  Plus,
+  Trash2,
+  ArrowLeft,
+  Check,
   CheckCircle2, 
   Wallet, 
   AlertTriangle, 

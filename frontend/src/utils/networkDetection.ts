@@ -9,13 +9,6 @@ export interface NetworkDetectionResult {
   pendingWalletNetwork?: StellarNetwork | null
 }
 
-const STELLAR_NETWORK_PASSPHRASES: Record<string, StellarNetwork> = {
-  'Test SDF Network ; September 2015': 'testnet',
-  'Public Global Stellar Network ; September 2015': 'mainnet',
-  'Standalone Network ; February 2017': 'standalone',
-  'Future Network ; October 2022': 'futurenet',
-}
-
 export function parseStellarNetworkPassphrase(passphrase: string): StellarNetwork {
   const lower = passphrase.toLowerCase()
   if (lower.includes('test')) return 'testnet'

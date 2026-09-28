@@ -22,6 +22,15 @@ function formatTime(ts: string): string {
     }
 }
 
+interface Props {
+    report: ReadinessReport | null | undefined
+    loading: boolean
+    loadError: boolean
+    history: ReadinessHistoryEntry[] | null | undefined
+    historyLoading: boolean
+    historyError: boolean
+}
+
 function formatDate(ts: string): string {
     try {
         const d = new Date(ts)

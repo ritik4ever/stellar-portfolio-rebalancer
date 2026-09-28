@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search, ChevronDown, ChevronUp, ExternalLink, Download, Share2, ImageIcon } from 'lucide-react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, ChevronDown, ChevronUp, ExternalLink, Share2, ImageIcon } from 'lucide-react'
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { formatShortDate, formatTime, formatNumber } from '../utils/localeFormat'
 import { downloadBlob } from '../utils/export'
@@ -39,6 +39,10 @@ interface RebalanceEvent {
 }
 
 
+
+interface RebalanceTimelineProps {
+    portfolioId: string | null
+}
 
 const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) => {
     // We use a large limit to render up to 100 entries without lag as per AC
@@ -261,7 +265,7 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
                         onClick={handleShare}
                         disabled={exporting || history.length === 0}
                         className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
-                        title={typeof navigator !== 'undefined' && navigator.share ? 'Share' : 'Download'}
+                        title={typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? 'Share' : 'Download'}
                     >
                         <Share2 className="w-4 h-4" />
                         Share
@@ -311,7 +315,7 @@ const RebalanceTimeline: React.FC<RebalanceTimelineProps> = ({ portfolioId }) =>
                     <div className="absolute left-6 top-2 bottom-2 w-0.5 bg-gray-200 dark:bg-gray-700 hidden sm:block"></div>
                     
                     <div className="space-y-6">
-                        {history.map((event, index) => {
+                        {history.map((event) => {
                             const isExpanded = expandedRows.has(event.id)
                             
                             return (
