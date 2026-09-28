@@ -1,0 +1,32 @@
+name: Compose Resources Validation
+
+on:
+  pull_request:
+    paths:
+      - 'deployment/docker-compose.yml'
+      - 'docker-compose.resources.yml'
+      - 'scripts/validate-compose-resources.mjs'
+      - '.github/workflows/compose-resources.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'deployment/docker-compose.yml'
+      - 'docker-compose.resources.yml'
+      - 'scripts/validate-compose-resources.mjs'
+      - '.github/workflows/compose-resources.yml'
+
+jobs:
+  validate-compose-resources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate compose resource limits mirror
+        run: npm run validate:compose-resources

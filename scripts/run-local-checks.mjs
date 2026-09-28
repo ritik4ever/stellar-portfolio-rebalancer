@@ -7,12 +7,14 @@ const mode = process.argv[2]
 const CHECKS = {
   'pre-commit': [
     { cwd: '.', script: 'validate:env-examples', label: 'Environment examples and docs validation' },
+    { cwd: '.', script: 'validate:compose-resources', label: 'Compose resource limits mirror' },
     { cwd: 'backend', script: 'lint', label: 'Backend lint', optional: true },
     { cwd: 'frontend', script: 'lint', label: 'Frontend lint', optional: true },
     { cwd: '.', script: 'format', label: 'Workspace format check', optional: true },
   ],
   'pre-push': [
     { cwd: '.', script: 'validate:env-examples', label: 'Environment examples and docs validation' },
+    { cwd: '.', script: 'validate:compose-resources', label: 'Compose resource limits mirror' },
     { cwd: 'backend', script: 'lint', label: 'Backend lint', optional: true },
     { cwd: 'frontend', script: 'lint', label: 'Frontend lint', optional: true },
     { cwd: 'frontend', script: 'test', label: 'Frontend quick tests' },

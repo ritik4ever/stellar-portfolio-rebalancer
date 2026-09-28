@@ -624,6 +624,7 @@ This sets `core.hooksPath` to `scripts/hooks` for your local clone only.
 The pre-commit hook runs:
 
 - `npm run validate:env-examples`
+- `npm run validate:compose-resources`
 - backend `npm run lint` when configured
 - frontend `npm run lint` when configured
 - root `npm run format` when configured
@@ -631,6 +632,7 @@ The pre-commit hook runs:
 The pre-push hook runs:
 
 - `npm run validate:env-examples`
+- `npm run validate:compose-resources`
 - backend `npm run lint` when configured
 - frontend `npm run lint` when configured
 - frontend `npm test`
