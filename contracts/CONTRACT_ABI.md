@@ -225,6 +225,11 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `actual_balances`: Actual balances used for slippage checks.
 - **Preconditions / failure behavior:**
   - Portfolio must exist and steward/owner must authorize call.
+- **Contract-level slippage enforcement (independent of the backend):**
+  - Before any balance mutation, every leg is checked against the contract-level per-asset-class limit (`set_asset_slippage`, default 100 bps / 1%, max 500 bps / 5%).
+  - Fail-closed on malformed input: a zero/negative oracle price or a negative reported balance reverts with `Error::InvalidPrice`; a non-zero reported balance for an asset with no expected leg reverts with `Error::SlippageExceeded`.
+  - The sum of per-leg slippage across all legs is capped by the portfolio's `global_max_slippage_bps`, which can never exceed `MAX_GLOBAL_MAX_SLIPPAGE_BPS` (1000 bps / 10%): `set_global_max_slippage` rejects larger values and stored values are clamped at enforcement time.
+  - Exceeding any bound reverts the entire rebalance with `Error::SlippageExceeded` and emits a `("slippage_guard","triggered")` event.
 
 ### `admin_force_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
@@ -401,6 +406,11 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `33` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | There is no delete entrypoint. Repurpose an existing template's allocations via `update_template` instead of creating a new one. |
 | `38` | `NoPendingAdmin` | `accept_admin` was called while no admin transfer is in flight. | Have the current admin call `propose_admin` first, or check `get_pending_admin` before accepting. |
 | `39` | `InvalidAdminProposal` | `propose_admin` was called with the address that is already the current admin. | Propose a different address; re-proposing the incumbent would be a no-op transfer. |
+| `40` | `ArithmeticOverflow` | An arithmetic operation overflowed. | Report this error with the full transaction envelope to the maintainers. |
+| `41` | `Unauthorized` | Caller authenticated successfully but is neither the contract admin nor a registered operator for an operator-eligible entrypoint. | Use an admin or registered operator address. |
+| `42` | `NoPendingAdmin` | `accept_admin` was called while no admin transfer is in flight. | Have the current admin call `propose_admin` first, or check `get_pending_admin` before accepting. |
+| `43` | `InvalidAdminProposal` | `propose_admin` was called with the address that is already the current admin. | Propose a different address; re-proposing the incumbent would be a no-op transfer. |
+| `44` | `TooManyPortfolios` | Portfolio creation failed because the user reached the maximum allowed portfolios. | Close an existing portfolio via `close_portfolio` before creating a new one. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 

@@ -1172,6 +1172,13 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
+    /// Set a portfolio's aggregate ("global") max slippage cap, applied to the
+    /// sum of per-leg slippage across all assets during a rebalance.
+    ///
+    /// The value is bounded by [`MAX_GLOBAL_MAX_SLIPPAGE_BPS`] (1000 bps / 10%):
+    /// larger values are rejected with [`Error::InvalidSlippageTolerance`] so a
+    /// malformed or malicious request can never disable the contract-level
+    /// aggregate slippage defense (#1856).
     pub fn set_global_max_slippage(
         env: Env,
         portfolio_id: u64,
@@ -1180,7 +1187,11 @@ impl PortfolioRebalancer {
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
         portfolio.user.require_auth();
-        
+
+        if global_max_slippage_bps > MAX_GLOBAL_MAX_SLIPPAGE_BPS {
+            return Err(Error::InvalidSlippageTolerance);
+        }
+
         portfolio.global_max_slippage_bps = global_max_slippage_bps;
         
         env.storage()
@@ -1435,32 +1446,48 @@ impl PortfolioRebalancer {
                     } else {
                         -expected_balance
                     };
+
+                    // Contract-level per-asset slippage guard (#962, fail-closed
+                    // per #1856): runs for every leg of a trade-related state
+                    // change, before any balance mutation. Malformed inputs (a
+                    // zero/negative oracle price, or a reported balance that would
+                    // imply a non-positive execution price) are rejected outright.
+                    if price <= 0 || actual_balance < 0 {
+                        return Err(Error::InvalidPrice);
+                    }
                     if expected_abs > 0 {
                         let diff = expected_balance - actual_balance;
                         let diff_abs = if diff >= 0 { diff } else { -diff };
                         let slippage_bps = (diff_abs * 10000) / expected_abs;
-                        
+
                         // Per-asset slippage check (existing behavior)
                         if slippage_bps > portfolio.slippage_tolerance as i128 {
                             return Err(Error::SlippageExceeded);
                         }
-                        
-                        // Contract-level per-asset slippage guard (#962): derive the
-                        // effective DEX execution price from the reported balances and
-                        // enforce the admin-configurable asset-class limit (default 1%,
-                        // max 5%). `actual_price = expected_price * actual_balance /
-                        // expected_balance` keeps the measured deviation identical to the
-                        // balance-based `slippage_bps` above, so the portfolio-level and
-                        // contract-level checks stay consistent.
+
+                        // `actual_price = expected_price * actual_balance /
+                        // expected_balance` keeps the measured deviation identical
+                        // to the balance-based `slippage_bps` above, so the
+                        // portfolio-level and contract-level checks stay consistent.
+                        // The guarded variant fail-closes on `actual_price <= 0` and
+                        // on absurd (> +1000%) positive deviations.
                         let actual_price = (price * actual_balance) / expected_balance;
-                        slippage::check_execution_slippage(env, &asset, price, actual_price)?;
+                        slippage::check_execution_slippage_guarded(env, &asset, price, actual_price)?;
                         // Accumulate for global slippage check
                         total_slippage_bps += slippage_bps;
+                    } else if actual_balance != 0 {
+                        // No expected leg to measure deviation against, yet the
+                        // caller reports a balance: fail closed rather than let a
+                        // malformed request bypass the slippage guard.
+                        return Err(Error::SlippageExceeded);
                     }
                 }
-                
-                // Global slippage cap check across all legs
-                if total_slippage_bps > portfolio.global_max_slippage_bps as i128 {
+
+                // Global slippage cap check across all legs. The stored cap is
+                // clamped to MAX_GLOBAL_MAX_SLIPPAGE_BPS (#1856) so a cap written
+                // before that bound existed cannot disable the aggregate check.
+                let global_cap_bps = slippage::cap_global_max_slippage_bps(portfolio.global_max_slippage_bps);
+                if total_slippage_bps > global_cap_bps as i128 {
                     return Err(Error::SlippageExceeded);
                 }
             }
