@@ -60,7 +60,7 @@ These checks are triggered only when their path filters match. GitHub treats the
 | `test` (E2E)                                   | `e2e-tests.yml`                 | all files (targets `main`/`master` branches)                                      | Full Playwright E2E suite with PostgreSQL backend                       |
 | `validate-env-examples`                        | `env-example-validation.yml`    | `.env.example`, `docs/ENVIRONMENT.md`, source files, validation script            | `.env.example` files stay in sync with source and docs                  |
 | `audit-policy`                                 | `npm-audit-policy.yml`          | `package.json`, `package-lock.json`, audit baseline, `docs/CONTRIBUTING.md`       | npm dependency vulnerability counts stay at or below the reviewed baseline |
-| `lighthouse`                                   | `lighthouse.yml`                | `frontend/**`, `.lighthouserc.json`                                               | Lighthouse CI performance, accessibility, and best-practice scores      |
+| `lighthouse`                                   | `lighthouse.yml`                | `frontend/**`, `.lighthouserc.json`, `.github/workflows/lighthouse.yml`, `docs/FRONTEND_PERFORMANCE_BUDGET.md` | Lighthouse CI performance metrics and resource-size budgets             |
 
 ### Post-merge checks (not blocking)
 
@@ -149,7 +149,7 @@ This repository uses **squash merges** to maintain a clean, linear commit histor
 | `migration-dry-run` fails                    | A migration file has a syntax error or conflict                    | Run `npm run db:migrate -- --dry-run` locally against both SQLite and PostgreSQL                      |
 | `visual-regression` fails                    | UI screenshot doesn't match baseline                               | Review diffs in the uploaded Playwright artifact; update baselines if the change is intentional        |
 | `soroban-testnet-smoke` fails                | Contract doesn't build or deploy on testnet                        | Check Rust build errors; verify testnet RPC is reachable; check `STELLAR_TESTNET_SECRET_KEY` secret   |
-| `lighthouse` fails                           | Performance or accessibility scores dropped below thresholds       | Check `.lighthouserc.json` for thresholds; optimize the flagged areas                                 |
+| `lighthouse` fails                           | A performance metric or resource-size budget regressed             | Check the timing and `resource-summary` assertions in `.lighthouserc.json`; see `docs/FRONTEND_PERFORMANCE_BUDGET.md` |
 
 ---
 

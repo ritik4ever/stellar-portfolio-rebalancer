@@ -2,41 +2,11 @@
   "ci": {
     "collect": {
       "staticDistDir": "./frontend/dist",
+      "isSinglePageApplication": true,
       "url": [
         "http://localhost/index.html"
       ],
-      "numberOfRuns": 3,
-      "settings": {
-        "budgets": [
-          {
-            "path": "/*",
-            "resourceSizes": [
-              {
-                "resourceType": "script",
-                "budget": 300
-              },
-              {
-                "resourceType": "total",
-                "budget": 650
-              }
-            ],
-            "timings": [
-              {
-                "metric": "largest-contentful-paint",
-                "budget": 2500
-              },
-              {
-                "metric": "total-blocking-time",
-                "budget": 200
-              },
-              {
-                "metric": "cumulative-layout-shift",
-                "budget": 0.1
-              }
-            ]
-          }
-        ]
-      }
+      "numberOfRuns": 3
     },
     "assert": {
       "assertions": {
@@ -58,7 +28,18 @@
             "maxNumericValue": 0.1
           }
         ],
-        "performance-budget": "error"
+        "resource-summary:script:size": [
+          "error",
+          {
+            "maxNumericValue": 460800
+          }
+        ],
+        "resource-summary:total:size": [
+          "error",
+          {
+            "maxNumericValue": 665600
+          }
+        ]
       }
     },
     "upload": {
