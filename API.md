@@ -570,31 +570,90 @@ available price contributes zero to `total_value_usd` rather than being assumed.
 
 ### Get Rebalance Plan
 
-- **POST /api/portfolio** — Create portfolio (`userAddress`, `allocations`, `threshold`, optional `slippageTolerance`). Allocations must sum to 100%; threshold 1–50%. Supports `Idempotency-Key`.
-- **GET /api/portfolio/{id}** — Get portfolio by ID.
-- **GET /api/portfolios** — List all portfolios (optional query parameter: `userAddress`).
-- **POST /api/portfolio/{id}/clone** — Clone an existing portfolio (optional body: `{ name }`). Supports `Idempotency-Key`.
-- **GET /api/user/{address}/portfolios** — List portfolios for a Stellar address. When JWT auth is enabled, the token subject must match `:address` (otherwise `403`). In demo mode, public-by-address listing is allowed only when `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` is enabled.
-- **GET /api/portfolios/summary** — Dashboard summary of every portfolio for one address in a single request (query: `userAddress`, required). Returns `id`, `name`, `total_value_usd`, `drift_status` (`ok`/`warning`/`critical`), and `last_rebalanced` per portfolio; empty array for an unknown address. Prices are read once from the oracle cache for the whole response. Same ownership rules as `GET /api/user/{address}/portfolios`.
-- **GET /api/portfolio/{id}/rebalance-plan** — Get full read-only rebalance plan (per-asset buy/sell amounts, estimated fees, estimated slippage, projected allocations, prices).
-- **POST /api/portfolio/{id}/rebalance/dry-run** — Dry-run rebalance; returns the same response schema as `rebalance-plan` without DB writes, contract calls, or trade execution.
-- **POST /api/portfolio/{id}/rebalance** — Execute rebalance (body optional: `{ options: { simulateOnly, ignoreSafetyChecks, slippageOverrides } }`). Supports `Idempotency-Key`.
-- **GET /api/portfolio/{id}/analytics** — Analytics time series (query: `days`, default 30).
-- **GET /api/portfolio/{id}/performance-summary** — Performance summary.
-- **GET /api/portfolio/tax-report** — Realized gain/loss tax report computed with FIFO cost basis (query: `year` optional, defaults to current year; `format` `json` (default) or `csv`).
+~~~
+GET /api/v1/portfolio/{portfolioId}/rebalance-plan
+~~~
 
-Response:
-```json
+Returns a read-only plan. It does not write to the database, call a contract, or execute trades.
+
+#### Success Response (200)
+
+~~~
 {
-  "portfolioId": "portfolio-abc123",
-  "totalValue": 10000.00,
-  "maxSlippagePercent": 1,
-  "estimatedSlippageBps": 100,
-  "prices": { "XLM": { "price": 0.3589, "change": -0.5 } },
-  "priceFeedMeta": { /* feed metadata */ }
+  "success": true,
+  "data": {
+    "portfolioId": "portfolio-abc123",
+    "totalValue": 10000.0,
+    "maxSlippagePercent": 1,
+    "estimatedSlippageBps": 100,
+    "estimatedFees": {
+      "xlm": 0.00002,
+      "usd": 0.000007,
+      "perTradeXlm": 0.00001,
+      "tradeCount": 2
+    },
+    "assets": [
+      {
+        "asset": "XLM",
+        "action": "buy",
+        "currentBalance": 1000,
+        "currentValue": 358.9,
+        "currentAllocationPercent": 35.89,
+        "targetAllocationPercent": 40,
+        "targetValue": 4000,
+        "driftPercent": -4.11,
+        "buyAmount": 101.42,
+        "sellAmount": 0,
+        "tradeValue": 36.38,
+        "projectedBalance": 1101.42,
+        "projectedValue": 395.0,
+        "projectedAllocationPercent": 39.5,
+        "price": 0.3589
+      }
+    ],
+    "projectedAllocations": {
+      "XLM": 39.5,
+      "USDC": 60.5
+    },
+    "prices": {
+      "XLM": { "price": 0.3589, "change": -0.5 }
+    },
+    "priceFeedMeta": {
+      "source": "reflector",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  },
+  "error": null,
+  "timestamp": "2025-01-01T00:00:00.000Z"
 }
-```
+~~~
 
+The assets array contains one entry for every asset present in the portfolio allocations or balances. The action is buy, sell, or hold. Amounts and values are numeric; unavailable prices are represented as zero by the planning service. The prices field may be omitted when no prices are available.
+
+#### Error Responses
+
+All errors use the standard error envelope:
+
+~~~
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable description",
+    "details": {}
+  },
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+~~~
+
+| HTTP status | Error code | Condition | Client action |
+|-------------|------------|-----------|---------------|
+| 400 | VALIDATION_ERROR | The portfolio ID path parameter is missing. | Supply a non-empty portfolio ID. |
+| 404 | NOT_FOUND | No portfolio exists for the supplied ID. | Check the ID or create the portfolio first. |
+| 500 | INTERNAL_ERROR | Loading the portfolio, prices, or plan failed unexpectedly. | Retry later and surface the message without assuming a plan was generated. |
+
+The endpoint is read-only, so a successful response is a calculation preview and must not be treated as confirmation that any trade was submitted.
 ### Execute Rebalance
 
 ```bash
