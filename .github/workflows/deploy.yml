@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node.js for deployment metadata checks
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: '.nvmrc'
 
       - name: Resolve Sentry release metadata
         run: node scripts/sentry-metadata.mjs --deployment staging >> "$GITHUB_ENV"
@@ -143,7 +143,7 @@ jobs:
       - name: Setup Node.js for deployment metadata checks
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: '.nvmrc'
 
       - name: Resolve Sentry release metadata
         run: node scripts/sentry-metadata.mjs --deployment production >> "$GITHUB_ENV"

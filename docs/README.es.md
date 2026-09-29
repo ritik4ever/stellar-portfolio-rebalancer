@@ -88,7 +88,7 @@ Los nuevos contribuidores deben leer el glosario antes de profundizar en la conf
 
 ### Requisitos Previos
 
-- Node.js 18+
+- Node.js 22.22.2 (ver `.nvmrc`)
 - Rust + Cargo
 - Soroban CLI
 - Billetera Stellar (se recomienda Freighter o Rabet)

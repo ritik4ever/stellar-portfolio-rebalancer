@@ -23,14 +23,14 @@ git config --global core.eol lf
 
 ## 3. Node.js Version Management
 
-Install Node.js 20.19.0+ inside WSL using `nvm` (Node Version Manager):
+Install Node.js 22.22.2 inside WSL using `nvm` (Node Version Manager):
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 # Restart your terminal or source ~/.bashrc
-nvm install 20.19.0
-nvm use 20.19.0
-nvm alias default 20.19.0
+nvm install 22.22.2
+nvm use 22.22.2
+nvm alias default 22.22.2
 ```
 
 ## 4. Rust + Soroban Installation
