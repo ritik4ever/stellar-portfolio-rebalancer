@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:base",
+    "config:recommended",
     ":dependencyDashboard",
     ":semanticCommits"
   ],
@@ -33,14 +33,14 @@
     "assignees": ["@renovatebot"]
   },
   "prConcurrentLimit": 3,
-  "prCreationLimit": 3,
-  "npm": {
-    "enabled": true,
-    "supportPolicy": ["lts_active"]
-  },
-  "cargo": {
-    "enabled": true
-  },
+  "prHourlyLimit": 3,
+  "enabledManagers": [
+    "npm",
+    "cargo",
+    "dockerfile",
+    "docker-compose",
+    "github-actions"
+  ],
   "packageRules": [
     {
       "description": "Group patch updates into weekly batch PR",
@@ -81,7 +81,7 @@
     },
     {
       "description": "Critical security updates",
-      "matchDatasources": ["npm", "cargo"],
+      "matchDatasources": ["npm", "crate"],
       "matchUpdateTypes": ["patch"],
       "matchDepTypes": ["dependencies"],
       "groupName": "security fixes",
