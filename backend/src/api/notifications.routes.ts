@@ -4,7 +4,7 @@ import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { notificationSubscribeSchema, notificationQuerySchema, notificationThresholdsQuerySchema, notificationThresholdsBodySchema } from './validation.js'
+import { notificationSubscribeSchema, notificationQuerySchema, notificationUnsubscribeQuerySchema, notificationUnsubscribeBodySchema, notificationThresholdsQuerySchema, notificationThresholdsBodySchema } from './validation.js'
 import { getAuthConfig } from '../services/authService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -217,7 +217,7 @@ notificationsRouter.delete('/notifications/alerts/thresholds', requireJwtWhenEna
 })
 
 // Unsubscribe from notifications
-notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
+notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, validateQuery(notificationUnsubscribeQuerySchema, 400), validateRequest(notificationUnsubscribeBodySchema, 400), async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, only allow unsubscribing own preferences.
         let userId: string | undefined

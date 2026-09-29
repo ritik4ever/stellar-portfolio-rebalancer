@@ -207,6 +207,12 @@ export const notificationQuerySchema = z.object({
     reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
 
+export const notificationUnsubscribeQuerySchema = notificationQuerySchema.strict();
+export const notificationUnsubscribeBodySchema = z.preprocess(
+    (body) => body ?? {},
+    z.object({}).strict()
+);
+
 export const notificationThresholdsQuerySchema = z.object({
     userId: z.string().min(1, 'userId query parameter is required').optional(),
     asset: z.string().trim().min(1, 'asset query parameter is required').toUpperCase().optional()
