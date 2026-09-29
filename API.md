@@ -1198,6 +1198,116 @@ Idempotency-Key: <uuid>
 GET /api/v1/notifications/preferences?userId=GALPHABET...
 ```
 
+`userId` is required when JWT authentication is disabled. When it is enabled,
+send `Authorization: Bearer <access_token>`; `userId` may be omitted, but if
+provided it must match the address in the token. A user with no saved
+preferences receives defaults, which are saved on the first read.
+
+**200 OK** — `data.preferences` is an object (never `null`):
+
+```json
+{
+  "success": true,
+  "data": {
+    "preferences": {
+      "userId": "GALPHABET...",
+      "emailEnabled": false,
+      "webhookEnabled": false,
+      "digestMode": "immediate",
+      "events": {
+        "rebalance": true,
+        "circuitBreaker": true,
+        "priceMovement": true,
+        "riskChange": true
+      }
+    }
+  },
+  "error": null,
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+The example shows newly initialized defaults. `userId` is a string;
+`emailEnabled`, `webhookEnabled`, and the four shown `events` values are
+booleans. `digestMode` is `"immediate"`, `"daily"`, or `"weekly"`.
+Saved preferences may also include `emailAddress`, `webhookUrl`,
+`slackWebhookUrl`, and `phoneNumber` (strings); `slackEnabled`, `smsEnabled`,
+and `phoneVerified` (booleans); `priceAlertThresholds` (an object mapping asset
+symbols to numeric thresholds); and `events.correlation_breakdown` (boolean).
+These fields are omitted when absent. A newly initialized response does not
+include them; subsequent reads of the saved row include the stored channel
+flags and `events.correlation_breakdown`.
+
+**Error responses** have `success: false`, `data: null`, an `error` object,
+and an ISO 8601 `timestamp`. `error.details` is omitted unless noted below.
+
+| Status | `error.code` | `error.message` | Additional body fields |
+|--------|--------------|-----------------|------------------------|
+| `400` | `VALIDATION_ERROR` | `userId query parameter is required` | None. Applies when auth is disabled and `userId` is missing. |
+| `401` | `UNAUTHORIZED` | `Missing or invalid Authorization header` (no bearer token) or `Invalid access token` (invalid token) | None. Applies when auth is enabled. |
+| `401` | `TOKEN_EXPIRED` | `Access token expired` | None. Applies when auth is enabled. |
+| `403` | `FORBIDDEN` | `Cannot read notification preferences for another user` | None. Applies when auth is enabled and `userId` differs from the token address. |
+| `403` | `CORS_FORBIDDEN_ORIGIN` | `Origin is not allowed by CORS policy` | None. Applies when the request's `Origin` is outside a configured allowlist. |
+| `422` | `VALIDATION_ERROR` | `Invalid query parameters` | `error.details` is an array of `{ "field": string, "message": string }` entries (for example, an empty or non-string `userId`). |
+| `429` | `RATE_LIMITED` | `Rate limit exceeded for global. Please try again later.` | `error.details` and `meta` each contain `limitType`, `retryAfter`, and `endpoint`; see below. |
+| `500` | `INTERNAL_ERROR` | The handler's error message, or `Internal validation exception` if query validation throws | None. |
+
+For example, a missing `userId` when auth is disabled returns:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "userId query parameter is required"
+  },
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+An invalid query value returns `422` with the validation issues:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid query parameters",
+    "details": [{ "field": "userId", "message": "userId query parameter is required" }]
+  },
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+```
+
+The global rate limiter returns `429` in this shape:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Rate limit exceeded for global. Please try again later.",
+    "details": {
+      "limitType": "global",
+      "retryAfter": 900,
+      "endpoint": "GET /api/v1/notifications/preferences"
+    }
+  },
+  "timestamp": "2025-01-01T00:00:00.000Z",
+  "meta": {
+    "retryAfter": 900,
+    "limitType": "global",
+    "endpoint": "GET /api/v1/notifications/preferences"
+  }
+}
+```
+
+`retryAfter` is a number of seconds and is also sent in the `Retry-After`
+header. Other listed errors omit `details` and `meta`.
+
 ### Unsubscribe
 
 ```bash
