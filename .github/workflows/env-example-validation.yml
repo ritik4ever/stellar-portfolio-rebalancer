@@ -8,6 +8,7 @@ on:
       - 'docs/ENVIRONMENT.md'
       - 'backend/src/**'
       - 'frontend/src/**'
+      - 'backend/package.json'
       - 'scripts/validate-env-examples.mjs'
       - '.github/workflows/env-example-validation.yml'
   push:
@@ -20,6 +21,7 @@ on:
       - 'docs/ENVIRONMENT.md'
       - 'backend/src/**'
       - 'frontend/src/**'
+      - 'backend/package.json'
       - 'scripts/validate-env-examples.mjs'
       - '.github/workflows/env-example-validation.yml'
 
@@ -34,5 +36,16 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Validate env examples and environment docs
         run: npm run validate:env-examples
+
+      - name: Fail if env examples drift from source
+        run: |
+          if ! git diff --quiet -- backend/.env.example frontend/.env.example docs/ENVIRONMENT.md; then
+            echo "::error::.env.example files are out of sync. Run 'npm run validate:env-examples' locally and commit the result."
+            git diff -- backend/.env.example frontend/.env.example docs/ENVIRONMENT.md
+            exit 1
+          fi
