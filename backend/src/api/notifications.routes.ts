@@ -225,6 +225,7 @@ notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, 
             userId = req.user!.address
             const queryId = req.query.userId as string | undefined
             if (queryId && queryId !== userId) {
+                // 403 FORBIDDEN: { success: false, error: { code: 'FORBIDDEN', message: string } }
                 return fail(res, 403, 'FORBIDDEN', 'Cannot unsubscribe notification preferences for another user')
             }
         } else {
@@ -232,6 +233,7 @@ notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, 
         }
 
         if (!userId) {
+            // 400 VALIDATION_ERROR: { success: false, error: { code: 'VALIDATION_ERROR', message: string } }
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
@@ -241,9 +243,11 @@ notificationsRouter.delete('/notifications/unsubscribe', requireJwtWhenEnabled, 
 
         logger.info('User unsubscribed from notifications', { userId, reason: unsubscribeReason || undefined })
 
+        // 200 OK: { success: true, data: { message: string } }
         return ok(res, { message: 'Successfully unsubscribed from all notifications' })
     } catch (error) {
         logger.error('Failed to unsubscribe from notifications', { error: getErrorObject(error) })
+        // 500 INTERNAL_ERROR: { success: false, error: { code: 'INTERNAL_ERROR', message: string } }
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
