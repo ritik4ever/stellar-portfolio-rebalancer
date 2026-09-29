@@ -14,6 +14,7 @@ The `main` branch is the production-ready release branch. All changes reach `mai
 | --------------------------------- | -------- |
 | Require pull request before merge | ✅ Yes   |
 | Required approving reviews        | 1+       |
+| Require review from Code Owners   | ✅ Yes   |
 | Dismiss stale reviews on new push | ✅ Yes   |
 | Require status checks to pass     | ✅ Yes   |
 | Require branches to be up-to-date | ✅ Yes   |
