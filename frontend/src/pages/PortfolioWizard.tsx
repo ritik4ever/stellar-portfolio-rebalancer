@@ -181,15 +181,15 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Add allocation row
+ 
   const handleAddAsset = () => {
-    // Pick first symbol not already in allocations (e.g. XLM, USDC, BTC, ETH)
+   
     const existing = allocations.map(a => a.asset);
     const available = ['XLM', 'USDC', 'BTC', 'ETH'].find(symbol => !existing.includes(symbol)) || 'USDC';
     setAllocations([...allocations, { asset: available, percentage: 0 }]);
   };
 
-  // Update allocation row
+ 
   const handleUpdateAllocation = (index: number, field: 'asset' | 'percentage', value: any) => {
     const next = [...allocations];
     if (field === 'percentage') {
@@ -199,10 +199,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
       next[index].asset = value;
     }
     setAllocations(next);
-    setSelectedTemplateId('custom'); // Any manual adjustment makes it custom
+    setSelectedTemplateId('custom'); 
   };
 
-  // Remove allocation row
+ 
   const handleRemoveAsset = (index: number) => {
     if (allocations.length > 1) {
       setAllocations(allocations.filter((_, i) => i !== index));
@@ -210,7 +210,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Step validation
+ 
   const canGoForward = () => {
     if (step === 1) return true;
     if (step === 2) return isAllocationValid;
@@ -234,7 +234,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Review & Sign
+ 
   const handleSignAndSubmit = async () => {
     if (!publicKey) {
       setError('Please connect your Freighter wallet to sign the transaction.');
@@ -245,8 +245,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setError(null);
 
     try {
-      // Simulate/Trigger signing via walletManager if needed
-      // Create a mocked transaction or message XDR to sign
+      
       const mockXdr = 'AAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAA';
       try {
         await walletManager.signTransaction(mockXdr);
@@ -254,13 +253,13 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         console.warn('Freighter sign bypassed or failed, proceeding with fallback logic', signErr);
       }
 
-      // Convert allocations array to allocations map expected by API
+      
       const allocationsMap: Record<string, number> = {};
       allocations.forEach(item => {
         allocationsMap[item.asset] = item.percentage;
       });
 
-      // API Submit Portfolio
+     
       const portfolio = await createPortfolioMutation.mutateAsync({
         userAddress: publicKey,
         allocations: allocationsMap,
@@ -276,7 +275,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
       if (portfolio && portfolio.id) {
         setCreatedId(portfolio.id);
 
-        // Generate public share link
+        
         try {
           const shareRes = await api.post<{ hash: string; active: boolean }>(
             ENDPOINTS.PORTFOLIO_SHARE(portfolio.id)
