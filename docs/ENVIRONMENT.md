@@ -1,6 +1,9 @@
 # Environment Variable Reference
 
+Last verified: 2026-09-29 against commit `717ea953f3a338c35bfdbc73e06eddb95f216273` on `main`.
+
 Canonical reference for `backend/.env.example` and `frontend/.env.example`.
+Defaults below are the values the process uses when a variable is unset. A value written in an example file overrides that fallback after you copy the file.
 Variables marked **⚠️ SECRET** must never be committed, logged, or exposed in client bundles.
 
 ## Contents
@@ -118,15 +121,15 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `NODE_ENV` | No | `development` | Runtime mode controlling startup validation, logging behavior, and feature gating. | `production` | |
 | `PORT` | No | `3001` | HTTP API listen port. | `3001` | |
 | `STELLAR_NETWORK` | No | `testnet` | Selects `testnet` or `mainnet` defaults for Horizon and Soroban RPC. | `mainnet` | |
-| `CORS_ORIGINS` | No | `http://localhost:3000,...` (see `.env.example`) | Comma-separated browser origins allowed to call the API. | `https://app.example.com` | Restrict to your exact production domain in production. |
-| `LOG_LEVEL` | No | `info` | Application log verbosity. | `warn` | |
-| `LOG_PRETTY` | No | `false` | Pretty-prints logs when `true`; emits JSON lines when `false`. | `true` | |
-| `LOG_DEPLOYMENT_ENV` | No | `local` | Deployment-tier label included in log records and telemetry. | `production` | |
-| `ENABLE_API_LOGGING` | No | `true` | Enables verbose per-request logging. | `false` | Disable in high-throughput production to reduce log volume. |
-| `ENABLE_API_DOCS` | No | `false` | Exposes interactive Swagger/OpenAPI documentation endpoints. | `true` | |
-| `DEBUG_PRICE_FEEDS` | No | `false` | Emits extra upstream price-feed debug logs. | `true` | |
-| `WS_PORT` | No | `3001` | WebSocket listen port (typically shares the HTTP port). | `3001` | |
-| `WS_HEARTBEAT_INTERVAL` | No | `30000` | WebSocket ping/pong heartbeat interval (ms). | `30000` | |
+| `CORS_ORIGINS` | No | _(empty)_ | Comma-separated browser origins allowed to call the API. When unset, non-production reflects any `Origin` and production rejects every cross-origin request. `backend/.env.example` sets `http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000`. | `https://app.example.com` | Restrict to your exact production domain in production. A `*` entry is ignored in production. |
+| `LOG_LEVEL` | No | `debug` outside production, `info` in production | Application log verbosity (`backend/src/utils/logger.ts`). | `warn` | |
+| `LOG_PRETTY` | No | _(unread)_ | Present in `backend/.env.example`. The API logger always emits JSON lines and does not read this variable. | `true` | |
+| `LOG_DEPLOYMENT_ENV` | No | `NODE_ENV`, then `development` | Deployment-tier label included in log records and telemetry. Unset falls back to `NODE_ENV`, then `development`. The example file sets `local`. | `production` | |
+| `ENABLE_API_LOGGING` | No | _(unread)_ | Present in `backend/.env.example`. Backend source does not read this variable. | `false` | |
+| `ENABLE_API_DOCS` | No | `true` outside production, `false` in production | Exposes Swagger UI at `/api/docs` when the value is the string `true`. `/api-docs` is mounted regardless. | `true` | |
+| `DEBUG_PRICE_FEEDS` | No | _(unread)_ | Present in `backend/.env.example`. Backend source does not read this variable. | `true` | |
+| `WS_PORT` | No | _(unread by the API)_ | The API attaches WebSockets to the HTTP server on `PORT`. Only `scripts/chaos/ws-portfolio-feed-load.mjs` reads `WS_PORT` (fallback `3001`). | `3001` | |
+| `WS_HEARTBEAT_INTERVAL` | No | _(unread)_ | Present in `backend/.env.example`. The frontend heartbeat is the constant `WS_HEARTBEAT_INTERVAL_MS` (`30000`) in `frontend/src/constants/wsProtocol.ts`, not this variable. | `30000` | |
 | `CI` | No | _(empty)_ | CI environment marker used by scripts and validation checks. | `true` | |
 
 ### Database
@@ -149,11 +152,11 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `STELLAR_HORIZON_URL` | Yes | — | Horizon REST endpoint used for all Stellar chain reads. | `https://horizon-testnet.stellar.org` | |
 | `STELLAR_CONTRACT_ADDRESS` | Yes | — | Soroban contract ID (`C...`) for portfolio operations. | `CAAAA...AAAA` | |
 | `CONTRACT_ADDRESS` | No | _(empty)_ | Alias for `STELLAR_CONTRACT_ADDRESS`. Must match if both are set. | `CAAAA...AAAA` | |
-| `STELLAR_REBALANCE_SECRET` | Conditional | — | Stellar secret key (`S...`) used to sign backend-initiated rebalances. Required unless demo fallback mode is active. | _(use secrets manager)_ | ⚠️ SECRET — never log or expose. See [rotation guide](#stellar_rebalance_secret--stellar_secret_key). |
+| `STELLAR_REBALANCE_SECRET` | Conditional | — | Stellar secret key (`S...`) used to sign backend-initiated rebalances. Required unless both `DEMO_MODE` and `ALLOW_DEMO_BALANCE_FALLBACK` are enabled. `STELLAR_SECRET_KEY` is accepted as an alias. | _(use secrets manager)_ | ⚠️ SECRET — never log or expose. See [rotation guide](#stellar_rebalance_secret--stellar_secret_key). |
 | `STELLAR_SECRET_KEY` | No | _(empty)_ | Alias for `STELLAR_REBALANCE_SECRET`. | _(use secrets manager)_ | ⚠️ SECRET |
 | `REBALANCE_ALLOW_SIGNER_MISMATCH` | No | `false` | Allows the backend signer to differ from the portfolio owner during execution. | `false` | |
 | `STELLAR_ASSET_ISSUERS` | No | bundled map | JSON object mapping asset symbol to issuer public key for pricing and rebalance logic. | `{"USDC":"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"}` | |
-| `SOROBAN_RPC_URL` | No | network default | Soroban RPC endpoint for contract event indexing. | `https://soroban-testnet.stellar.org` | |
+| `SOROBAN_RPC_URL` | No | testnet `https://soroban-testnet.stellar.org`; mainnet `https://soroban-rpc.mainnet.stellar.gateway.fm` | Soroban RPC endpoint. `SOROBAN_RPC_URLS` (comma-separated) is preferred when set; this variable is the single-URL fallback. `STELLAR_RPC_URL` is the next alias. | `https://soroban-testnet.stellar.org` | |
 | `STELLAR_RPC_URL` | No | _(empty)_ | Backward-compatible alias for `SOROBAN_RPC_URL`. | `https://soroban-testnet.stellar.org` | |
 | `SOROBAN_EVENT_INDEXER_INTERVAL_MS` | No | `15000` | Poll interval for on-chain contract event sync (ms). | `15000` | |
 | `SOROBAN_EVENT_INDEXER_LIMIT` | No | `100` | Maximum events fetched per RPC page. | `100` | |
@@ -166,14 +169,14 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `COINGECKO_API_KEY` | No | _(empty)_ | CoinGecko API key for production-grade rate limits. | _(use secrets manager)_ | ⚠️ SECRET — rotate via CoinGecko dashboard. See [rotation guide](#coingecko_api_key--vite_coingecko_api_key). |
-| `COINGECKO_BASE_URL` | No | `https://api.coingecko.com/api/v3` | CoinGecko base URL for price requests. | `https://pro-api.coingecko.com/api/v3` | |
+| `COINGECKO_BASE_URL` | No | _(empty)_ | Override for the price-feed base URL. Checked only when `REFLECTOR_SERVICE_URL` is unset. When both are empty, the service uses `https://pro-api.coingecko.com/api/v3` if `COINGECKO_API_KEY` is set, otherwise `https://api.coingecko.com/api/v3`. | `https://pro-api.coingecko.com/api/v3` | |
 | `COINGECKO_FALLBACK_CACHE_TTL_MS` | No | `30000` | TTL for the CoinGecko fallback price cache only (ms). | `30000` | |
 | `COINGECKO_FREE_TIER_PER_MINUTE` | No | `30` | CoinGecko Demo free-tier ceiling; `/api/v1/prices` allows two thirds of this per minute. | `30` | |
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
-| `REFLECTOR_ADDRESS` | No | _(empty)_ | Soroban contract address for Reflector on-chain oracle. | `CABC...` | |
+| `REFLECTOR_ADDRESS` | No | _(empty)_ | Listed in `backend/.env.example` and passed through `deployment/docker-compose.yml`. Backend and frontend source do not read this name; the contract stores the Reflector address on chain. The frontend legacy name is `VITE_REFLECTOR_ADDRESS`. | `CABC...` | |
 | `REFLECTOR_SERVICE_URL` | No | _(empty)_ | Off-chain service URL for Reflector oracle. | `https://reflector.example.com` | |
-| `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
-| `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
+| `PRICE_CACHE_DURATION` | No | _(unread)_ | Present in `backend/.env.example`. The price service does not read it. Cache TTL is hardcoded: `300000` ms outside production and `600000` ms in production (`backend/src/services/reflector.ts`). Startup summary cache duration is the separate, undocumented `CACHE_DURATION_MS` (fallback `30000`). | `300000` | |
+| `MIN_REQUEST_INTERVAL` | No | _(unread)_ | Present in `backend/.env.example`. The price service hardcodes `90000` ms and does not read this variable. Startup config reads the separate `MIN_REQUEST_INTERVAL_MS` (fallback `1000`). | `90000` | |
 
 ### Public Status
 
@@ -187,7 +190,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
-| `ENABLE_AUTO_REBALANCER` | No | `false` | Enables queue-backed automatic rebalance scheduling. | `true` | |
+| `ENABLE_AUTO_REBALANCER` | No | `false` outside production | Enables queue-backed automatic rebalance scheduling when set to the string `true`. In `NODE_ENV=production` the scheduler is enabled even when this variable is unset or `false`. | `true` | |
 | `AUTO_REBALANCE_DRY_RUN` | No | `false` | Computes and reports scheduled rebalance plans without submitting on-chain transactions. A portfolio's `strategyConfig.dryRun` value overrides this global setting. | `true` | |
 | `AUTO_REBALANCE_CHECK_INTERVAL` | No | `3600000` | How often the auto-rebalancer checks all portfolios (ms). | `3600000` | |
 | `MIN_REBALANCE_INTERVAL` | No | `86400000` | Minimum time between successful rebalances per portfolio (ms). | `86400000` | |
@@ -302,7 +305,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `OTEL_ENABLED` | No | `false` | Enables OpenTelemetry tracing. | `true` | |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OpenTelemetry OTLP exporter endpoint. | `http://localhost:4318` | |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318/v1/traces` | OpenTelemetry OTLP exporter endpoint (`backend/src/observability/tracing.ts`). | `http://localhost:4318/v1/traces` | |
 | `OTEL_SERVICE_NAME` | No | `stellar-portfolio-backend` | OpenTelemetry service name. | `stellar-portfolio-backend` | |
 | `SENTRY_ENABLED` | No | `false` | Enables the backend Sentry integration. | `true` | |
 | `SENTRY_DSN` | No | _(empty)_ | Sentry project DSN for error and performance reporting. | _(see Sentry dashboard)_ | ⚠️ SECRET — if exposed publicly, rotate via Sentry project settings. See [rotation guide](#sentry_dsn--vite_sentry_dsn). |
@@ -339,14 +342,14 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
-| `DEMO_MODE` | No | `true` | Enables local demo portfolio flows. Set to `false` in production. | `false` | |
-| `ALLOW_FALLBACK_PRICES` | No | `true` | Uses fallback price data when the primary feed fails. | `false` | |
-| `ALLOW_MOCK_PRICE_HISTORY` | No | `true` | Allows generated historical price data. Disable in production. | `false` | |
+| `DEMO_MODE` | No | `true` outside production, `false` in production | Enables local demo portfolio flows. Startup refuses to boot when this is true in production. | `false` | |
+| `ALLOW_FALLBACK_PRICES` | No | `true` outside production, `false` in production | Uses fallback price data when the primary feed fails. | `false` | |
+| `ALLOW_MOCK_PRICE_HISTORY` | No | follows `DEMO_MODE` | Allows generated historical price data. When unset, matches `DEMO_MODE`. | `false` | |
 | `PRICE_HISTORY_BACKFILL_DAYS` | No | `90` | Days of price history backfilled when a new asset is added. Valid range: 1–365. | `45` | |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | No | `false` | Allows anonymous portfolio listing by user address in demo mode. | `false` | |
-| `ENABLE_DEBUG_ROUTES` | No | `true` | Enables debug/test route groups. **Must be `false` in production.** | `false` | ⚠️ Exposes internal test routes and can leak stack traces — the highest-risk flag in this section. |
-| `ALLOW_DEMO_BALANCE_FALLBACK` | No | `true` | Uses demo balances when a live on-chain balance fetch fails. | `false` | |
-| `ENABLE_DEMO_DB_SEED` | No | `true` | Seeds demo data into the local database at startup. Disable in production. | `false` | |
+| `ENABLE_DEBUG_ROUTES` | No | `false` | Enables debug/test route groups. The code fallback is `false` in every environment. `backend/.env.example` sets `true`, so a copied example file turns the routes on until you change it. | `false` | ⚠️ Exposes internal test routes and can leak stack traces — the highest-risk flag in this section. |
+| `ALLOW_DEMO_BALANCE_FALLBACK` | No | follows `DEMO_MODE` | Uses demo balances when a live on-chain balance fetch fails. When unset, matches `DEMO_MODE`. Together with `DEMO_MODE`, this is what makes `STELLAR_REBALANCE_SECRET` optional. | `false` | |
+| `ENABLE_DEMO_DB_SEED` | No | follows `DEMO_MODE` | Seeds demo data into the local database at startup. When unset, matches `DEMO_MODE`. | `false` | |
 | `DEMO_INITIAL_BALANCE` | No | `10000` | Starting USD value assigned to demo portfolios. | `10000` | |
 | `MOCK_EXTERNAL_APIS` | No | `false` | Mocks all outbound provider calls. For test and CI use only. | `false` | |
 
@@ -355,6 +358,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `FEATURE_FLAGS_FILE` | No | _(empty)_ | Path to a local JSON file containing feature flag overrides for staging. | `./feature-flags.json` | |
+
+`getFeatureFlags()` also reads these names, which are not in `backend/.env.example` and therefore are not table rows here: `ENABLE_ISSUER_METADATA` (fallback `true`), `ENABLE_SHADOW_MODE` (fallback `false`), `ENABLE_REBALANCE_CROSS_CHECK` (fallback `false`), and `REBALANCE_CROSS_CHECK_REQUIRE_AGREEMENT` (fallback `false`).
 
 ---
 
