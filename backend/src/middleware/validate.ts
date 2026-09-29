@@ -3,7 +3,7 @@ import { ZodSchema, ZodError } from 'zod';
 import { logger } from '../utils/logger.js';
 import { fail } from '../utils/apiResponse.js';
 
-export const validateRequest = (schema: ZodSchema) => {
+export const validateRequest = (schema: ZodSchema, statusCode = 422) => {
     return (req: Request, res: Response, next: NextFunction) => {
         try {
             const result = schema.safeParse(req.body);
@@ -20,7 +20,7 @@ export const validateRequest = (schema: ZodSchema) => {
                     errors: formattedErrors
                 });
 
-                return fail(res, 422, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
+                return fail(res, statusCode, 'VALIDATION_ERROR', 'Invalid request payload', formattedErrors);
             }
 
             req.body = result.data;
@@ -32,7 +32,7 @@ export const validateRequest = (schema: ZodSchema) => {
     };
 };
 
-export const validateQuery = (schema: ZodSchema) => {
+export const validateQuery = (schema: ZodSchema, statusCode = 422) => {
     return (req: Request, res: Response, next: NextFunction) => {
         try {
             const result = schema.safeParse(req.query);
@@ -49,7 +49,7 @@ export const validateQuery = (schema: ZodSchema) => {
                     errors: formattedErrors
                 });
 
-                return fail(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
+                return fail(res, statusCode, 'VALIDATION_ERROR', 'Invalid query parameters', formattedErrors);
             }
 
             // Express 5 exposes `req.query` as a getter-only accessor, so a plain

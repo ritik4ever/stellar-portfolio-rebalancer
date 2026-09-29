@@ -426,6 +426,29 @@ describe('Notification Preferences API Integration Tests', () => {
             expect(prefs!.emailEnabled).toBe(false)
             expect(prefs!.webhookEnabled).toBe(false)
         })
+
+        it('rejects malformed query and body before unsubscribing', async () => {
+            const unsubscribe = vi.spyOn(notificationService, 'unsubscribe')
+
+            await request(app)
+                .delete('/api/notifications/unsubscribe')
+                .query({ userId: TEST_USER, unexpected: 'value' })
+                .expect(400)
+
+            await request(app)
+                .delete('/api/notifications/unsubscribe')
+                .query({ userId: TEST_USER })
+                .send({ allocations: { XLM: 100 } })
+                .expect(400)
+
+            await request(app)
+                .delete('/api/notifications/unsubscribe')
+                .query({ userId: TEST_USER, reason: 'x'.repeat(281) })
+                .expect(400)
+
+            expect(unsubscribe).not.toHaveBeenCalled()
+            unsubscribe.mockRestore()
+        })
     })
 
     describe('GET /api/notifications/logs', () => {
