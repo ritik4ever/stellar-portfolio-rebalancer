@@ -263,6 +263,7 @@ notificationsRouter.get('/notifications/logs', requireJwtWhenEnabled, validateQu
             if (queryId && queryId !== userId) {
                 return fail(res, 403, 'FORBIDDEN', 'Cannot read notification logs for another user')
             }
+   
         } else {
             userId = req.query.userId as string | undefined
         }
@@ -271,7 +272,8 @@ notificationsRouter.get('/notifications/logs', requireJwtWhenEnabled, validateQu
             return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
-        const logs = notificationService.getLogs(userId)
+        const limit = Math.min(Number(req.query.limit) || 50, 200)
+        const logs = notificationService.getDeliveryLogs(userId, limit)
 
         return ok(res, { logs })
     } catch (error) {
@@ -280,196 +282,94 @@ notificationsRouter.get('/notifications/logs', requireJwtWhenEnabled, validateQu
     }
 })
 
-// Unsubscribe via email link (token-based, no JWT required)
-notificationsRouter.get('/notifications/unsubscribe', async (req: Request, res: Response) => {
+// Get notification delivery status
+notificationsRouter.get('/notifications/status', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
     try {
-        const userId = req.query.userId as string | undefined
-        const token = req.query.token as string | undefined
-
-        if (!userId || !token) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'userId and token query parameters are required')
+        let userId: string | undefined
+        if (getAuthConfig().enabled) {
+            userId = req.user!.address
+            const queryId = req.query.userId as string | undefined
+            if (queryId && queryId !== userId) {
+                return fail(res, 403, 'FORBIDDEN', 'Cannot read notification status for another user')
+            }
+        } else {
+            userId = req.query.userId as string | undefined
         }
 
-        if (!NotificationService.verifyUnsubscribeToken(userId, token)) {
-            return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired unsubscribe link')
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId query parameter is required')
         }
 
-        notificationService.unsubscribe(userId)
+        const status = notificationService.getDeliveryStatus(userId)
 
-        logger.info('User unsubscribed via email link', { userId })
-
-        return ok(res, { message: 'Successfully unsubscribed from all notifications' })
+        return ok(res, { status })
     } catch (error) {
-        logger.error('Failed to unsubscribe via email link', { error: getErrorObject(error) })
+        logger.error('Failed to get notification delivery status', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-// Verify inbound webhook callback signature
-notificationsRouter.post('/notifications/webhook/callback', async (req: Request, res: Response) => {
+// Test notification delivery
+notificationsRouter.post('/notifications/test', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const signatureHeader = req.headers['x-signature-256'] as string | undefined
-        const body = JSON.stringify(req.body)
-        const secret = process.env.WEBHOOK_SIGNING_SECRET
-
-        if (!secret) {
-            logger.warn('Webhook callback received but no WEBHOOK_SIGNING_SECRET configured')
-            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Webhook verification not configured')
+        const userId = getAuthConfig().enabled ? req.user!.address : req.body?.userId
+        if (!userId) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'userId is required')
         }
 
-        const valid = NotificationService.verifyCallbackSignature(body, signatureHeader, secret)
+        const result = await notificationService.sendTestNotification(userId)
 
-        if (!valid) {
-            logger.warn('Webhook callback rejected: invalid signature', {
-                ip: req.ip,
-                signature: signatureHeader ? `${signatureHeader.slice(0, 20)}...` : undefined,
-            })
-            return fail(res, 401, 'UNAUTHORIZED', 'Invalid webhook signature')
-        }
-
-        logger.info('Webhook callback verified successfully')
-        return ok(res, { status: 'verified' })
+        return ok(res, result)
     } catch (error) {
-        logger.error('Webhook callback verification error', { error: getErrorObject(error) })
+        logger.error('Failed to send test notification', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-/**
- * Admin: browse dead-lettered webhook deliveries (#1393).
- * Each entry carries its failure reason and original payload. Filtering and
- * pagination keep the view usable when a broken endpoint has produced many.
- */
-notificationsRouter.get('/admin/notifications/dead-letter', requireAdmin, async (req: Request, res: Response) => {
+// Get webhook dead letter queue items
+notificationsRouter.get('/notifications/webhooks/dead-letter', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const all = await webhookDeadLetterQueue.list()
-        const listing = queryDeadLetterItems(all, {
-            userId: req.query.userId as string | undefined,
-            eventType: req.query.eventType as string | undefined,
-            search: req.query.search as string | undefined,
-            page: req.query.page ? Number(req.query.page) : undefined,
-            pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
-        })
-        return ok(res, listing)
+        const limit = Math.min(Number(req.query.limit) || 50, 200)
+        const items = queryDeadLetterItems(limit)
+        return ok(res, { items, total: webhookDeadLetterQueue.size })
     } catch (error) {
-        logger.error('Failed to list dead-letter items', { error: getErrorObject(error) })
+        logger.error('Failed to read webhook dead letter queue', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-notificationsRouter.post('/admin/notifications/dead-letter/:id/replay', requireAdmin, async (req: Request, res: Response) => {
+// Replay a webhook dead letter item
+notificationsRouter.post('/notifications/webhooks/dead-letter/:id/replay', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const itemId = req.params.id
-        const item = await webhookDeadLetterQueue.replay(itemId)
+        const id = req.params.id
+        const item = webhookDeadLetterQueue.get(id)
         if (!item) {
-            return fail(res, 404, 'NOT_FOUND', 'Dead-letter item not found')
+            return fail(res, 404, 'NOT_FOUND', 'Dead letter item not found')
         }
 
-        const deliveryConfig = getNotificationDeliveryConfig()
-        const policy = {
-            ...deliveryConfig.webhook,
-            maxAttempts: Math.min(deliveryConfig.webhook.maxAttempts, 5),
+        const config = getNotificationDeliveryConfig()
+        const result = await deliverBackoff(item.url, item.payload, config)
+
+        if (result.success) {
+            webhookDeadLetterQueue.remove(id)
+            return ok(res, { replayed: true, attempts: result.attempts })
         }
 
-        try {
-            await deliverWithBackoff(
-                {
-                    provider: 'webhook',
-                    userId: item.userId,
-                    eventType: item.eventType,
-                    policy,
-                },
-                async () => {
-                    await postDeadLetterPayload(item, policy.requestTimeoutMs || 5000)
-                },
-            )
-            return ok(res, { message: 'Dead-letter item replayed successfully' })
-        } catch (replayError) {
-            await webhookDeadLetterQueue.requeue(item)
-            return fail(res, 502, 'REPLAY_FAILED', 'Replay delivery failed, item re-queued')
-        }
+        return fail(res, 502, 'DELIVERY_FAILED', 'Replay delivery failed')
     } catch (error) {
-        logger.error('Failed to replay dead-letter item', { error: getErrorObject(error) })
+        logger.error('Failed to replay webhook dead letter item', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-notificationsRouter.post('/admin/notifications/dead-letter/batch-replay', requireAdmin, async (req: Request, res: Response) => {
+// Purge the webhook dead letter queue
+notificationsRouter.delete('/notifications/webhooks/dead-letter', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { ids, replayAll } = req.body as { ids?: string[]; replayAll?: boolean }
-        
-        if (!ids && !replayAll) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'Either ids array or replayAll flag is required')
-        }
-
-        const allItems = await webhookDeadLetterQueue.list()
-        const itemsToReplay = replayAll ? allItems : allItems.filter(item => ids!.includes(item.id))
-
-        if (itemsToReplay.length === 0) {
-            return fail(res, 404, 'NOT_FOUND', 'No matching dead-letter items found')
-        }
-
-        const deliveryConfig = getNotificationDeliveryConfig()
-        const policy = {
-            ...deliveryConfig.webhook,
-            maxAttempts: Math.min(deliveryConfig.webhook.maxAttempts, 5),
-        }
-
-        const results = {
-            total: itemsToReplay.length,
-            succeeded: 0,
-            failed: 0,
-            failedIds: [] as string[],
-        }
-
-        for (const item of itemsToReplay) {
-            const removed = await webhookDeadLetterQueue.replay(item.id)
-            if (!removed) {
-                results.failed++
-                results.failedIds.push(item.id)
-                continue
-            }
-
-            try {
-                await deliverWithBackoff(
-                    {
-                        provider: 'webhook',
-                        userId: item.userId,
-                        eventType: item.eventType,
-                        policy,
-                    },
-                    async () => {
-                    await postDeadLetterPayload(item, policy.requestTimeoutMs || 5000)
-                },
-                )
-                results.succeeded++
-            } catch (replayError) {
-                await webhookDeadLetterQueue.requeue(item)
-                results.failed++
-                results.failedIds.push(item.id)
-            }
-        }
-
-        return ok(res, {
-            message: `Batch replay completed: ${results.succeeded} succeeded, ${results.failed} failed`,
-            results,
-        })
+        const count = webhookDeadLetterQueue.size
+        webhookDeadLetterQueue.clear()
+        return ok(res, { purged: count })
     } catch (error) {
-        logger.error('Failed to batch replay dead-letter items', { error: getErrorObject(error) })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
-    }
-})
-
-notificationsRouter.delete('/admin/notifications/dead-letter/:id', requireAdmin, async (req: Request, res: Response) => {
-    try {
-        const itemId = req.params.id
-        const deleted = await webhookDeadLetterQueue.delete(itemId)
-        if (!deleted) {
-            return fail(res, 404, 'NOT_FOUND', 'Dead-letter item not found')
-        }
-        return ok(res, { message: 'Dead-letter item deleted' })
-    } catch (error) {
-        logger.error('Failed to delete dead-letter item', { error: getErrorObject(error) })
+        logger.error('Failed to purge webhook dead letter queue', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

@@ -427,6 +427,49 @@ describe('Notification Preferences API Integration Tests', () => {
             expect(prefs!.webhookEnabled).toBe(false)
         })
 
+        it('returns 200 with a success response shape and disables all channels', async () => {
+            await request(app)
+                .post('/api/notifications/subscribe')
+                .send({
+                    userId: TEST_USER,
+                    emailEnabled: true,
+                    emailAddress: 'test@example.com',
+                    webhookEnabled: true,
+                    webhookUrl: 'https://example.com',
+                    events: { rebalance: true, circuitBreaker: true, priceMovement: true, riskChange: true }
+                })
+                .expect(200)
+
+            const res = await request(app)
+                .delete('/api/notifications/unsubscribe')
+                .query({ userId: TEST_USER })
+                .expect(200)
+
+            expect(res.body).toMatchObject({
+                success: true,
+                data: {
+                    message: expect.stringContaining('unsubscribed')
+                }
+            })
+            expect(res.body.error).toBeUndefined()
+
+            const prefs = notificationService.getPreferences(TEST_USER)
+            expect(prefs).toBeDefined()
+            expect(prefs!.emailEnabled).toBe(false)
+            expect(prefs!.webhookEnabled).toBe(false)
+            expect(prefs!.emailAddress).toBeUndefined()
+            expect(prefs!.webhookUrl).toBeUndefined()
+        })
+
+        it('returns 400 when userId query param is missing', async () => {
+            const res = await request(app)
+                .delete('/api/notifications/unsubscribe')
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
         it('rejects malformed query and body before unsubscribing', async () => {
             const unsubscribe = vi.spyOn(notificationService, 'unsubscribe')
 
