@@ -44,6 +44,23 @@ The project uses release-please to automatically generate changelog entries from
 
 Use a `!` after the type/scope or add a `BREAKING CHANGE:` footer when a commit introduces a breaking change. release-please flags those entries in the generated changelog.
 
+### Worked Example: From Commit to Changelog
+
+**Input (Commit Message)**:
+```text
+feat(api): add portfolio export endpoint
+
+Adds a new CSV export feature for user portfolios.
+```
+
+**Expected Output (Generated `CHANGELOG.md` Entry)**:
+```markdown
+### Features
+
+* **api:** add portfolio export endpoint
+```
+
+
 ### Entry Categories
 
 Release changelog entries are generated into these sections:
