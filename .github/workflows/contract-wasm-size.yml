@@ -17,8 +17,12 @@ on:
 
 # ── Tunable knobs ─────────────────────────────────────────────────────────────
 env:
+  # soroban-sdk 28+ requires the wasm32v1-none target (the old
+  # wasm32-unknown-unknown target is rejected by its build script on
+  # rustc >= 1.82) and spec-shaking support to be advertised at build time.
+  SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2: "1"
   # Build artefact path (relative to contracts/)
-  WASM_PATH: target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
+  WASM_PATH: target/wasm32v1-none/release/portfolio_rebalancer.wasm
   # Baseline file path (relative to contracts/)
   BASELINE_FILE: wasm-size-baseline.txt
   # Percentage growth that triggers a failure (integer, e.g. 10 = 10 %)
@@ -35,10 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust (wasm32 target)
+      - name: Setup Rust (wasm32v1-none target)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo registry + build artefacts
         uses: actions/cache@v4
@@ -53,7 +57,7 @@ jobs:
 
       - name: Build contract (release WASM)
         working-directory: contracts
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --target wasm32v1-none --release
 
       - name: Measure WASM size and compare against baseline
         id: size_check
