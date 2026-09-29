@@ -1,10 +1,17 @@
 repos:
-  - repo: https://github.com/pre-commit/mirrors-eslint
-    rev: v9
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
-      - id: eslint
+      - id: check-yaml
+        files: ^(?:\.github/workflows/.*\.ya?ml|\.pre-commit-config\.yaml)$
+      - id: check-json
+        files: ^\.lighthouserc\.json$
+      - id: check-toml
+        files: ^\.gitleaks\.toml$
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.2
+    rev: v8.30.1
     hooks:
       - id: gitleaks
-        args: ["--config", ".gitleaks.toml"]
+        # Scan the complete working tree in local hooks and `--all-files` CI runs.
+        # The upstream hook defaults to `--staged`, which scans nothing on a clean checkout.
+        entry: gitleaks dir . --redact --config .gitleaks.toml --verbose

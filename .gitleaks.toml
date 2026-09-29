@@ -1,4 +1,4 @@
-# Giteaks configuration for Stellar Portfolio Rebalancer
+# Gitleaks configuration for Stellar Portfolio Rebalancer
 # Docs: https://github.com/gitleaks/gitleaks
 
 title = "Stellar Portfolio Rebalancer gitleaks config"
@@ -7,30 +7,22 @@ title = "Stellar Portfolio Rebalancer gitleaks config"
 [extend]
 useDefault = true
 
-# Allowlist for known false positives.
-# Keep entries specific to test fixtures and example keys.
+# Allow only explicit documentation placeholders. Do not allowlist whole fixture,
+# mock, or example paths: those files can accidentally contain real credentials too.
 [allowlist]
-  description = "Known false positives: test fixtures, example keys, sample data"
+  description = "Documented non-secret placeholders"
 
-  # Regex patterns of false positives (used in tests/CI only).
+  # These are literal, non-production values used by automated checks.
   regexes = [
-    # Example API keys (e.g., Stripe test keys, AWS example keys)
-    'sk_test_[a-zA-Z0-9]+',
-    'AKIA[0-9A-Z]{16}',
-    # Generic password placeholders
-    'changeme',
-    'your_password_here',
+    # Deterministic CI-only JWT values; they cannot authenticate outside test jobs.
+    '''(?:a11y|e2e|zap)-ci-jwt-secret-at-least-32-characters-long''',
+    # RFC 6455 sample nonce used by the Blackbox WebSocket handshake probe.
+    '''x3JJHMbDL1EzLkh9GBhXDw==''',
   ]
 
-  # Paths to allowlist entirely (e.g., test fixture directories).
+  # Generated dependency/build trees are not source inputs and can be very large.
   paths = [
-    'test/fixtures/',
-    'tests/.*/fixtures/'
-    '.*/example.*',
-    '.*/mock.*',
+    '''(^|/)node_modules/''',
+    '''^contracts/target/''',
+    '''(^|/)dist/''',
   ]
-
-  # Specific commits to ignore (historical false positives). Keep this list minimal.
-  # commits = [
-  #   "commit_hash",
-  # ]
