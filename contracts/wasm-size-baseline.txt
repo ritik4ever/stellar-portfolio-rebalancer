@@ -9,15 +9,12 @@
 # ──────────────────────────
 # When a legitimate feature warrants a larger WASM binary:
 #
-#   1. Build locally (soroban-sdk 28+ requires the wasm32v1-none target
-#      and the spec-shaking env var, matching .github/workflows/
-#      contract-wasm-size.yml):
+#   1. Build locally:
 #        cd contracts
-#        SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 \
-#          cargo build --target wasm32v1-none --release
+#        cargo build --target wasm32-unknown-unknown --release
 #
 #   2. Measure the new size:
-#        wc -c < target/wasm32v1-none/release/portfolio_rebalancer.wasm
+#        wc -c < target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
 #
 #   3. Replace the number on the BASELINE= line below with the new byte count.
 #
@@ -28,7 +25,4 @@
 # check was introduced. If CI reports that the baseline is wrong on the first
 # run, update it with the value from step 2 above.
 #
-# Baseline re-recorded when the check moved to wasm32v1-none + soroban-sdk 28
-# (the previous 57344 was produced by a wasm32-unknown-unknown / sdk 27 build
-# that the current SDK can no longer produce).
-BASELINE=131887
+BASELINE=57344
