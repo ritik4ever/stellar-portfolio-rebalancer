@@ -38,6 +38,62 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
 3. Set every **Yes** or **Conditional** entry in `backend/.env`.
 4. Store all ⚠️ SECRET values in a secrets manager (Vault, AWS Secrets Manager, 1Password, etc.) — never commit real values.
 
+### Worked example: local API on port 3001
+
+This is the common local case: copy the example files, start the backend, and confirm the process is listening. The values below are the ones already written in `backend/.env.example` and `frontend/.env.example`. They satisfy startup validation. They are placeholders, not a funded account, so Horizon and Soroban calls will fail until you replace the contract address and signer.
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+The copied backend file includes:
+
+```bash
+NODE_ENV=development
+PORT=3001
+STELLAR_NETWORK=testnet
+STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
+STELLAR_CONTRACT_ADDRESS=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+STELLAR_REBALANCE_SECRET=SBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+ENABLE_AUTO_REBALANCER=false
+```
+
+The copied frontend file includes:
+
+```bash
+VITE_API_URL=http://localhost:3001
+```
+
+Start the API from `backend/` (`npm run dev`). With Redis not running, startup still binds the HTTP port. The log line for a successful bind is JSON and contains:
+
+```text
+"msg":"[SERVER] Listening on port 3001"
+```
+
+The same log includes `"autoRebalancer":"disabled (non-production)"` because `NODE_ENV` is `development` and `ENABLE_AUTO_REBALANCER` is not `true`. It also includes this warning:
+
+```text
+[STARTUP] Redis unreachable — BullMQ workers, scheduled jobs, and distributed rate limiting are inactive. In-memory rate limiting is active as a single-instance fallback. Set REDIS_URL (default: redis://localhost:6379) and restart to enable the full queue subsystem.
+```
+
+Check the process:
+
+```bash
+curl -i http://localhost:3001/health
+```
+
+Expected response:
+
+```text
+HTTP/1.1 200 OK
+Content-Type: text/plain; charset=utf-8
+
+ok
+```
+
+`GET /health` does not call Horizon, Soroban, or Redis. A body other than `ok`, or any status other than 200, means the server on port 3001 is not this API.
+
 ---
 
 ## Secret Rotation Guide
