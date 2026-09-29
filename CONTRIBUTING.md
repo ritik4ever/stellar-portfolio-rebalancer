@@ -65,9 +65,17 @@ We provide templates for common contribution types:
 
 This repository uses [gitleaks](https://github.com/gitleaks/gitleaks) to prevent secrets from being committed.
 
+GitHub Actions enforces the same `.gitleaks.toml` policy in both the
+`Secret Scan` workflow and the `Pre-commit` workflow. The latter executes the
+entire `.pre-commit-config.yaml` on every pull request and push to `main`, so
+the configuration is a required automated check rather than an optional local
+convention. Lighthouse budgets in `.lighthouserc.json` are enforced by the
+path-scoped `Lighthouse CI` workflow whenever frontend or budget files change.
+
 ### Local pre-commit hook
 
-The pre-commit hook (located at `scripts/hooks/pre-commit`) runs `gitleaks protect --staged` on every commit. To enable it:
+The pre-commit hook (located at `scripts/hooks/pre-commit`) runs
+`gitleaks git --pre-commit --redact --staged` on every commit. To enable it:
 
 1. Install gitleaks (via Homebrew: `brew install gitleaks`, or Go: `go install github.com/gitleaks/gitleaks/v8@latest`)
 2. The hook is automatically installed via [Husky](https://typicode.github.io/husky/) or [pre-commit](https://pre-commit.com/) depending on your setup.
