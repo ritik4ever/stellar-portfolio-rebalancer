@@ -1,5 +1,7 @@
 # Changelog
 
+Last verified: 2026-09-29
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -16,7 +18,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 1. **During development**: Use Conventional Commit messages for every commit.
 2. **Before PR**: Select the PR commit type and flag breaking changes in the PR template when applicable.
 3. **PR review**: Commitlint validates PR commit messages in CI.
-4. **Per-PR requirement**: Every PR must include a `CHANGELOG.md` entry, or a `chore: skip changelog` commit explaining why the change is invisible to users.
+4. **API changes**: The PR template asks for a `CHANGELOG.md` entry when a PR changes an HTTP route, request/response schema, database schema, or CLI/contract signature.
 5. **Release preparation**: release-please opens or updates a release PR after changes merge to `main`.
 
 ### Automated Collection
