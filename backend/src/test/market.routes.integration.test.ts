@@ -9,8 +9,29 @@ import { databaseService } from '../services/databaseService.js'
 import { closeIdempotencyDb } from '../db/idempotencyDb.js'
 import { closeNotificationDb } from '../db/notificationDb.js'
 
+const { mockGetCurrentPricesWithMeta } = vi.hoisted(() => ({
+    mockGetCurrentPricesWithMeta: vi.fn(),
+}))
+
 vi.mock('../db/priceHistoryDb.js', () => ({
     getMarketMoversData: vi.fn(),
+}))
+
+vi.mock('../services/reflector.js', () => ({
+    ReflectorService: class {
+        getCurrentPricesWithMeta = mockGetCurrentPricesWithMeta
+        getCurrentPrices = vi.fn()
+        finalizePriceMap = (prices: Record<string, any>) => prices
+        buildFeedMeta = (prices: Record<string, any>, hint: string, cacheStatus?: string) => ({
+            provider: 'backend',
+            degraded: false,
+            staleOrLimited: false,
+            resolutionHint: hint,
+            assetsCount: Object.keys(prices).length,
+            cacheStatus: cacheStatus ?? 'redis_bypassed',
+            resolvedAtMs: Date.now(),
+        })
+    }
 }))
 
 vi.mock('../services/assetRegistryService.js', () => ({
@@ -87,6 +108,79 @@ afterAll(async () => {
 describe('market routes integration', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mockGetCurrentPricesWithMeta.mockReset()
+    })
+
+    it('GET /api/v1/prices returns current price payload and feed metadata', async () => {
+        mockGetCurrentPricesWithMeta.mockResolvedValueOnce({
+            prices: {
+                XLM: {
+                    price: 0.3589,
+                    change: -0.5,
+                    timestamp: 1706880000,
+                    source: 'coingecko',
+                    servedFromCache: false,
+                    serverFetchedAtMs: 1706880000000,
+                    dataTier: 'live',
+                },
+                BTC: {
+                    price: 111150,
+                    change: 0.23,
+                    timestamp: 1706880000,
+                    source: 'coingecko',
+                    servedFromCache: false,
+                    serverFetchedAtMs: 1706880000000,
+                    dataTier: 'live',
+                }
+            },
+            feedMeta: {
+                provider: 'backend',
+                degraded: false,
+                staleOrLimited: false,
+                resolutionHint: 'live',
+                assetsCount: 2,
+                cacheStatus: 'redis_miss',
+                resolvedAtMs: 1706880000000,
+            }
+        })
+
+        const res = await request(app).get('/api/v1/prices').expect(200)
+
+        expect(res.body.success).toBe(true)
+        expect(res.body.error).toBeNull()
+        expect(res.body.data.prices.XLM).toMatchObject({
+            price: 0.3589,
+            source: 'coingecko',
+            dataTier: 'live',
+        })
+        expect(res.body.data.feedMeta).toMatchObject({
+            provider: 'backend',
+            assetsCount: 2,
+            cacheStatus: 'redis_miss',
+        })
+    })
+
+    it('GET /api/v1/prices returns 503 when the price feed fails and fallback prices are disabled', async () => {
+        vi.resetModules()
+        process.env = { ...envBackup, DB_PATH: testDbPath, DATABASE_URL: '', ALLOW_FALLBACK_PRICES: 'false', JWT_SECRET: 'unit-test-jwt-secret-min-32-chars!!', NODE_ENV: 'test', ENABLE_DEMO_DB_SEED: 'false', DEMO_MODE: 'true', AUTH_ENABLED: 'false' }
+        mockGetCurrentPricesWithMeta.mockRejectedValueOnce(new Error('Price source unavailable'))
+
+        const { mountApiRoutes } = await import('../http/mountApiRoutes.js')
+        const { apiErrorHandler } = await import('../middleware/apiErrorHandler.js')
+        const express = (await import('express')).default
+        const cors = (await import('cors')).default
+
+        const failureApp = express()
+        failureApp.use(cors())
+        failureApp.use(express.json())
+        mountApiRoutes(failureApp)
+        failureApp.use(apiErrorHandler)
+
+        const res = await request(failureApp).get('/api/v1/prices').expect(503)
+
+        expect(res.body.success).toBe(false)
+        expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE')
+        expect(res.body.error.message).toContain('ALLOW_FALLBACK_PRICES is disabled')
     })
 
     it('GET /api/v1/market/movers returns top 5 gainers and losers sorted correctly', async () => {
