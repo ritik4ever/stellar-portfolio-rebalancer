@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Stellar-Reflector%20Protocol-blue" alt="Stellar" />
   <img src="https://img.shields.io/badge/Soroban-Smart%20Contracts-orange" alt="Soroban" />
-  <img src="https://img.shields.io/badge/Backend-Rust%20%2F%20Fastify-green" alt="Backend" />
+  <img src="https://img.shields.io/badge/Backend-Node.js%20%2F%20Express%20%2F%20TypeScript-green" alt="Backend" />
   <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License" />
 </p>
 
@@ -59,6 +59,9 @@ stellar-portfolio-rebalancer/
 ├── frontend/      # React + TypeScript frontend
 ├── backend/       # Node.js + Express API
 ├── deployment/    # Docker deployment files
+├── scripts/       # Test, validation, and observability tooling
+├── security/      # SBOM and npm audit baseline
+├── terraform/     # AWS infrastructure (RDS, SNS, budgets)
 └── docs/          # Documentation (including ADRs)
 
 Core Terms
@@ -282,6 +285,9 @@ Rebalance history tracks outcomes and explicit slippage metrics.
 
 Testing
 Bash
+# Full suite (backend + frontend + contracts)
+npm test
+
 # Frontend tests
 cd frontend && npm test
 
