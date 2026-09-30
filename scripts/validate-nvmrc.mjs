@@ -68,20 +68,59 @@ if (!version) {
 }
 const versionText = version.join('.')
 
+const indentOf = (line) => line.length - line.trimStart().length
+
+// Strips a YAML comment (a `#` at line start or after whitespace, outside quotes).
+function stripComment(line) {
+  let quote = null
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (quote) {
+      if (ch === quote) quote = null
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+      return line.slice(0, i).trimEnd()
+    }
+  }
+  return line
+}
+
+// Returns the lines of each `actions/setup-node` step so its settings are
+// checked individually rather than by file-wide counts.
+function setupNodeSteps(lines) {
+  const steps = []
+  lines.forEach((line, index) => {
+    if (!/(?:^|\s|-\s)uses:\s*['"]?actions\/setup-node@/.test(line)) return
+    let start = index
+    while (start >= 0 && !/^\s*-\s/.test(lines[start])) start--
+    if (start < 0) start = index
+    const stepIndent = indentOf(lines[start])
+    let end = start + 1
+    while (end < lines.length && (lines[end].trim() === '' || indentOf(lines[end]) > stepIndent)) end++
+    steps.push({ line: index + 1, body: lines.slice(start, end) })
+  })
+  return steps
+}
+
 for (const file of readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f)).sort()) {
   const path = join(WORKFLOWS_DIR, file)
-  const text = readFileSync(path, 'utf8')
-  const setupSteps = text.match(/uses:\s*actions\/setup-node@/g)?.length ?? 0
-  if (setupSteps === 0) continue
+  const lines = readFileSync(path, 'utf8').split(/\r?\n/).map(stripComment)
 
-  if (/^\s*node-version:/m.test(text)) {
-    errors.push(`${path} hard-codes node-version; use node-version-file: '.nvmrc' instead`)
-  }
-  const fileRefs = text.match(/node-version-file:\s*['"]?\.nvmrc['"]?/g)?.length ?? 0
-  if (fileRefs < setupSteps) {
-    errors.push(
-      `${path} has ${setupSteps} actions/setup-node step(s) but only ${fileRefs} read node-version-file: '.nvmrc'`,
-    )
+  lines.forEach((line, index) => {
+    if (/^\s*node-version:/.test(line)) {
+      errors.push(`${path}:${index + 1} hard-codes node-version; use node-version-file: '.nvmrc' instead`)
+    }
+  })
+
+  for (const step of setupNodeSteps(lines)) {
+    const values = step.body
+      .map((line) => /^\s*node-version-file:\s*(.*)$/.exec(line)?.[1].trim().replace(/^(['"])(.*)\1$/, '$2'))
+      .filter((value) => value !== undefined)
+    if (values.length !== 1 || values[0] !== NVMRC) {
+      const found = values.length === 0 ? 'none' : values.map((v) => `'${v}'`).join(', ')
+      errors.push(`${path}:${step.line} actions/setup-node must set node-version-file: '${NVMRC}' (found ${found})`)
+    }
   }
 }
 

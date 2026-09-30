@@ -685,26 +685,30 @@ export class ReflectorService {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 15000)
 
-        const response = await fetch(
-            `${baseUrl}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`,
-            {
-                headers,
-                signal: controller.signal
+        // The deadline covers the body download too: fetch() resolves on
+        // headers, so a stalled body would otherwise hang past the timeout.
+        try {
+            const response = await fetch(
+                `${baseUrl}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`,
+                {
+                    headers,
+                    signal: controller.signal
+                }
+            )
+
+            if (!response.ok) {
+                throw new Error(`CoinGecko history API error: ${response.status}`)
             }
-        )
 
-        clearTimeout(timeoutId)
+            const data = await response.json()
 
-        if (!response.ok) {
-            throw new Error(`CoinGecko history API error: ${response.status}`)
+            return data.prices.map(([timestamp, price]: [number, number]) => ({
+                timestamp: Math.floor(timestamp / 1000),
+                price
+            }))
+        } finally {
+            clearTimeout(timeoutId)
         }
-
-        const data = await response.json()
-
-        return data.prices.map(([timestamp, price]: [number, number]) => ({
-            timestamp: Math.floor(timestamp / 1000),
-            price
-        }))
     }
 
     private generateMockHistory(asset: string, hours: number): Array<{ timestamp: number, price: number }> {

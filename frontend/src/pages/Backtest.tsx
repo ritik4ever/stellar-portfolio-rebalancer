@@ -220,7 +220,7 @@ const BacktestPage: React.FC<BacktestPageProps> = ({ onNavigate }) => {
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="date" minTickGap={32} />
                                         <YAxis tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`} width={80} />
-                                        <Tooltip formatter={(v: number) => formatUsd(v)} />
+                                        <Tooltip formatter={(v) => (typeof v === 'number' ? formatUsd(v) : '—')} />
                                         <Legend />
                                         <Line type="monotone" dataKey="value" name={`Rebalanced (${result.threshold}%)`} stroke="#3B82F6" dot={false} strokeWidth={2} />
                                         <Line type="monotone" dataKey="buyAndHoldValue" name="Buy and hold" stroke="#9CA3AF" dot={false} strokeDasharray="4 4" />

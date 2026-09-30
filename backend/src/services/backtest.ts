@@ -86,6 +86,12 @@ function round(value: number, decimals = 2): number {
 
 export function runBacktest(input: BacktestInput): BacktestResult {
     const assets = Object.keys(input.allocations)
+    // Validation accepts totals within 0.01 of 100; normalise so holdings
+    // always sum to the portfolio value and rebalances conserve it.
+    const allocationTotal = assets.reduce((sum, asset) => sum + input.allocations[asset], 0)
+    const weights = Object.fromEntries(
+        assets.map((asset) => [asset, (input.allocations[asset] / allocationTotal) * 100]),
+    )
     const dailyByAsset = new Map<string, Map<number, number>>()
     for (const asset of assets) {
         const points = input.history[asset]
@@ -106,7 +112,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     const priceAt = (asset: string, day: number) => dailyByAsset.get(asset)!.get(day)!
     const targetUnits = (value: number, day: number) =>
         Object.fromEntries(
-            assets.map((asset) => [asset, (value * input.allocations[asset]) / 100 / priceAt(asset, day)]),
+            assets.map((asset) => [asset, (value * weights[asset]) / 100 / priceAt(asset, day)]),
         )
     const valueOf = (units: Record<string, number>, day: number) =>
         assets.reduce((sum, asset) => sum + units[asset] * priceAt(asset, day), 0)
@@ -127,7 +133,7 @@ export function runBacktest(input: BacktestInput): BacktestResult {
         let driftAsset = assets[0]
         for (const asset of assets) {
             const actualPct = ((units[asset] * priceAt(asset, day)) / value) * 100
-            const drift = Math.abs(actualPct - input.allocations[asset])
+            const drift = Math.abs(actualPct - weights[asset])
             if (drift > maxDriftPct) {
                 maxDriftPct = drift
                 driftAsset = asset
@@ -189,15 +195,20 @@ export async function fetchBacktestHistory(
     reflector: Pick<ReflectorService, 'getMarketPriceHistory'>,
     assets: string[],
     days: number,
+    now: number = Date.now(),
 ): Promise<Record<string, PricePoint[]>> {
+    // Drop the current UTC day: it is still open, and its latest intraday
+    // point would otherwise be treated as that day's close.
+    const currentDay = Math.floor(now / 1000 / DAY_SECONDS) * DAY_SECONDS
     const entries = await Promise.all(
         assets.map(async (asset) => {
+            let history: PricePoint[]
             try {
-                return [asset, await reflector.getMarketPriceHistory(asset, days)] as const
+                history = await reflector.getMarketPriceHistory(asset, days)
             } catch (error) {
-                const reason = error instanceof Error ? error.message : String(error)
-                throw new BacktestDataError(`Historical prices unavailable for ${asset}: ${reason}`)
+                throw new BacktestDataError(`Historical prices unavailable for ${asset}`, { cause: error })
             }
+            return [asset, history.filter((point) => point.timestamp < currentDay)] as const
         }),
     )
     return Object.fromEntries(entries)

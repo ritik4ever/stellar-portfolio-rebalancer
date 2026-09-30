@@ -6,7 +6,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import express from 'express'
 import request from 'supertest'
-import { runBacktest, toDailyCloses, BacktestDataError, BACKTEST_DISCLAIMER } from '../services/backtest.js'
+import {
+    runBacktest,
+    toDailyCloses,
+    fetchBacktestHistory,
+    BacktestDataError,
+    BACKTEST_DISCLAIMER,
+} from '../services/backtest.js'
 
 const { mockGetMarketPriceHistory, mockGetPriceHistory } = vi.hoisted(() => ({
     mockGetMarketPriceHistory: vi.fn(),
@@ -55,7 +61,9 @@ describe('runBacktest', () => {
 
         const tight = runBacktest({ allocations, threshold: 10, initialValue: 1000, history })
         expect(tight.rebalanceCount).toBe(1)
-        expect(tight.events[0]).toMatchObject({ timestamp: START + DAY, asset: 'XLM', maxDriftPct: 16.67 })
+        // With two assets both drift by the same amount, so either may be reported.
+        expect(tight.events[0]).toMatchObject({ timestamp: START + DAY, maxDriftPct: 16.67 })
+        expect(['XLM', 'USDC']).toContain(tight.events[0].asset)
         expect(tight.timeline.map((p) => p.rebalanced)).toEqual([false, true, false])
     })
 
@@ -67,6 +75,21 @@ describe('runBacktest', () => {
         expect(result.finalValue).toBeGreaterThan(1000)
         expect(result.totalReturnPct).toBeGreaterThan(result.buyAndHoldReturnPct)
         expect(result.maxDrawdownPct).toBeGreaterThan(0)
+    })
+
+    it('conserves value when accepted allocations total slightly off 100', () => {
+        // Validation accepts totals within 0.01 of 100.
+        const history = { XLM: series([1, 2, 1, 2]), USDC: series([1, 1, 1, 1]) }
+        const flatPrices = { XLM: series([1, 1]), USDC: series([1, 1]) }
+
+        const flat = runBacktest({ allocations: { XLM: 50, USDC: 50.005 }, threshold: 5, initialValue: 1000, history: flatPrices })
+        expect(flat.timeline[0].value).toBe(1000)
+        expect(flat.finalValue).toBe(1000)
+
+        const exact = runBacktest({ allocations: { XLM: 50, USDC: 50 }, threshold: 5, initialValue: 1000, history })
+        const offBy = runBacktest({ allocations: { XLM: 50, USDC: 50.005 }, threshold: 5, initialValue: 1000, history })
+        expect(offBy.rebalanceCount).toBe(exact.rebalanceCount)
+        expect(Math.abs(offBy.finalValue - exact.finalValue)).toBeLessThan(0.5)
     })
 
     it('only simulates days where every asset has a real price', () => {
@@ -91,6 +114,23 @@ describe('runBacktest', () => {
                 history: { XLM: series([1]), USDC: series([1]) },
             }),
         ).toThrow(BacktestDataError)
+    })
+})
+
+describe('fetchBacktestHistory', () => {
+    it('drops points from the still-open current UTC day', async () => {
+        const now = (START + 2 * DAY + 3600) * 1000
+        const reflector = {
+            getMarketPriceHistory: vi.fn(async () => [
+                { timestamp: START, price: 1 },
+                { timestamp: START + DAY, price: 2 },
+                { timestamp: START + 2 * DAY, price: 3 },
+                { timestamp: START + 2 * DAY + 1800, price: 4 },
+            ]),
+        }
+
+        const history = await fetchBacktestHistory(reflector, ['XLM'], 7, now)
+        expect(history.XLM.map((p) => p.price)).toEqual([1, 2])
     })
 })
 
@@ -136,6 +176,7 @@ describe('POST /backtest', () => {
 
         expect(res.status).toBe(503)
         expect(res.body.error.code).toBe('HISTORICAL_DATA_UNAVAILABLE')
+        expect(res.body.error.message).toBe('Historical prices unavailable for XLM')
         expect(mockGetPriceHistory).not.toHaveBeenCalled()
     })
 

@@ -9,7 +9,7 @@ import {
 import { validateRequest } from '../middleware/validate.js'
 import { backtestRequestSchema } from './validation.js'
 import { logger } from '../utils/logger.js'
-import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
+import { getErrorObject } from '../utils/helpers.js'
 import { ok, fail } from '../utils/apiResponse.js'
 
 export const backtestRouter = Router()
@@ -34,10 +34,16 @@ backtestRouter.post('/backtest', validateRequest(backtestRequestSchema), async (
             disclaimer: BACKTEST_DISCLAIMER,
         })
     } catch (error) {
+        // BacktestDataError messages are composed here from validated asset
+        // symbols only; provider/internal details stay in the server log.
         if (error instanceof BacktestDataError) {
+            logger.warn('[BACKTEST] Historical data unavailable', {
+                error: getErrorObject(error),
+                cause: getErrorObject(error.cause),
+            })
             return fail(res, 503, 'HISTORICAL_DATA_UNAVAILABLE', error.message)
         }
         logger.error('[BACKTEST] Simulation failed', { error: getErrorObject(error) })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        return fail(res, 500, 'INTERNAL_ERROR', 'Backtest simulation failed')
     }
 })
