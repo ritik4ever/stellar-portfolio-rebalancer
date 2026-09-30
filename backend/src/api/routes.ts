@@ -11,6 +11,7 @@ import { assetsRouter } from './assets.routes.js'
 import { analyticsRouter } from './analytics.routes.js'
 import { adminRouter } from './admin.routes.js'
 import { taxReportRouter } from './taxReport.routes.js'
+import { backtestRouter } from './backtest.routes.js'
 
 
 export const portfolioRouter = Router()
@@ -26,5 +27,6 @@ portfolioRouter.use(debugRouter)
 portfolioRouter.use(consentRouter)
 portfolioRouter.use(assetsRouter)
 portfolioRouter.use(analyticsRouter)
+portfolioRouter.use(backtestRouter)
 portfolioRouter.use('/admin', adminRouter)
 

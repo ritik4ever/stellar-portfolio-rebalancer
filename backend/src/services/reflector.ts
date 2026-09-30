@@ -646,49 +646,7 @@ export class ReflectorService {
 
     async getPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
         try {
-            const coinIds = this.getCoinIdMap()
-            const coinId = coinIds[asset]
-            if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
-
-            const apiKey = this.coinGeckoApiKey
-            const baseUrl = this.getBaseUrl()
-
-            const headers: Record<string, string> = {
-                'Accept': 'application/json',
-                'User-Agent': 'StellarPortfolioRebalancer/1.0'
-            }
-
-            if (apiKey && apiKey.trim()) {
-                headers['x-cg-pro-api-key'] = apiKey.trim()
-            }
-
-            let interval = 'daily'
-            if (days <= 1) interval = 'minutely'
-            else if (days <= 7) interval = 'hourly'
-
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 15000)
-
-            const response = await fetch(
-                `${baseUrl}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`,
-                {
-                    headers,
-                    signal: controller.signal
-                }
-            )
-
-            clearTimeout(timeoutId)
-
-            if (!response.ok) {
-                throw new Error(`CoinGecko history API error: ${response.status}`)
-            }
-
-            const data = await response.json()
-
-            return data.prices.map(([timestamp, price]: [number, number]) => ({
-                timestamp: Math.floor(timestamp / 1000),
-                price
-            }))
+            return await this.getMarketPriceHistory(asset, days)
         } catch (error) {
             logger.error('Failed to get price history for asset', { asset, error })
             if (!getFeatureFlags().allowMockPriceHistory) {
@@ -696,6 +654,57 @@ export class ReflectorService {
             }
             return this.generateMockHistory(asset, days * 24)
         }
+    }
+
+    /**
+     * Real historical prices from CoinGecko `market_chart`. Never falls back to
+     * synthetic data — callers that must not show mock prices (e.g. backtests)
+     * use this instead of getPriceHistory.
+     */
+    async getMarketPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
+        const coinIds = this.getCoinIdMap()
+        const coinId = coinIds[asset]
+        if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
+
+        const apiKey = this.coinGeckoApiKey
+        const baseUrl = this.getBaseUrl()
+
+        const headers: Record<string, string> = {
+            'Accept': 'application/json',
+            'User-Agent': 'StellarPortfolioRebalancer/1.0'
+        }
+
+        if (apiKey && apiKey.trim()) {
+            headers['x-cg-pro-api-key'] = apiKey.trim()
+        }
+
+        let interval = 'daily'
+        if (days <= 1) interval = 'minutely'
+        else if (days <= 7) interval = 'hourly'
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+        const response = await fetch(
+            `${baseUrl}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`,
+            {
+                headers,
+                signal: controller.signal
+            }
+        )
+
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+            throw new Error(`CoinGecko history API error: ${response.status}`)
+        }
+
+        const data = await response.json()
+
+        return data.prices.map(([timestamp, price]: [number, number]) => ({
+            timestamp: Math.floor(timestamp / 1000),
+            price
+        }))
     }
 
     private generateMockHistory(asset: string, hours: number): Array<{ timestamp: number, price: number }> {
