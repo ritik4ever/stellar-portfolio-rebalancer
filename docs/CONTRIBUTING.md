@@ -626,6 +626,7 @@ The pre-commit hook runs:
 - `npm run validate:env-examples`
 - `npm run validate:compose-resources`
 - `npm run validate:funding`
+- `npm run validate:nvmrc`
 - backend `npm run lint` when configured
 - frontend `npm run lint` when configured
 - root `npm run format` when configured
@@ -635,6 +636,7 @@ The pre-push hook runs:
 - `npm run validate:env-examples`
 - `npm run validate:compose-resources`
 - `npm run validate:funding`
+- `npm run validate:nvmrc`
 - backend `npm run lint` when configured
 - frontend `npm run lint` when configured
 - frontend `npm test`

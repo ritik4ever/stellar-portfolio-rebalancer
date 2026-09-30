@@ -646,29 +646,48 @@ export class ReflectorService {
 
     async getPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
         try {
-            const coinIds = this.getCoinIdMap()
-            const coinId = coinIds[asset]
-            if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
-
-            const apiKey = this.coinGeckoApiKey
-            const baseUrl = this.getBaseUrl()
-
-            const headers: Record<string, string> = {
-                'Accept': 'application/json',
-                'User-Agent': 'StellarPortfolioRebalancer/1.0'
+            return await this.getMarketPriceHistory(asset, days)
+        } catch (error) {
+            logger.error('Failed to get price history for asset', { asset, error })
+            if (!getFeatureFlags().allowMockPriceHistory) {
+                throw new Error(`Price history unavailable for ${asset} and ALLOW_MOCK_PRICE_HISTORY is disabled`)
             }
+            return this.generateMockHistory(asset, days * 24)
+        }
+    }
 
-            if (apiKey && apiKey.trim()) {
-                headers['x-cg-pro-api-key'] = apiKey.trim()
-            }
+    /**
+     * Real historical prices from CoinGecko `market_chart`. Never falls back to
+     * synthetic data — callers that must not show mock prices (e.g. backtests)
+     * use this instead of getPriceHistory.
+     */
+    async getMarketPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
+        const coinIds = this.getCoinIdMap()
+        const coinId = coinIds[asset]
+        if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
-            let interval = 'daily'
-            if (days <= 1) interval = 'minutely'
-            else if (days <= 7) interval = 'hourly'
+        const apiKey = this.coinGeckoApiKey
+        const baseUrl = this.getBaseUrl()
 
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const headers: Record<string, string> = {
+            'Accept': 'application/json',
+            'User-Agent': 'StellarPortfolioRebalancer/1.0'
+        }
 
+        if (apiKey && apiKey.trim()) {
+            headers['x-cg-pro-api-key'] = apiKey.trim()
+        }
+
+        let interval = 'daily'
+        if (days <= 1) interval = 'minutely'
+        else if (days <= 7) interval = 'hourly'
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+        // The deadline covers the body download too: fetch() resolves on
+        // headers, so a stalled body would otherwise hang past the timeout.
+        try {
             const response = await fetch(
                 `${baseUrl}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`,
                 {
@@ -676,8 +695,6 @@ export class ReflectorService {
                     signal: controller.signal
                 }
             )
-
-            clearTimeout(timeoutId)
 
             if (!response.ok) {
                 throw new Error(`CoinGecko history API error: ${response.status}`)
@@ -689,12 +706,8 @@ export class ReflectorService {
                 timestamp: Math.floor(timestamp / 1000),
                 price
             }))
-        } catch (error) {
-            logger.error('Failed to get price history for asset', { asset, error })
-            if (!getFeatureFlags().allowMockPriceHistory) {
-                throw new Error(`Price history unavailable for ${asset} and ALLOW_MOCK_PRICE_HISTORY is disabled`)
-            }
-            return this.generateMockHistory(asset, days * 24)
+        } finally {
+            clearTimeout(timeoutId)
         }
     }
 

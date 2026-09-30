@@ -45,6 +45,7 @@ import PortfolioWizard from './pages/PortfolioWizard'
 import Compare from './pages/Compare'
 import AnalyticsPage from './pages/Analytics'
 import TaxReportPage from './pages/TaxReport'
+import BacktestPage from './pages/Backtest'
 import Shortcuts from './components/Shortcuts'
 import Onboarding, { resetOnboarding } from './components/Onboarding'
 import OnboardingChecklist from './components/OnboardingChecklist'
@@ -571,6 +572,10 @@ function App() {
                         onNavigate={handleNavigate}
                         publicKey={publicKey}
                     />
+                </ErrorBoundary>
+            ) : currentView === 'backtest' ? (
+                <ErrorBoundary fallbackTitle="Rebalance Simulator">
+                    <BacktestPage onNavigate={handleNavigate} />
                 </ErrorBoundary>
             ) : currentView === 'settings' ? (
                 <ErrorBoundary fallbackTitle="Settings">

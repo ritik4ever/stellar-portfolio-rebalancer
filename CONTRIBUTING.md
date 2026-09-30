@@ -69,7 +69,10 @@ GitHub Actions enforces the same `.gitleaks.toml` policy in both the
 `Secret Scan` workflow and the `Pre-commit` workflow. The latter executes the
 entire `.pre-commit-config.yaml` on every pull request and push to `main`, so
 the configuration is a required automated check rather than an optional local
-convention. Lighthouse budgets in `.lighthouserc.json` are enforced by the
+convention. The same run also executes the local `validate-nvmrc` and
+`validate-funding` hooks, so `.nvmrc` (the Node.js version every workflow,
+Dockerfile and `engines.node` range must agree on) and `FUNDING.json` are
+validated on every pull request. Lighthouse budgets in `.lighthouserc.json` are enforced by the
 path-scoped `Lighthouse CI` workflow whenever frontend or budget files change.
 
 ### Local pre-commit hook

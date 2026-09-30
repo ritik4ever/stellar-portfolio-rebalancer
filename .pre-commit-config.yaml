@@ -2,12 +2,14 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Scopes list every tracked config file of each type; keep them in sync
+      # when adding new YAML/JSON/TOML configuration to the repository.
       - id: check-yaml
-        files: ^(?:\.github/workflows/.*\.ya?ml|\.pre-commit-config\.yaml)$
+        files: ^(?:\.github/.*\.ya?ml|\.pre-commit-config\.yaml|docker-compose\.resources\.yml|deployment/.*\.ya?ml|docs/openapi\.yaml)$
       - id: check-json
-        files: ^\.lighthouserc\.json$
+        files: ^(?:\.lighthouserc\.json|FUNDING\.json|renovate\.json|\.github/.*\.json)$
       - id: check-toml
-        files: ^\.gitleaks\.toml$
+        files: ^(?:\.gitleaks\.toml|rust-toolchain\.toml|contracts/(?:.*/)?(?:Cargo|deny)\.toml)$
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
@@ -15,3 +17,19 @@ repos:
         # Scan the complete working tree in local hooks and `--all-files` CI runs.
         # The upstream hook defaults to `--staged`, which scans nothing on a clean checkout.
         entry: gitleaks dir . --redact --config .gitleaks.toml --verbose
+  - repo: local
+    hooks:
+      # Zero-dependency validators from scripts/; they read the files directly,
+      # so they run once per invocation rather than per changed file.
+      - id: validate-nvmrc
+        name: validate .nvmrc is enforced (workflows, Dockerfiles, engines)
+        entry: node scripts/validate-nvmrc.mjs
+        language: system
+        pass_filenames: false
+        files: ^(?:\.nvmrc|\.github/workflows/.*\.ya?ml|(?:backend|frontend)/Dockerfile|(?:backend/|frontend/)?package\.json|scripts/validate-nvmrc\.mjs)$
+      - id: validate-funding
+        name: validate FUNDING.json (Drips config, EIP-55 addresses)
+        entry: node scripts/validate-funding.mjs
+        language: system
+        pass_filenames: false
+        files: ^(?:FUNDING\.json|scripts/validate-funding\.mjs)$
