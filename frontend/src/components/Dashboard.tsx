@@ -508,6 +508,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                         </button>
                         <button
                             type="button"
+                            onClick={() => onNavigate('backtest')}
+                            className="rounded-lg px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            title="Simulate a rebalance threshold on historical prices"
+                        >
+                            Simulator
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => onNavigate('settings')}
                             className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 transition-colors"
                             aria-label="Settings"
