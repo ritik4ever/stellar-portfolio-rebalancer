@@ -1,5 +1,7 @@
 # Contributors
 
+_Last verified: 2026-09-30_
+
 ## Translators
 
 | Language | Translator | GitHub |
@@ -9,7 +11,7 @@
 | French (fr) | Machine-translated (pending review) | — |
 | German (de) | Machine-translated (pending review) | — |
 
-To be credited as a translator, submit a PR with your translation improvements. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+To be credited as a translator, submit a PR with your translation improvements. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for contribution guidelines.
 
 ### Worked example
 
