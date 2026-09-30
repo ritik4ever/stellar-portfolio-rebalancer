@@ -28,12 +28,20 @@ on:
   pull_request:
     paths:
       - 'renovate.json'
+      # the command this workflow runs (`npm run validate:renovate`) is defined
+      # here, so a PR that edits or deletes it must also start this check --
+      # otherwise a broken validator ships with the CI silently skipped.
+      - 'package.json'
       - '.github/workflows/renovate-config.yml'
   push:
     branches:
       - main
     paths:
       - 'renovate.json'
+      # the command this workflow runs (`npm run validate:renovate`) is defined
+      # here, so a PR that edits or deletes it must also start this check --
+      # otherwise a broken validator ships with the CI silently skipped.
+      - 'package.json'
       - '.github/workflows/renovate-config.yml'
 
 permissions:
