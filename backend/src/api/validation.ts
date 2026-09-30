@@ -380,12 +380,30 @@ export const portfolioHistoryQuerySchema = z.object({
 // ─── Price feed schemas ───────────────────────────────────────────────────────
 const isoDateString = z.string().refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid ISO date string');
 
+/** Maximum allowed OHLCV query range: 90 days in milliseconds */
+const OHLCV_MAX_RANGE_MS = 90 * 24 * 60 * 60 * 1000;
+
 export const ohlcvQuerySchema = z.object({
     asset: z.string().min(1, 'asset is required').max(32).toUpperCase(),
     interval: z.enum(['1h', '4h', '1d']),
     from: isoDateString,
     to: isoDateString,
-});
+}).strict()
+    .refine(
+        (data) => Date.parse(data.from) < Date.parse(data.to),
+        { message: 'from must be before to', path: ['from'] }
+    )
+    .refine(
+        (data) => (Date.parse(data.to) - Date.parse(data.from)) <= OHLCV_MAX_RANGE_MS,
+        { message: 'Date range cannot exceed 90 days', path: ['to'] }
+    );
+
+/**
+ * Schema for GET /prices — the route accepts no query parameters.
+ * Any unknown param is rejected with a 400 to prevent confused clients
+ * from assuming filtered results are being returned.
+ */
+export const pricesQuerySchema = z.object({}).strict();
 
 // ─── Analytics schemas (#1430) ────────────────────────────────────────────────
 const notFutureDate = (v: string) => Date.parse(v) <= Date.now()
