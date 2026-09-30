@@ -109,6 +109,7 @@ The `RebalancerClient` class supports these endpoints:
 | `validate-env-examples.mjs`     | Validate `.env.example` files                |
 | `validate-compose-resources.mjs` | Check `docker-compose.resources.yml` mirrors the limits in `deployment/docker-compose.yml` |
 | `validate-funding.mjs`          | Validate `FUNDING.json` (Drips config, EIP-55 addresses) |
+| `validate-nvmrc.mjs`            | Check `.nvmrc` is the Node.js version used by CI workflows, Dockerfiles and `engines.node` |
 | `install-git-hooks.mjs`         | Install git hooks from `scripts/hooks/`      |
 | `check-commit-messages.sh`      | Validate commit message format               |
 | `check-generated-artifacts.sh`  | Verify generated files are up-to-date        |
