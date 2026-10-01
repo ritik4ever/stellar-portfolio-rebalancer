@@ -4,7 +4,15 @@ import { requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { requireAdmin } from '../middleware/auth.js'
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { notificationSubscribeSchema, notificationQuerySchema, notificationUnsubscribeQuerySchema, notificationUnsubscribeBodySchema, notificationThresholdsQuerySchema, notificationThresholdsBodySchema } from './validation.js'
+import {
+    notificationSubscribeSchema,
+    notificationQuerySchema,
+    notificationPreferencesQuerySchema,
+    notificationUnsubscribeQuerySchema,
+    notificationUnsubscribeBodySchema,
+    notificationThresholdsQuerySchema,
+    notificationThresholdsBodySchema,
+} from './validation.js'
 import { getAuthConfig } from '../services/authService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -88,7 +96,12 @@ notificationsRouter.post('/notifications/sms/verification/confirm', requireJwtWh
 })
 
 // Get notification preferences
-notificationsRouter.get('/notifications/preferences', requireJwtWhenEnabled, validateQuery(notificationQuerySchema), async (req: Request, res: Response) => {
+// #1803: strict schema + 400 before any DB/contract work.
+notificationsRouter.get(
+    '/notifications/preferences',
+    requireJwtWhenEnabled,
+    validateQuery(notificationPreferencesQuerySchema, 400),
+    async (req: Request, res: Response) => {
     try {
         // Issue #178: when auth is enabled, only allow reading own preferences.
         let userId: string | undefined

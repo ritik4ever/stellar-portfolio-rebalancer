@@ -203,9 +203,39 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    userId: z.string().trim().min(1, 'userId query parameter is required').optional(),
     reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
+
+// Dedicated schema for GET /notifications/preferences (#1803).
+// Rejects unknown query keys and malformed userId/reason before any DB access.
+export const notificationPreferencesQuerySchema = z
+    .object({
+        userId: z
+            .string()
+            .trim()
+            .min(1, 'userId query parameter is required')
+            .max(128, 'userId must be 128 characters or fewer')
+            .optional(),
+        reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional(),
+    })
+    .strict();
+
+// Domain constraints from the README Quick Start, reused wherever allocation
+// percentages are accepted so invalid payloads fail with a clean 400.
+export const allocationSumTo100Schema = z
+    .record(z.string().min(1), z.number().min(0).max(100))
+    .refine(
+        (allocations) => {
+            const entries = Object.entries(allocations)
+            if (entries.length === 0 || entries.length > MAX_PORTFOLIO_ASSETS) return false
+            const total = entries.reduce((sum, [, value]) => sum + value, 0)
+            return Math.abs(total - 100) <= 0.01
+        },
+        {
+            message: `Allocations must contain between 1 and ${MAX_PORTFOLIO_ASSETS} assets and sum to 100%`,
+        }
+    )
 
 export const notificationUnsubscribeQuerySchema = notificationQuerySchema.strict();
 export const notificationUnsubscribeBodySchema = z.preprocess(
