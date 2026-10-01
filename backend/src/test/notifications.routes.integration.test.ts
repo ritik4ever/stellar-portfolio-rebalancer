@@ -685,4 +685,59 @@ describe('Notification Preferences API Integration Tests', () => {
             process.env.WEBHOOK_SIGNING_SECRET = originalSecret
         })
     })
+
+    describe('GET /api/notifications/preferences - query validation (#1803)', () => {
+        it('rejects unknown query parameters with 400 before any DB work', async () => {
+            const res = await request(app)
+                .get('/api/notifications/preferences')
+                .query({ userId: TEST_USER, allocations: 'XLM=100', foo: 'bar' })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('rejects an empty userId query value with 400', async () => {
+            const res = await request(app)
+                .get('/api/notifications/preferences')
+                .query({ userId: '   ' })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('rejects an over-long userId with 400', async () => {
+            const res = await request(app)
+                .get('/api/notifications/preferences')
+                .query({ userId: 'G'.repeat(200) })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('rejects an over-long reason with 400', async () => {
+            const res = await request(app)
+                .get('/api/notifications/preferences')
+                .query({ userId: TEST_USER, reason: 'x'.repeat(500) })
+                .expect(400)
+
+            expect(res.body.success).toBe(false)
+            expect(res.body.error.code).toBe('VALIDATION_ERROR')
+        })
+
+        it('accepts a valid userId and returns the documented response shape', async () => {
+            const res = await request(app)
+                .get('/api/notifications/preferences')
+                .query({ userId: TEST_USER })
+                .expect(200)
+
+            expect(res.body.success).toBe(true)
+            expect(res.body.data.preferences).toBeDefined()
+            expect(typeof res.body.data.preferences.emailEnabled).toBe('boolean')
+            expect(res.body.data.preferences.events).toBeDefined()
+            expect(typeof res.body.data.preferences.events.rebalance).toBe('boolean')
+        })
+    })
 })
