@@ -24,6 +24,8 @@ import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
 import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
 import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
+import { getPublicShareView } from '../services/publicShare.js'
+import { OG_IMAGE_CONTENT_TYPE, renderPortfolioOgCard } from '../services/ogImage.js'
 import type { Portfolio } from '../types/index.js'
 
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
@@ -290,35 +292,55 @@ portfoliosRouter.delete('/portfolio/:id/share', ...protectedWriteLimiter, async 
 
 portfoliosRouter.get('/portfolio/share/:hash', async (req: Request, res: Response) => {
     try {
-        const hash = req.params.hash
-        if (!hash) return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+        const { hash } = req.params
+        if (typeof hash !== 'string' || hash.length === 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+        }
 
-        const share = databaseService.getPublicShareByHash(hash)
-        if (!share) return fail(res, 404, 'NOT_FOUND', 'Share link not found')
+        const lookup = await getPublicShareView(hash)
+        if (lookup.status === 'revoked') return fail(res, 410, 'GONE', 'This share link has been revoked')
+        if (lookup.status === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Share link not found')
 
-        if (!share.active) return fail(res, 410, 'GONE', 'This share link has been revoked')
-
-        const portfolio = await portfolioStorage.getPortfolio(share.portfolioId)
-        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-
-        const maskedAddress = share.userAddress.length > 10
-            ? `${share.userAddress.slice(0, 4)}...${share.userAddress.slice(-4)}`
-            : share.userAddress
-
-        return ok(res, {
-            portfolio: {
-                id: share.portfolioId,
-                allocations: portfolio.allocations,
-                totalValue: portfolio.totalValue,
-                threshold: portfolio.threshold,
-                lastRebalance: portfolio.lastRebalance,
-                createdAt: portfolio.createdAt,
-            },
-            owner: { address: maskedAddress },
-            sharedAt: share.createdAt,
-        })
+        return ok(res, lookup.view)
     } catch (error) {
         logger.error('[ERROR] Get public share failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * Open Graph card for a shared portfolio. Crawlers fetch this URL directly from
+ * `og:image`, so the image has to exist server-side rather than be painted by
+ * the browser. Renders from the masked share view — same payload, same
+ * revocation rules as the JSON endpoint above.
+ */
+portfoliosRouter.get('/portfolio/share/:hash/og.png', async (req: Request, res: Response) => {
+    try {
+        const { hash } = req.params
+        if (typeof hash !== 'string' || hash.length === 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+        }
+
+        const lookup = await getPublicShareView(hash)
+        if (lookup.status === 'revoked') return fail(res, 410, 'GONE', 'This share link has been revoked')
+        if (lookup.status === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Share link not found')
+
+        const { portfolio, owner } = lookup.view
+        const png = renderPortfolioOgCard({
+            name: portfolio.name,
+            totalValue: portfolio.totalValue,
+            threshold: portfolio.threshold,
+            allocations: portfolio.allocations,
+            ownerAddress: owner.address,
+        })
+
+        res.setHeader('Content-Type', OG_IMAGE_CONTENT_TYPE)
+        res.setHeader('Content-Length', String(png.length))
+        /** Crawlers re-fetch on every share, so cache hard at the edge only. */
+        res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=86400')
+        return res.status(200).send(png)
+    } catch (error) {
+        logger.error('[ERROR] Render public share OG image failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
