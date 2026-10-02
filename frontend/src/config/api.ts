@@ -143,6 +143,8 @@ export const API_CONFIG = {
         PORTFOLIO_REBALANCE_STATUS: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/rebalance-status`,
         PORTFOLIO_SHARE: (id: string) => `${API_RESOURCE_ROOT}/portfolio/${id}/share`,
         PORTFOLIO_SHARE_VIEW: (hash: string) => `${API_RESOURCE_ROOT}/portfolio/share/${hash}`,
+        /** Server-rendered Open Graph card advertised as `og:image` for a shared portfolio. */
+        PORTFOLIO_SHARE_OG_IMAGE: (hash: string) => `${API_RESOURCE_ROOT}/portfolio/share/${hash}/og.png`,
         PORTFOLIO_ANALYTICS: (id: string, days: number) =>
             `${API_RESOURCE_ROOT}/portfolio/${id}/analytics?days=${days}`,
         PORTFOLIO_COMPARE: (ids: string[], from?: string, to?: string) => {
