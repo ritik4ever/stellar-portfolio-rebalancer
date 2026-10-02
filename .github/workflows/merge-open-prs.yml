@@ -1,4 +1,4 @@
-name: Merge new PR and close its issues
+name: Merge PR linked to Stellar Wave issues
 
 on:
   pull_request_target:
@@ -10,49 +10,89 @@ permissions:
   pull-requests: write
   issues: write
 
+concurrency:
+  group: stellar-wave-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   merge:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
-      - name: Merge PR and close referenced issues
+      - name: Check labels, merge PR, and close issues
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
+
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
+              --json state --jq '.state')" != "OPEN" ]; then
+            echo "PR is no longer open; skipping."
+            exit 0
+          fi
+
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
+              --json isDraft --jq '.isDraft')" != "false" ]; then
+            echo "PR is a draft; skipping."
+            exit 0
+          fi
+
           gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
             --json body --jq '.body // ""' |
-            python3 -c 'import re,sys; body=sys.stdin.read(); pattern=r"(?im)^[ \t]*(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)[ \t]+#([1-9][0-9]*)\b"; print("\n".join(sorted(set(re.findall(pattern,body)),key=int)))' \
+            python3 -c 'import re,sys; body=sys.stdin.read(); pattern=r"(?im)^[ \t]*(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)[ \t]+#([1-9][0-9]*)\b"; [print(number) for number in sorted(set(re.findall(pattern,body)),key=int)]' \
             > "$RUNNER_TEMP/issues"
+
+          if [ ! -s "$RUNNER_TEMP/issues" ]; then
+            echo "No referenced issues found; skipping PR."
+            exit 0
+          fi
+
+          while read -r issue; do
+            has_label="$(gh issue view "$issue" --repo "$GH_REPO" \
+              --json labels --jq 'any(.labels[].name; . == "Stellar Wave")')"
+            if [ "$has_label" != "true" ]; then
+              echo "Issue #$issue lacks the Stellar Wave label; skipping PR."
+              exit 0
+            fi
+          done < "$RUNNER_TEMP/issues"
 
           for attempt in 1 2 3 4 5; do
             if gh pr merge "$PR_NUMBER" --repo "$GH_REPO" \
-              --squash --match-head-commit "$HEAD_SHA"; then
+                --squash --match-head-commit "$HEAD_SHA"; then
               break
             fi
-            sleep 15
+            echo "Merge attempt $attempt failed; retrying if attempts remain."
+            if [ "$attempt" -lt 5 ]; then sleep 15; fi
           done
 
           state="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
-            --json state --jq .state)"
+            --json state --jq '.state')"
           if [ "$state" != "MERGED" ]; then
-            echo "PR was not merged; issues remain open."
+            echo "PR did not merge; issues remain open."
             exit 1
           fi
 
           while read -r issue; do
-            [ -n "$issue" ] || continue
-
-            state="$(gh issue view "$issue" --repo "$GH_REPO" \
-              --json state --jq .state)"
-            if [ "$state" = "OPEN" ]; then
-              gh issue close "$issue" --repo "$GH_REPO" \
-                --reason completed
+            has_label="$(gh issue view "$issue" --repo "$GH_REPO" \
+              --json labels --jq 'any(.labels[].name; . == "Stellar Wave")')"
+            if [ "$has_label" != "true" ]; then
+              echo "Issue #$issue lost the Stellar Wave label; cannot close it."
+              exit 1
             fi
 
             state="$(gh issue view "$issue" --repo "$GH_REPO" \
-              --json state --jq .state)"
-            [ "$state" = "CLOSED" ] || exit 1
+              --json state --jq '.state')"
+            if [ "$state" = "OPEN" ]; then
+              gh issue close "$issue" --repo "$GH_REPO" --reason completed
+            fi
+
+            state="$(gh issue view "$issue" --repo "$GH_REPO" \
+              --json state --jq '.state')"
+            if [ "$state" != "CLOSED" ]; then
+              echo "Failed to close issue #$issue."
+              exit 1
+            fi
           done < "$RUNNER_TEMP/issues"
