@@ -10,7 +10,7 @@
     "before 3am on Monday"
   ],
   "rangeStrategy": "bump",
-  "semanticCommits": true,
+  "semanticCommits": "enabled",
   "commitMessagePrefix": "chore(deps): ",
   "major": {
     "enabled": true
@@ -26,7 +26,6 @@
     "**/target/**",
     ".git/**"
   ],
-  "enableVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
     "enabled": true,
     "labels": ["security", "dependencies"],
@@ -48,14 +47,14 @@
       "groupName": "patch dependencies",
       "schedule": ["before 3am on Monday"],
       "automerge": false,
-      "semanticCommits": true
+      "semanticCommits": "enabled"
     },
     {
       "description": "Minor version updates - separate PRs",
       "matchUpdateTypes": ["minor"],
       "groupName": "minor dependencies",
       "automerge": false,
-      "semanticCommits": true
+      "semanticCommits": "enabled"
     },
     {
       "description": "Major version updates - separate PRs with strict review",
@@ -63,11 +62,11 @@
       "groupName": "major dependencies",
       "automerge": false,
       "labels": ["breaking-change", "dependencies"],
-      "semanticCommits": true
+      "semanticCommits": "enabled"
     },
     {
       "description": "Node.js version management",
-      "matchDatasources": ["node"],
+      "matchDatasources": ["node-version"],
       "enabled": true,
       "automerge": false,
       "labels": ["toolchain", "dependencies"]

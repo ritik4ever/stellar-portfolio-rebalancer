@@ -29,6 +29,7 @@
     "validate:env-examples": "node scripts/validate-env-examples.mjs",
     "validate:compose-resources": "node scripts/validate-compose-resources.mjs",
     "validate:funding": "node scripts/validate-funding.mjs",
+    "validate:renovate": "npx --yes --package renovate renovate-config-validator --strict --no-global renovate.json",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "quick:pre-commit": "node scripts/run-local-checks.mjs pre-commit",
     "quick:pre-push": "node scripts/run-local-checks.mjs pre-push",

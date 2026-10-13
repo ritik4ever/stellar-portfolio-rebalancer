@@ -1,0 +1,64 @@
+name: Renovate Config Validation
+
+# Keeps renovate.json enforced by actually running Renovate's own validator
+# against it. Before this existed nothing in the repository referenced
+# renovate.json at all — no workflow, no hook, no script — so a config Renovate
+# would reject sat unnoticed. It did: `enableVulnerabilityAlerts` is not a
+# Renovate option, and the validator failed on it with "Invalid configuration
+# option". A config Renovate cannot parse means no dependency update PRs are
+# ever opened, and nothing was in a position to notice.
+#
+# Path-filtered on purpose. The validator's package is a large download
+# (~360 MB on a cold npx cache) and renovate.json changes rarely, so gating it
+# to the files that can actually break it keeps every other PR at zero cost.
+# The push leg matters too: renovate.json can only become invalid through a
+# change to it, so filtering by path loses nothing.
+#
+# --strict is deliberate: it also fails on configuration *warnings* and on a
+# pending migration, not just hard errors. A pending migration means Renovate
+# is reading the config with deprecated semantics and has told nobody, which is
+# the quieter version of the same problem — the config still "works" while
+# meaning something other than what it says.
+#
+# --no-global matters because the file being validated is repository config,
+# not self-hosted global config. Passing a path without it makes the validator
+# assume global, which is a different option set.
+
+on:
+  pull_request:
+    paths:
+      - 'renovate.json'
+      # the command this workflow runs (`npm run validate:renovate`) is defined
+      # here, so a PR that edits or deletes it must also start this check --
+      # otherwise a broken validator ships with the CI silently skipped.
+      - 'package.json'
+      - '.github/workflows/renovate-config.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'renovate.json'
+      # the command this workflow runs (`npm run validate:renovate`) is defined
+      # here, so a PR that edits or deletes it must also start this check --
+      # otherwise a broken validator ships with the CI silently skipped.
+      - 'package.json'
+      - '.github/workflows/renovate-config.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-renovate-config:
+    name: Validate renovate.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Validate renovate.json against the official Renovate validator
+        run: npm run validate:renovate
