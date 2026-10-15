@@ -71,6 +71,10 @@ Before any cross-region step is considered, a **single-AZ** Redis event is handl
   rate-limit counters respond. Treat writes issued during the failover window as possibly lost and let clients
   retry through idempotent operations.
 
+**Partial trade or RPC outage during rebalance (SPR-2026-287):** stop new rebalance jobs, capture the submitted
+transaction hashes as reconciliation evidence, and resume only after balances reconcile; if the outcome cannot be
+confirmed, roll back to the pre-trade allocation snapshot taken before the run started.
+
 Escalate to the multi-region procedures below only when the **whole region** is unavailable.
 
 ## 3. Infrastructure Overview
