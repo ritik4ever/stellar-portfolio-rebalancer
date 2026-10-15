@@ -55,6 +55,12 @@ const ALLOWED_MISSING_BACKEND_KEYS = new Set([
   'ANALYTICS_SNAPSHOT_RAW_DAYS',
 ])
 
+// SPR-2026-283: price-age input must be valid before any work starts (no secrets logged).
+const MAX_PRICE_AGE_SECONDS = Number(process.env.ORACLE_MAX_PRICE_AGE_SECONDS ?? 3600)
+if (!Number.isFinite(MAX_PRICE_AGE_SECONDS) || MAX_PRICE_AGE_SECONDS <= 0) {
+  throw new Error('ORACLE_MAX_PRICE_AGE_SECONDS must be a positive number')
+}
+
 function parseEnvExampleKeys(content) {
   const keys = new Set()
   const duplicates = new Set()

@@ -552,6 +552,8 @@ soroban contract invoke \
 
 ### 2. Decide whether to reset
 
+Before running any incident procedure, validate the safe-pause and reconciliation inputs (pause reason, portfolio or breaker id, evidence destination); abort with a clear error if any are missing or malformed, and never log secret material (SPR-2026-288).
+
 Wait for automatic backend recovery when its cooldown is close to expiry and the price feed and market have stabilised. Do not reset while the underlying move, stale oracle data, or correlation anomaly is continuing; it will retrigger immediately. A manual reset is appropriate for a confirmed false-positive feed tick, a resolved incident that requires immediate service restoration, or a backend breaker whose cooldown has not yet elapsed. The Soroban emergency stop always requires an explicit admin reset; it has no timer-based recovery.
 
 Before resetting, record the incident, affected asset/portfolio, trigger reason, and current oracle/market checks. Keep automatic rebalancing paused through the reset if an incident is still active.
