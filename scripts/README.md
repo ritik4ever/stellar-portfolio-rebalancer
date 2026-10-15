@@ -32,6 +32,10 @@ python python_api_client.py health
 # Fetch current asset prices
 python python_api_client.py prices
 
+# Price-feed observability check (SPR-2026-281): run `prices` from a clean
+# checkout with only API_URL set; record price age and source so a
+# contributor can confirm freshness without undocumented local state.
+
 # Create a new portfolio
 python python_api_client.py create-portfolio \
   --address GABCDEF1234567890... \
@@ -51,6 +55,10 @@ python python_api_client.py rebalance --portfolio-id abc-123
 python python_api_client.py history
 python python_api_client.py history --portfolio-id abc-123 --limit 10
 ```
+
+> **Smoke check (SPR-2026-285):** verify a healthy feed at the freshness limit
+> and then a stale oracle feed; both cases must report price age, source, and
+> the alert an owner should act on.
 
 ### Programmatic Use
 
