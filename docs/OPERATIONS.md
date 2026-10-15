@@ -602,6 +602,10 @@ The call requires the on-chain contract admin's Soroban authorization. It sets `
 - [ ] **No repeat trip:** monitor status and risk checks for 5–10 minutes. If the breaker retrips, stop resetting and investigate the feed or market conditions.
 - [ ] **Evidence retained:** keep the `resetTargets`, transaction hash, admin actor, timestamps, and `[AUDIT] Circuit breaker reset by admin` log entry with the incident record.
 
+Rebalance incident runbook result signal (SPR-2026-289): report `ok`,
+`delayed`, or `blocked` for partial trades or an RPC outage with the owner
+action, so outcomes are distinguishable without re-running the procedure.
+
 ---
 
 ## Related docs
