@@ -606,6 +606,12 @@ Rebalance incident runbook result signal (SPR-2026-289): report `ok`,
 `delayed`, or `blocked` for partial trades or an RPC outage with the owner
 action, so outcomes are distinguishable without re-running the procedure.
 
+### 6. Release verification procedures (SPR-2026-291, SPR-2026-293, SPR-2026-294)
+
+- **Clean environment validation (SPR-2026-291):** Verify releases from a tagged commit in a clean checkout or isolated service without relying on undocumented local state (`npm run validate:release-verification`).
+- **Pre-work input validation & secret redaction (SPR-2026-293):** All release verification inputs (`RELEASE_TAG`, `RELEASE_DIGEST`, `RELEASE_PROVENANCE`) must be validated before work begins. Any invalid format stops immediately with a clear error, and all credentials or tokens are strictly redacted from logs.
+- **Outcome reporting & digest mismatch action (SPR-2026-294):** Verification outcomes must report distinct signals (`VERIFIED`, `TRANSIENT_DELAY`, or `BLOCKED`). If an artifact digest differs from the published digest, the procedure halts with `BLOCKED (DIGEST_MISMATCH)` and notifies the release owner.
+
 ---
 
 ## Related docs
