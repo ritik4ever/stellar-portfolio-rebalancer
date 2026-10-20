@@ -31,6 +31,7 @@
     "validate:funding": "node scripts/validate-funding.mjs",
     "validate:release-verification": "node scripts/validate-release-verification.mjs",
     "validate:env-ref": "node scripts/validate-environment-reference.mjs",
+    "validate:renovate": "node scripts/validate-renovate-config.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "quick:pre-commit": "node scripts/run-local-checks.mjs pre-commit",
     "quick:pre-push": "node scripts/run-local-checks.mjs pre-push",

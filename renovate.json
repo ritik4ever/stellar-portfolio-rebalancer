@@ -24,7 +24,11 @@
   "ignorePaths": [
     "**/node_modules/**",
     "**/target/**",
-    ".git/**"
+    "**/dist/**",
+    "**/.terraform/**",
+    ".git/**",
+    ".husky/**",
+    "security/sbom/**"
   ],
   "enableVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
@@ -39,7 +43,9 @@
     "cargo",
     "dockerfile",
     "docker-compose",
-    "github-actions"
+    "github-actions",
+    "terraform",
+    "pre-commit"
   ],
   "packageRules": [
     {
@@ -67,17 +73,31 @@
     },
     {
       "description": "Node.js version management",
-      "matchDatasources": ["node"],
+      "matchDatasources": ["node-version"],
       "enabled": true,
       "automerge": false,
       "labels": ["toolchain", "dependencies"]
     },
     {
       "description": "Rust toolchain updates",
-      "matchDatasources": ["rust"],
+      "matchDatasources": ["rust-version"],
       "enabled": true,
       "automerge": false,
       "labels": ["toolchain", "dependencies"]
+    },
+    {
+      "description": "Terraform provider and module updates",
+      "matchManagers": ["terraform"],
+      "automerge": false,
+      "labels": ["terraform", "dependencies"],
+      "semanticCommits": true
+    },
+    {
+      "description": "Pre-commit hook updates",
+      "matchManagers": ["pre-commit"],
+      "automerge": false,
+      "labels": ["toolchain", "dependencies"],
+      "semanticCommits": true
     },
     {
       "description": "Critical security updates",
