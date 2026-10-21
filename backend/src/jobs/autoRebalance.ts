@@ -183,13 +183,19 @@ export async function processAutoRebalanceJob(
             riskCheck.reasonCode === "STAT_MODEL_VAR_BREACH" ||
             riskCheck.reasonCode === "STAT_MODEL_CVAR_BREACH"
           ) {
-            await riskManagementService.checkCVaRVaRThresholdsAndAutoPause(
-              portfolio.id,
-              portfolio.allocations ?? {},
-              prices,
-              portfolio.userAddress,
-            );
-            skipCounts["risk_paused"] = (skipCounts["risk_paused"] ?? 0) + 1;
+            if (feedMeta?.staleOrLimited) {
+              // Skip pause persistence/notification when the feed is degraded;
+              // the block still applies for this cycle but without durable side effects.
+              skipCounts["stale_price_data"] = (skipCounts["stale_price_data"] ?? 0) + 1;
+            } else {
+              await riskManagementService.checkCVaRVaRThresholdsAndAutoPause(
+                portfolio.id,
+                portfolio.allocations ?? {},
+                prices,
+                portfolio.userAddress,
+              );
+              skipCounts["risk_paused"] = (skipCounts["risk_paused"] ?? 0) + 1;
+            }
           } else {
             skipCounts["circuit_breaker"] = (skipCounts["circuit_breaker"] ?? 0) + 1;
           }
