@@ -179,11 +179,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Admin-only: store a new named on-chain allocation template.
-    ///
-    /// Templates are on-chain data (persistent storage), not hardcoded
-    /// constants, so the set of available templates can grow over time
-    /// without a contract upgrade.
+   
     pub fn create_template(
         env: Env,
         name: String,
