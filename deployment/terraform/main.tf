@@ -157,6 +157,11 @@ module "ecs" {
   blue_green_deployment_config = var.blue_green_deployment_config
   ecs_min_capacity             = lookup(var.ecs_min_capacity, terraform.workspace, 1)
   ecs_max_capacity             = lookup(var.ecs_max_capacity, terraform.workspace, 5)
+
+  # Rollout recovery: pass the apply-outcome signal through so the ECS module
+  # can expose ECS-scoped recovery outputs (ecs_rollout_status, etc.).
+  rollout_outcome_signal = var.rollout_outcome_signal
+  rollout_owner_action   = var.rollout_owner_action
 }
 
 module "s3_cloudfront" {

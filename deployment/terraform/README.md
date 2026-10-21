@@ -122,12 +122,113 @@ azs = ["us-east-1a", "us-east-1b"]
 
 Full detail — including what clients observe during a switchover and how to run a failover drill — is in [`modules/elasticache/README.md`](modules/elasticache/README.md).
 
+## Rollout Recovery from a Partial Apply
+
+A Terraform apply is not atomic. When a plan applies some resources and then errors on others,
+the rollout recovery signal lets the CI post-apply step decide whether to proceed, wait, or
+halt and notify the owner.
+
+### Signal values
+
+| Signal | Meaning |
+|---|---|
+| `success` | Apply completed cleanly; all resources are in the desired state. |
+| `transient_delay` | A retryable condition was encountered. Wait and re-run. |
+| `blocked` | Apply failed; owner action is required before retrying. |
+
+### Setting the signal (CI)
+
+The CI wrapper that calls `terraform apply` passes the signal via a variable:
+
+```bash
+# Determine the signal from apply exit code and error output, then apply:
+terraform apply \
+  -var "rollout_outcome_signal=blocked" \
+  -var "rollout_affected_service=ecs-service" \
+  -var "rollout_owner_action=resolve_blocker" \
+  tfplan
+```
+
+### Reading the signal (post-apply CI step)
+
+```bash
+STATUS=$(terraform output -raw rollout_outcome)
+
+case "$STATUS" in
+  success)
+    echo "Rollout complete."
+    ;;
+  transient_delay)
+    ACTION=$(terraform output -raw rollout_owner_action)
+    echo "Waiting — $ACTION. Re-run terraform apply after the ECS deployment stabilizes."
+    ;;
+  blocked)
+    ACTION=$(terraform output -raw rollout_owner_action)
+    SERVICE=$(terraform output -raw rollout_affected_service)
+    echo "::error::Rollout blocked on $SERVICE. Owner action: $ACTION"
+    exit 1
+    ;;
+esac
+```
+
+### ECS-specific recovery outputs
+
+When the affected service is the ECS service, additional outputs are available:
+
+| Output | Description |
+|---|---|
+| `ecs_rollout_status` | ECS-scoped status token. |
+| `ecs_rollout_cluster` | Cluster name, or `null` on success. |
+| `ecs_rollout_affected_service` | ECS service name, or `null` on success (mirrored from ECS module). |
+| `ecs_rollout_owner_action` | Remediation token, or `null` on success. |
+| `ecs_rollout_detail` | Human-readable description of the ECS rollout outcome. |
+| `ecs_rollout_target_address` | Terraform `-target` address for a scoped recovery apply, or `null` on success. |
+
+### Safe rollback boundary for a partial apply affecting the ECS service
+
+When `ecs_rollout_status` is `blocked`:
+
+1. **Do NOT apply the full plan again** without resolving the owner action.
+2. Run `terraform plan` to confirm drift is limited to the ECS service:
+   ```bash
+   terraform plan -var-file=<env>.tfvars
+   ```
+3. Resolve the prerequisite identified by `ecs_rollout_owner_action`.
+4. Apply with a targeted plan scoped to the ECS service only:
+   ```bash
+   # The target address is available as a Terraform output:
+   TARGET=$(terraform output -raw ecs_rollout_target_address)
+   terraform apply -target="$TARGET" -var-file=<env>.tfvars
+   ```
+5. Verify the service reaches a healthy state:
+   - ECS service `runningCount == desiredCount`
+   - ALB target group healthy host count ≥ 1
+   - `/api/v1/health` returns HTTP 200
+6. Re-run the full apply once the targeted apply succeeds and `ecs_rollout_status` returns `success`.
+
+If the targeted apply also fails, roll back to the previous task definition revision:
+
+```bash
+aws ecs update-service \
+  --cluster <cluster-name> \
+  --service <service-name> \
+  --task-definition <previous-task-def-arn> \
+  --force-new-deployment
+```
+
+This restores the ECS service without touching any other resource and provides a clear
+rollback boundary: only the ECS service is in a non-desired state; all other resources
+remain unaffected.
+
+See `modules/ecs/rollout_recovery.tf` for the full in-code procedure and the
+`tests/ecs_rollout_recovery.tftest.hcl` test suite.
+
 ## Modules
 
 - `vpc`: VPC and networking configuration
 - `rds`: PostgreSQL database
 - `elasticache`: Redis cache
-- `ecs`: ECS service with Fargate
+- `ecs`: ECS service with Fargate (includes rollout recovery signal)
 - `s3_cloudfront`: S3 bucket with CloudFront CDN
 - `budgets`: AWS Budgets and cost monitoring with alerting
 
