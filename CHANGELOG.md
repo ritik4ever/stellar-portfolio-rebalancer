@@ -1,5 +1,7 @@
 # Changelog
 
+Last verified: 2026-09-29
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -16,7 +18,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 1. **During development**: Use Conventional Commit messages for every commit.
 2. **Before PR**: Select the PR commit type and flag breaking changes in the PR template when applicable.
 3. **PR review**: Commitlint validates PR commit messages in CI.
-4. **Per-PR requirement**: Every PR must include a `CHANGELOG.md` entry, or a `chore: skip changelog` commit explaining why the change is invisible to users.
+4. **API changes**: The PR template asks for a `CHANGELOG.md` entry when a PR changes an HTTP route, request/response schema, database schema, or CLI/contract signature.
 5. **Release preparation**: release-please opens or updates a release PR after changes merge to `main`.
 
 ### Automated Collection
@@ -43,6 +45,23 @@ The project uses release-please to automatically generate changelog entries from
 - `feat(api)!: require signed export requests`
 
 Use a `!` after the type/scope or add a `BREAKING CHANGE:` footer when a commit introduces a breaking change. release-please flags those entries in the generated changelog.
+
+### Worked Example: From Commit to Changelog
+
+**Input (Commit Message)**:
+```text
+feat(api): add portfolio export endpoint
+
+Adds a new CSV export feature for user portfolios.
+```
+
+**Expected Output (Generated `CHANGELOG.md` Entry)**:
+```markdown
+### Features
+
+* **api:** add portfolio export endpoint
+```
+
 
 ### Entry Categories
 
@@ -102,6 +121,8 @@ Release changelog entries are generated into these sections:
 - **Security updates**: Follow [security disclosure policy](.github/SECURITY.md) if applicable
 
 ## [Unreleased]
+
+- DELETE `/api/v1/notifications/unsubscribe` rejects unknown query fields and non-empty request bodies with HTTP 400 before changing notification preferences ([#1808](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1808)).
 
 - Configurable analytics snapshot retention policy and admin management endpoints ([#1397](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1397))
   - Added configurable retention cutoff (`ANALYTICS_COMPACTION_CUTOFF_DAYS`) and raw high-frequency snapshot window (`ANALYTICS_COMPACTION_RECENT_DAYS`) with startup validation and environment variable overrides.

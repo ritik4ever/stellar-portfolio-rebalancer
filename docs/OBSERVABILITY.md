@@ -158,6 +158,10 @@ The backend exports dedicated price-quality metrics:
 - `stellar_portfolio_reflector_stale_prices_total`
 - `stellar_portfolio_reflector_fallback_usage_total`
 
+Price-feed result signal (SPR-2026-284): report `ok`, `delayed`, or `blocked`
+when the oracle feed turns stale, together with the owner action, so success,
+transient delay, and blocked work are distinguishable at a glance.
+
 Alertmanager ships non-critical alerts to `http://host.docker.internal:5001/alerts` by default. Replace those receivers with your Slack or webhook destination before production rollout. Critical alerts page the on-call engineer instead — see below.
 
 ## On-Call Escalation Policy

@@ -17,6 +17,9 @@ Use this template for contract, backend, and frontend releases. Fill in the rele
 - [ ] Confirm SBOM artifacts were generated for frontend, backend, and contracts.
 - [ ] Confirm artifact attestations were created for the release bundles.
 - [ ] Review `npm run audit:policy` output and record any accepted exceptions.
+- [ ] Validate release inputs and configuration before rollout starts with `npm run validate:release-verification` (SPR-2026-293: verifies tag, digest, and provenance; stops with clear error on invalid configuration and redacts secrets).
+- [ ] Validate release artifact reproduction from a clean checkout or isolated environment without undocumented local state (SPR-2026-291).
+
 
 ## Contract artifacts
 
@@ -45,5 +48,6 @@ Use this template for contract, backend, and frontend releases. Fill in the rele
 - [ ] Check logs for startup or dependency warnings.
 - [ ] Confirm alerts are quiet or explain any expected noise.
 - [ ] If an alert fired during rollout, cross-check the exact Sentry release and environment before triaging the error.
+- [ ] Verify artifact digest against published attestation; report clear outcomes distinguishing success, transient delay, or blocked mismatch (SPR-2026-294: if digest differs, block rollout and alert release owner immediately).
 - [ ] Record the release outcome, including any temporary exceptions.
 - [ ] Capture follow-up work for anything deferred during the release.

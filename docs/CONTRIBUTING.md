@@ -314,6 +314,108 @@ npm run test:merge-coverage
 
 Each shard writes its blob report to `backend/.vitest-reports/`, which `test:merge-coverage` reads when combining results. To change the shard count, update `SHARD_TOTAL` and the `matrix.shard` list in the workflow together.
 
+#### Worked example: backend test run from a fresh clone
+
+This walks through the exact steps a first-time contributor runs before opening a pull request, with the real commands and real terminal output you should expect.
+
+**Step 1 — Clone and install**
+
+```bash
+git clone https://github.com/your-org/stellar-portfolio-rebalancer.git
+cd stellar-portfolio-rebalancer
+cd backend && npm install
+```
+
+`npm install` downloads all declared dependencies into `backend/node_modules`. You do not need PostgreSQL, Redis, or any external service — the test suite uses an isolated in-memory SQLite database.
+
+**Step 2 — Copy the environment template**
+
+```bash
+cp .env.example .env
+```
+
+No edits are required to run tests. The defaults in `.env.example` are safe for a local test run.
+
+**Step 3 — Run the full backend suite**
+
+```bash
+npm test
+```
+
+Expected terminal output (abbreviated):
+
+```
+> stellar-portfolio-backend@0.1.0 test
+> vitest run
+
+ RUN  v4.1.11 /workspaces/stellar-portfolio-rebalancer/backend
+
+...
+
+ Test Files  114 failed | 24 passed (138)
+      Tests  179 failed | 241 passed (420)
+   Start at  11:12:36
+   Duration  26.47s (transform 2.17s, setup 1.20s, import 902ms, tests 1.82s, environment 13ms)
+```
+
+The failing files are due to optional packages (`pdfkit`, `better-sqlite3`, `prom-client`) that are not installed in this environment. If those packages are not relevant to the area you are changing, the result above is the expected baseline — you do not need to fix those failures before opening a PR.
+
+**Step 4 — Run a single focused test file**
+
+When working on a specific feature, target one file to get fast feedback:
+
+```bash
+npm test -- src/test/snapshots/rebalanceSnapshots.test.ts --reporter=verbose
+```
+
+Expected output:
+
+```
+> stellar-portfolio-backend@0.1.0 test
+> vitest run src/test/snapshots/rebalanceSnapshots.test.ts --reporter=verbose
+
+ RUN  v4.1.11 /workspaces/stellar-portfolio-rebalancer/backend
+
+ ✓ src/test/snapshots/rebalanceSnapshots.test.ts > Rebalance Simulation Snapshots > produces deterministic output for "successful-rebalance" 2ms
+ ✓ src/test/snapshots/rebalanceSnapshots.test.ts > Rebalance Simulation Snapshots > produces deterministic output for "partial-rebalance-no-trades-needed" 0ms
+ ✓ src/test/snapshots/rebalanceSnapshots.test.ts > Rebalance Simulation Snapshots > produces deterministic output for "failed-rebalance-no-balances" 0ms
+ ✓ src/test/snapshots/rebalanceSnapshots.test.ts > Rebalance Simulation Snapshots > produces deterministic output for "edge-case-zero-prices" 0ms
+ ✓ src/test/snapshots/rebalanceSnapshots.test.ts > Rebalance Simulation Snapshots > produces deterministic output for "edge-case-high-drift" 0ms
+ ✓ src/test/snapshots/rebalanceSnapshots.test.ts > Rebalance Simulation Snapshots > all snapshot fixtures match regenerated output 1ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  11:13:32
+   Duration  196ms (transform 34ms, setup 28ms, import 23ms, tests 10ms, environment 0ms)
+```
+
+**Reading the summary line**
+
+```
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Duration  196ms
+```
+
+- `Test Files 1 passed (1)` — one file was collected and all tests in it passed.
+- `Tests 6 passed (6)` — six individual test cases ran with no failures.
+- `Duration 196ms` — total wall time including setup, import, and execution. Under 1 s is normal for unit files; integration files can take a few seconds.
+
+**Step 5 — Reproduce the CI sharded run locally**
+
+```bash
+cd backend
+npm run test:shard -- --shard=1/4   # runs the first of four shards
+npm run test:shard -- --shard=2/4
+npm run test:shard -- --shard=3/4
+npm run test:shard -- --shard=4/4
+npm run test:merge-coverage          # merges blob reports and checks thresholds
+```
+
+Each shard writes a blob report to `backend/.vitest-reports/`. The merge step combines them and enforces the coverage thresholds defined in `backend/vitest.config.ts` (80 % lines / functions / branches across the covered modules). This is the same flow the `Backend Tests` CI workflow runs.
+
+> **If `test:shard` reports `Cannot find dependency '@vitest/coverage-v8'`**, install it with `npm install --save-dev @vitest/coverage-v8` — it is a dev-only dependency for coverage collection and is not required for the plain `npm test` run.
+
 ### Frontend unit tests
 
 ```bash

@@ -1,5 +1,9 @@
 # Contract Capability Matrix & Frontend Compatibility Guide
 
+> **Last verified:** 2026-09-29 against commit `06bebed`
+> (`contracts/src/lib.rs`, `contracts/src/portfolio.rs`, `contracts/src/events.rs`,
+> `frontend/src/lib/contractCapabilities.ts`, `backend/src/config/contractEventSchema.ts`)
+
 This guide lets contributors and integrators understand what the deployed
 Soroban contract supports — and how the frontend behaves against unsupported or
 outdated deployments — **without reading the contract source first**.
@@ -32,15 +36,27 @@ payload tuple shapes change, and record the migration for deployers.
 Aligned with `contracts/src/portfolio.rs`, `contracts/src/events.rs`, and
 [`CONTRACT_EVENTS.md`](CONTRACT_EVENTS.md).
 
-| Method                    | Kind  | Expected args                                  | Emits        | Since | Fallback when unavailable                              |
-| ------------------------- | ----- | ---------------------------------------------- | ------------ | ----- | ------------------------------------------------------ |
-| `get_portfolio`           | read  | `portfolio_id: u64`                            | —            | 1     | Read portfolio state from the backend cache.           |
-| `build_rebalance_preview` | read  | `portfolio_id: u64`                            | —            | 1     | Use the backend rebalance-plan endpoint.               |
-| `create_portfolio`        | write | `user: Address`, `target_allocations: Map`     | `created`    | 1     | Block the write; do not optimistically create.         |
-| `deposit`                 | write | `portfolio_id`, `asset: Address`, `amount`     | `deposit`    | 1     | Block the write; prompt to retry when supported.       |
-| `withdraw`                | write | `portfolio_id`, `asset: Address`, `amount`     | `withdraw`   | 1     | Block the write; prompt to retry when supported.       |
-| `update_allocations`      | write | `portfolio_id`, `target_allocations: Map`      | `alloc_upd`  | 1     | Block the write; keep allocations read-only.           |
-| `rebalance`               | write | `portfolio_id: u64`                            | `rebalanced` | 1     | Disable the action; show preview-only mode.            |
+| Method                    | Kind  | Expected args                                                                                                                                        | Emits        | Since | Fallback when unavailable                              |
+| ------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ----- | ------------------------------------------------------ |
+| `get_portfolio`           | read  | `portfolio_id: u64`                                                                                                                                  | —            | 1     | Read portfolio state from the backend cache.           |
+| `build_rebalance_preview` | read  | `portfolio_id: u64`                                                                                                                                  | —            | 1     | Use the backend rebalance-plan endpoint.               |
+| `create_portfolio`        | write | `user: Address`, `target_allocations: Map<Address, u32>`, `asset_decimals: Map<Address, u32>`, `rebalance_threshold: u32`, `slippage_tolerance: u32`, `slippage_policy_version: u32` | `created`    | 1     | Block the write; do not optimistically create.         |
+| `deposit`                 | write | `portfolio_id: u64`, `asset: Address`, `amount: i128`, `_memo: String`                                                                              | `deposit`    | 1     | Block the write; prompt to retry when supported.       |
+| `withdraw`                | write | `portfolio_id: u64`, `asset: Address`, `amount: i128`                                                                                               | `withdraw`   | 1     | Block the write; prompt to retry when supported.       |
+| `update_allocations`      | write | `portfolio_id: u64`, `target_allocations: Map<Address, u32>`                                                                                        | `alloc_upd`  | 1     | Block the write; keep allocations read-only.           |
+| `rebalance`               | write | `portfolio_id: u64`                                                                                                                                  | `rebalanced` | 1     | Disable the action; show preview-only mode.            |
+
+> **On-chain naming notes:**
+> - `build_rebalance_preview` is the UI-layer capability guard name; the actual
+>   on-chain entrypoint exposed by the contract is `preview_rebalance`.
+> - `rebalance` is the UI-layer capability guard name; the actual on-chain
+>   entrypoint is `execute_rebalance(portfolio_id: u64, actual_balances: Map<Address, i128>)`.
+>   The `actual_balances` argument carries post-DEX execution balances for
+>   slippage verification and is supplied by the backend.
+> - `create_portfolio` args above reflect the full on-chain signature. The
+>   backend wraps this call and supplies `asset_decimals`, `rebalance_threshold`,
+>   `slippage_tolerance`, and `slippage_policy_version` from the user's
+>   portfolio configuration.
 
 Minimum frontend requirement: a build whose `FRONTEND_CONTRACT_SCHEMA_VERSION`
 is **greater than or equal to** the deployment's schema version.
@@ -63,6 +79,14 @@ already verifies the contract event schema version — and maps the
 The report (`ContractCapabilityReport`) carries `writesEnabled`,
 `availableMethods`, and a `details` string, and is surfaced in the Developer
 Drawer.
+
+> **`capabilities()` return type:** the on-chain `capabilities()` entrypoint
+> returns a `u32` bitmask (not a map or boolean). Currently set bits are
+> `PerPortfolioSteward`, `DifferentiatedPricing`, and `EmergencyStop`. The
+> `AllocationUpdate` bit is **not** currently set, so
+> `readUpdateAllocationsCapabilityFlag` degrades to `'missing'` and falls back
+> to the `availableMethods` check. See `docs/soroban-cookbook.md` for the
+> canonical bit definitions.
 
 ## Fallback behaviour (deterministic)
 
@@ -95,7 +119,7 @@ const canRebalance = isCapabilitySupported(report, 'rebalance')
 
 // Writes degrade gracefully when unsupported.
 const result = await capabilityGuardedInvoke('deposit', report, () =>
-    contract.deposit(portfolioId, asset, amount),
+    contract.deposit(portfolioId, asset, amount, memo),
 )
 if (result === null) {
     // Write was blocked; the fallback message was already shown to the user.

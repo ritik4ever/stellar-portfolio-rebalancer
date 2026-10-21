@@ -203,9 +203,45 @@ export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    userId: z.string().trim().min(1, 'userId query parameter is required').optional(),
     reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
+
+// Dedicated schema for GET /notifications/preferences (#1803).
+// Rejects unknown query keys and malformed userId/reason before any DB access.
+export const notificationPreferencesQuerySchema = z
+    .object({
+        userId: z
+            .string()
+            .trim()
+            .min(1, 'userId query parameter is required')
+            .max(128, 'userId must be 128 characters or fewer')
+            .optional(),
+        reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional(),
+    })
+    .strict();
+
+// Domain constraints from the README Quick Start, reused wherever allocation
+// percentages are accepted so invalid payloads fail with a clean 400.
+export const allocationSumTo100Schema = z
+    .record(z.string().min(1), z.number().min(0).max(100))
+    .refine(
+        (allocations) => {
+            const entries = Object.entries(allocations)
+            if (entries.length === 0 || entries.length > MAX_PORTFOLIO_ASSETS) return false
+            const total = entries.reduce((sum, [, value]) => sum + value, 0)
+            return Math.abs(total - 100) <= 0.01
+        },
+        {
+            message: `Allocations must contain between 1 and ${MAX_PORTFOLIO_ASSETS} assets and sum to 100%`,
+        }
+    )
+
+export const notificationUnsubscribeQuerySchema = notificationQuerySchema.strict();
+export const notificationUnsubscribeBodySchema = z.preprocess(
+    (body) => body ?? {},
+    z.object({}).strict()
+);
 
 export const notificationThresholdsQuerySchema = z.object({
     userId: z.string().min(1, 'userId query parameter is required').optional(),
@@ -380,12 +416,30 @@ export const portfolioHistoryQuerySchema = z.object({
 // ─── Price feed schemas ───────────────────────────────────────────────────────
 const isoDateString = z.string().refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid ISO date string');
 
+/** Maximum allowed OHLCV query range: 90 days in milliseconds */
+const OHLCV_MAX_RANGE_MS = 90 * 24 * 60 * 60 * 1000;
+
 export const ohlcvQuerySchema = z.object({
     asset: z.string().min(1, 'asset is required').max(32).toUpperCase(),
     interval: z.enum(['1h', '4h', '1d']),
     from: isoDateString,
     to: isoDateString,
-});
+}).strict()
+    .refine(
+        (data) => Date.parse(data.from) < Date.parse(data.to),
+        { message: 'from must be before to', path: ['from'] }
+    )
+    .refine(
+        (data) => (Date.parse(data.to) - Date.parse(data.from)) <= OHLCV_MAX_RANGE_MS,
+        { message: 'Date range cannot exceed 90 days', path: ['to'] }
+    );
+
+/**
+ * Schema for GET /prices — the route accepts no query parameters.
+ * Any unknown param is rejected with a 400 to prevent confused clients
+ * from assuming filtered results are being returned.
+ */
+export const pricesQuerySchema = z.object({}).strict();
 
 // ─── Analytics schemas (#1430) ────────────────────────────────────────────────
 const notFutureDate = (v: string) => Date.parse(v) <= Date.now()

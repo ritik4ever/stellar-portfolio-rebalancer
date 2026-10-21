@@ -1,30 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { Shield, Share2, Clock, User } from 'lucide-react'
-import { api, ENDPOINTS } from '../config/api'
-
-function setMetaTags(tags: Record<string, string>) {
-  for (const [property, content] of Object.entries(tags)) {
-    let el = document.querySelector(`meta[property="${property}"]`)
-    if (!el) {
-      el = document.createElement('meta')
-      el.setAttribute('property', property)
-      document.head.appendChild(el)
-    }
-    el.setAttribute('content', content)
-  }
-}
-
-function removeMetaTags(properties: string[]) {
-  for (const property of properties) {
-    const el = document.querySelector(`meta[property="${property}"]`)
-    if (el) el.remove()
-  }
-}
+import { api, API_CONFIG, ENDPOINTS } from '../config/api'
+import { DEFAULT_SOCIAL_META, applySocialMeta, toAbsoluteUrl } from '../lib/socialMeta'
 
 interface PublicPortfolioData {
   portfolio: {
     id: string
+    name?: string
     allocations: Record<string, number>
     totalValue: number
     threshold: number
@@ -41,13 +24,21 @@ interface PublicPortfolioProps {
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899']
 
+function formatAssetPercent(value: number): string {
+  const rounded = Math.round(value * 10) / 10
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`
+}
+
 function PublicPortfolio({ hash }: PublicPortfolioProps) {
   const [data, setData] = useState<PublicPortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const metaInjected = useRef(false)
 
   useEffect(() => {
+    setData(null)
+    setError(null)
+    setLoading(true)
+
     const fetchSharedPortfolio = async () => {
       try {
         const res = await api.get<PublicPortfolioData>(ENDPOINTS.PORTFOLIO_SHARE_VIEW(hash))
@@ -68,24 +59,41 @@ function PublicPortfolio({ hash }: PublicPortfolioProps) {
   }, [hash])
 
   useEffect(() => {
-    if (!data || metaInjected.current) return
-    metaInjected.current = true
-    const totalValue = data.portfolio.totalValue?.toLocaleString() || '0'
-    const assetCount = Object.keys(data.portfolio.allocations || {}).length
-    document.title = `Portfolio Snapshot — ${totalValue} | Stellar Portfolio Rebalancer`
-    setMetaTags({
-      'og:title': `Portfolio Snapshot — $${totalValue}`,
-      'og:description': `Shared portfolio with ${assetCount} asset${assetCount !== 1 ? 's' : ''}. Total value: $${totalValue}.`,
-      'og:url': window.location.href,
-      'og:type': 'website',
-      'og:site_name': 'Stellar Portfolio Rebalancer',
-    })
-    return () => {
-      metaInjected.current = false
-      document.title = 'Stellar Portfolio Rebalancer'
-      removeMetaTags(['og:title', 'og:description', 'og:url', 'og:type', 'og:site_name'])
+    if (loading || !data) {
+      applySocialMeta(DEFAULT_SOCIAL_META)
+      return
     }
-  }, [data])
+
+    const allocations = Object.entries(data.portfolio.allocations || {})
+    const totalWeight = allocations.reduce((sum, [, weight]) => sum + weight, 0)
+    const largest = allocations.reduce<{ asset: string; weight: number } | null>(
+      (top, [asset, weight]) => (!top || weight > top.weight ? { asset, weight } : top),
+      null,
+    )
+    const largestPercent = largest && totalWeight > 0 ? (largest.weight / totalWeight) * 100 : 0
+    const totalValue = data.portfolio.totalValue?.toLocaleString() || '0'
+    const assetCount = allocations.length
+    const headline = data.portfolio.name?.trim() || 'Portfolio Snapshot'
+
+    applySocialMeta({
+      title: `${headline} — $${totalValue}`,
+      description: [
+        `Shared portfolio with ${assetCount} asset${assetCount === 1 ? '' : 's'}. Total value: $${totalValue}.`,
+        data.portfolio.threshold ? ` Rebalance threshold: ${formatAssetPercent(data.portfolio.threshold)}.` : '',
+        largest && largestPercent > 0
+          ? ` Largest holding: ${largest.asset} at ${formatAssetPercent(largestPercent)}.`
+          : '',
+      ].join(''),
+      url: window.location.href,
+      imageUrl: toAbsoluteUrl(ENDPOINTS.PORTFOLIO_SHARE_OG_IMAGE(hash), API_CONFIG.BASE_URL),
+      imageAlt: `${headline}: $${totalValue} across ${assetCount} asset${assetCount === 1 ? '' : 's'}`,
+      documentTitle: `${headline} — $${totalValue} | ${DEFAULT_SOCIAL_META.documentTitle}`,
+    })
+
+    return () => {
+      applySocialMeta(DEFAULT_SOCIAL_META)
+    }
+  }, [data, loading, hash])
 
   if (loading) {
     return (

@@ -487,3 +487,44 @@ The validator fails when:
 - Runtime code references an env key absent from its example file.
 - Either example file defines a key more than once.
 - `backend/.env.example`, `frontend/.env.example`, and the tables in this document drift apart.
+
+---
+
+## Environment Reference Verification and Recovery (SPR-2026-296..300)
+
+Run repeatable environment reference verification:
+
+```bash
+npm run validate:env-ref
+```
+
+### Clean Environment Validation (SPR-2026-296)
+Contributors can verify startup validation and documented defaults without undocumented local state. In local/development mode, the validator falls back safely to `MINIMUM_VIABLE_LOCAL_DEFAULTS`:
+- `NODE_ENV`: `development`
+- `PORT`: `3001`
+- `STELLAR_NETWORK`: `testnet`
+- `STELLAR_HORIZON_URL`: `https://horizon-testnet.stellar.org`
+- `ENABLE_AUTO_REBALANCER`: `false`
+- `VITE_API_URL`: `http://localhost:3001`
+
+### Safe Recovery & Rollback Boundaries (SPR-2026-297)
+When deploying in `production` mode (`NODE_ENV=production`), production-only variables are strictly audited before work:
+- `DATABASE_URL`: PostgreSQL connection URI (SQLite prohibited in production).
+- `REDIS_URL`: Redis connection URI for queues and distributed rate limiting.
+- `JWT_SECRET`: 32+ character cryptographically secure secret.
+- `CORS_ORIGINS`: Explicit origins list (`*` prohibited).
+
+If any production-only variable is missing or malformed, verification immediately halts at rollback boundary `HALT_BEFORE_TRAFFIC_SHIFT` and outputs the precise remediation action required.
+
+### Input Validation & Secret Redaction (SPR-2026-298)
+Port ranges (1-65535) and Stellar networks are strictly validated before rollout. All private keys (`S...`), JWT secrets, tokens, and passwords in failure messages are automatically redacted with `[REDACTED]`.
+
+### Outcome Reporting (SPR-2026-299)
+Validation emits three distinct signals:
+- `VERIFIED`: Environment configuration satisfies all criteria.
+- `TRANSIENT_DELAY`: Infrastructure warmup or service discovery pending (retry with exponential backoff).
+- `BLOCKED`: Malformed configuration or missing production variables requiring owner intervention.
+
+### Repeatability Smoke Check (SPR-2026-300)
+A maintainer can run `scripts/environment-reference.test.mjs` or `runEnvironmentSmokeCheck()` repeatedly without environment leakage or side effects.
+

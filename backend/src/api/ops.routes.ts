@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import { pricesQuerySchema } from './validation.js'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import {
@@ -827,6 +828,14 @@ opsRouter.post('/rebalance-lock/force-release', requireAdmin, async (req: Reques
 
 opsRouter.get('/prices', async (req: Request, res: Response) => {
     try {
+        const parsed = pricesQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+            const message = parsed.error.issues
+                .map(issue => `${issue.path.join('.') || 'query'}: ${issue.message}`)
+                .join('; ')
+            return fail(res, 400, 'VALIDATION_ERROR', message)
+        }
+
         logger.info('[DEBUG] Fetching prices for frontend...')
         const payload = await reflectorService.getCurrentPricesWithMeta()
 

@@ -62,6 +62,11 @@ pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
 pub const DEFAULT_ASSET_SLIPPAGE_BPS: u32 = 100; // 1%
 /// Maximum configurable contract-level max execution slippage per asset class (5%).
 pub const MAX_ASSET_SLIPPAGE_BPS: u32 = 500; // 5%
+/// Contract-level upper bound on a portfolio's aggregate (`global_max_slippage_bps`)
+/// slippage cap (10%). `set_global_max_slippage` rejects larger values and the
+/// aggregate check clamps stored values to this bound, so the sum-of-legs
+/// slippage defense can never be disabled by a malformed or malicious request.
+pub const MAX_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 1000; // 10%
 
 /// Rebalancing strategy types, mirroring backend `RebalanceStrategyType`.
 #[contracttype]
@@ -437,15 +442,15 @@ pub enum Error {
     ArithmeticOverflow = 40,
     /// Caller authenticated successfully but is neither the contract admin
     /// nor a registered operator for an operator-eligible entrypoint.
-    Unauthorized = 37,
+    Unauthorized = 41,
     /// `accept_admin` was called while no admin transfer is in flight
     /// (`propose_admin` has never run, or the transfer already completed).
-    NoPendingAdmin = 38,
+    NoPendingAdmin = 42,
     /// A proposed admin is required to differ from the current admin;
     /// re-proposing the incumbent would be a no-op transfer.
-    InvalidAdminProposal = 39,
+    InvalidAdminProposal = 43,
     /// Portfolio creation failed because the user reached the maximum allowed portfolios.
-    TooManyPortfolios = 40,
+    TooManyPortfolios = 44,
 }
 
 #[contracttype]

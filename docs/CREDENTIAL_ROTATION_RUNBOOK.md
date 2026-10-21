@@ -249,6 +249,52 @@ Configure these in CloudWatch Alarms and route alerts to your on-call SNS topic.
 
 ---
 
+## 7. Startup failure modes
+
+### 7a. `USE_AWS_SECRETS_MANAGER=true` without any ARN
+
+**Symptom:** The server refuses to start with the error:
+
+```
+[STARTUP-CONFIG] Validation failed. Server will not start.
+1. USE_AWS_SECRETS_MANAGER is true but neither DB_SECRET_ARN nor REDIS_SECRET_ARN is set.
+   Provide at least one ARN or set USE_AWS_SECRETS_MANAGER=false.
+```
+
+**Root cause:** `USE_AWS_SECRETS_MANAGER=true` tells the `CredentialManager` to fetch credentials from Secrets Manager. Without at least one ARN it cannot do so, and the backend would silently fall back to plain environment-variable credentials — a partial rollout where secret rotation is effectively disabled despite appearing to be enabled.
+
+**Fix:** Set the relevant ARN(s) in your environment file before deploying:
+
+```bash
+# backend/.env (or your deployment environment)
+USE_AWS_SECRETS_MANAGER=true
+DB_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789012:secret:stellar-portfolio-db
+REDIS_SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789012:secret:stellar-portfolio-redis
+```
+
+### 7b. Malformed ARN value
+
+**Symptom:** Server refuses to start with a message like:
+
+```
+[STARTUP-CONFIG] Validation failed. Server will not start.
+1. DB_SECRET_ARN 'arn:wrong-format' is not a valid AWS Secrets Manager ARN.
+   Expected format: arn:aws:secretsmanager:<region>:<account-id>:secret:<name>
+```
+
+**Fix:** Verify the ARN in the AWS Console under **Secrets Manager → secret → ARN** and copy it exactly.
+
+### 7c. Secret rotation Lambda errors at startup
+
+If the backend starts successfully but the `CredentialManager` cannot fetch credentials at runtime:
+
+1. Check the Lambda logs (see §1e).
+2. Verify IAM permissions allow `secretsmanager:GetSecretValue` for the service role.
+3. Confirm the secret is in `AWSCURRENT` stage (see §1a/1b).
+4. Trigger a manual force-refresh via the admin API (see §3).
+
+---
+
 ## See also
 
 - [AWS Secrets Manager rotation docs](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html)
