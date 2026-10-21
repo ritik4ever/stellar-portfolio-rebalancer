@@ -109,15 +109,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// Step 2 of the two-step admin transfer: the pending admin claims the role.
-    ///
     
-    /// authorize this call itself, which is what proves the incoming admin
-    /// controls the key. On success `DataKey::Admin` is rewritten, the
-    /// pending nomination is cleared, and the previous admin loses every
-    /// admin right immediately.
-    ///
-    /// Returns [`Error::NoPendingAdmin`] when no transfer is in flight.
     pub fn accept_admin(env: Env) -> Result<(), Error> {
         let pending_admin: Address = env
             .storage()
