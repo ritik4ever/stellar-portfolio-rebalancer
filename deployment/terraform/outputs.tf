@@ -68,3 +68,59 @@ output "redis_preferred_cache_cluster_azs" {
   value       = module.elasticache.preferred_cache_cluster_azs
   description = "Availability zones the primary and each read replica are pinned to."
 }
+
+# ─── Rollout recovery outputs ─────────────────────────────────────────────────
+# These outputs let the CI post-apply step read the rollout signal and decide
+# whether to proceed, wait, or halt and notify the owner.
+#
+# Usage (in the CI step that follows `terraform apply`):
+#
+#   STATUS=$(terraform output -raw rollout_outcome)
+#   case "$STATUS" in
+#     success)        echo "Rollout complete." ;;
+#     transient_delay) echo "Waiting for ECS to stabilize…" ;;
+#     blocked)
+#       ACTION=$(terraform output -raw rollout_owner_action)
+#       SERVICE=$(terraform output -raw rollout_affected_service)
+#       echo "::error::Rollout blocked on $SERVICE. Owner action: $ACTION"
+#       exit 1 ;;
+#   esac
+
+output "rollout_outcome" {
+  description = "Overall rollout outcome: success, transient_delay, or blocked."
+  value       = var.rollout_outcome_signal
+}
+
+output "rollout_affected_service" {
+  description = "Service affected by a partial apply, or null on a clean success."
+  value = (
+    var.rollout_outcome_signal == "success"
+    ? null
+    : (var.rollout_affected_service != "" ? var.rollout_affected_service : module.ecs.ecs_rollout_affected_service)
+  )
+}
+
+output "rollout_owner_action" {
+  description = "Remediation token for the operator, or null on a clean success."
+  value       = var.rollout_outcome_signal == "success" ? null : module.ecs.ecs_rollout_owner_action
+}
+
+output "ecs_rollout_status" {
+  description = "ECS-service-scoped rollout status mirrored from the ECS module."
+  value       = module.ecs.ecs_rollout_status
+}
+
+output "ecs_rollout_cluster" {
+  description = "ECS cluster name for the affected service, or null on success."
+  value       = module.ecs.ecs_rollout_cluster
+}
+
+output "ecs_rollout_detail" {
+  description = "Human-readable description of the ECS rollout outcome."
+  value       = module.ecs.ecs_rollout_detail
+}
+
+output "ecs_rollout_target_address" {
+  description = "Terraform -target address for a scoped recovery apply, or null on success."
+  value       = module.ecs.ecs_rollout_target_address
+}
