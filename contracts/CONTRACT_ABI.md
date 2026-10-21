@@ -509,3 +509,9 @@ The contract includes property-based tests using [`proptest`](https://docs.rs/pr
 | 5 | Rebalance idempotent when no drift | 10,000 |
 
 Run: `cargo test --features testutils property_`
+
+## Cooldown Bounds Specification (SPR-2026-211)
+
+- **Lower Bound:** 60 seconds (1 minute)
+- **Upper Bound:** 604,800 seconds (7 days)
+- **Timestamp State Guarantee:** `last_rebalance_timestamp` is strictly written to contract state **after** successful execution of the rebalance routine. Failed execution leaves the prior cooldown timestamp intact.
