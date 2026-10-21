@@ -97,6 +97,42 @@ Key checks:
 - `source` is `"secrets_manager"` (not `"env"`).
 - `lastRefreshed` is within the last 4–5 minutes.
 
+The same response includes a non-secret JWT rotation summary:
+
+```json
+{
+  "jwt": {
+    "activeVersion": "current",
+    "previousVersion": "previous",
+    "previousGraceActive": true,
+    "previousGraceUntil": "2026-08-31T08:45:00.000Z"
+  }
+}
+```
+
+These are labels and a configured expiry timestamp only. The endpoint never
+returns the current or previous JWT secret. During an overlap, newly issued
+tokens use `activeVersion: "current"`; tokens signed with `previousVersion:
+"previous"` remain accepted only while `previousGraceActive` is `true`.
+
+### Clean-checkout overlap reproduction
+
+Use synthetic values in an isolated test environment; do not use production
+credentials or commit an `.env` file:
+
+```bash
+export JWT_SECRET="$(openssl rand -base64 32)"
+export JWT_PREVIOUS_SECRET="$(openssl rand -base64 32)"
+export JWT_PREVIOUS_SECRET_GRACE_UNTIL="$(node -e 'console.log(new Date(Date.now() + 15 * 60 * 1000).toISOString())')"
+```
+
+Start the backend, issue a new token, and query the admin credentials status
+endpoint. The response should identify `current` as the active version and
+show the previous grace window as active without displaying either value.
+After the timestamp expires, the status should report
+`previousGraceActive: false`; remove `JWT_PREVIOUS_SECRET` and its grace
+timestamp on the next deployment.
+
 ### 1d. Verify connectivity after rotation
 
 ```bash

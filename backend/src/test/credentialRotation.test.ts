@@ -219,6 +219,8 @@ describe('Credential rotation and dynamic configuration (#rds-secret-rotation)',
             expect(res.body.success).toBe(true);
             expect(res.body.data.database.configured).toBe(true);
             expect(res.body.data.redis).toBeDefined();
+            expect(res.body.data.jwt.activeVersion).toBe('current');
+            expect(JSON.stringify(res.body.data.jwt)).not.toContain('secret');
         });
 
         it('POST /api/ops/credentials/refresh refreshes DB pool and Redis credentials', async () => {

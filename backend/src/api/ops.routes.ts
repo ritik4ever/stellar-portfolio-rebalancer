@@ -27,6 +27,7 @@ import type { Portfolio } from '../types/index.js'
 import { runContractDiagnostics } from '../services/contractDiagnostics.js'
 import { getFailedJobs } from '../queue/queueMetrics.js'
 import { requireAdmin } from '../middleware/auth.js'
+import { getJwtRotationStatus } from '../services/authService.js'
 
 import { getAnomalySummary } from '../monitoring/anomalyTracker.js'
 import { buildReadinessReport } from '../monitoring/readiness.js'
@@ -566,6 +567,7 @@ opsRouter.get('/credentials/status', requireAdmin, async (_req: Request, res: Re
                 lastRefreshed: redisCreds.lastRefreshed.toISOString(),
                 urlRedacted: redisCreds.url.replace(/:\/\/[^@]*@/, '://***@')
             },
+            jwt: getJwtRotationStatus(),
             timestamp: new Date().toISOString()
         }
         return ok(res, status)
