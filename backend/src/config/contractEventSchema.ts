@@ -1,7 +1,4 @@
-/**
- * Backend expectations for Soroban contract events consumed by {@link ContractEventIndexerService}.
- * Bump {@link BACKEND_CONTRACT_EVENT_SCHEMA_VERSION} when topic names or payload tuple shapes change.
- */
+
 
 export const BACKEND_CONTRACT_EVENT_SCHEMA_VERSION = 1
 
