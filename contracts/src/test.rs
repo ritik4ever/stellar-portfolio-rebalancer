@@ -2037,6 +2037,393 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
         );
 }
 
+// ── Oracle caller authorization regressions (SPR-2026-201/202/203) ───────────
+//
+// The contract accepts prices from exactly one authorized source: the Reflector
+// address pinned at `initialize`. The optional CoinGecko fallback may only be
+// installed (or re-configured) by the admin, and it may only influence the
+// accepted price while it stays inside the configured deviation bound.
+//
+// The regressions below pin that bound, prove that an unauthorized address
+// cannot swap the price source, and prove that a rejected submission is
+// atomic: balances, the authorized oracle and the last accepted price are
+// preserved.
+
+/// Mock reflector price for every asset (100.00 with 14 decimals).
+const MOCK_REFLECTOR_PRICE: i128 = 100_00000000000000;
+
+/// Fallback price exactly `DEFAULT_DEVIATION_THRESHOLD_BPS` away from the mock
+/// reflector price (97.00 -> 300 bps, i.e. exactly on the bound).
+const FALLBACK_PRICE_AT_BOUND: i128 = 97_00000000000000;
+
+/// Fallback price one basis point beyond the bound (96.99 -> 301 bps).
+const FALLBACK_PRICE_BEYOND_BOUND: i128 = 96_99000000000000;
+
+/// Fallback price well beyond the bound (90.00 -> 1000 bps).
+const FALLBACK_PRICE_DEVIATING: i128 = 90_00000000000000;
+
+/// Unauthorized but valid looking price source (120.00).
+const ROGUE_FALLBACK_PRICE: i128 = 120_00000000000000;
+
+/// USD value of a raw token balance, priced with 14 decimals.
+fn value_of(balance: i128, price: i128) -> i128 {
+    (balance * price) / 10i128.pow(14)
+}
+
+/// Fallback source sitting exactly on the default deviation bound.
+mod coingecko_at_threshold {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockCoinGeckoAtThreshold;
+
+    #[contractimpl]
+    impl MockCoinGeckoAtThreshold {
+        pub fn price(_env: Env, _asset: Address) -> Option<i128> {
+            Some(97_00000000000000i128)
+        }
+    }
+}
+
+/// Fallback source one basis point beyond the default deviation bound.
+mod coingecko_just_above_threshold {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockCoinGeckoJustAbove;
+
+    #[contractimpl]
+    impl MockCoinGeckoJustAbove {
+        pub fn price(_env: Env, _asset: Address) -> Option<i128> {
+            Some(96_99000000000000i128)
+        }
+    }
+}
+
+/// Unauthorized price source that would inflate the valuation if accepted.
+mod coingecko_rogue {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+
+    #[contract]
+    pub struct MockCoinGeckoRogue;
+
+    #[contractimpl]
+    impl MockCoinGeckoRogue {
+        pub fn price(_env: Env, _asset: Address) -> Option<i128> {
+            Some(120_00000000000000i128)
+        }
+    }
+}
+
+#[test]
+fn test_oracle_deviation_bound_accepts_configured_oracle_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let fallback_id = env.register_contract(None, coingecko_at_threshold::MockCoinGeckoAtThreshold);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+    client.set_coingecko_address(&fallback_id);
+
+    let asset = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), ALLOCATION_DENOMINATOR);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    let valuation = client.get_portfolio_value_usd(&pid);
+    assert_eq!(
+        valuation.total_usd_value,
+        value_of(100_0000000, MOCK_REFLECTOR_PRICE),
+        "a fallback exactly on the deviation bound must not override the authorized oracle price"
+    );
+    assert_ne!(
+        valuation.total_usd_value,
+        value_of(100_0000000, FALLBACK_PRICE_AT_BOUND),
+        "the fallback price must not be used while it stays inside the bound"
+    );
+
+    // The accepted price still comes from the authorized oracle.
+    let asset_valuation = valuation.assets.get(0).unwrap();
+    assert_eq!(asset_valuation.oracle_price, MOCK_REFLECTOR_PRICE);
+    assert_eq!(asset_valuation.quantity, 100_0000000);
+
+    // The authorized oracle is preserved.
+    let view = client.get_config_view(&pid);
+    assert_eq!(view.reflector_address, reflector_id);
+}
+
+#[test]
+fn test_oracle_deviation_bound_beyond_uses_conservative_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let fallback_id = env.register_contract(None, coingecko_just_above_threshold::MockCoinGeckoJustAbove);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+    client.set_coingecko_address(&fallback_id);
+
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset1.clone(), 5000);
+    allocations.set(asset2.clone(), 5000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset1, &80_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &20_0000000, &String::from_str(&env, ""));
+
+    let valuation = client.get_portfolio_value_usd(&pid);
+    assert_eq!(
+        valuation.total_usd_value,
+        value_of(100_0000000, FALLBACK_PRICE_BEYOND_BOUND),
+        "a fallback beyond the bound must be replaced by the conservative price"
+    );
+    assert_ne!(
+        valuation.total_usd_value,
+        value_of(100_0000000, MOCK_REFLECTOR_PRICE),
+        "the authorized oracle price must not be used once the bound is exceeded"
+    );
+
+    // The deviation is reported, and the conservative price is the one kept.
+    let _ = client.execute_rebalance(&pid, &Map::new(&env));
+    assert!(
+        has_host_event(&env, "oracle_dev_warn"),
+        "exceeding the deviation bound must emit an oracle deviation warning"
+    );
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.total_value,
+        value_of(100_0000000, FALLBACK_PRICE_BEYOND_BOUND),
+        "the last accepted price must be the conservative one"
+    );
+
+    // The authorized oracle is preserved.
+    let view = client.get_config_view(&pid);
+    assert_eq!(view.reflector_address, reflector_id);
+}
+
+#[test]
+fn test_unauthorized_oracle_caller_cannot_change_configuration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let fallback_id = env.register_contract(None, coingecko_deviating::MockCoinGecko);
+    let rogue_id = env.register_contract(None, coingecko_rogue::MockCoinGeckoRogue);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+    client.set_coingecko_address(&fallback_id);
+
+    let config = OracleConfig {
+        deviation_threshold_bps: DEFAULT_DEVIATION_THRESHOLD_BPS,
+        fallback_behavior: 0,
+    };
+    client.set_oracle_config(&config);
+
+    let asset = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), ALLOCATION_DENOMINATOR);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    // Control: the admin is allowed to (re)install the authorized fallback.
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_coingecko_address",
+                args: (&fallback_id,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_coingecko_address(&fallback_id);
+
+    // An unauthorized address may not swap the price source.
+    let rogue_source = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_coingecko_address",
+                args: (&rogue_id,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_set_coingecko_address(&rogue_id);
+    assert!(
+        rogue_source.is_err(),
+        "an unauthorized address must not be able to swap the price source"
+    );
+
+    // Nor may it loosen the deviation bound.
+    let loose = OracleConfig {
+        deviation_threshold_bps: 10_000,
+        fallback_behavior: 0,
+    };
+    let rogue_config = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_oracle_config",
+                args: (&loose,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_set_oracle_config(&loose);
+    assert!(
+        rogue_config.is_err(),
+        "an unauthorized address must not be able to re-configure the oracle"
+    );
+
+    // The oracle configuration and the authorized oracle are preserved.
+    assert_eq!(client.get_oracle_config(), config);
+    assert_eq!(client.get_config_view(&pid).reflector_address, reflector_id);
+
+    // Balances are preserved.
+    let token = TokenClient::new(&env, &asset);
+    assert_eq!(token.balance(&contract_id), 100_0000000);
+    assert_eq!(token.balance(&user), 100_0000000);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.current_balances.get(asset.clone()).unwrap(),
+        100_0000000
+    );
+
+    // The last accepted price is preserved.
+    let valuation = client.get_portfolio_value_usd(&pid);
+    assert_eq!(
+        valuation.total_usd_value,
+        value_of(100_0000000, FALLBACK_PRICE_DEVIATING),
+        "a rejected submission must not change the last accepted price"
+    );
+    assert_ne!(
+        valuation.total_usd_value,
+        value_of(100_0000000, ROGUE_FALLBACK_PRICE),
+        "the unauthorized price source must never be used"
+    );
+}
+
+#[test]
+fn test_unauthorized_oracle_caller_preserves_state_across_state_change() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let fallback_id = env.register_contract(None, coingecko_deviating::MockCoinGecko);
+    let rogue_id = env.register_contract(None, coingecko_rogue::MockCoinGeckoRogue);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+    client.set_coingecko_address(&fallback_id);
+
+    let config = OracleConfig {
+        deviation_threshold_bps: DEFAULT_DEVIATION_THRESHOLD_BPS,
+        fallback_behavior: 0,
+    };
+    client.set_oracle_config(&config);
+
+    let asset = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), ALLOCATION_DENOMINATOR);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    client.deposit(&pid, &asset, &100_0000000, &String::from_str(&env, ""));
+
+    // An unauthorized submission before a state changing call is rejected.
+    let before = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_coingecko_address",
+                args: (&rogue_id,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_set_coingecko_address(&rogue_id);
+    assert!(
+        before.is_err(),
+        "an unauthorized address must not be able to swap the price source"
+    );
+
+    // A state changing call in between leaves the oracle configuration alone.
+    client.deposit(&pid, &asset, &50_0000000, &String::from_str(&env, ""));
+    assert_eq!(client.get_oracle_config(), config);
+    assert_eq!(client.get_config_view(&pid).reflector_address, reflector_id);
+
+    // The same unauthorized submission after the state change is rejected too.
+    let after = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_coingecko_address",
+                args: (&rogue_id,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_set_coingecko_address(&rogue_id);
+    assert!(
+        after.is_err(),
+        "an unauthorized address must not be able to swap the price source"
+    );
+
+    // Balances reflect the deposit and nothing else.
+    let token = TokenClient::new(&env, &asset);
+    assert_eq!(token.balance(&contract_id), 150_0000000);
+    assert_eq!(token.balance(&user), 50_0000000);
+    let portfolio = client.get_portfolio(&pid);
+    assert_eq!(
+        portfolio.current_balances.get(asset.clone()).unwrap(),
+        150_0000000
+    );
+
+    // The last accepted price is preserved.
+    let valuation = client.get_portfolio_value_usd(&pid);
+    assert_eq!(
+        valuation.total_usd_value,
+        value_of(150_0000000, FALLBACK_PRICE_DEVIATING),
+        "a rejected submission must not change the last accepted price"
+    );
+    assert_ne!(
+        valuation.total_usd_value,
+        value_of(150_0000000, ROGUE_FALLBACK_PRICE),
+        "the unauthorized price source must never be used"
+    );
+}
+
 #[test]
 fn test_create_portfolio_multiple_same_ledger() {
     let env = Env::default();
