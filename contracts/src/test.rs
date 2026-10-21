@@ -565,9 +565,11 @@ fn test_pause_resume_rebalance_full_lifecycle() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset, 10000);
+    let asset = create_token_and_mint(&env, &admin, &user, 200);
+    allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 
     // 1. Pause — rebalance must fail
     client.pause_portfolio(&pid, &PauseReason::UserPaused);
@@ -889,7 +891,8 @@ fn test_stale_data() {
                 let current = env.ledger().timestamp();
                 Some(PriceData {
                     price: 100_00000000000000,
-                    timestamp: current - 7200,
+                    // Exactly at the configured age boundary must be rejected.
+                    timestamp: current - crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS,
                 })
             }
             pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
@@ -915,7 +918,8 @@ fn test_stale_data() {
     });
 
     let actual_balances = Map::new(&env);
-    let _result = client.try_execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StaleOraclePrice)));
 }
 
 #[test]

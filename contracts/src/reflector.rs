@@ -36,7 +36,10 @@ impl PriceData {
 
     /// Check if price data is stale (older than specified seconds)
     pub fn is_stale(&self, current_timestamp: u64, max_age_seconds: u64) -> bool {
-        current_timestamp.saturating_sub(self.timestamp) > max_age_seconds
+        // A quote is valid for strictly less than the maximum age. Treating
+        // the exact boundary as fresh would allow an execution to consume a
+        // quote that has already reached its configured expiry.
+        current_timestamp.saturating_sub(self.timestamp) >= max_age_seconds
     }
 }
 
