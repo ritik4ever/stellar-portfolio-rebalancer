@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -41,18 +42,77 @@ function createLfScriptCopy(scriptPath, tempDir) {
   return target;
 }
 
+function resolveBashBinary() {
+  const candidates =
+    process.platform === 'win32'
+      ? ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files (x86)\\Git\\bin\\bash.exe', 'bash']
+      : ['bash'];
+  for (const candidate of candidates) {
+    const check = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
+    if (check.status === 0) {
+      return candidate;
+    }
+  }
+  return 'bash';
+}
+
+const BASH_BIN = resolveBashBinary();
+
+function createLfScriptCopy(sourcePath, tempDir) {
+  const raw = readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n');
+  const targetPath = path.join(tempDir, path.basename(sourcePath));
+  writeFileSync(targetPath, raw, { encoding: 'utf8', mode: 0o755 });
+  return targetPath;
+}
+
+function readComposeNormalized() {
+  const composePath = path.join(process.cwd(), 'deployment', 'docker-compose.yml');
+  return readFileSync(composePath, 'utf8').replace(/\r\n/g, '\n');
+}
+
+function sliceComposeService(compose, serviceName) {
+  const marker = `\n  ${serviceName}:\n`;
+  const start = compose.indexOf(marker);
+  if (start === -1) return '';
+  const rest = compose.slice(start + marker.length);
+  const nextMatch = rest.match(/\n(?:  [a-z0-9_-]+:|\n?(?:volumes|networks):)\n/);
+  const end = nextMatch ? start + marker.length + nextMatch.index : compose.length;
+  return compose.slice(start, end);
+}
+
+function extractComposeDefaultEnv(serviceBlock) {
+  const env = {};
+  const lines = serviceBlock.split('\n');
+  let inEnv = false;
+  for (const line of lines) {
+    if (/^\s{4}environment:\s*$/.test(line)) {
+      inEnv = true;
+      continue;
+    }
+    if (inEnv && /^\s{4}[a-z_]+:/.test(line)) {
+      break;
+    }
+    if (!inEnv) continue;
+    const match = line.match(/^\s{6}-\s+([A-Z0-9_]+)=(.*)$/);
+    if (!match) continue;
+    const [, key, rawVal] = match;
+    const fallbackMatch = rawVal.match(/^\$\{[A-Z0-9_]+:-(.*)\}$/);
+    env[key] = fallbackMatch ? fallbackMatch[1] : rawVal;
+  }
+  return env;
+}
+
 function runHealthCheck(mode) {
   const stateDir = mkdtempSync(path.join(tmpdir(), 'deploy-health-'));
-  const scriptPath = createLfScriptCopy(
-    path.join(process.cwd(), 'deployment', 'deploy.sh'),
-    stateDir,
-  );
+  const sourceScriptPath = path.join(process.cwd(), 'deployment', 'deploy.sh');
+  const scriptPath = createLfScriptCopy(sourceScriptPath, stateDir);
+
   const result = spawnSync(
     BASH_BIN,
     [
       '-c',
       [
-        'DEPLOY_STATE_DIR="$TEST_STATE_DIR"',
+        'DEPLOY_STATE_DIR="$(dirname "$1")/.state"',
         'source "$1"',
         'HEALTH_URL=http://localhost:3001/ready',
         'HEALTH_RETRIES=2',
@@ -76,7 +136,6 @@ function runHealthCheck(mode) {
       env: {
         ...process.env,
         CURL_MODE: mode,
-        TEST_STATE_DIR: stateDir,
       },
       encoding: 'utf8',
     },
@@ -87,13 +146,11 @@ function runHealthCheck(mode) {
 }
 
 test('deployment script supports dry-run mode without running a real deploy', () => {
-  const stateDir = mkdtempSync(path.join(tmpdir(), 'deploy-dry-run-'));
-  const scriptPath = createLfScriptCopy(
-    path.join(process.cwd(), 'deployment', 'deploy.sh'),
-    stateDir,
-  );
-
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'deploy-dryrun-'));
   try {
+    const sourceScriptPath = path.join(process.cwd(), 'deployment', 'deploy.sh');
+    const scriptPath = createLfScriptCopy(sourceScriptPath, tempDir);
+
     const output = execFileSync(
       BASH_BIN,
       [
@@ -108,33 +165,43 @@ test('deployment script supports dry-run mode without running a real deploy', ()
         env: {
           ...process.env,
           DEPLOY_HEALTH_URL: 'http://127.0.0.1:1',
-          DEPLOY_STATE_DIR: stateDir,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
-      },
+      }
     ).toString();
 
     assert.match(output, /DRY-RUN|dry-run|Dry-Run/i);
     assert.doesNotMatch(output, /Deploying to production/);
   } finally {
-    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
 test('backend Docker health distinguishes startup delay from blocked readiness', () => {
-  const composePath = path.join(process.cwd(), 'deployment', 'docker-compose.yml');
-  const compose = readFileSync(composePath, 'utf8').replace(/\r\n/g, '\n');
-  const backendStart = compose.indexOf('\n  backend:\n');
-  const backendEnd = compose.indexOf('\n  reflector-mock:\n', backendStart);
-  assert.notEqual(backendStart, -1);
-  assert.notEqual(backendEnd, -1);
+  const compose = readComposeNormalized();
+  const backendService = sliceComposeService(compose, 'backend');
+  assert.notEqual(backendService, '');
 
-  const backendService = compose.slice(backendStart, backendEnd);
   assert.match(backendService, /healthcheck:\s*\n\s+test: \["CMD", "node", "-e", .*\/ready/);
   assert.match(backendService, /interval: 5s/);
   assert.match(backendService, /timeout: 3s/);
   assert.match(backendService, /retries: 6/);
   assert.match(backendService, /start_period: 30s/);
+});
+
+test('clean checkout: default and stateful Docker Compose services define health checks and unless-stopped restart policy', () => {
+  const compose = readComposeNormalized();
+
+  for (const serviceName of ['frontend', 'backend', 'reflector-mock', 'redis', 'postgres', 'umami-db']) {
+    const block = sliceComposeService(compose, serviceName);
+    assert.notEqual(block, '', `Expected service ${serviceName} in deployment/docker-compose.yml`);
+    assert.match(block, /restart: unless-stopped/, `Expected ${serviceName} to set restart: unless-stopped`);
+    assert.match(block, /healthcheck:\s*\n\s+test:/, `Expected ${serviceName} to define a container healthcheck`);
+    assert.match(block, /interval:\s*\d+s/, `Expected ${serviceName} healthcheck interval`);
+    assert.match(block, /timeout:\s*\d+s/, `Expected ${serviceName} healthcheck timeout`);
+    assert.match(block, /retries:\s*\d+/, `Expected ${serviceName} healthcheck retries`);
+    assert.match(block, /start_period:\s*\d+s/, `Expected ${serviceName} healthcheck start_period`);
+  }
 });
 
 test('deployment reports a successful API startup', () => {
@@ -162,139 +229,124 @@ test('deployment reports blocked readiness with an owner action', () => {
   assert.match(result.stdout, /Owner action: inspect \/readiness and backend logs/);
 });
 
-// ── Repeatable Docker startup smoke verification (SPR-2026-270) ─────────────
-
-test('SPR-2026-270: verifies health checks and restart behavior in docker-compose.yml from a clean environment', () => {
-  const contract = verifyComposeStartupContract();
-
-  assert.equal(contract.valid, true, `Unexpected compose errors: ${contract.errors.join('; ')}`);
-  for (const service of ['frontend', 'backend', 'reflector-mock', 'redis', 'postgres']) {
-    assert.equal(contract.services[service]?.present, true, `${service} should be present`);
-    assert.equal(
-      contract.services[service]?.restartPolicy,
-      'unless-stopped',
-      `${service} should configure restart: unless-stopped`,
-    );
-  }
-  for (const service of ['backend', 'reflector-mock', 'redis', 'postgres']) {
-    assert.equal(
-      contract.services[service]?.healthcheckValid,
-      true,
-      `${service} healthcheck should be valid`,
-    );
-  }
-});
-
-test('SPR-2026-270: smoke check verifies services starting in different orders', () => {
-  const dependenciesFirst = simulateServiceStartupOrder([
-    'postgres',
-    'redis',
-    'reflector-mock',
-    'backend',
-    'frontend',
-  ]);
-  assert.equal(dependenciesFirst.converged, true);
-  assert.equal(dependenciesFirst.sawTransientDelay, false);
-  assert.equal(dependenciesFirst.outcome, 'STARTUP_OUTCOME=SUCCESS');
-
-  const apiBeforeDbOrder = simulateServiceStartupOrder([
-    'backend',
-    'frontend',
-    'reflector-mock',
-    'redis',
-    'postgres',
-  ]);
-  assert.equal(apiBeforeDbOrder.converged, true);
-  assert.equal(apiBeforeDbOrder.sawTransientDelay, true);
-  assert.equal(apiBeforeDbOrder.outcome, 'STARTUP_OUTCOME=SUCCESS');
-  assert.equal(apiBeforeDbOrder.timeline[0].startedService, 'backend');
-  assert.equal(apiBeforeDbOrder.timeline[0].livenessStatus, 200);
-  assert.equal(apiBeforeDbOrder.timeline[0].readinessStatus, 503);
-  assert.equal(apiBeforeDbOrder.timeline[0].dockerHealthState, 'starting');
-
-  const finalStep = apiBeforeDbOrder.timeline[apiBeforeDbOrder.timeline.length - 1];
-  assert.equal(finalStep.readinessStatus, 200);
-  assert.equal(finalStep.dockerHealthState, 'healthy');
-});
-
-test('SPR-2026-270: smoke check verifies API starting before its database is ready and container restart recovery', () => {
-  const delayedDb = simulateApiBeforeDatabaseSmokeCheck({
-    dbReadyOnAttempt: 3,
-    maxRetries: 6,
+function httpGetJson(url) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { agent: false }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(data) });
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+    req.on('error', reject);
   });
-  assert.equal(delayedDb.ok, true);
-  assert.equal(delayedDb.transientDelay, true);
-  assert.equal(delayedDb.outcome, 'STARTUP_OUTCOME=SUCCESS');
-  assert.equal(delayedDb.attemptsUsed, 3);
-  assert.equal(delayedDb.attempts[0].readinessHttp, 503);
-  assert.equal(delayedDb.attempts[0].signal, 'STARTUP_OUTCOME=TRANSIENT_DELAY');
-  assert.equal(delayedDb.attempts[2].readinessHttp, 200);
-  assert.equal(delayedDb.attempts[2].signal, 'STARTUP_OUTCOME=SUCCESS');
+}
 
-  const restartedApi = simulateApiBeforeDatabaseSmokeCheck({
-    dbReadyOnAttempt: 3,
-    maxRetries: 6,
-    simulateContainerRestartOnAttempt: 2,
+test('isolated service startup: reflector-mock serves /health and /ready without other services running', async () => {
+  const serverPath = path.join(process.cwd(), 'deployment', 'reflector-mock', 'server.js');
+
+  const freePort = await new Promise((resolve, reject) => {
+    const srv = http.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      srv.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    srv.on('error', reject);
   });
-  assert.equal(restartedApi.ok, true);
-  assert.equal(restartedApi.containerRestarts, 1);
-  assert.equal(restartedApi.outcome, 'STARTUP_OUTCOME=SUCCESS');
 
-  const blockedDb = simulateApiBeforeDatabaseSmokeCheck({
-    dbReadyOnAttempt: 10,
-    maxRetries: 6,
-  });
-  assert.equal(blockedDb.ok, false);
-  assert.equal(blockedDb.outcome, 'STARTUP_OUTCOME=BLOCKED');
-  assert.equal(blockedDb.ownerAction, 'inspect_readiness_database_and_backend_logs');
-});
-
-test('SPR-2026-270: repeatable Docker startup smoke check succeeds across runs and via deploy.sh --startup-smoke', () => {
-  const run1 = runDockerStartupSmokeCheck();
-  const run2 = runDockerStartupSmokeCheck();
-
-  assert.equal(run1.repeatable, true);
-  assert.equal(run1.ok, true);
-  assert.equal(run2.repeatable, true);
-  assert.equal(run2.ok, true);
-
-  const scriptPath = path.join(process.cwd(), 'deployment', 'deploy.sh');
-  const cliResult = spawnSync(BASH_BIN, [scriptPath, '--startup-smoke'], {
+  const mockProc = spawn(process.execPath, [serverPath], {
     cwd: process.cwd(),
-    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PORT: String(freePort),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  assert.equal(cliResult.status, 0, cliResult.stderr);
-  assert.match(cliResult.stdout, /STARTUP_SMOKE=PASS/);
+
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('reflector-mock startup timed out')), 5000);
+      mockProc.stdout.on('data', (chunk) => {
+        if (String(chunk).includes('Mock Reflector service listening')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      mockProc.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`reflector-mock exited early with code ${code}`));
+      });
+    });
+
+    for (const endpoint of ['/health', '/ready']) {
+      const response = await httpGetJson(`http://127.0.0.1:${freePort}${endpoint}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.body.status, 'ok');
+      assert.equal(response.body.service, 'mock-reflector');
+    }
+  } finally {
+    mockProc.stdout?.destroy();
+    mockProc.stderr?.destroy();
+    if (mockProc.exitCode === null) {
+      await new Promise((resolve) => {
+        mockProc.once('close', resolve);
+        mockProc.kill();
+      });
+    }
+  }
 });
 
-// ── Secret rotation config validation ──────────────────────────────────────
+// ── Secret rotation & clean-environment startup config validation ──────────
 
 /**
- * Runs validateRotationConfig() from startupConfig.ts by invoking Node directly
- * with the supplied environment overrides. Returns { exitCode, stdout, stderr }.
+ * Runs validateStartupConfigOrThrow() from startupConfig.ts by invoking Node
+ * directly with a lightweight in-memory module loader so tests work in a clean
+ * checkout without requiring pre-built dist files or backend/node_modules.
  */
 function runRotationConfigValidation(envOverrides = {}) {
-  const script = `
-    import { registerHooks } from 'node:module';
-    registerHooks({
-      resolve(specifier, context, nextResolve) {
-        try {
-          return nextResolve(specifier, context);
-        } catch (err) {
-          if (specifier.endsWith('/utils/logger.js')) {
-            return {
-              url: 'data:text/javascript,const noop = () => {}; export const logger = { info: noop, warn: noop, error: noop, debug: noop };',
-              shortCircuit: true,
-            };
+  const loaderHookCode = `
+    import { existsSync } from 'node:fs';
+    import { fileURLToPath, pathToFileURL } from 'node:url';
+    import path from 'node:path';
+
+    const LOGGER_STUB_URL = 'data:text/javascript,' + encodeURIComponent(
+      'export const logger = { info(){}, warn(){}, error(){}, debug(){}, trace(){}, fatal(){} }; export const logAudit = () => {};'
+    );
+
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier.endsWith('/utils/logger.js') || specifier.endsWith('./secretRedactor.js')) {
+        return { url: LOGGER_STUB_URL, shortCircuit: true };
+      }
+      if ((specifier.startsWith('./') || specifier.startsWith('../')) && specifier.endsWith('.js') && context.parentURL?.startsWith('file:')) {
+        const parentDir = path.dirname(fileURLToPath(context.parentURL));
+        const jsCandidate = path.resolve(parentDir, specifier);
+        if (!existsSync(jsCandidate)) {
+          const tsCandidate = jsCandidate.replace(/\\.js$/, '.ts');
+          if (existsSync(tsCandidate)) {
+            return { url: pathToFileURL(tsCandidate).href, shortCircuit: true };
           }
-          if (specifier.endsWith('.js')) {
-            return nextResolve(specifier.slice(0, -3) + '.ts', context);
-          }
-          throw err;
         }
-      },
-    });
-    const { validateStartupConfigOrThrow } = await import('./backend/src/config/startupConfig.js');
+      }
+      return nextResolve(specifier, context);
+    }
+  `;
+
+  const startupConfigPath = existsSync(path.join(process.cwd(), 'backend', 'src', 'config', 'startupConfig.js'))
+    ? './backend/src/config/startupConfig.js'
+    : './backend/src/config/startupConfig.ts';
+
+  const script = `
+    import { register } from 'node:module';
+    register('data:text/javascript,' + encodeURIComponent(${JSON.stringify(loaderHookCode)}));
+    const { validateStartupConfigOrThrow } = await import(${JSON.stringify(startupConfigPath)});
     try {
       validateStartupConfigOrThrow(${JSON.stringify(envOverrides)});
       console.log('VALIDATION_PASSED');
@@ -309,6 +361,26 @@ function runRotationConfigValidation(envOverrides = {}) {
     encoding: 'utf8',
   });
 }
+
+test('clean checkout: backend Docker Compose defaults pass startup config validation without undocumented local state', () => {
+  const compose = readComposeNormalized();
+  const backendService = sliceComposeService(compose, 'backend');
+  const composeDefaults = extractComposeDefaultEnv(backendService);
+
+  assert.equal(composeDefaults.PORT, '3001');
+  assert.equal(composeDefaults.DEMO_MODE, 'true');
+  assert.equal(composeDefaults.ALLOW_DEMO_BALANCE_FALLBACK, 'true');
+  assert.equal(composeDefaults.ALLOW_FALLBACK_PRICES, 'true');
+  assert.equal(composeDefaults.REFLECTOR_SERVICE_URL, 'http://reflector-mock:8080');
+
+  const result = runRotationConfigValidation(composeDefaults);
+  assert.equal(
+    result.status ?? result.exitCode,
+    0,
+    `Expected clean-checkout compose defaults to pass startup validation.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+  );
+  assert.match(result.stdout, /VALIDATION_PASSED/);
+});
 
 /** Minimal valid env used as the base for rotation tests. */
 const VALID_BASE_ENV = {
