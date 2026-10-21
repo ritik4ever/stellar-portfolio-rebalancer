@@ -1,6 +1,79 @@
+# Mirror of the resource limits defined in deployment/docker-compose.yml.
+#
+# docker-compose.resources.yml is intentionally NOT used to run anything:
+# it exists so reviewers and `scripts/validate-compose-resources.mjs` (CI and
+# the optional pre-commit hook) can diff the declared limits against the real
+# compose file and fail when the two drift apart. Edit limits in
+# deployment/docker-compose.yml only, then regenerate this block to match.
 version: "3.8"
+
 services:
+  frontend:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+
   backend:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "512M" }
+
+  redis:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+
+  postgres:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "1G" }
+
+  monitoring:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+
+  prometheus:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "1G" }
+
+  alertmanager:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "128M" }
+
+  grafana:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+
+  loki:
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: "512M" }
+
+  promtail:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "128M" }
+
+  blackbox-exporter:
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: "64M" }
+
+  jaeger:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "512M" }
+
+  umami:
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: "256M" }
+
+  umami-db:
     deploy:
       resources:
         limits: { cpus: "0.5", memory: "256M" }

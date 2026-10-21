@@ -7,14 +7,16 @@ export interface DriftGaugeAsset {
   threshold: number
 }
 
-interface DriftGaugeProps {
-  asset: DriftGaugeAsset
-  size?: number
-}
+
 
 interface DriftGaugeGridProps {
   assets: DriftGaugeAsset[]
   title?: string
+}
+
+interface DriftGaugeProps {
+  asset: DriftGaugeAsset
+  size?: number
 }
 
 type DriftStatus = 'ok' | 'warning' | 'critical'
@@ -43,7 +45,7 @@ const STATUS_COLORS: Record<DriftStatus, { stroke: string; text: string; bg: str
     stroke: '#ef4444',
     text: 'text-red-600 dark:text-red-400',
     bg: '#fee2e2',
-    label: 'Exceeds threshold',
+    label: 'Above threshold',
   },
 }
 

@@ -126,3 +126,34 @@ body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
+
+/* ─── Price Ticker Banner ──────────────────────────────────────────────────── */
+
+@keyframes ticker-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
+/*
+ * The track contains items duplicated once (2× the content width),
+ * so animating by -50% produces a seamless infinite loop.
+ * Duration scales with item count; 40s is a comfortable default.
+ */
+.price-ticker-track {
+    /* Enough width to hold 2× the content — the flex layout expands naturally */
+    width: max-content;
+    animation: ticker-scroll 40s linear infinite;
+    will-change: transform;
+}
+
+.price-ticker-paused {
+    animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .price-ticker-track {
+        animation: none !important;
+        /* In reduced-motion mode, overflow-x scroll lets users pan manually */
+        overflow-x: auto;
+    }
+}

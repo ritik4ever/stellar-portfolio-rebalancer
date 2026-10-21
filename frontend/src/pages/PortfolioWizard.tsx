@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Plus, 
-  Trash2, 
-  ArrowLeft, 
-  ArrowRight, 
-  Check, 
+  Plus,
+  Trash2,
+  ArrowLeft,
+  Check,
   CheckCircle2, 
   Wallet, 
   AlertTriangle, 
@@ -84,10 +83,10 @@ const TEMPLATES: Template[] = [
 const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey }) => {
   const createPortfolioMutation = useCreatePortfolioMutation();
 
-  // Wizard state (steps 1 to 5)
+ 
   const [step, setStep] = useState<number>(1);
 
-  // Form states preserved across steps
+ 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('custom');
   const [strategy, setStrategy] = useState<WizardStrategy>('threshold');
   const [allocations, setAllocations] = useState<Allocation[]>([
@@ -100,18 +99,18 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
   const [dcaIntervalDays, setDcaIntervalDays] = useState<number>(7);
   const [dcaStartDate, setDcaStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
-  // UX states
+  
   const [error, setError] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState<boolean>(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [shareHash, setShareHash] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState<boolean>(false);
 
-  // Draft resume state
+ 
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ReturnType<typeof loadWizardDraft> | null>(null);
 
-  // Check for existing draft on mount
+  
   useEffect(() => {
     const draft = loadWizardDraft();
     if (draft && draft.step >= 1 && draft.step <= (draft.strategy === 'dca' ? 5 : 4)) {
@@ -120,7 +119,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   }, []);
 
-  // Save draft on state changes (persist wizard progress)
+  
   useEffect(() => {
     if (step >= 1 && step <= (strategy === 'dca' ? 5 : 4) && !showResumePrompt) {
       saveWizardDraft({
@@ -161,7 +160,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setPendingDraft(null);
   }, []);
 
-  // Live sum validation calculations
+ 
   const totalPercentage = allocations.reduce((sum, item) => sum + (item.percentage || 0), 0);
   const remaining = remainingAllocation(allocations);
   const isAllocationValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.every(item => item.percentage > 0);
@@ -169,7 +168,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     && Number.isInteger(dcaIntervalDays) && dcaIntervalDays >= 1 && dcaIntervalDays <= 365
     && Boolean(dcaStartDate) && !Number.isNaN(new Date(`${dcaStartDate}T00:00:00`).getTime());
 
-  // Handle template selection
+  
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (templateId === 'custom') {
@@ -182,15 +181,15 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Add allocation row
+ 
   const handleAddAsset = () => {
-    // Pick first symbol not already in allocations (e.g. XLM, USDC, BTC, ETH)
+   
     const existing = allocations.map(a => a.asset);
     const available = ['XLM', 'USDC', 'BTC', 'ETH'].find(symbol => !existing.includes(symbol)) || 'USDC';
     setAllocations([...allocations, { asset: available, percentage: 0 }]);
   };
 
-  // Update allocation row
+ 
   const handleUpdateAllocation = (index: number, field: 'asset' | 'percentage', value: any) => {
     const next = [...allocations];
     if (field === 'percentage') {
@@ -200,10 +199,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
       next[index].asset = value;
     }
     setAllocations(next);
-    setSelectedTemplateId('custom'); // Any manual adjustment makes it custom
+    setSelectedTemplateId('custom'); 
   };
 
-  // Remove allocation row
+ 
   const handleRemoveAsset = (index: number) => {
     if (allocations.length > 1) {
       setAllocations(allocations.filter((_, i) => i !== index));
@@ -211,7 +210,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Step validation
+ 
   const canGoForward = () => {
     if (step === 1) return true;
     if (step === 2) return isAllocationValid;
@@ -235,7 +234,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Review & Sign
+ 
   const handleSignAndSubmit = async () => {
     if (!publicKey) {
       setError('Please connect your Freighter wallet to sign the transaction.');
@@ -246,8 +245,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setError(null);
 
     try {
-      // Simulate/Trigger signing via walletManager if needed
-      // Create a mocked transaction or message XDR to sign
+      
       const mockXdr = 'AAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAA';
       try {
         await walletManager.signTransaction(mockXdr);
@@ -255,13 +253,13 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         console.warn('Freighter sign bypassed or failed, proceeding with fallback logic', signErr);
       }
 
-      // Convert allocations array to allocations map expected by API
+      
       const allocationsMap: Record<string, number> = {};
       allocations.forEach(item => {
         allocationsMap[item.asset] = item.percentage;
       });
 
-      // API Submit Portfolio
+     
       const portfolio = await createPortfolioMutation.mutateAsync({
         userAddress: publicKey,
         allocations: allocationsMap,
@@ -277,7 +275,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
       if (portfolio && portfolio.id) {
         setCreatedId(portfolio.id);
 
-        // Generate public share link
+        
         try {
           const shareRes = await api.post<{ hash: string; active: boolean }>(
             ENDPOINTS.PORTFOLIO_SHARE(portfolio.id)

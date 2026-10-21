@@ -1,35 +1,39 @@
 # Stellar Portfolio Rebalancer - Public Roadmap
 
-*Last Updated: June 1, 2026*
+*Last verified: 2026-09-29 against commit [`717ea95`](https://github.com/ritik4ever/stellar-portfolio-rebalancer/commit/717ea95).*
 
-## Now (Current Sprint)
+## ✅ Shipped
 
-These items are actively being worked on:
+These features were previously listed as planned or in progress and are now implemented:
 
-| Priority | Feature | Description |
-|----------|---------|-------------|
-| High | Core rebalancing algorithm | Optimize gas usage and execution speed |
-| High | Reflector oracle integration | Complete real-time price feed integration |
-| Medium | Wallet connection stability | Improve Freighter/Rabet/xBull compatibility |
-| Ongoing | Bug fixes | Issues identified in testing |
+| Feature | Description | Where it lives |
+|---------|-------------|----------------|
+| Core rebalancing algorithm | Threshold-triggered rebalancing with drift and cooldown checks | `contracts/src/portfolio.rs`, `backend/src/services/rebalancing.ts` |
+| Reflector oracle integration | Real-time price feeds with caching and API fallbacks | `backend/src/services/reflector.ts`, `contracts/src/oracle.rs` |
+| Wallet connection support | Freighter / Rabet / xBull connection and signing | `frontend/src/utils/walletManager.ts`, `frontend/src/utils/walletAdapters.ts` |
+| Portfolio dashboard | Visual allocation and performance charts | `frontend/src/pages/Analytics.tsx`, `frontend/src/components/Dashboard.tsx` |
+| Historical reports | Rebalance history, allocation history, and export | `frontend/src/components/RebalanceHistory.tsx`, `backend/src/services/portfolioExportService.ts` |
+| Notification system | Email and webhook alerts with per-user preferences | `backend/src/services/notificationService.ts`, `docs/NOTIFICATIONS.md` |
+| Multi-asset support | Up to 10 assets per portfolio, backed by an asset registry | `backend/src/api/validation.ts`, `backend/src/services/assetRegistryService.ts` |
+| Stellar DEX integration | Slippage-aware trade execution via `@stellar/stellar-sdk` | `backend/src/services/dex.ts` |
+| Rebalancing strategies | Threshold and DCA strategy support | `backend/src/services/rebalancingStrategyService.ts`, `contracts/src/strategies/` |
 
-##  Next (1-2 months)
+## 🔜 Next (1-2 months)
 
 | Feature | Description | Status |
 |---------|-------------|--------|
-| Portfolio Dashboard | Visual asset allocation and performance charts | Planning |
-| Historical Reports | Track past rebalancing events | Design |
-| Notification System | Email/Discord alerts for rebalancing | Research |
-| Multi-asset Support | Expand beyond current asset types | Planning |
+| Soroban contract v2 | Multi-hop swaps and limit orders | Not yet implemented |
 
-##  Later (3-6+ months)
+## 📅 Later (3-6+ months)
 
 | Feature | Description |
 |---------|-------------|
 | Mobile Application | iOS/Android app for portfolio monitoring |
-| Custom Strategies | User-defined rebalancing rules |
-| DeFi Integration | Connect with Stellar DEX and lending protocols |
-| Tax Optimization | Minimize tax impact during rebalancing |
+| Team portfolios | Multi-user collaboration with role-based access |
+| Governance | DAO voting for protocol parameters |
+| Cross-chain | Bridge support for non-Stellar assets |
+| Lending integration | Connect with Stellar lending protocols |
+| Tax optimization | Minimize tax impact during rebalancing |
 
 ##  How to Contribute
 
@@ -39,4 +43,4 @@ These items are actively being worked on:
 
 ## Roadmap Updates
 
-This document is reviewed monthly and after major releases.
+This document is re-verified against the codebase at each release and reviewed monthly. When a change completes or invalidates an item above, update it and refresh the **Last verified** line at the top.

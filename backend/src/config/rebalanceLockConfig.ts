@@ -15,11 +15,23 @@
 export interface RebalanceLockConfig {
     /** Time-to-live for rebalancing locks in milliseconds. */
     ttlMs: number
+    /**
+     * Wait-time threshold in milliseconds for the per-portfolio advisory
+     * lock acquisition path (`acquireWorkerLock` used by
+     * `rebalanceWorker.ts`). When a single acquisition takes longer than
+     * this, a warning is logged indicating a possibly stuck lock / saturated
+     * DB pool. See #1399.
+     */
+    waitWarnMs: number
 }
 
 export const DEFAULT_REBALANCE_LOCK_TTL_MS = 5 * 60 * 1000
 export const MIN_REBALANCE_LOCK_TTL_MS = 1_000
 export const MAX_REBALANCE_LOCK_TTL_MS = 30 * 60 * 1000
+
+export const DEFAULT_REBALANCE_LOCK_WAIT_WARN_MS = 1_000
+export const MIN_REBALANCE_LOCK_WAIT_WARN_MS = 0
+export const MAX_REBALANCE_LOCK_WAIT_WARN_MS = 60_000
 
 function parsePositiveInt(
     value: string | undefined,
@@ -56,8 +68,17 @@ export function parseRebalanceLockConfig(
         MAX_REBALANCE_LOCK_TTL_MS,
     )
 
+    const waitWarnMs = parsePositiveInt(
+        env.REBALANCE_LOCK_WAIT_WARN_MS,
+        DEFAULT_REBALANCE_LOCK_WAIT_WARN_MS,
+        'REBALANCE_LOCK_WAIT_WARN_MS',
+        errors,
+        MIN_REBALANCE_LOCK_WAIT_WARN_MS,
+        MAX_REBALANCE_LOCK_WAIT_WARN_MS,
+    )
+
     return {
-        config: { ttlMs },
+        config: { ttlMs, waitWarnMs },
         errors,
     }
 }

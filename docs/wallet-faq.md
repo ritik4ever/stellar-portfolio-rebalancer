@@ -63,3 +63,7 @@ Open a [GitHub issue](https://github.com/ritik4ever/stellar-portfolio-rebalancer
 - Your Freighter version
 - The exact error message
 - Steps to reproduce
+
+## What happens if I never reconnect?
+
+If you set up a portfolio and never reconnect your wallet, no automatic rebalancing occurs. Your funds remain untouched in contract storage. For a full explanation of what happens and how to delegate signing to another address, see [Disconnected Wallet Behavior](DISCONNECTED_WALLET_BEHAVIOR.md).

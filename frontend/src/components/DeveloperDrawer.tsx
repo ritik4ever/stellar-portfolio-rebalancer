@@ -20,6 +20,8 @@ interface CapabilityDiff {
     type: CapabilityDiffType
 }
 
+
+
 function computeCapabilityDiff(
     current: ContractCapabilityReport,
     previous: ContractCapabilityReport | null

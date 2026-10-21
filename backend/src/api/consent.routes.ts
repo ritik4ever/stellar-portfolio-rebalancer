@@ -29,7 +29,7 @@ function resolveConsentUserId(req: Request, candidate?: string): string | undefi
     return req.user?.address ?? candidate
 }
 
-/** Get consent status for a user. Required before using the app. */
+
 consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (req: Request, res: Response) => {
     try {
         const userId = (req.query.userId ?? req.query.user_id) as string
@@ -50,7 +50,7 @@ consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (r
     }
 })
 
-/** GDPR: Grant active consent and append an immutable audit event. */
+
 consentRouter.post('/consent/grant', requireJwtWhenEnabled, idempotencyMiddleware, validateRequest(consentGrantSchema), (req: Request, res: Response) => {
     try {
         const userId = resolveConsentUserId(req, req.body.userId)

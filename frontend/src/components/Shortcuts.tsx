@@ -8,6 +8,8 @@ import {
   type ShortcutAction,
 } from '../hooks/useKeybindings'
 
+
+
 interface ShortcutsProps {
   onNewPortfolio?: () => void
   onExecuteRebalance?: () => void

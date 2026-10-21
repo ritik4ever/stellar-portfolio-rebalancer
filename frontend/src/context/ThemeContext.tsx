@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
@@ -38,10 +38,14 @@ function getColorSchemeMedia(): MediaQueryList | null {
     }
 }
 
-function resolveIsDark(preference: ThemePreference): boolean {
+function resolveIsDarkFromMedia(preference: ThemePreference, media: MediaQueryList | null): boolean {
     if (preference === 'dark') return true
     if (preference === 'light') return false
-    return getColorSchemeMedia()?.matches ?? false
+    return media?.matches ?? false
+}
+
+function resolveIsDark(preference: ThemePreference): boolean {
+    return resolveIsDarkFromMedia(preference, getColorSchemeMedia())
 }
 
 export function applyThemeClass(isDark: boolean): void {
@@ -69,8 +73,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const [preference, setPreference] = useState<ThemePreference>(() => readStoredPreference())
     const [isDark, setIsDark] = useState(() => resolveIsDark(readStoredPreference()))
 
+    // Keep a stable ref to the media query so the listener and the
+    // immediate read always use the same MediaQueryList instance.
+    const mediaRef = useRef<MediaQueryList | null>(null)
+
     const syncResolvedTheme = useCallback((nextPreference: ThemePreference) => {
-        setIsDark(resolveIsDark(nextPreference))
+        setIsDark(resolveIsDarkFromMedia(nextPreference, mediaRef.current))
     }, [])
 
     useEffect(() => {
@@ -88,21 +96,28 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, [preference, syncResolvedTheme])
 
     useEffect(() => {
+        // Always update the media ref so resolveIsDarkFromMedia is never stale.
+        mediaRef.current = getColorSchemeMedia()
+
         if (preference !== 'system') return undefined
 
-        const media = getColorSchemeMedia()
+        const media = mediaRef.current
         if (!media) return undefined
 
-        const onChange = () => syncResolvedTheme('system')
+        // Immediately sync in case OS theme changed while preference was non-system.
+        setIsDark(media.matches)
+
+        const onChange = () => setIsDark(media.matches)
+
         if (typeof media.addEventListener === 'function') {
             media.addEventListener('change', onChange)
             return () => media.removeEventListener('change', onChange)
         }
 
-        const legacyListener = () => onChange()
-        media.addListener(legacyListener)
-        return () => media.removeListener(legacyListener)
-    }, [preference, syncResolvedTheme])
+        // Legacy Safari fallback
+        media.addListener(onChange)
+        return () => media.removeListener(onChange)
+    }, [preference])
 
     useEffect(() => {
         const onStorage = (event: StorageEvent) => {

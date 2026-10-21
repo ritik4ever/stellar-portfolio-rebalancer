@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import { pricesQuerySchema } from './validation.js'
 import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import {
@@ -17,6 +18,7 @@ import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
 import { getQueueByName } from '../queue/queues.js'
+import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
@@ -38,7 +40,7 @@ const reflectorService = new ReflectorService()
 const featureFlags = getFeatureFlags()
 const publicFeatureFlags = getPublicFeatureFlags()
 
-/** Comprehensive health check for API clients and monitoring tools (mounted at /api/health, /api/v1/health). */
+
 opsRouter.get('/health', async (_req: Request, res: Response) => {
     const checkedAt = new Date().toISOString()
     const deps: Record<string, { status: 'ok' | 'degraded' | 'down'; latency_ms: number; last_checked: string }> = {}
@@ -297,8 +299,10 @@ opsRouter.get('/workers/health', async (_req: Request, res: Response) => {
                 healthy: summary.healthy,
                 unhealthy: summary.unhealthy,
                 idle: summary.idle,
-                lagging: summary.lagging
+                lagging: summary.lagging,
+                crashLooping: summary.crashLooping
             },
+            supervisor: summary.supervisor,
             workers: summary.workers
         })
     } catch (error) {
@@ -824,6 +828,14 @@ opsRouter.post('/rebalance-lock/force-release', requireAdmin, async (req: Reques
 
 opsRouter.get('/prices', async (req: Request, res: Response) => {
     try {
+        const parsed = pricesQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+            const message = parsed.error.issues
+                .map(issue => `${issue.path.join('.') || 'query'}: ${issue.message}`)
+                .join('; ')
+            return fail(res, 400, 'VALIDATION_ERROR', message)
+        }
+
         logger.info('[DEBUG] Fetching prices for frontend...')
         const payload = await reflectorService.getCurrentPricesWithMeta()
 

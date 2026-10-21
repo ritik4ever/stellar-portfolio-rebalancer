@@ -6,7 +6,7 @@ import { ReflectorService } from './reflector.js'
 import { logger } from '../utils/logger.js'
 
 const riskManagementService = new RiskManagementService({
-    // Configurable CVaR/VaR auto-pause thresholds (falls back to class defaults).
+    
     var95: parseOptionalNumber(process.env.RISK_AUTOPAUSE_VAR95),
     cvar95: parseOptionalNumber(process.env.RISK_AUTOPAUSE_CVAR95),
     pauseDurationMs: parseOptionalNumber(process.env.RISK_AUTOPAUSE_DURATION_MS),

@@ -38,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.19.0'
+          node-version-file: '.nvmrc'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -51,7 +51,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install Soroban CLI
-        run: cargo install --locked soroban-cli
+        run: cargo install --locked soroban-cli --version 25.2.0
 
       - name: Verify install.sh
         run: bash ./install.sh

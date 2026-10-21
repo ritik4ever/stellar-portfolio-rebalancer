@@ -2,6 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReflectorService } from '../services/reflector.js'
 import { assetRegistryService } from '../services/assetRegistryService.js'
 
+vi.mock('../observability/metrics.js', () => ({
+    recordCacheHitRatio: vi.fn(),
+    recordCacheAge: vi.fn(),
+    recordCacheSize: vi.fn(),
+    recordCacheEntries: vi.fn(),
+    recordCacheOperation: vi.fn(),
+    recordCacheTtl: vi.fn(),
+    recordCacheExpiration: vi.fn(),
+    recordPriceFeedResolution: vi.fn(),
+    recordReflectorFallbackUsage: vi.fn(),
+    recordReflectorStalePrice: vi.fn(),
+}))
+
 type MockFetchResponse = {
     ok: boolean
     status: number
@@ -68,6 +81,41 @@ describe('ReflectorService staleness and fallback', () => {
         expect(fetchMock).toHaveBeenCalledTimes(2)
         expect(fetchMock.mock.calls[0]?.[0]).toContain('reflector.example')
         expect(fetchMock.mock.calls[1]?.[0]).toContain('api.coingecko.com')
+        expect(prices.XLM.source).toBe('coingecko_free')
+        expect(prices.XLM.price).toBe(0.361)
+    })
+
+    it('reuses the short CoinGecko fallback cache after the general price cache expires', async () => {
+        const nowSec = Math.floor(Date.now() / 1000)
+        vi.stubEnv('REFLECTOR_API_URL', 'https://reflector.example')
+        vi.stubEnv('PRICE_DATA_MAX_AGE', '600')
+        vi.stubEnv('ALLOW_FALLBACK_PRICES', 'false')
+        vi.stubEnv('ORACLE_CACHE_TTL_SECONDS', '0')
+        vi.stubEnv('COINGECKO_FALLBACK_CACHE_TTL_MS', '600000')
+
+        let coinGeckoCalls = 0
+        const fetchMock = vi.fn(async (url: string) => {
+            if (String(url).includes('api.coingecko.com')) {
+                coinGeckoCalls += 1
+                return response({
+                    stellar: { usd: 0.361, usd_24h_change: 0.5, last_updated_at: nowSec - 3 }
+                })
+            }
+            return response({
+                prices: {
+                    XLM: { price: '3540000', decimals: 7, timestamp: nowSec - 601 }
+                }
+            })
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const service = new ReflectorService()
+        await service.getCurrentPrices()
+        vi.advanceTimersByTime(360_000)
+        const prices = await service.getCurrentPrices()
+        service.stopCacheMetricsReporting()
+
+        expect(coinGeckoCalls).toBe(1)
         expect(prices.XLM.source).toBe('coingecko_free')
         expect(prices.XLM.price).toBe(0.361)
     })
@@ -173,20 +221,6 @@ describe('ReflectorService cache metrics and tuning', () => {
             XLM: 'stellar',
             BTC: 'bitcoin'
         })
-
-        // Mock metrics recording functions
-        vi.mock('../observability/metrics.js', () => ({
-            recordCacheHitRatio: vi.fn(),
-            recordCacheAge: vi.fn(),
-            recordCacheSize: vi.fn(),
-            recordCacheEntries: vi.fn(),
-            recordCacheOperation: vi.fn(),
-            recordCacheTtl: vi.fn(),
-            recordCacheExpiration: vi.fn(),
-            recordPriceFeedResolution: vi.fn(),
-            recordReflectorFallbackUsage: vi.fn(),
-            recordReflectorStalePrice: vi.fn(),
-        }))
     })
 
     afterEach(() => {
@@ -201,39 +235,39 @@ describe('ReflectorService cache metrics and tuning', () => {
 
         vi.stubEnv('REFLECTOR_API_URL', 'https://reflector.example')
         vi.stubEnv('PRICE_DATA_MAX_AGE', '600')
+        vi.stubEnv('ORACLE_CACHE_TTL_SECONDS', '0')
+        vi.spyOn(assetRegistryService, 'getSymbols').mockReturnValue(['XLM'])
+        vi.spyOn(assetRegistryService, 'getCoingeckoIdMap').mockReturnValue({ XLM: 'stellar' })
 
-        const fetchMock = vi.fn().mockResolvedValueOnce(response({
-            prices: {
-                XLM: {
-                    price: '3540000',
-                    decimals: 7,
-                    timestamp: nowSec - 10
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(response({
+                prices: {
+                    XLM: { price: '3540000', decimals: 7, timestamp: nowSec - 601 }
                 }
-            }
-        }))
+            }))
+            .mockResolvedValueOnce(response({
+                stellar: { usd: 0.354, usd_24h_change: 0.1, last_updated_at: nowSec }
+            }))
 
         vi.stubGlobal('fetch', fetchMock)
 
         const service = new ReflectorService()
 
-        // First call - miss and fetch
         let prices = await service.getCurrentPrices()
         expect(prices.XLM.price).toBeCloseTo(0.354, 8)
 
-        // Advance time by 5 seconds
         vi.advanceTimersByTime(5000)
 
-        // Second call - hit from cache
         prices = await service.getCurrentPrices()
         expect(prices.XLM.servedFromCache).toBe(true)
         expect(prices.XLM.cacheAgeMs).toBe(5000)
 
-        // Verify cache analytics
         const analytics = service.getCacheAnalytics()
         expect(analytics.totalEntries).toBe(1)
         expect(analytics.assets[0].cached).toBe(true)
         expect(analytics.assets[0].ageMs).toBe(5000)
         expect(analytics.assets[0].hitCount).toBeGreaterThanOrEqual(1)
+        service.stopCacheMetricsReporting()
     })
 
     it('reports cache analytics with hit ratios', async () => {
@@ -325,20 +359,17 @@ describe('ReflectorService cache metrics and tuning', () => {
         vi.stubEnv('REFLECTOR_API_URL', 'https://reflector.example')
         vi.stubEnv('PRICE_DATA_MAX_AGE', '600')
 
-        const fetchMock = vi.fn().mockResolvedValueOnce(response({
-            prices: {
-                XLM: {
-                    price: '3540000',
-                    decimals: 7,
-                    timestamp: nowSec - 10
-                },
-                BTC: {
-                    price: '10500000000000',
-                    decimals: 8,
-                    timestamp: nowSec - 10
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(response({
+                prices: {
+                    XLM: { price: '3540000', decimals: 7, timestamp: nowSec - 601 },
+                    BTC: { price: '10500000000000', decimals: 8, timestamp: nowSec - 601 }
                 }
-            }
-        }))
+            }))
+            .mockResolvedValueOnce(response({
+                stellar: { usd: 0.354, usd_24h_change: 0.1, last_updated_at: nowSec },
+                bitcoin: { usd: 105000, usd_24h_change: 0.2, last_updated_at: nowSec }
+            }))
 
         vi.stubGlobal('fetch', fetchMock)
 
@@ -380,16 +411,19 @@ describe('ReflectorService cache metrics and tuning', () => {
 
         vi.stubEnv('REFLECTOR_API_URL', 'https://reflector.example')
         vi.stubEnv('PRICE_DATA_MAX_AGE', '600')
+        vi.stubEnv('ORACLE_CACHE_TTL_SECONDS', '0')
+        vi.spyOn(assetRegistryService, 'getSymbols').mockReturnValue(['XLM'])
+        vi.spyOn(assetRegistryService, 'getCoingeckoIdMap').mockReturnValue({ XLM: 'stellar' })
 
-        const fetchMock = vi.fn().mockResolvedValueOnce(response({
-            prices: {
-                XLM: {
-                    price: '3540000',
-                    decimals: 7,
-                    timestamp: nowSec - 10
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(response({
+                prices: {
+                    XLM: { price: '3540000', decimals: 7, timestamp: nowSec - 601 }
                 }
-            }
-        }))
+            }))
+            .mockResolvedValueOnce(response({
+                stellar: { usd: 0.354, usd_24h_change: 0.1, last_updated_at: nowSec }
+            }))
 
         vi.stubGlobal('fetch', fetchMock)
 
@@ -403,5 +437,6 @@ describe('ReflectorService cache metrics and tuning', () => {
 
         status = service.getCacheStatus()
         expect(Object.keys(status).length).toBe(0)
+        service.stopCacheMetricsReporting()
     })
 })

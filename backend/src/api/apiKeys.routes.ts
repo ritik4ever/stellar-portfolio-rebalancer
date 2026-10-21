@@ -1,10 +1,4 @@
-/**
- * apiKeys.routes.ts
- * Routes: POST /api-keys, GET /api-keys, DELETE /api-keys/:id, POST /api-keys/:id/rotate
- *
- * Authentication: JWT (requireJwt) — users manage their own API keys via the web UI.
- * The generated keys are then used by programmatic clients via X-API-Key header.
- */
+
 
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'

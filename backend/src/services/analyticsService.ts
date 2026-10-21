@@ -29,12 +29,7 @@ class AnalyticsService {
     private readonly MIN_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000
 
    
-    // the BullMQ analytics-snapshot worker (src/queue/workers/analyticsSnapshotWorker.ts).
-
-    /**
-     * Capture snapshots for every portfolio.
-     * Called by the BullMQ analytics-snapshot worker.
-     */
+    
     async captureAllPortfolios() {
         try {
             const portfolios = portfolioStorage.getAllPortfolios()

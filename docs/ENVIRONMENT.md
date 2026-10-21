@@ -1,6 +1,9 @@
 # Environment Variable Reference
 
+Last verified: 2026-09-29 against commit `717ea953f3a338c35bfdbc73e06eddb95f216273` on `main`.
+
 Canonical reference for `backend/.env.example` and `frontend/.env.example`.
+Defaults below are the values the process uses when a variable is unset. A value written in an example file overrides that fallback after you copy the file.
 Variables marked **⚠️ SECRET** must never be committed, logged, or exposed in client bundles.
 
 ## Contents
@@ -37,6 +40,62 @@ Variables marked **⚠️ SECRET** must never be committed, logged, or exposed i
 2. `cp frontend/.env.example frontend/.env`
 3. Set every **Yes** or **Conditional** entry in `backend/.env`.
 4. Store all ⚠️ SECRET values in a secrets manager (Vault, AWS Secrets Manager, 1Password, etc.) — never commit real values.
+
+### Worked example: local API on port 3001
+
+This is the common local case: copy the example files, start the backend, and confirm the process is listening. The values below are the ones already written in `backend/.env.example` and `frontend/.env.example`. They satisfy startup validation. They are placeholders, not a funded account, so Horizon and Soroban calls will fail until you replace the contract address and signer.
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+The copied backend file includes:
+
+```bash
+NODE_ENV=development
+PORT=3001
+STELLAR_NETWORK=testnet
+STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
+STELLAR_CONTRACT_ADDRESS=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+STELLAR_REBALANCE_SECRET=SBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+ENABLE_AUTO_REBALANCER=false
+```
+
+The copied frontend file includes:
+
+```bash
+VITE_API_URL=http://localhost:3001
+```
+
+Start the API from `backend/` (`npm run dev`). With Redis not running, startup still binds the HTTP port. The log line for a successful bind is JSON and contains:
+
+```text
+"msg":"[SERVER] Listening on port 3001"
+```
+
+The same log includes `"autoRebalancer":"disabled (non-production)"` because `NODE_ENV` is `development` and `ENABLE_AUTO_REBALANCER` is not `true`. It also includes this warning:
+
+```text
+[STARTUP] Redis unreachable — BullMQ workers, scheduled jobs, and distributed rate limiting are inactive. In-memory rate limiting is active as a single-instance fallback. Set REDIS_URL (default: redis://localhost:6379) and restart to enable the full queue subsystem.
+```
+
+Check the process:
+
+```bash
+curl -i http://localhost:3001/health
+```
+
+Expected response:
+
+```text
+HTTP/1.1 200 OK
+Content-Type: text/plain; charset=utf-8
+
+ok
+```
+
+`GET /health` does not call Horizon, Soroban, or Redis. A body other than `ok`, or any status other than 200, means the server on port 3001 is not this API.
 
 ---
 
@@ -118,15 +177,15 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `NODE_ENV` | No | `development` | Runtime mode controlling startup validation, logging behavior, and feature gating. | `production` | |
 | `PORT` | No | `3001` | HTTP API listen port. | `3001` | |
 | `STELLAR_NETWORK` | No | `testnet` | Selects `testnet` or `mainnet` defaults for Horizon and Soroban RPC. | `mainnet` | |
-| `CORS_ORIGINS` | No | `http://localhost:3000,...` (see `.env.example`) | Comma-separated browser origins allowed to call the API. | `https://app.example.com` | Restrict to your exact production domain in production. |
-| `LOG_LEVEL` | No | `info` | Application log verbosity. | `warn` | |
-| `LOG_PRETTY` | No | `false` | Pretty-prints logs when `true`; emits JSON lines when `false`. | `true` | |
-| `LOG_DEPLOYMENT_ENV` | No | `local` | Deployment-tier label included in log records and telemetry. | `production` | |
-| `ENABLE_API_LOGGING` | No | `true` | Enables verbose per-request logging. | `false` | Disable in high-throughput production to reduce log volume. |
-| `ENABLE_API_DOCS` | No | `false` | Exposes interactive Swagger/OpenAPI documentation endpoints. | `true` | |
-| `DEBUG_PRICE_FEEDS` | No | `false` | Emits extra upstream price-feed debug logs. | `true` | |
-| `WS_PORT` | No | `3001` | WebSocket listen port (typically shares the HTTP port). | `3001` | |
-| `WS_HEARTBEAT_INTERVAL` | No | `30000` | WebSocket ping/pong heartbeat interval (ms). | `30000` | |
+| `CORS_ORIGINS` | No | _(empty)_ | Comma-separated browser origins allowed to call the API. When unset, non-production reflects any `Origin` and production rejects every cross-origin request. `backend/.env.example` sets `http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000`. | `https://app.example.com` | Restrict to your exact production domain in production. A `*` entry is ignored in production. |
+| `LOG_LEVEL` | No | `debug` outside production, `info` in production | Application log verbosity (`backend/src/utils/logger.ts`). | `warn` | |
+| `LOG_PRETTY` | No | _(unread)_ | Present in `backend/.env.example`. The API logger always emits JSON lines and does not read this variable. | `true` | |
+| `LOG_DEPLOYMENT_ENV` | No | `NODE_ENV`, then `development` | Deployment-tier label included in log records and telemetry. Unset falls back to `NODE_ENV`, then `development`. The example file sets `local`. | `production` | |
+| `ENABLE_API_LOGGING` | No | _(unread)_ | Present in `backend/.env.example`. Backend source does not read this variable. | `false` | |
+| `ENABLE_API_DOCS` | No | `true` outside production, `false` in production | Exposes Swagger UI at `/api/docs` when the value is the string `true`. `/api-docs` is mounted regardless. | `true` | |
+| `DEBUG_PRICE_FEEDS` | No | _(unread)_ | Present in `backend/.env.example`. Backend source does not read this variable. | `true` | |
+| `WS_PORT` | No | _(unread by the API)_ | The API attaches WebSockets to the HTTP server on `PORT`. Only `scripts/chaos/ws-portfolio-feed-load.mjs` reads `WS_PORT` (fallback `3001`). | `3001` | |
+| `WS_HEARTBEAT_INTERVAL` | No | _(unread)_ | Present in `backend/.env.example`. The frontend heartbeat is the constant `WS_HEARTBEAT_INTERVAL_MS` (`30000`) in `frontend/src/constants/wsProtocol.ts`, not this variable. | `30000` | |
 | `CI` | No | _(empty)_ | CI environment marker used by scripts and validation checks. | `true` | |
 
 ### Database
@@ -149,11 +208,11 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `STELLAR_HORIZON_URL` | Yes | — | Horizon REST endpoint used for all Stellar chain reads. | `https://horizon-testnet.stellar.org` | |
 | `STELLAR_CONTRACT_ADDRESS` | Yes | — | Soroban contract ID (`C...`) for portfolio operations. | `CAAAA...AAAA` | |
 | `CONTRACT_ADDRESS` | No | _(empty)_ | Alias for `STELLAR_CONTRACT_ADDRESS`. Must match if both are set. | `CAAAA...AAAA` | |
-| `STELLAR_REBALANCE_SECRET` | Conditional | — | Stellar secret key (`S...`) used to sign backend-initiated rebalances. Required unless demo fallback mode is active. | _(use secrets manager)_ | ⚠️ SECRET — never log or expose. See [rotation guide](#stellar_rebalance_secret--stellar_secret_key). |
+| `STELLAR_REBALANCE_SECRET` | Conditional | — | Stellar secret key (`S...`) used to sign backend-initiated rebalances. Required unless both `DEMO_MODE` and `ALLOW_DEMO_BALANCE_FALLBACK` are enabled. `STELLAR_SECRET_KEY` is accepted as an alias. | _(use secrets manager)_ | ⚠️ SECRET — never log or expose. See [rotation guide](#stellar_rebalance_secret--stellar_secret_key). |
 | `STELLAR_SECRET_KEY` | No | _(empty)_ | Alias for `STELLAR_REBALANCE_SECRET`. | _(use secrets manager)_ | ⚠️ SECRET |
 | `REBALANCE_ALLOW_SIGNER_MISMATCH` | No | `false` | Allows the backend signer to differ from the portfolio owner during execution. | `false` | |
 | `STELLAR_ASSET_ISSUERS` | No | bundled map | JSON object mapping asset symbol to issuer public key for pricing and rebalance logic. | `{"USDC":"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"}` | |
-| `SOROBAN_RPC_URL` | No | network default | Soroban RPC endpoint for contract event indexing. | `https://soroban-testnet.stellar.org` | |
+| `SOROBAN_RPC_URL` | No | testnet `https://soroban-testnet.stellar.org`; mainnet `https://soroban-rpc.mainnet.stellar.gateway.fm` | Soroban RPC endpoint. `SOROBAN_RPC_URLS` (comma-separated) is preferred when set; this variable is the single-URL fallback. `STELLAR_RPC_URL` is the next alias. | `https://soroban-testnet.stellar.org` | |
 | `STELLAR_RPC_URL` | No | _(empty)_ | Backward-compatible alias for `SOROBAN_RPC_URL`. | `https://soroban-testnet.stellar.org` | |
 | `SOROBAN_EVENT_INDEXER_INTERVAL_MS` | No | `15000` | Poll interval for on-chain contract event sync (ms). | `15000` | |
 | `SOROBAN_EVENT_INDEXER_LIMIT` | No | `100` | Maximum events fetched per RPC page. | `100` | |
@@ -166,18 +225,28 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `COINGECKO_API_KEY` | No | _(empty)_ | CoinGecko API key for production-grade rate limits. | _(use secrets manager)_ | ⚠️ SECRET — rotate via CoinGecko dashboard. See [rotation guide](#coingecko_api_key--vite_coingecko_api_key). |
-| `COINGECKO_BASE_URL` | No | `https://api.coingecko.com/api/v3` | CoinGecko base URL for price requests. | `https://pro-api.coingecko.com/api/v3` | |
+| `COINGECKO_BASE_URL` | No | _(empty)_ | Override for the price-feed base URL. Checked only when `REFLECTOR_SERVICE_URL` is unset. When both are empty, the service uses `https://pro-api.coingecko.com/api/v3` if `COINGECKO_API_KEY` is set, otherwise `https://api.coingecko.com/api/v3`. | `https://pro-api.coingecko.com/api/v3` | |
+| `COINGECKO_FALLBACK_CACHE_TTL_MS` | No | `30000` | TTL for the CoinGecko fallback price cache only (ms). | `30000` | |
+| `COINGECKO_FREE_TIER_PER_MINUTE` | No | `30` | CoinGecko Demo free-tier ceiling; `/api/v1/prices` allows two thirds of this per minute. | `30` | |
 | `REFLECTOR_API_URL` | No | _(empty)_ | Reflector oracle API base URL used as an off-chain price fallback. | `https://api.reflector.network` | |
-| `REFLECTOR_ADDRESS` | No | _(empty)_ | Soroban contract address for Reflector on-chain oracle. | `CABC...` | |
+| `REFLECTOR_ADDRESS` | No | _(empty)_ | Listed in `backend/.env.example` and passed through `deployment/docker-compose.yml`. Backend and frontend source do not read this name; the contract stores the Reflector address on chain. The frontend legacy name is `VITE_REFLECTOR_ADDRESS`. | `CABC...` | |
 | `REFLECTOR_SERVICE_URL` | No | _(empty)_ | Off-chain service URL for Reflector oracle. | `https://reflector.example.com` | |
-| `PRICE_CACHE_DURATION` | No | `300000` | In-memory price cache TTL (ms). | `300000` | |
-| `MIN_REQUEST_INTERVAL` | No | `90000` | Minimum interval between upstream market-data fetches (ms). | `90000` | |
+| `PRICE_CACHE_DURATION` | No | _(unread)_ | Present in `backend/.env.example`. The price service does not read it. Cache TTL is hardcoded: `300000` ms outside production and `600000` ms in production (`backend/src/services/reflector.ts`). Startup summary cache duration is the separate, undocumented `CACHE_DURATION_MS` (fallback `30000`). | `300000` | |
+| `MIN_REQUEST_INTERVAL` | No | _(unread)_ | Present in `backend/.env.example`. The price service hardcodes `90000` ms and does not read this variable. Startup config reads the separate `MIN_REQUEST_INTERVAL_MS` (fallback `1000`). | `90000` | |
+
+### Public Status
+
+| Variable | Required | Default | Description | Example | Security Note |
+|---|---|---|---|---|---|
+| `PUBLIC_STATUS_CACHE_TTL_MS` | No | `15000` | Cache TTL for the public `/api/v1/status` oracle and DEX connectivity report (ms). `0` disables caching. | `15000` | |
+| `PUBLIC_STATUS_DEX_FROM_ASSET` | No | `XLM` | Asset sold by the Stellar DEX connectivity probe on the public status page. | `XLM` | |
+| `PUBLIC_STATUS_DEX_TO_ASSET` | No | `USDC` | Asset bought by the Stellar DEX connectivity probe on the public status page. | `USDC` | |
 
 ### Auto-Rebalancer
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
-| `ENABLE_AUTO_REBALANCER` | No | `false` | Enables queue-backed automatic rebalance scheduling. | `true` | |
+| `ENABLE_AUTO_REBALANCER` | No | `false` outside production | Enables queue-backed automatic rebalance scheduling when set to the string `true`. In `NODE_ENV=production` the scheduler is enabled even when this variable is unset or `false`. | `true` | |
 | `AUTO_REBALANCE_DRY_RUN` | No | `false` | Computes and reports scheduled rebalance plans without submitting on-chain transactions. A portfolio's `strategyConfig.dryRun` value overrides this global setting. | `true` | |
 | `AUTO_REBALANCE_CHECK_INTERVAL` | No | `3600000` | How often the auto-rebalancer checks all portfolios (ms). | `3600000` | |
 | `MIN_REBALANCE_INTERVAL` | No | `86400000` | Minimum time between successful rebalances per portfolio (ms). | `86400000` | |
@@ -210,6 +279,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `USE_MEMORY_CACHE` | No | `false` | Enables an in-memory portfolio cache as an alternative to Redis for specific paths. | `false` | |
 | `QUEUE_BACKLOG_READY_THRESHOLD` | No | `500` | Readiness gate: when the BullMQ `waiting + delayed` depth exceeds this value the instance reports not-ready, so orchestrators route traffic away before the backlog becomes customer-visible. | `500` | |
 
+### Worker Supervisor
+
+| Variable | Required | Default | Description | Example | Security Note |
+|---|---|---|---|---|---|
+| `WORKER_SUPERVISOR_ENABLED` | No | `true` | Enables the heartbeat supervisor that automatically restarts workers which stop sending heartbeats. Set to `false` to only log missed heartbeats. | `true` | |
+| `WORKER_SUPERVISOR_INTERVAL_MS` | No | `30000` | How often the supervisor sweeps persisted worker heartbeats (ms). | `30000` | |
+| `WORKER_SUPERVISOR_MISSED_HEARTBEATS` | No | `3` | Consecutive missed heartbeats tolerated before a supervised restart is triggered. | `3` | |
+| `WORKER_SUPERVISOR_MAX_RESTARTS` | No | `3` | Maximum supervised restarts per worker inside the restart window; further attempts are blocked until the window slides to keep crash loops from exhausting resources. | `3` | |
+| `WORKER_SUPERVISOR_RESTART_WINDOW_MS` | No | `300000` | Sliding window (ms) used to count supervised restarts per worker. | `300000` | |
+
 ### Risk Controls
 
 | Variable | Required | Default | Description | Example | Security Note |
@@ -227,6 +306,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `REBALANCE_ALLOW_PARTIAL_FILL` | No | `true` | Allows partial order fills when a full fill is unavailable. | `true` | |
 | `REBALANCE_ROLLBACK_ON_FAILURE` | No | `true` | Attempts to roll back all changes if execution fails mid-flow. | `true` | |
 | `REBALANCE_LOCK_TTL_MS` | No | `300000` | Time-to-live for rebalancing concurrency locks (ms). Valid range: 1000–1800000. | `600000` | |
+| `REBALANCE_LOCK_WAIT_WARN_MS` | No | `1000` | Wait-time threshold (ms) after which a slow per-portfolio advisory-lock acquisition logs a warning (possible stuck lock or saturated DB pool). Valid range: 0–60000. | `2000` | |
 | `RISK_VOLATILITY_HIGH` | No | `10` | Volatility percentage threshold for high-risk classification. | `10` | |
 | `RISK_VOLATILITY_CRITICAL` | No | `15` | Volatility percentage threshold for critical-risk classification. | `15` | |
 | `RISK_CONCENTRATION_HIGH` | No | `60` | Concentration percentage threshold for high-risk classification. | `60` | |
@@ -272,13 +352,16 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `EMAIL_MAX_BACKOFF_MS` | No | `30000` | Exponential backoff ceiling for email retries (ms). | `30000` | |
 | `EMAIL_BACKOFF_MULTIPLIER` | No | `2` | Exponential multiplier for email retry delays. Must be ≥ 1. | `2` | |
 | `NOTIFICATION_RATE_LIMIT_PER_HOUR` | No | `10` | Maximum notifications sent per user per hour. | `10` | |
+| `TWILIO_ACCOUNT_SID` | No | _(empty)_ | Twilio account SID used to send SMS notifications. | _(see Twilio console)_ | ⚠️ SECRET — rotate via Twilio console. |
+| `TWILIO_AUTH_TOKEN` | No | _(empty)_ | Twilio auth token. | _(use secrets manager)_ | ⚠️ SECRET — rotate via Twilio console. |
+| `TWILIO_FROM_NUMBER` | No | _(empty)_ | Twilio sender phone number for outbound SMS. | `+15551234567` | |
 
 ### Observability
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `OTEL_ENABLED` | No | `false` | Enables OpenTelemetry tracing. | `true` | |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OpenTelemetry OTLP exporter endpoint. | `http://localhost:4318` | |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318/v1/traces` | OpenTelemetry OTLP exporter endpoint (`backend/src/observability/tracing.ts`). | `http://localhost:4318/v1/traces` | |
 | `OTEL_SERVICE_NAME` | No | `stellar-portfolio-backend` | OpenTelemetry service name. | `stellar-portfolio-backend` | |
 | `SENTRY_ENABLED` | No | `false` | Enables the backend Sentry integration. | `true` | |
 | `SENTRY_DSN` | No | _(empty)_ | Sentry project DSN for error and performance reporting. | _(see Sentry dashboard)_ | ⚠️ SECRET — if exposed publicly, rotate via Sentry project settings. See [rotation guide](#sentry_dsn--vite_sentry_dsn). |
@@ -295,6 +378,10 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `METRICS_PREFIX` | No | `stellar_portfolio_` | Prefix applied to all emitted metric names. | `stellar_portfolio_` | |
 | `METRICS_DEFAULT_LABELS_SERVICE` | No | `stellar-portfolio-backend` | Default service label attached to all emitted metrics. | `stellar-portfolio-backend` | |
 | `ALERT_CONTACT` | No | `platform-oncall` | Alert-routing metadata label for operations tooling. | `platform-oncall` | |
+| `MONITORING_SLACK_WEBHOOK_URL` | No | _(empty)_ | Slack incoming webhook URL for operational alerts. | _(use secrets manager)_ | ⚠️ SECRET — rotate via Slack app settings. |
+| `PAGERDUTY_ROUTING_KEY` | No | _(empty)_ | PagerDuty Events API v2 routing key for operational alerts. | _(use secrets manager)_ | ⚠️ SECRET — rotate via PagerDuty service settings. |
+| `IDEMPOTENCY_CLEANUP_EXPECTED_INTERVAL_MS` | No | `3600000` | Expected interval between idempotency cleanup worker runs, used to detect missed runs. | `3600000` | |
+| `IDEMPOTENCY_CLEANUP_FAILURE_ALERT_THRESHOLD` | No | `3` | Consecutive idempotency cleanup failures before alerting. | `3` | |
 | `READINESS_CACHE_TTL_MS` | No | `2000` | Cache TTL for the `/readiness` health endpoint (ms). | `2000` | |
 
 ### Analytics & Snapshots
@@ -311,14 +398,14 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
-| `DEMO_MODE` | No | `true` | Enables local demo portfolio flows. Set to `false` in production. | `false` | |
-| `ALLOW_FALLBACK_PRICES` | No | `true` | Uses fallback price data when the primary feed fails. | `false` | |
-| `ALLOW_MOCK_PRICE_HISTORY` | No | `true` | Allows generated historical price data. Disable in production. | `false` | |
+| `DEMO_MODE` | No | `true` outside production, `false` in production | Enables local demo portfolio flows. Startup refuses to boot when this is true in production. | `false` | |
+| `ALLOW_FALLBACK_PRICES` | No | `true` outside production, `false` in production | Uses fallback price data when the primary feed fails. | `false` | |
+| `ALLOW_MOCK_PRICE_HISTORY` | No | follows `DEMO_MODE` | Allows generated historical price data. When unset, matches `DEMO_MODE`. | `false` | |
 | `PRICE_HISTORY_BACKFILL_DAYS` | No | `90` | Days of price history backfilled when a new asset is added. Valid range: 1–365. | `45` | |
 | `ALLOW_PUBLIC_USER_PORTFOLIOS_IN_DEMO` | No | `false` | Allows anonymous portfolio listing by user address in demo mode. | `false` | |
-| `ENABLE_DEBUG_ROUTES` | No | `true` | Enables debug/test route groups. **Must be `false` in production.** | `false` | ⚠️ Exposes internal test routes and can leak stack traces — the highest-risk flag in this section. |
-| `ALLOW_DEMO_BALANCE_FALLBACK` | No | `true` | Uses demo balances when a live on-chain balance fetch fails. | `false` | |
-| `ENABLE_DEMO_DB_SEED` | No | `true` | Seeds demo data into the local database at startup. Disable in production. | `false` | |
+| `ENABLE_DEBUG_ROUTES` | No | `false` | Enables debug/test route groups. The code fallback is `false` in every environment. `backend/.env.example` sets `true`, so a copied example file turns the routes on until you change it. | `false` | ⚠️ Exposes internal test routes and can leak stack traces — the highest-risk flag in this section. |
+| `ALLOW_DEMO_BALANCE_FALLBACK` | No | follows `DEMO_MODE` | Uses demo balances when a live on-chain balance fetch fails. When unset, matches `DEMO_MODE`. Together with `DEMO_MODE`, this is what makes `STELLAR_REBALANCE_SECRET` optional. | `false` | |
+| `ENABLE_DEMO_DB_SEED` | No | follows `DEMO_MODE` | Seeds demo data into the local database at startup. When unset, matches `DEMO_MODE`. | `false` | |
 | `DEMO_INITIAL_BALANCE` | No | `10000` | Starting USD value assigned to demo portfolios. | `10000` | |
 | `MOCK_EXTERNAL_APIS` | No | `false` | Mocks all outbound provider calls. For test and CI use only. | `false` | |
 
@@ -327,6 +414,8 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | Variable | Required | Default | Description | Example | Security Note |
 |---|---|---|---|---|---|
 | `FEATURE_FLAGS_FILE` | No | _(empty)_ | Path to a local JSON file containing feature flag overrides for staging. | `./feature-flags.json` | |
+
+`getFeatureFlags()` also reads these names, which are not in `backend/.env.example` and therefore are not table rows here: `ENABLE_ISSUER_METADATA` (fallback `true`), `ENABLE_SHADOW_MODE` (fallback `false`), `ENABLE_REBALANCE_CROSS_CHECK` (fallback `false`), and `REBALANCE_CROSS_CHECK_REQUIRE_AGREEMENT` (fallback `false`).
 
 ---
 
@@ -398,3 +487,44 @@ The validator fails when:
 - Runtime code references an env key absent from its example file.
 - Either example file defines a key more than once.
 - `backend/.env.example`, `frontend/.env.example`, and the tables in this document drift apart.
+
+---
+
+## Environment Reference Verification and Recovery (SPR-2026-296..300)
+
+Run repeatable environment reference verification:
+
+```bash
+npm run validate:env-ref
+```
+
+### Clean Environment Validation (SPR-2026-296)
+Contributors can verify startup validation and documented defaults without undocumented local state. In local/development mode, the validator falls back safely to `MINIMUM_VIABLE_LOCAL_DEFAULTS`:
+- `NODE_ENV`: `development`
+- `PORT`: `3001`
+- `STELLAR_NETWORK`: `testnet`
+- `STELLAR_HORIZON_URL`: `https://horizon-testnet.stellar.org`
+- `ENABLE_AUTO_REBALANCER`: `false`
+- `VITE_API_URL`: `http://localhost:3001`
+
+### Safe Recovery & Rollback Boundaries (SPR-2026-297)
+When deploying in `production` mode (`NODE_ENV=production`), production-only variables are strictly audited before work:
+- `DATABASE_URL`: PostgreSQL connection URI (SQLite prohibited in production).
+- `REDIS_URL`: Redis connection URI for queues and distributed rate limiting.
+- `JWT_SECRET`: 32+ character cryptographically secure secret.
+- `CORS_ORIGINS`: Explicit origins list (`*` prohibited).
+
+If any production-only variable is missing or malformed, verification immediately halts at rollback boundary `HALT_BEFORE_TRAFFIC_SHIFT` and outputs the precise remediation action required.
+
+### Input Validation & Secret Redaction (SPR-2026-298)
+Port ranges (1-65535) and Stellar networks are strictly validated before rollout. All private keys (`S...`), JWT secrets, tokens, and passwords in failure messages are automatically redacted with `[REDACTED]`.
+
+### Outcome Reporting (SPR-2026-299)
+Validation emits three distinct signals:
+- `VERIFIED`: Environment configuration satisfies all criteria.
+- `TRANSIENT_DELAY`: Infrastructure warmup or service discovery pending (retry with exponential backoff).
+- `BLOCKED`: Malformed configuration or missing production variables requiring owner intervention.
+
+### Repeatability Smoke Check (SPR-2026-300)
+A maintainer can run `scripts/environment-reference.test.mjs` or `runEnvironmentSmokeCheck()` repeatedly without environment leakage or side effects.
+

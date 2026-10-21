@@ -84,10 +84,10 @@ debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, requireAdmi
     try {
         logger.info('[DEBUG] Clearing cache and forcing fresh prices...')
 
-        // Clear cache first
+        
         reflectorService.clearCache()
 
-        // Get cache status
+        
         const cacheStatus = reflectorService.getCacheStatus()
 
         const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()

@@ -1,11 +1,9 @@
 import React from 'react'
 import { Radio, WifiOff, RefreshCw } from 'lucide-react'
 import { useRealtimeConnection } from '../context/RealtimeConnectionContext'
-import ReadinessDrilldown from './ReadinessDrilldown'
 
 const RealtimeStatusBanner: React.FC = () => {
-    const { state, reconnect, reconnectInfo, report, readinessLoading, readinessError } = useRealtimeConnection()
-    const showDrilldown = false
+    const { state, reconnect, reconnectInfo } = useRealtimeConnection()
 
     if (state === 'connected') {
         return (
@@ -19,13 +17,6 @@ const RealtimeStatusBanner: React.FC = () => {
                     <Radio className="h-3.5 w-3.5 shrink-0" aria-hidden />
                     <span className="font-medium">Live updates</span>
                 </div>
-                {showDrilldown && (
-                    <ReadinessDrilldown
-                        report={report}
-                        loading={readinessLoading}
-                        loadError={readinessError}
-                    />
-                )}
             </div>
         )
     }
@@ -75,13 +66,6 @@ const RealtimeStatusBanner: React.FC = () => {
                     Retry
                 </button>
             </div>
-            {showDrilldown && (
-                <ReadinessDrilldown
-                    report={report}
-                    loading={readinessLoading}
-                    loadError={readinessError}
-                />
-            )}
         </div>
     )
 }

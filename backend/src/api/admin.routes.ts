@@ -136,7 +136,7 @@ function handleUpdateAnomalyThresholds(req: Request, res: Response) {
   }
 }
 
-// GET & PUT/PATCH routes for anomaly-thresholds (and anomaly-detection/thresholds alias)
+
 adminRouter.get('/anomaly-thresholds', requireAdmin, handleGetAnomalyThresholds)
 adminRouter.get('/anomaly-detection/thresholds', requireAdmin, handleGetAnomalyThresholds)
 
@@ -238,6 +238,56 @@ adminRouter.get('/audit-log', requireAdmin, async (req: Request, res: Response) 
     return ok(res, result)
   } catch (error) {
     logger.error('[ADMIN] Failed to query audit log', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+})
+
+adminRouter.get('/config/volatility-threshold', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const currentThreshold = getVolatilityThresholdPct()
+    return ok(res, {
+      thresholdPct: currentThreshold,
+      min: MIN_VOLATILITY_THRESHOLD_PCT,
+      max: MAX_VOLATILITY_THRESHOLD_PCT,
+      default: DEFAULT_VOLATILITY_THRESHOLD_PCT
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to get volatility threshold', { error: getErrorMessage(error) })
+    return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+  }
+})
+
+adminRouter.put('/config/volatility-threshold', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { thresholdPct, threshold } = req.body
+    const valueToSet = thresholdPct !== undefined ? thresholdPct : threshold
+
+    if (typeof valueToSet !== 'number' || !Number.isFinite(valueToSet)) {
+      return fail(res, 400, 'VALIDATION_ERROR', 'thresholdPct must be a number')
+    }
+
+    if (valueToSet < MIN_VOLATILITY_THRESHOLD_PCT || valueToSet > MAX_VOLATILITY_THRESHOLD_PCT) {
+      return fail(res, 400, 'VALIDATION_ERROR', `thresholdPct must be between ${MIN_VOLATILITY_THRESHOLD_PCT}% and ${MAX_VOLATILITY_THRESHOLD_PCT}%`)
+    }
+
+    const before = getVolatilityThresholdPct()
+    const updated = setVolatilityThresholdPct(valueToSet)
+    const actor = req.adminPublicKey ?? 'unknown'
+
+    logAdminAction(actor, 'update_volatility_threshold', 'circuit_breaker', before, updated)
+
+    logger.info('[ADMIN] Volatility threshold updated', {
+      actor,
+      before,
+      after: updated
+    })
+
+    return ok(res, {
+      message: 'Volatility threshold updated successfully',
+      thresholdPct: updated
+    })
+  } catch (error) {
+    logger.error('[ADMIN] Failed to update volatility threshold', { error: getErrorMessage(error) })
     return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
   }
 })

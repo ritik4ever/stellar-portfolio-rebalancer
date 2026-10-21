@@ -133,7 +133,7 @@
   },
   "compare": {
     "title": "Comparar Carteras",
-    "subtitle": "Seleccione 2-3 carteras para comparar lado a lado",
+    "subtitle": "Seleccione 2-5 carteras para comparar lado a lado",
     "selectPortfolios": "Seleccionar Carteras",
     "noPortfolios": "No hay carteras disponibles para comparar",
     "selectAtLeastTwo": "Seleccione al menos 2 carteras para comparar",

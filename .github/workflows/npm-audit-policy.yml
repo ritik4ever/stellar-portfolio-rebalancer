@@ -58,7 +58,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: '.nvmrc'
 
       - name: Check npm dependency audit baseline
         run: npm run audit:policy
@@ -82,7 +82,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked
 
       - name: Check cargo dependency audit baseline
         run: |
