@@ -904,6 +904,11 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
+            const isFailed = result.status === 'failed';
+            const errorReason = isFailed
+                ? (result.failureReason || result.explanation?.failureReason || result.error || 'Rebalance execution failed')
+                : undefined;
+
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Manual Rebalancing',
@@ -911,20 +916,57 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 gasUsed: result.gasUsed ?? '0 XLM',
                 feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
                 slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
-                status: result.status === 'failed' ? 'failed' : 'completed',
+                status: isFailed ? 'failed' : 'completed',
                 isAutomatic: false,
+                error: errorReason,
+                details: {
+                    actor: 'user',
+                    source: 'api',
+                    explanation: result.explanation,
+                    ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
+                },
             });
 
             return ok(res, { result });
+        } catch (innerError) {
+            // Preserve state consistency during interrupted or failed rebalances:
+            // Persist the failed event so external error result and recorded history agree
+            const failureReason = innerError instanceof ConflictError
+                ? 'Rebalance conflict: execution already in progress'
+                : 'Rebalance execution failed due to an unexpected error';
+
+            try {
+                await rebalanceHistoryService.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Manual Rebalancing (Failed)',
+                    trades: 0,
+                    gasUsed: '0 XLM',
+                    status: 'failed',
+                    isAutomatic: false,
+                    error: failureReason,
+                    details: {
+                        actor: 'user',
+                        source: 'api',
+                        failureReason,
+                    },
+                });
+            } catch (histErr) {
+                logger.error('[ERROR] Failed to record failure rebalance event', {
+                    error: getErrorObject(histErr),
+                    portfolioId,
+                });
+            }
+
+            throw innerError;
         } finally {
             await releaseWorkerLock(portfolioId);
         }
     } catch (error) {
         if (error instanceof ConflictError) {
-            return fail(res, 409, 'CONFLICT', error.message);
+            return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
         }
-        console.error('[ERROR] Manual rebalance failed:', error);
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+        logger.error('[ERROR] Manual rebalance failed', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', 'Rebalance execution failed');
     }
 
 });
@@ -981,7 +1023,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
         });
     } catch (error) {
         logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch rebalance history');
     }
 });
 
@@ -1011,7 +1053,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history/export', validateQuery(re
         return res.status(200).send(result.body);
     } catch (error) {
         logger.error('[ERROR] Failed to export rebalance history', { error: getErrorObject(error) });
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to export rebalance history');
     }
 });
 
