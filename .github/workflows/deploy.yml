@@ -46,6 +46,11 @@ jobs:
           terraform init
           terraform workspace select staging || terraform workspace new staging
 
+      - name: Validate Terraform configuration
+        run: |
+          cd deployment/terraform
+          terraform validate -no-color
+
       - name: Terraform plan
         run: |
           cd deployment/terraform
@@ -172,6 +177,11 @@ jobs:
           cd deployment/terraform
           terraform init
           terraform workspace select production || terraform workspace new production
+
+      - name: Validate Terraform configuration
+        run: |
+          cd deployment/terraform
+          terraform validate -no-color
 
       - name: Terraform plan
         run: |

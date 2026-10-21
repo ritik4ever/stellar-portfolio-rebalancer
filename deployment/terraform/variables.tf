@@ -2,18 +2,33 @@ variable "aws_region" {
   description = "AWS region to deploy resources"
   type        = string
   default     = "us-east-1"
+
+  validation {
+    condition     = length(trimspace(var.aws_region)) > 0
+    error_message = "aws_region must not be empty."
+  }
 }
 
 variable "project_name" {
   description = "Name of the project"
   type        = string
   default     = "stellar-portfolio"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]*$", var.project_name))
+    error_message = "project_name must contain only letters, numbers, and hyphens, and must start with a letter or number."
+  }
 }
 
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
   type        = string
   default     = "10.0.0.0/16"
+
+  validation {
+    condition     = can(cidrhost(var.vpc_cidr, 0))
+    error_message = "vpc_cidr must be a valid IPv4 or IPv6 CIDR block."
+  }
 }
 
 variable "azs" {
@@ -24,6 +39,11 @@ variable "azs" {
   validation {
     condition     = length(var.azs) >= 2
     error_message = "azs must contain at least two availability zones so ElastiCache can place a read replica in a different AZ from the primary."
+  }
+
+  validation {
+    condition     = length(distinct(var.azs)) == length(var.azs)
+    error_message = "azs must not contain duplicate availability zones."
   }
 }
 
@@ -218,6 +238,14 @@ variable "blue_green_deployment_config" {
       action_on_timeout = "CONTINUE_DEPLOYMENT"
     }
   }
+
+  validation {
+    condition = (
+      var.blue_green_deployment_config.termination_wait_time_in_minutes >= 1 &&
+      contains(["CONTINUE_DEPLOYMENT", "STOP_DEPLOYMENT"], var.blue_green_deployment_config.deployment_ready_option.action_on_timeout)
+    )
+    error_message = "blue_green_deployment_config must keep the rollback window at least 1 minute and use CONTINUE_DEPLOYMENT or STOP_DEPLOYMENT."
+  }
 }
 variable "ecs_min_capacity" {
   description = "Minimum number of ECS tasks"
@@ -225,6 +253,11 @@ variable "ecs_min_capacity" {
   default = {
     staging    = 1
     production = 2
+  }
+
+  validation {
+    condition     = alltrue([for capacity in values(var.ecs_min_capacity) : capacity >= 1])
+    error_message = "Every ecs_min_capacity value must be at least 1 so a rollout retains a serving task."
   }
 }
 
@@ -234,5 +267,10 @@ variable "ecs_max_capacity" {
   default = {
     staging    = 3
     production = 10
+  }
+
+  validation {
+    condition     = alltrue([for capacity in values(var.ecs_max_capacity) : capacity >= 1])
+    error_message = "Every ecs_max_capacity value must be at least 1."
   }
 }
