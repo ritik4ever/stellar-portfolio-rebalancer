@@ -889,7 +889,8 @@ fn test_stale_data() {
                 let current = env.ledger().timestamp();
                 Some(PriceData {
                     price: 100_00000000000000,
-                    timestamp: current - 7200,
+                    // Exactly at the configured age boundary must be rejected.
+                    timestamp: current - crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS,
                 })
             }
             pub fn twap(_env: Env, _asset: Asset, _records: u32) -> Option<i128> {
@@ -915,7 +916,8 @@ fn test_stale_data() {
     });
 
     let actual_balances = Map::new(&env);
-    let _result = client.try_execute_rebalance(&pid, &actual_balances);
+    let result = client.try_execute_rebalance(&pid, &actual_balances);
+    assert_eq!(result, Err(Ok(Error::StaleOraclePrice)));
 }
 
 #[test]

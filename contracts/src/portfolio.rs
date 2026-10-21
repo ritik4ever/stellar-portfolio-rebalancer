@@ -1,5 +1,6 @@
 use crate::types::*;
 use soroban_sdk::{symbol_short, xdr::ToXdr, Address, Env, Map, Symbol, Vec};
+use crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS;
 
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
     if allocations.is_empty() {
@@ -37,7 +38,7 @@ pub fn calculate_portfolio_value(
     reflector_client: &crate::reflector::ReflectorClient,
 ) -> Result<i128, Error> {
     let mut total_value = 0i128;
-    let _current_time = env.ledger().timestamp();
+    let current_time = env.ledger().timestamp();
 
     for (asset, balance) in balances.iter() {
         let _decimals = asset_decimals
@@ -46,6 +47,9 @@ pub fn calculate_portfolio_value(
         if let Some(price_data) =
             crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
+            if price_data.is_stale(current_time, REFLECTOR_PRICE_MAX_AGE_SECONDS) {
+                return Err(Error::StaleOraclePrice);
+            }
             total_value += balance_to_value(balance, price_data.price);
         }
     }
@@ -117,7 +121,7 @@ pub fn build_rebalance_preview(
         if let Some(price_data) =
             crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
-            if price_data.is_stale(current_time, 3600) {
+            if price_data.is_stale(current_time, REFLECTOR_PRICE_MAX_AGE_SECONDS) {
                 skipped_assets.push_back(asset.clone());
                 skip_reasons.set(asset.clone(), AssetSkipReason::StalePrice);
                 continue;
