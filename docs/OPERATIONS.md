@@ -69,7 +69,27 @@ See `deployment/terraform/modules/elasticache/README.md` for the full failover d
 
 - Worker implementations live under `backend/src/queue/workers/` (`portfolioCheckWorker`, `rebalanceWorker`, `analyticsSnapshotWorker`, `idempotencyCleanupWorker`). Each exposes `start*Worker` / `stop*Worker` and runtime status used by readiness and ops routes.
 - **Important:** The default `npm run dev` / `npm start` entrypoint (`backend/src/index.ts`) registers the **scheduler** when Redis is available; it does **not** automatically spawn BullMQ worker processes. For full queue processing in development you need a process that calls the worker starters (or a dedicated worker entrypoint your deployment provides). Until workers run, jobs accumulate in Redis and `/ready` may report workers as not ready.
+- **Heartbeat supervisor:** When a process calls `startAllWorkers()`, the runtime registers a stop-and-restart handler per worker and starts the heartbeat supervisor. A worker that misses `WORKER_SUPERVISOR_MISSED_HEARTBEATS` consecutive heartbeats (default 3, swept every `WORKER_SUPERVISOR_INTERVAL_MS`, default 30s) is restarted automatically; `WORKER_SUPERVISOR_MAX_RESTARTS` restarts per `WORKER_SUPERVISOR_RESTART_WINDOW_MS` window (defaults 3 per 5 min) bound crash loops. Set `WORKER_SUPERVISOR_ENABLED=false` to keep logging misses without restarting, and inspect `/api/v1/workers/health` for `summary.crashLooping` and per-worker supervisor state.
 - **Docker Compose:** The `backend` service runs `npm start` only. Ensure `REDIS_URL` points at the `redis` service (e.g. `redis://redis:6379`) if you expect queues to function. The optional `observability` profile runs another Node process on a separate port for observability stacks—see `deployment/docker-compose.yml`. Note that the Docker Compose configuration includes predefined resource limits (CPU and memory) for each service to guarantee reproducibility in local and preview environments. You can adjust these in a `docker-compose.override.yml` if necessary.
+
+### Docker API startup outcomes
+
+The backend container healthcheck polls `/ready`, not `/health`: `/health` only confirms that the HTTP process is responding, while `/ready` also checks the database and required subsystems. Docker reports:
+
+- `healthy` when `/ready` returns HTTP 200 (startup succeeded).
+- `starting` while the backend is starting or during temporary readiness failures. The probe runs every 5 seconds, allows 3 seconds per request, and has a 30-second start period.
+- `unhealthy` after six failed probes outside the start period (startup is blocked).
+
+Check the current state and probe details with:
+
+```sh
+docker compose ps backend
+docker inspect --format '{{json .State.Health}}' portfolio-backend
+docker compose logs --tail=100 backend
+curl -i http://localhost:3001/readiness
+```
+
+If the container remains `starting`, wait for readiness and inspect `/readiness` if the delay persists. If it becomes `unhealthy`, use the `checks.database` error and database path in `/readiness` to resolve connectivity, permissions, or database-lock issues, then retry startup. The deployment script uses `/ready` too and logs `STARTUP_OUTCOME=SUCCESS`, `TRANSIENT_DELAY`, or `BLOCKED`; a blocked outcome includes the owner action and follows the existing rollback policy.
 
 ## Contract event indexer
 
@@ -551,6 +571,8 @@ soroban contract invoke \
 
 ### 2. Decide whether to reset
 
+Before running any incident procedure, validate the safe-pause and reconciliation inputs (pause reason, portfolio or breaker id, evidence destination); abort with a clear error if any are missing or malformed, and never log secret material (SPR-2026-288).
+
 Wait for automatic backend recovery when its cooldown is close to expiry and the price feed and market have stabilised. Do not reset while the underlying move, stale oracle data, or correlation anomaly is continuing; it will retrigger immediately. A manual reset is appropriate for a confirmed false-positive feed tick, a resolved incident that requires immediate service restoration, or a backend breaker whose cooldown has not yet elapsed. The Soroban emergency stop always requires an explicit admin reset; it has no timer-based recovery.
 
 Before resetting, record the incident, affected asset/portfolio, trigger reason, and current oracle/market checks. Keep automatic rebalancing paused through the reset if an incident is still active.
@@ -598,6 +620,16 @@ The call requires the on-chain contract admin's Soroban authorization. It sets `
 - [ ] **Auto-rebalancer state:** `GET /api/v1/auto-rebalancer/status` reports `status.isRunning: true` before releasing the incident hold. If it was intentionally stopped, restart it with the same signed admin headers at `POST /api/v1/auto-rebalancer/start`.
 - [ ] **No repeat trip:** monitor status and risk checks for 5–10 minutes. If the breaker retrips, stop resetting and investigate the feed or market conditions.
 - [ ] **Evidence retained:** keep the `resetTargets`, transaction hash, admin actor, timestamps, and `[AUDIT] Circuit breaker reset by admin` log entry with the incident record.
+
+Rebalance incident runbook result signal (SPR-2026-289): report `ok`,
+`delayed`, or `blocked` for partial trades or an RPC outage with the owner
+action, so outcomes are distinguishable without re-running the procedure.
+
+### 6. Release verification procedures (SPR-2026-291, SPR-2026-293, SPR-2026-294)
+
+- **Clean environment validation (SPR-2026-291):** Verify releases from a tagged commit in a clean checkout or isolated service without relying on undocumented local state (`npm run validate:release-verification`).
+- **Pre-work input validation & secret redaction (SPR-2026-293):** All release verification inputs (`RELEASE_TAG`, `RELEASE_DIGEST`, `RELEASE_PROVENANCE`) must be validated before work begins. Any invalid format stops immediately with a clear error, and all credentials or tokens are strictly redacted from logs.
+- **Outcome reporting & digest mismatch action (SPR-2026-294):** Verification outcomes must report distinct signals (`VERIFIED`, `TRANSIENT_DELAY`, or `BLOCKED`). If an artifact digest differs from the published digest, the procedure halts with `BLOCKED (DIGEST_MISMATCH)` and notifies the release owner.
 
 ---
 

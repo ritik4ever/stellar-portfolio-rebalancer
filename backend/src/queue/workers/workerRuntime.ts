@@ -1,17 +1,17 @@
 import { Job, Worker } from "bullmq";
-import { persistWorkerStatus } from './workerHeartbeat.js';
+import {
+    persistWorkerStatus,
+    registerWorkerRestartHandler,
+    clearWorkerRestartHandlers,
+    startWorkerSupervisor,
+    stopWorkerSupervisor,
+    DEFAULT_SUPERVISOR_CONFIG,
+    type SupervisorConfig,
+} from './workerHeartbeat.js';
 import { getDLQQueue, DLQJobData } from '../queues.js';
 import { logger } from '../../utils/logger.js';
 import { query } from '../../db/client.js';
-import { startPortfolioCheckWorker } from './portfolioCheckWorker.js'
-import { startRebalanceWorker } from './rebalanceWorker.js'
-import { startAnalyticsSnapshotWorker } from './analyticsSnapshotWorker.js'
-import { startAnalyticsCompactionWorker } from './analyticsCompactionWorker.js'
-import { startIdempotencyCleanupWorker } from './idempotencyCleanupWorker.js'
-import { startPortfolioExportWorker } from './portfolioExportWorker.js'
-import { startUserAlertsWorker } from './userAlertsWorker.js'
-import { startScheduledExportWorker } from './scheduledExportWorker.js'
-import { startPriceHistoryWorkers, stopPriceHistoryWorkers } from './priceHistoryWorker.js'
+
 
 export interface WorkerRuntimeStatus {
     name: string
@@ -203,10 +203,162 @@ export async function handleFinalFailure(job: Job, error: unknown): Promise<void
 
 let workers: Worker[] = []
 
-export function startAllWorkers(): void {
+/** Default cadence of the heartbeat supervisor sweep (#1194). */
+export const DEFAULT_WORKER_SUPERVISOR_INTERVAL_MS = 30_000
+
+function readPositiveInt(value: string | undefined, fallback: number): number {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
+}
+
+/** The heartbeat supervisor is on by default; ops can opt out per environment. */
+export function isWorkerSupervisorEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+    return (env.WORKER_SUPERVISOR_ENABLED ?? 'true').trim().toLowerCase() !== 'false'
+}
+
+/** Supervisor tuning resolved from the environment, falling back to safe defaults. */
+export function getWorkerSupervisorConfig(env: NodeJS.ProcessEnv = process.env): Partial<SupervisorConfig> {
+    return {
+        missedHeartbeatThreshold: readPositiveInt(
+            env.WORKER_SUPERVISOR_MISSED_HEARTBEATS,
+            DEFAULT_SUPERVISOR_CONFIG.missedHeartbeatThreshold,
+        ),
+        maxRestartAttempts: readPositiveInt(env.WORKER_SUPERVISOR_MAX_RESTARTS, DEFAULT_SUPERVISOR_CONFIG.maxRestartAttempts),
+        restartWindowMs: readPositiveInt(env.WORKER_SUPERVISOR_RESTART_WINDOW_MS, DEFAULT_SUPERVISOR_CONFIG.restartWindowMs),
+    }
+}
+
+/** Sweep interval (ms) for the heartbeat supervisor loop. */
+export function getWorkerSupervisorIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
+    return readPositiveInt(env.WORKER_SUPERVISOR_INTERVAL_MS, DEFAULT_WORKER_SUPERVISOR_INTERVAL_MS)
+}
+
+interface WorkerRestartDefinition {
+    /** Worker status name, matching the key used by persistWorkerStatus */
+    name: string
+    /** Stops the affected worker instance and starts a fresh one */
+    restart: () => Promise<void>
+}
+
+/**
+ * Restart handlers for every worker started by startAllWorkers().
+ * The heartbeat supervisor (#1194) invokes these instead of only logging a
+ * missed heartbeat, so a crashed or hung worker is brought back within a
+ * bounded number of attempts. Price-history workers are excluded because they
+ * do not persist a heartbeat status entry.
+ */
+function buildWorkerRestartDefinitions(): WorkerRestartDefinition[] {
+    return [
+        {
+            name: 'portfolio-check',
+            restart: async () => {
+                const { stopPortfolioCheckWorker, startPortfolioCheckWorker } = await import('./portfolioCheckWorker.js')
+                await stopPortfolioCheckWorker()
+                startPortfolioCheckWorker()
+            },
+        },
+        {
+            name: 'rebalance',
+            restart: async () => {
+                const { stopRebalanceWorker, startRebalanceWorker } = await import('./rebalanceWorker.js')
+                await stopRebalanceWorker()
+                startRebalanceWorker()
+            },
+        },
+        {
+            name: 'analytics-snapshot',
+            restart: async () => {
+                const { stopAnalyticsSnapshotWorker, startAnalyticsSnapshotWorker } = await import('./analyticsSnapshotWorker.js')
+                await stopAnalyticsSnapshotWorker()
+                startAnalyticsSnapshotWorker()
+            },
+        },
+        {
+            name: 'analytics-compaction',
+            restart: async () => {
+                const { stopAnalyticsCompactionWorker, startAnalyticsCompactionWorker } = await import('./analyticsCompactionWorker.js')
+                await stopAnalyticsCompactionWorker()
+                startAnalyticsCompactionWorker()
+            },
+        },
+        {
+            name: 'idempotency-cleanup',
+            restart: async () => {
+                const { stopIdempotencyCleanupWorker, startIdempotencyCleanupWorker } = await import('./idempotencyCleanupWorker.js')
+                await stopIdempotencyCleanupWorker()
+                startIdempotencyCleanupWorker()
+            },
+        },
+        {
+            name: 'portfolio-export',
+            restart: async () => {
+                const { stopPortfolioExportWorker, startPortfolioExportWorker } = await import('./portfolioExportWorker.js')
+                await stopPortfolioExportWorker()
+                startPortfolioExportWorker()
+            },
+        },
+        {
+            name: 'user-alerts',
+            restart: async () => {
+                const { stopUserAlertsWorker, startUserAlertsWorker } = await import('./userAlertsWorker.js')
+                await stopUserAlertsWorker()
+                startUserAlertsWorker()
+            },
+        },
+        {
+            name: 'scheduled-export',
+            restart: async () => {
+                const { stopScheduledExportWorker, startScheduledExportWorker } = await import('./scheduledExportWorker.js')
+                await stopScheduledExportWorker()
+                startScheduledExportWorker()
+            },
+        },
+    ]
+}
+
+/** Names of the workers the heartbeat supervisor can restart. */
+export function getSupervisedWorkerNames(): string[] {
+    return buildWorkerRestartDefinitions().map((definition) => definition.name)
+}
+
+/**
+ * Attach a stop-and-restart handler for every supervised worker so the
+ * heartbeat supervisor can recover workers that stop sending heartbeats.
+ */
+export function registerDefaultWorkerRestartHandlers(): string[] {
+    const definitions = buildWorkerRestartDefinitions()
+    for (const definition of definitions) {
+        registerWorkerRestartHandler(definition.name, definition.restart)
+    }
+    return definitions.map((definition) => definition.name)
+}
+
+export async function startAllWorkers(): Promise<void> {
     logger.info('[WORKER] Starting all background workers...')
 
     try {
+        const [
+            { startPortfolioCheckWorker },
+            { startRebalanceWorker },
+            { startAnalyticsSnapshotWorker },
+            { startAnalyticsCompactionWorker },
+            { startIdempotencyCleanupWorker },
+            { startPortfolioExportWorker },
+            { startUserAlertsWorker },
+            { startScheduledExportWorker },
+            { startPriceHistoryWorkers },
+        ] = await Promise.all([
+            import('./portfolioCheckWorker.js'),
+            import('./rebalanceWorker.js'),
+            import('./analyticsSnapshotWorker.js'),
+            import('./analyticsCompactionWorker.js'),
+            import('./idempotencyCleanupWorker.js'),
+            import('./portfolioExportWorker.js'),
+            import('./userAlertsWorker.js'),
+            import('./scheduledExportWorker.js'),
+            import('./priceHistoryWorker.js'),
+        ])
+
         workers.push(
             startPortfolioCheckWorker() as Worker,
             startRebalanceWorker() as Worker,
@@ -219,7 +371,24 @@ export function startAllWorkers(): void {
         )
         
         startPriceHistoryWorkers()
-        
+
+        // Supervised recovery (#1194): register a restart handler per worker and
+        // start the heartbeat supervisor so a worker that stops sending
+        // heartbeats is restarted automatically, with crash-loop protection.
+        if (isWorkerSupervisorEnabled()) {
+            const supervised = registerDefaultWorkerRestartHandlers()
+            const config = getWorkerSupervisorConfig()
+            const intervalMs = getWorkerSupervisorIntervalMs()
+            startWorkerSupervisor(config, intervalMs)
+            logger.info('[WORKER] Heartbeat supervisor started', {
+                supervised,
+                intervalMs,
+                config,
+            })
+        } else {
+            logger.warn('[WORKER] Heartbeat supervisor disabled (WORKER_SUPERVISOR_ENABLED=false)')
+        }
+
         logger.info(`[WORKER] Successfully started ${workers.length} standard worker(s) alongside price history workers`)
     } catch (error) {
         logger.error('[WORKER] Failed to start one or more workers:', error)
@@ -229,8 +398,13 @@ export function startAllWorkers(): void {
 
 export async function stopAllWorkers(): Promise<void> {
     logger.info('[WORKER] Stopping all background workers...')
-    
+
+    // Stop supervising first so shutdown is not interpreted as a missed heartbeat.
+    stopWorkerSupervisor()
+    clearWorkerRestartHandlers()
+
     try {
+        const { stopPriceHistoryWorkers } = await import('./priceHistoryWorker.js')
         await Promise.all([
             ...workers.map(w => w.close()),
             stopPriceHistoryWorkers()

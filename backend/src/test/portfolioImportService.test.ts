@@ -256,4 +256,51 @@ describe('parseCsvStream - chunked streaming parser', () => {
     expect(rows.length).toBe(0)
     expect(errors).toContain('header')
   })
+
+  it('supports configurable delimiter in stream chunks', async () => {
+    const chunks = ['asset;allocation_pct\n', 'XLM;70\n', 'USDC;30']
+    const { rows, errors } = await collect(chunks, { delimiter: ';' })
+    expect(errors.length).toBe(0)
+    expect(rows).toEqual([
+      { asset: 'XLM', allocation_pct: 70 },
+      { asset: 'USDC', allocation_pct: 30 },
+    ])
+  })
+
+  it('supports header-row mapping in stream chunks', async () => {
+    const chunks = ['symbol,weight_pct\n', 'XLM,55\n', 'USDC,45']
+    const { rows, errors } = await collect(chunks, {
+      headerMap: { symbol: 'asset', weight_pct: 'allocation_pct' },
+    })
+    expect(errors.length).toBe(0)
+    expect(rows).toEqual([
+      { asset: 'XLM', allocation_pct: 55 },
+      { asset: 'USDC', allocation_pct: 45 },
+    ])
+  })
+
+  it('handles embedded commas and quotes across streamed chunks', async () => {
+    const chunks = ['asset,allocation_pct\n', '"XLM, RESERVE",60\n', '"USDC, YIELD",40']
+    const { rows, errors } = await collect(chunks)
+    expect(errors.length).toBe(0)
+    expect(rows[0].asset).toBe('XLM, RESERVE')
+    expect(rows[1].asset).toBe('USDC, YIELD')
+  })
+
+  it('ignores trailing empty lines and CRLF padding in stream', async () => {
+    const chunks = ['asset,allocation_pct\r\n', 'XLM,100\r\n', '\r\n', '   \r\n', '']
+    const { rows, errors } = await collect(chunks)
+    expect(errors.length).toBe(0)
+    expect(rows).toEqual([{ asset: 'XLM', allocation_pct: 100 }])
+  })
+
+  it('yields row-level error on malformed non-numeric values in stream', async () => {
+    const chunks = ['asset,allocation_pct\n', 'XLM,invalid_pct\n', 'USDC,50']
+    const { rows, errors } = await collect(chunks)
+    expect(errors).toContain('allocation_pct')
+    expect(rows).toEqual([
+      { asset: 'XLM', allocation_pct: NaN },
+      { asset: 'USDC', allocation_pct: 50 },
+    ])
+  })
 })

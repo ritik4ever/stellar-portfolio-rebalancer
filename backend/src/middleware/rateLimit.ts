@@ -15,6 +15,22 @@ const WRITE_MAX = parseInt(process.env.RATE_LIMIT_WRITE_MAX || "", 10) || 20;
 const AUTH_MAX = parseInt(process.env.RATE_LIMIT_AUTH_MAX || "", 10) || 10;
 const CRITICAL_MAX = parseInt(process.env.RATE_LIMIT_CRITICAL_MAX || "", 10) || 5;
 
+/**
+ * CoinGecko Demo (free) plan allows 30 calls per minute.
+ * https://docs.coingecko.com/docs/common-errors-rate-limit
+ * `/api/v1/prices` is capped at two thirds of that ceiling so a Reflector
+ * outage cannot consume the whole fallback budget.
+ */
+export const COINGECKO_FREE_TIER_PER_MINUTE = 30;
+const PRICES_WINDOW_MS = 60_000;
+
+export function pricesRouteLimit(tierPerMinute = Number.parseInt(process.env.COINGECKO_FREE_TIER_PER_MINUTE || "", 10)): number {
+  const tier = Number.isFinite(tierPerMinute) && tierPerMinute > 0 ? tierPerMinute : COINGECKO_FREE_TIER_PER_MINUTE;
+  return Math.max(1, Math.floor((tier * 2) / 3));
+}
+
+const PRICES_MAX = pricesRouteLimit();
+
 const BURST_WINDOW_MS = parseInt(process.env.RATE_LIMIT_BURST_WINDOW_MS || "", 10) || 1000;
 const BURST_MAX = parseInt(process.env.RATE_LIMIT_BURST_MAX || "", 10) || 5;
 const WRITE_BURST_MAX = parseInt(process.env.RATE_LIMIT_WRITE_BURST_MAX || "", 10) || 3;
@@ -262,6 +278,18 @@ export const criticalRateLimiter = rateLimit({
   passOnStoreError: true,
 });
 
+export const pricesRateLimiter = rateLimit({
+  windowMs: PRICES_WINDOW_MS,
+  limit: PRICES_MAX,
+  keyGenerator: createKeyGenerator("prices"),
+  handler: createHandler(PRICES_WINDOW_MS, "prices"),
+  standardHeaders: "draft-7",
+  legacyHeaders: true,
+  store: makeStore("prices"),
+  skip: (req) => isTrustedHealthProbe(req),
+  passOnStoreError: true,
+});
+
 export const adminRateLimiter = rateLimit({
   windowMs: GLOBAL_WINDOW_MS,
   limit: AUTH_MAX,
@@ -306,6 +334,8 @@ export const RATE_LIMIT_ROUTE_POLICIES = {
   "POST /api/v1/consent/audit/purge": "protectedCritical",
   "DELETE /api/v1/user/:address/data": "protectedCritical",
 
+  "GET /api/v1/prices": "prices",
+
   "POST /api/v1/admin/assets": "admin",
   "DELETE /api/v1/admin/assets/:symbol": "admin",
   "PATCH /api/v1/admin/assets/:symbol": "admin",
@@ -320,6 +350,7 @@ const limiters: Record<string, import("express").RequestHandler | import("expres
   critical: criticalRateLimiter,
   burst: burstProtectionLimiter,
   admin: adminRateLimiter,
+  prices: pricesRateLimiter,
   protectedWrite: protectedWriteLimiter,
   protectedCritical: protectedCriticalLimiter,
 };

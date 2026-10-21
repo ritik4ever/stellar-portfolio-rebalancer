@@ -2,6 +2,9 @@
     "name": "stellar-portfolio-backend",
     "version": "0.1.0",
     "type": "module",
+    "engines": {
+        "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+    },
     "scripts": {
         "dev": "tsx watch --import ./src/observability/register-tracing.ts --import ./src/observability/apm-register.ts src/index.ts",
         "build": "tsc --noEmitOnError false",
@@ -54,7 +57,7 @@
         "dotenv": "^18.0.3",
         "express": "^5.2.1",
         "express-rate-limit": "^8.7.0",
-        "ioredis": "^6.0.0",
+        "ioredis": "^5.9.3",
         "jsonwebtoken": "^9.0.3",
         "newrelic": "^14.5.0",
         "node-cron": "^4.6.0",
@@ -92,7 +95,7 @@
         "redis-memory-server": "^0.17.1",
         "supertest": "^7.3.0",
         "tsx": "^4.23.15",
-        "typescript": "^7.0.2",
+        "typescript": "^5.9.3",
         "vitest": "^5.0.1"
     }
 }

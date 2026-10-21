@@ -4,7 +4,8 @@
 # Core subsystems called out by the devops issues.
 /backend/ @xqcxx
 /frontend/ @xqcxx
-/contracts/ @xqcxx
+/contracts/** @xqcxx
+/terraform/** @ritik4ever
 /deployment/ @xqcxx
 /docs/ @xqcxx
 /.github/ @xqcxx

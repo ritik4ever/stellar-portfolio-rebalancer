@@ -39,3 +39,26 @@ variable "notification_slack_webhook" {
   type        = string
   default     = ""
 }
+
+variable "rollout_outcome_signal" {
+  description = "Reported outcome of a Terraform rollout: 'success', 'transient_delay', or 'blocked'. Set by the rollout workflow to distinguish outcomes for a partial apply affecting a single service."
+  type        = string
+  default     = "success"
+
+  validation {
+    condition     = contains(["success", "transient_delay", "blocked"], var.rollout_outcome_signal)
+    error_message = "rollout_outcome_signal must be one of: success, transient_delay, blocked."
+  }
+}
+
+variable "rollout_affected_service" {
+  description = "Name of the service affected by a partial Terraform apply during rollout. Empty when the rollout is not partial."
+  type        = string
+  default     = ""
+}
+
+variable "rollout_owner_action" {
+  description = "Owner action required to resolve a partial Terraform apply affecting a single service (e.g., 'retry_apply', 'review_plan_and_apply', 'resolve_blocker'). Empty when no action is required."
+  type        = string
+  default     = ""
+}

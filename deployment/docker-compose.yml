@@ -73,6 +73,12 @@ services:
     volumes:
       - ./logs:/app/logs
       - backend_data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3001/ready', r => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
     deploy:
       resources:
         limits:

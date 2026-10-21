@@ -5,6 +5,7 @@ import ThemeToggle from './ThemeToggle'
 import { WalletSelector } from './WalletSelector'
 import { api, ENDPOINTS } from '../config/api'
 import { getConfiguredNetwork } from '../utils/networkDetection'
+import SystemStatusPanel from './SystemStatusPanel'
 
 interface LandingProps {
     onNavigate: (view: string) => void
@@ -18,7 +19,6 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
     const [showWalletSelector, setShowWalletSelector] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [showWalletDropdown, setShowWalletDropdown] = useState(false)
-    const [walletNetwork,] = useState<string | null>(null)
     const dropdownRef = useRef<HTMLDivElement>(null)
     const configuredNetwork = getConfiguredNetwork()
 
@@ -313,6 +313,17 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
                             </span>
                         </li>
                     </ul>
+
+                    <div className="mt-8">
+                        <SystemStatusPanel />
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('status')}
+                            className="mt-3 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                            Open the full system status page
+                        </button>
+                    </div>
                 </section>
             </div>
 
@@ -339,6 +350,13 @@ const Landing: React.FC<LandingProps> = ({ onNavigate, onConnectWallet, onNeedsC
                         className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
                     >
                         Cookie Policy
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onNavigate('status')}
+                        className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                    >
+                        System Status
                     </button>
                 </div>
             </footer>

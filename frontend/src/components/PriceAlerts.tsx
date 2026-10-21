@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Trash2, Edit2, Bell, Mail, Link, AlertTriangle, CheckCircle2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -59,7 +59,7 @@ const PriceAlerts: React.FC<PriceAlertsProps> = ({ publicKey }) => {
   const [formAlertType, setFormAlertType] = useState<'email' | 'webhook'>('email')
   const [formWebhookUrl, setFormWebhookUrl] = useState('')
   const [formEmail, setFormEmail] = useState('')
-  const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({
+  const [currentPrices] = useState<Record<string, number>>({
     XLM: 0.354,
     USDC: 1.0,
     BTC: 110000,

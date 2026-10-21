@@ -3,6 +3,7 @@ import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
 import { recordCacheTtl, recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice, recordCacheOperation, recordCacheExpiration, recordCacheAge, recordCacheHitRatio, recordCacheSize, recordCacheEntries } from '../observability/metrics.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { CoinGeckoFallbackCache, readCoinGeckoFallbackTtlMs } from './coinGeckoFallbackCache.js'
 import { REDIS_URL } from '../queue/connection.js'
 import { databaseService } from './databaseService.js'
 
@@ -66,6 +67,7 @@ export class ReflectorService {
     private redisCache: Awaited<ReturnType<typeof import('ioredis').default>> | null = null
     private redisAvailable: boolean = false
     private readonly ORACLE_CACHE_KEY = 'oracle:prices'
+    private readonly coinGeckoFallbackCache: CoinGeckoFallbackCache<PriceData>
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
@@ -75,6 +77,7 @@ export class ReflectorService {
 
         const rawTtl = Number.parseInt(process.env.ORACLE_CACHE_TTL_SECONDS || '30', 10)
         this.oracleCacheTtlSeconds = Number.isFinite(rawTtl) && rawTtl >= 0 ? rawTtl : 30
+        this.coinGeckoFallbackCache = new CoinGeckoFallbackCache(readCoinGeckoFallbackTtlMs())
 
         // Initialize cache metrics reporting
         this.startCacheMetricsReporting()
@@ -433,6 +436,11 @@ export class ReflectorService {
 
     private async getFreshPrices(assets: string[], coinIds: Record<string, string>): Promise<PricesMap> {
         const now = Date.now()
+        const cachedFallback = this.coinGeckoFallbackCache.getAll(assets, now)
+        if (cachedFallback) {
+            logger.info('[DEBUG] CoinGecko fallback cache hit', { assets })
+            return cachedFallback
+        }
 
         // Rate limiting - don't make requests too frequently
         if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
@@ -534,6 +542,7 @@ export class ReflectorService {
 
                     prices[asset] = priceData
 
+                    const cachedAtMs = Date.now()
                     this.priceCache.set(asset, {
                         data: {
                             price: priceData.price,
@@ -542,8 +551,9 @@ export class ReflectorService {
                             source: priceData.source,
                             volume: priceData.volume
                         },
-                        cachedAtMs: Date.now()
+                        cachedAtMs
                     })
+                    this.coinGeckoFallbackCache.put(asset, { ...priceData, servedFromCache: true }, cachedAtMs)
 
                     // Record cache update operation
                     recordCacheOperation('update', asset)
@@ -912,6 +922,7 @@ export class ReflectorService {
 
     clearCache(): void {
         this.priceCache.clear()
+        this.coinGeckoFallbackCache.clear()
         logger.info('[DEBUG] Price cache cleared')
     }
 

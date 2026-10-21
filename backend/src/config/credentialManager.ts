@@ -264,7 +264,11 @@ class CredentialManager {
                     };
                     this.redisCredsCache = creds;
                     this.lastRedisRefresh = now;
-                    logger.info('[CREDENTIALS] Refreshed Redis credentials from AWS Secrets Manager');
+                    logger.info('[CREDENTIALS] Refreshed Redis credentials from AWS Secrets Manager', {
+                        host: rawHost,
+                        tls,
+                        source: 'secrets_manager',
+                    });
                     return creds;
                 }
             } catch (err) {

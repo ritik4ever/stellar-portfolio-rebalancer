@@ -86,7 +86,7 @@ Novos contribuidores devem ler o glossário antes de aprofundar na configuraçã
 
 ## Pré-requisitos
 
-* Node.js (>=20.19.0)
+* Node.js 22.22.2 (ver `.nvmrc`)
 * Rust + Cargo
 * Soroban CLI
 * Carteira Stellar (Freighter ou Rabet recomendada)

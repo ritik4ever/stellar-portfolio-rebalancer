@@ -4,7 +4,7 @@ set -euo pipefail
 
 PRODUCTION_DEPLOY=false
 DRY_RUN=false
-HEALTH_URL="${DEPLOY_HEALTH_URL:-${HEALTH_CHECK_URL:-http://localhost:3001/health}}"
+HEALTH_URL="${DEPLOY_HEALTH_URL:-${HEALTH_CHECK_URL:-http://localhost:3001/ready}}"
 HEALTH_TIMEOUT="${DEPLOY_HEALTH_TIMEOUT:-10}"
 HEALTH_RETRIES="${DEPLOY_HEALTH_RETRIES:-5}"
 HEALTH_INTERVAL="${DEPLOY_HEALTH_INTERVAL:-10}"
@@ -15,9 +15,18 @@ DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && p
 PREVIOUS_GOOD_FILE="${DEPLOY_STATE_DIR}/last-known-good"
 DEPLOY_LOG_FILE="${DEPLOY_STATE_DIR}/deploy.log"
 
-# Load environment variables
+# Load environment variables safely — avoids leaking values into the shell
+# history or process list that the previous awk/export approach created.
+# Each non-comment KEY=VALUE line is exported individually so that values
+# containing spaces, quotes, or special characters are handled correctly.
 if [ -f .env ]; then
-    export $(cat .env | grep -v '#' | awk '/=/ {print $1}')
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip blank lines and comment lines
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Only process lines that contain an '=' sign
+        [[ "$line" != *=* ]] && continue
+        export "$line"
+    done < .env
 fi
 
 # Colors for output
@@ -158,6 +167,7 @@ health_check() {
     local url="$HEALTH_URL"
     local attempt=1
     local start_epoch
+    local saw_transient_delay=false
     start_epoch="$(date +%s)"
 
     print_info "Running health check against ${url} (max ${HEALTH_RETRIES} attempts, ${HEALTH_INTERVAL}s interval)..."
@@ -169,8 +179,15 @@ health_check() {
 
     while [ "$attempt" -le "$HEALTH_RETRIES" ]; do
         if curl -sf --max-time "$HEALTH_TIMEOUT" "$url" > /dev/null 2>&1; then
-            print_status "Health check passed on attempt ${attempt}"
+            log_event "STARTUP_OUTCOME=SUCCESS url=${url} attempt=${attempt} transient_delay=${saw_transient_delay}"
+            print_status "STARTUP_OUTCOME=SUCCESS: API readiness passed on attempt ${attempt} (transient_delay=${saw_transient_delay})"
             return 0
+        fi
+
+        if [ "$saw_transient_delay" = false ]; then
+            saw_transient_delay=true
+            log_event "STARTUP_OUTCOME=TRANSIENT_DELAY url=${url} attempt=${attempt} owner_action=wait_for_readiness"
+            print_warning "STARTUP_OUTCOME=TRANSIENT_DELAY: API readiness is pending. Owner action: wait for readiness; if it persists, inspect /readiness and backend logs."
         fi
 
         if [ "$attempt" -lt "$HEALTH_RETRIES" ]; then
@@ -181,7 +198,9 @@ health_check() {
         attempt=$((attempt + 1))
     done
 
-    print_error "Health check failed after ${HEALTH_RETRIES} attempts (elapsed $(( $(date +%s) - start_epoch ))s)"
+    local elapsed_seconds=$(( $(date +%s) - start_epoch ))
+    log_event "STARTUP_OUTCOME=BLOCKED url=${url} attempts=${HEALTH_RETRIES} elapsed_seconds=${elapsed_seconds} owner_action=inspect_readiness_database_and_backend_logs"
+    print_error "STARTUP_OUTCOME=BLOCKED: readiness failed after ${HEALTH_RETRIES} attempts (elapsed ${elapsed_seconds}s). Owner action: inspect /readiness and backend logs, resolve the reported database/dependency issue, then retry or roll back."
     return 1
 }
 
@@ -401,4 +420,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

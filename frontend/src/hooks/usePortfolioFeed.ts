@@ -25,13 +25,6 @@ interface PricesMap {
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
-interface PortfolioFeedState {
-    prices: PricesMap
-    feedMeta: PriceFeedMeta | null
-    connectionState: ConnectionState
-    lastUpdated: Date | null
-}
-
 interface UsePortfolioFeedOptions {
     pollingIntervalMs?: number
     pollingFallback?: boolean
@@ -90,7 +83,7 @@ export function usePortfolioFeed(options: UsePortfolioFeedOptions = {}) {
         if (pollingRef.current) return
         pollingRef.current = setInterval(async () => {
             try {
-                const { default: api } = await import('../config/api')
+                const { api } = await import('../config/api')
                 const data = await api.get<{ prices: PricesMap; feedMeta?: PriceFeedMeta }>(POLLING_API_PATH)
                 if (data && typeof data === 'object') {
                     const d = data as unknown as { prices?: PricesMap; feedMeta?: PriceFeedMeta }

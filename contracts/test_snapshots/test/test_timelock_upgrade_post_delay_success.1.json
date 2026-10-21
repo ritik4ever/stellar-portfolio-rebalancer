@@ -18,7 +18,7 @@
               "function_name": "queue_upgrade",
               "args": [
                 {
-                  "bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  "bytes": "dd01a6d90678a86ba37dc487887fbdbae1767903db75a9f18b92a6cc60e30f5e"
                 }
               ]
             }
@@ -44,7 +44,7 @@
     ]
   ],
   "ledger": {
-    "protocol_version": 27,
+    "protocol_version": 28,
     "sequence_number": 0,
     "timestamp": 172801,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -65,7 +65,7 @@
               "val": {
                 "contract_instance": {
                   "executable": {
-                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "wasm": "dd01a6d90678a86ba37dc487887fbdbae1767903db75a9f18b92a6cc60e30f5e"
                   },
                   "storage": [
                     {
@@ -149,7 +149,7 @@
                         ]
                       },
                       "val": {
-                        "bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        "bytes": "dd01a6d90678a86ba37dc487887fbdbae1767903db75a9f18b92a6cc60e30f5e"
                       }
                     }
                   ]
@@ -173,7 +173,7 @@
               "val": {
                 "contract_instance": {
                   "executable": {
-                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "wasm": "74beb3d1766e5455fda0dc427f938b1490e614db4e1af37a884e05f94d87a7d6"
                   },
                   "storage": null
                 }
@@ -230,8 +230,53 @@
           "data": {
             "contract_code": {
               "ext": "v0",
-              "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-              "code": ""
+              "hash": "74beb3d1766e5455fda0dc427f938b1490e614db4e1af37a884e05f94d87a7d6",
+              "code": "746573745f636f6e74726163745f666f725f636f6e74726163745f69645f4341414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414146435434"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_code": {
+              "ext": "v0",
+              "hash": "a41146d7d116b29faf18d228425fa97194e16df1d4f3e5d4f51c58ca557fcc6d",
+              "code": "746573745f636f6e74726163745f666f725f636f6e74726163745f69645f4341414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414144324b4d"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_code": {
+              "ext": {
+                "v1": {
+                  "ext": "v0",
+                  "cost_inputs": {
+                    "ext": "v0",
+                    "n_instructions": 0,
+                    "n_functions": 0,
+                    "n_globals": 0,
+                    "n_table_entries": 0,
+                    "n_types": 0,
+                    "n_data_segments": 0,
+                    "n_elem_segments": 0,
+                    "n_imports": 0,
+                    "n_exports": 0,
+                    "n_data_segment_bytes": 0
+                  }
+                }
+              },
+              "hash": "dd01a6d90678a86ba37dc487887fbdbae1767903db75a9f18b92a6cc60e30f5e",
+              "code": "0061736d01000000001e11636f6e7472616374656e766d6574617630000000000000000100000000"
             }
           },
           "ext": "v0"
@@ -245,7 +290,7 @@
       "event": {
         "ext": "v0",
         "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-        "type_": "system",
+        "type": "system",
         "body": {
           "v0": {
             "topics": [
@@ -258,7 +303,7 @@
                     "symbol": "Wasm"
                   },
                   {
-                    "bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "bytes": "a41146d7d116b29faf18d228425fa97194e16df1d4f3e5d4f51c58ca557fcc6d"
                   }
                 ]
               },
@@ -268,7 +313,7 @@
                     "symbol": "Wasm"
                   },
                   {
-                    "bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "bytes": "dd01a6d90678a86ba37dc487887fbdbae1767903db75a9f18b92a6cc60e30f5e"
                   }
                 ]
               }
@@ -285,7 +330,7 @@
       "event": {
         "ext": "v0",
         "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-        "type_": "contract",
+        "type": "contract",
         "body": {
           "v0": {
             "topics": [
@@ -319,7 +364,7 @@
                     "symbol": "to_hash"
                   },
                   "val": {
-                    "bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "bytes": "dd01a6d90678a86ba37dc487887fbdbae1767903db75a9f18b92a6cc60e30f5e"
                   }
                 }
               ]

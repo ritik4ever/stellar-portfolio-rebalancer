@@ -1,5 +1,5 @@
 import React from 'react'
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link, Search } from 'lucide-react'
+import { Clock, ArrowRight, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Calendar, Link } from 'lucide-react'
 
 import { useRebalanceHistory } from '../hooks/queries/useHistoryQuery'
 import { downloadCSV, toCSV } from '../utils/export'
@@ -50,10 +50,10 @@ interface RebalanceHistoryProps {
 const RebalanceHistory: React.FC<RebalanceHistoryProps> = ({ portfolioId, isLoading: forcedLoading = false }) => {
     const [page, setPage] = React.useState(1)
     const limit = 10
-    const [search, setSearch] = React.useState('')
-    const [statusFilter, setStatusFilter] = React.useState('')
-    const [triggerFilter, setTriggerFilter] = React.useState('')
-    const [dateFilter, setDateFilter] = React.useState('')
+    const [search] = React.useState('')
+    const [statusFilter] = React.useState('')
+    const [triggerFilter] = React.useState('')
+    const [dateFilter] = React.useState('')
 
     // Query for rebalance history
     const { data, isLoading, error: queryError } = useRebalanceHistory(portfolioId, page, limit, search, statusFilter, triggerFilter, dateFilter)
