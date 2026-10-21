@@ -15,9 +15,18 @@ DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && p
 PREVIOUS_GOOD_FILE="${DEPLOY_STATE_DIR}/last-known-good"
 DEPLOY_LOG_FILE="${DEPLOY_STATE_DIR}/deploy.log"
 
-# Load environment variables
+# Load environment variables safely — avoids leaking values into the shell
+# history or process list that the previous awk/export approach created.
+# Each non-comment KEY=VALUE line is exported individually so that values
+# containing spaces, quotes, or special characters are handled correctly.
 if [ -f .env ]; then
-    export $(cat .env | grep -v '#' | awk '/=/ {print $1}')
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip blank lines and comment lines
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Only process lines that contain an '=' sign
+        [[ "$line" != *=* ]] && continue
+        export "$line"
+    done < .env
 fi
 
 # Colors for output

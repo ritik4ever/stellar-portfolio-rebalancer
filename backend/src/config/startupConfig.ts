@@ -40,6 +40,8 @@ const STELLAR_NETWORKS = new Set(["testnet", "mainnet"]);
 // Accept both full Soroban strkey length and shorter test placeholders (must start with C/S)
 const STELLAR_CONTRACT_REGEX = /^C[A-Z2-7A-Z0-9]{10,}$/;
 const STELLAR_SECRET_REGEX = /^S[A-Z2-7A-Z0-9]{10,}$/;
+// AWS Secrets Manager ARN format: arn:aws:secretsmanager:<region>:<account-id>:secret:<name>
+const AWS_SECRET_ARN_REGEX = /^arn:aws:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$/;
 
 export function validateStartupConfigOrThrow(
   env: NodeJS.ProcessEnv = process.env,
@@ -253,6 +255,53 @@ export function validateStartupConfigOrThrow(
   const { config: analyticsCompaction, errors: analyticsCompactionErrors } =
     parseAnalyticsCompactionConfig(env);
   errors.push(...analyticsCompactionErrors);
+
+  // ── AWS Secrets Manager rotation config validation ────────────────────────
+  // When USE_AWS_SECRETS_MANAGER=true the application expects at least one
+  // ARN to be configured; starting without one means secret rotation can
+  // never be picked up and the process would silently fall back to
+  // environment-variable credentials — a partial rollout without the feature.
+  const useSecretsManager = (env.USE_AWS_SECRETS_MANAGER || "").trim().toLowerCase() === "true";
+  const dbSecretArn = (env.DB_SECRET_ARN || env.AWS_DB_SECRET_ID || "").trim();
+  const redisSecretArn = (env.REDIS_SECRET_ARN || env.AWS_REDIS_SECRET_ID || "").trim();
+
+  if (useSecretsManager) {
+    if (!dbSecretArn && !redisSecretArn) {
+      errors.push(
+        "USE_AWS_SECRETS_MANAGER is true but neither DB_SECRET_ARN nor REDIS_SECRET_ARN is set. " +
+        "Provide at least one ARN or set USE_AWS_SECRETS_MANAGER=false.",
+      );
+    }
+    if (dbSecretArn && !AWS_SECRET_ARN_REGEX.test(dbSecretArn)) {
+      errors.push(
+        `DB_SECRET_ARN '${dbSecretArn}' is not a valid AWS Secrets Manager ARN. ` +
+        "Expected format: arn:aws:secretsmanager:<region>:<account-id>:secret:<name>",
+      );
+    }
+    if (redisSecretArn && !AWS_SECRET_ARN_REGEX.test(redisSecretArn)) {
+      errors.push(
+        `REDIS_SECRET_ARN '${redisSecretArn}' is not a valid AWS Secrets Manager ARN. ` +
+        "Expected format: arn:aws:secretsmanager:<region>:<account-id>:secret:<name>",
+      );
+    }
+  } else {
+    // Even without USE_AWS_SECRETS_MANAGER=true, an ARN in the environment
+    // activates Secrets Manager in credentialManager.ts. Validate its format
+    // so mis-typed ARNs fail loudly at startup.
+    if (dbSecretArn && !AWS_SECRET_ARN_REGEX.test(dbSecretArn)) {
+      errors.push(
+        `DB_SECRET_ARN '${dbSecretArn}' is not a valid AWS Secrets Manager ARN. ` +
+        "Expected format: arn:aws:secretsmanager:<region>:<account-id>:secret:<name>",
+      );
+    }
+    if (redisSecretArn && !AWS_SECRET_ARN_REGEX.test(redisSecretArn)) {
+      errors.push(
+        `REDIS_SECRET_ARN '${redisSecretArn}' is not a valid AWS Secrets Manager ARN. ` +
+        "Expected format: arn:aws:secretsmanager:<region>:<account-id>:secret:<name>",
+      );
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────────
 
   const autoRebalancerEnabled =
     env.NODE_ENV === "production" || env.ENABLE_AUTO_REBALANCER === "true";
