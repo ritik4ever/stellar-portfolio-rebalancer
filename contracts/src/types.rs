@@ -39,6 +39,11 @@ pub const MAX_PORTFOLIO_STORAGE_BYTES: u32 = 3_072;
 pub const REBALANCE_COOLDOWN_SECONDS: u64 = 3600;
 pub const PRICE_MAX_AGE_SECONDS: u64 = 3600;
 pub const MAX_TIMESTAMP_DRIFT_SECONDS: u64 = 7200;
+/// Renew portfolio entries below one day of remaining lifetime.
+pub const PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS: u32 = 17_280;
+/// Extend portfolios to thirty days (five seconds per ledger), below Soroban's
+/// protocol maximum persistent-entry TTL of 535,680 ledgers.
+pub const PORTFOLIO_TTL_EXTEND_TO_LEDGERS: u32 = 518_400;
 
 pub const MIN_REBALANCE_THRESHOLD: u32 = 1;
 pub const MAX_REBALANCE_THRESHOLD: u32 = 50;
