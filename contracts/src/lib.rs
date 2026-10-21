@@ -93,17 +93,7 @@ impl PortfolioRebalancer {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
-    /// Step 1 of the two-step admin transfer: nominate `new_admin`.
-    ///
-    /// Admin-only. Nomination alone grants `new_admin` nothing — every
-    /// admin-gated entrypoint keeps checking `DataKey::Admin`, which is only
-    /// rewritten once `new_admin` calls [`accept_admin`] itself. This makes
-    /// an admin handover impossible to complete against an address that
-    /// cannot sign (a typo, a contract with no auth path, a lost key).
-    ///
-    /// Calling this again replaces any proposal still in flight, so the
-    /// current admin can retarget or effectively cancel a mistaken nomination
-    /// by proposing a different address.
+    
     pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
