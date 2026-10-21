@@ -565,9 +565,11 @@ fn test_pause_resume_rebalance_full_lifecycle() {
     client.initialize(&admin, &reflector_id);
 
     let mut allocations = Map::new(&env);
-    let asset = Address::generate(&env);
-    allocations.set(asset, 10000);
+    let asset = create_token_and_mint(&env, &admin, &user, 200);
+    allocations.set(asset.clone(), 10000);
     let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+
+    client.deposit(&pid, &asset, &100, &String::from_str(&env, ""));
 
     // 1. Pause — rebalance must fail
     client.pause_portfolio(&pid, &PauseReason::UserPaused);

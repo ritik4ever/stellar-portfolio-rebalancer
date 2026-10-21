@@ -6,8 +6,8 @@
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "scripts": {
-    "dev": "vite --host",
-    "build": "tsc && vite build",
+    "dev": "node init && vite --host",
+    "build": "node init && tsc && vite build",
     "preview": "vite preview --host",
     "test": "vitest run",
     "test:unit": "vitest run",
@@ -16,7 +16,7 @@
     "test:e2e:visual": "playwright test --project=visual-regression",
     "test:e2e:visual-update": "playwright test --project=visual-regression --update-snapshots",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build",
+    "build-storybook": "node init && storybook build",
     "lint:i18n": "node scripts/audit-i18n.js",
     "lint": "npm run lint:i18n"
   },
