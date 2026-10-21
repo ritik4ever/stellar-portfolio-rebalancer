@@ -126,8 +126,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// The address nominated by [`propose_admin`] and still awaiting its
-    /// [`accept_admin`] call, or `None` when no transfer is in flight.
+    
     pub fn get_pending_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
