@@ -153,10 +153,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Create a portfolio with full strategy configuration.
-    /// `strategy` defaults to [`StrategyType::Threshold`] for callers that
-    /// do not pass explicit strategy parameters (backward compatible with
-    /// the original [`create_portfolio`] signature).
+    
     pub fn create_portfolio_with_strategy(
         env: Env,
         user: Address,
