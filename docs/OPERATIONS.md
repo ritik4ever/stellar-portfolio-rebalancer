@@ -91,6 +91,70 @@ curl -i http://localhost:3001/readiness
 
 If the container remains `starting`, wait for readiness and inspect `/readiness` if the delay persists. If it becomes `unhealthy`, use the `checks.database` error and database path in `/readiness` to resolve connectivity, permissions, or database-lock issues, then retry startup. The deployment script uses `/ready` too and logs `STARTUP_OUTCOME=SUCCESS`, `TRANSIENT_DELAY`, or `BLOCKED`; a blocked outcome includes the owner action and follows the existing rollback policy.
 
+### Validating Docker startup from a clean environment (SPR-2026-266)
+
+`deployment/docker-compose.yml` provides self-contained defaults for all required runtime variables (`PORT`, `CONTRACT_ADDRESS`, `REFLECTOR_ADDRESS`, `REFLECTOR_SERVICE_URL`, `STELLAR_NETWORK`, `STELLAR_HORIZON_URL`, `DEMO_MODE=true`, `ALLOW_DEMO_BALANCE_FALLBACK=true`, `ALLOW_FALLBACK_PRICES=true`, and `DB_PATH=/app/data/portfolio.db`). A fresh checkout can boot without a local `.env` file or pre-created SQLite database—Docker creates the `backend_data` and `frontend_logs` named volumes automatically.
+
+1. **Reset to a clean Docker state** (removes containers, network, and named volumes so no undocumented local state remains):
+
+   ```sh
+   docker compose -f deployment/docker-compose.yml --profile full-stack --profile observability --profile analytics down -v --remove-orphans
+   ```
+
+2. **Reproduce isolated service startup (`--no-deps`)**:
+
+   Each default service can be started on its own without pre-starting the rest of the stack:
+
+   ```sh
+   # Isolated oracle mock (/health and /ready on :8080)
+   docker compose -f deployment/docker-compose.yml up --build -d --no-deps reflector-mock
+   curl -fsS http://localhost:8080/health
+
+   # Isolated backend (initializes SQLite in backend_data and uses fallback/demo defaults if reflector-mock or Redis is absent)
+   docker compose -f deployment/docker-compose.yml up --build -d --no-deps backend
+   curl -fsS http://localhost:3001/ready
+
+   # Isolated frontend (serves static bundle on :3000 -> :80)
+   docker compose -f deployment/docker-compose.yml up --build -d --no-deps frontend
+   curl -fsS -o /dev/null -w '%{http_code}\n' http://localhost:3000/
+   ```
+
+3. **Reproduce services starting in a different order**:
+
+   - **Backend before `reflector-mock` (or before `full-stack` `redis` / `postgres`):**
+     Start `backend` first, then start `reflector-mock`:
+     ```sh
+     docker compose -f deployment/docker-compose.yml down -v
+     docker compose -f deployment/docker-compose.yml up --build -d --no-deps backend
+     docker compose -f deployment/docker-compose.yml up --build -d --no-deps reflector-mock
+     ```
+     `backend` boots with fallback prices enabled, marks optional Redis queues as `disabled` when `redis` is not running, and transitions from `starting` to `healthy` as soon as SQLite readiness succeeds. Once `reflector-mock` is `healthy`, live mock oracle queries at `http://reflector-mock:8080` succeed without manual reconfiguration.
+   - **`frontend` before `backend` reaches `healthy`:**
+     `frontend` declares `depends_on: [backend]` (`service_started`), so Nginx begins serving static assets while `portfolio-backend` is still in its `start_period: 30s` readiness window (`starting`) before converging to `healthy`.
+
+4. **Check health checks and `unless-stopped` restart behavior**:
+
+   All default services (`frontend`, `backend`, `reflector-mock`) and stateful profile services (`redis`, `postgres`, `umami-db`) configure `restart: unless-stopped` and container `healthcheck` probes:
+
+   ```sh
+   # Inspect health status and restart policy for each default container
+   docker compose -f deployment/docker-compose.yml ps
+   docker inspect --format '{{.Name}} status={{.State.Status}} health={{.State.Health.Status}} restart={{.HostConfig.RestartPolicy.Name}} count={{.RestartCount}}' \
+     portfolio-frontend portfolio-backend portfolio-reflector-mock
+
+   # Verify container restart recovery and post-restart readiness
+   docker compose -f deployment/docker-compose.yml restart backend reflector-mock frontend
+   docker inspect --format '{{.Name}} health={{.State.Health.Status}}' \
+     portfolio-frontend portfolio-backend portfolio-reflector-mock
+   ```
+
+   Run the offline verification tests from a clean checkout (no running Docker daemon or `node_modules` required):
+
+   ```sh
+   node --test deployment/deploy.test.mjs
+   node scripts/validate-compose-resources.mjs
+   ```
+
 ## Contract event indexer
 
 - **Code:** `backend/src/services/contractEventIndexer.ts`.
