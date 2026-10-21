@@ -28,6 +28,7 @@
     "changelog:preview": "conventional-changelog -p conventionalcommits",
     "validate:env-examples": "node scripts/validate-env-examples.mjs",
     "validate:compose-resources": "node scripts/validate-compose-resources.mjs",
+    "validate:docker-startup": "node deployment/docker-startup-smoke.mjs",
     "validate:funding": "node scripts/validate-funding.mjs",
     "validate:release-verification": "node scripts/validate-release-verification.mjs",
     "validate:env-ref": "node scripts/validate-environment-reference.mjs",

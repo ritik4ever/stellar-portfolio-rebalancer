@@ -91,6 +91,22 @@ curl -i http://localhost:3001/readiness
 
 If the container remains `starting`, wait for readiness and inspect `/readiness` if the delay persists. If it becomes `unhealthy`, use the `checks.database` error and database path in `/readiness` to resolve connectivity, permissions, or database-lock issues, then retry startup. The deployment script uses `/ready` too and logs `STARTUP_OUTCOME=SUCCESS`, `TRANSIENT_DELAY`, or `BLOCKED`; a blocked outcome includes the owner action and follows the existing rollback policy.
 
+#### Repeatable Docker startup smoke verification (SPR-2026-270)
+
+Maintainers can verify Docker Compose health check definitions, `restart: unless-stopped` policies, out-of-order service startup resilience, and API-before-database readiness recovery from a clean environment without undocumented local state:
+
+```sh
+npm run validate:docker-startup
+bash deployment/deploy.sh --startup-smoke
+node --test deployment/deploy.test.mjs
+```
+
+The smoke check verifies that:
+
+1. All core services (`frontend`, `backend`, `reflector-mock`, `redis`, `postgres`) declare `restart: unless-stopped` and expected health checks in `deployment/docker-compose.yml`.
+2. Services starting in different orders (dependencies first, API before database, or reverse order) converge cleanly to `healthy` and `STARTUP_OUTCOME=SUCCESS`.
+3. When the API starts before its database is ready, `/health` responds `200`, `/ready` reports `503` (`STARTUP_OUTCOME=TRANSIENT_DELAY`), and readiness recovers to `200` (`STARTUP_OUTCOME=SUCCESS`) once the database is ready (or reports `STARTUP_OUTCOME=BLOCKED` if the database stays unavailable across all retries).
+
 ## Contract event indexer
 
 - **Code:** `backend/src/services/contractEventIndexer.ts`.

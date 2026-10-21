@@ -144,6 +144,36 @@ describe('buildReadinessReport', () => {
         })
     })
 
+    it('transitions from not_ready to ready when the API starts before its database is ready', async () => {
+        const { buildReadinessReport, setReadinessCacheTtl, clearReadinessCache } = await import('../monitoring/readiness.js')
+        clearReadinessCache()
+        setReadinessCacheTtl(0)
+
+        mockGetReadiness.mockReturnValueOnce({
+            ready: false,
+            databasePath: '/tmp/test.db',
+            error: 'connection refused'
+        })
+
+        const initialReport = await buildReadinessReport()
+        expect(initialReport.status).toBe('not_ready')
+        expect(initialReport.checks.database.status).toBe('not_ready')
+        expect(initialReport.checks.database.details).toMatchObject({
+            databasePath: '/tmp/test.db',
+            error: 'connection refused',
+            degradedReason: 'connection refused'
+        })
+
+        mockGetReadiness.mockReturnValueOnce({
+            ready: true,
+            databasePath: '/tmp/test.db'
+        })
+
+        const recoveredReport = await buildReadinessReport()
+        expect(recoveredReport.status).toBe('ready')
+        expect(recoveredReport.checks.database.status).toBe('ready')
+    })
+
     it('returns not_ready when an enabled auto-rebalancer is not initialized', async () => {
         process.env.ENABLE_AUTO_REBALANCER = 'true'
         mockGetAutoRebalancerStatus.mockReturnValue({
