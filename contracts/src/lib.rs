@@ -77,8 +77,7 @@ impl PortfolioRebalancer {
             .instance()
             .set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
-        // A freshly initialized contract has no legacy storage to migrate,
-        // so it starts on the current schema directly.
+        
         env.storage()
             .instance()
             .set(&DataKey::SchemaVersion, &CURRENT_STORAGE_SCHEMA_VERSION);
