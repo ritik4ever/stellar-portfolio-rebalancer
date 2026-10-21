@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     checkCVaRVaRThresholdsAndAutoPause: vi.fn().mockResolvedValue({}),
     getAllPortfolios: vi.fn(),
     getCurrentPrices: vi.fn(),
+    getCurrentPricesWithMeta: vi.fn(),
     checkCooldownPeriod: vi.fn().mockReturnValue({ safe: true }),
     checkMarketConditions: vi.fn().mockReturnValue({ safe: true }),
 }))
@@ -42,6 +43,7 @@ vi.mock('../services/stellar.js', () => {
 vi.mock('../services/reflector.js', () => {
     class ReflectorService {
         getCurrentPrices = mocks.getCurrentPrices
+        getCurrentPricesWithMeta = mocks.getCurrentPricesWithMeta
     }
     return { ReflectorService }
 })
@@ -86,6 +88,16 @@ import type { Portfolio } from '../types/index.js'
 const PRICES = {
     XLM: { price: 0.35, change: 0, timestamp: 1, source: 'external' as const },
     USDC: { price: 1.0, change: 0, timestamp: 1, source: 'external' as const },
+}
+
+const FEED_META = {
+    provider: 'backend' as const,
+    resolvedAtMs: Date.now(),
+    degraded: false,
+    staleOrLimited: false,
+    resolutionHint: 'fresh_primary' as const,
+    assetsCount: 2,
+    cacheStatus: 'redis_miss' as const,
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -133,6 +145,7 @@ describe('processAutoRebalanceJob — strategy dispatch', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentPrices.mockResolvedValue(PRICES)
+        mocks.getCurrentPricesWithMeta.mockResolvedValue({ prices: PRICES, feedMeta: FEED_META })
         mocks.shouldAllowRebalance.mockReturnValue({ allowed: true, reason: 'OK', alerts: [] })
         mocks.checkCooldownPeriod.mockReturnValue({ safe: true })
         mocks.checkMarketConditions.mockReturnValue({ safe: true })
@@ -201,6 +214,7 @@ describe('processAutoRebalanceJob — CVaR/VaR auto-pause integration', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentPrices.mockResolvedValue(PRICES)
+        mocks.getCurrentPricesWithMeta.mockResolvedValue({ prices: PRICES, feedMeta: FEED_META })
         mocks.checkCooldownPeriod.mockReturnValue({ safe: true })
         mocks.checkMarketConditions.mockReturnValue({ safe: true })
         mocks.checkRebalanceNeeded.mockResolvedValue(true)
@@ -262,11 +276,38 @@ describe('processAutoRebalanceJob — CVaR/VaR auto-pause integration', () => {
             expect.arrayContaining([expect.objectContaining({ reason: 'circuit_breaker', count: 1 })])
         )
     })
+
+    it('does not persist auto-pause side effects when feed is stale/limited for a single missing interval', async () => {
+        mocks.getAllPortfolios.mockResolvedValue([dcaPortfolio()])
+        mocks.getCurrentPricesWithMeta.mockResolvedValue({
+            prices: PRICES,
+            feedMeta: {
+                ...FEED_META,
+                staleOrLimited: true,
+                resolutionHint: 'error_recovery_cache',
+            },
+        })
+        mocks.shouldAllowRebalance.mockReturnValue({
+            allowed: false,
+            reason: 'Rebalance blocked by VaR limit',
+            reasonCode: 'STAT_MODEL_VAR_BREACH',
+            alerts: [],
+        })
+
+        const summary = await processAutoRebalanceJob(mockJob())
+
+        expect(mocks.checkCVaRVaRThresholdsAndAutoPause).not.toHaveBeenCalled()
+        expect(mocks.queueAdd).not.toHaveBeenCalled()
+        expect(summary.portfoliosSkipped).toEqual(
+            expect.arrayContaining([expect.objectContaining({ reason: 'stale_price_data', count: 1 })])
+        )
+    })
 })
 describe('processAutoRebalanceJob — on-chain cross-check', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentPrices.mockResolvedValue(PRICES)
+        mocks.getCurrentPricesWithMeta.mockResolvedValue({ prices: PRICES, feedMeta: FEED_META })
         mocks.shouldAllowRebalance.mockReturnValue({ allowed: true, reason: 'OK', alerts: [] })
         mocks.checkCooldownPeriod.mockReturnValue({ safe: true })
         mocks.checkMarketConditions.mockReturnValue({ safe: true })
