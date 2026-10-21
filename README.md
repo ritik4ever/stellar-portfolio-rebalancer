@@ -28,6 +28,7 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 
 * **Smart Rebalancing** – Automatic maintenance of target allocations based on threshold triggers.
 * **Bounded Drift Thresholds** – Portfolio thresholds are constrained to 1%–50%; an out-of-range threshold is rejected atomically, so no portfolio, balance or configuration is changed.
+* **Atomic Target-Weight Invariant** – Target allocations are strictly enforced to sum to 100% (10,000 bps); invalid allocations exceeding 100% fail atomically, preserving stored weights, balances, and unchanged funds before and after state-changing operations.
 * **Multi-Wallet Support** – Compatible with Freighter, Rabet, xBull, and other Stellar wallets.
 * **Real-Time Price Feeds** – Powered by Reflector oracles with API fallbacks.
 * **Risk Management** – Circuit breakers, concentration limits, and volatility detection.

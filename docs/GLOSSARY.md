@@ -34,7 +34,7 @@ Each portfolio is capped at `MAX_PORTFOLIO_ASSETS` (10) assets, and each user at
 `target_allocations` is a mapping of asset addresses to target percentages.
 - **Backend/API layer:** Plain percentages summing to 100. Example: `{ "XLM": 40, "USDC": 35, "BTC": 25 }`
 - **Smart contract layer:** Basis points (0–10 000) summing to `ALLOCATION_DENOMINATOR` (10 000). The backend transparently converts between the two representations when creating or syncing portfolios.
-- The contract checks this during `create_portfolio` and rejects invalid allocations with `InvalidAllocation`.
+- The contract checks this during `create_portfolio` and `update_allocations`, rejecting invalid allocations exceeding or falling below 100% (10,000 bps) atomically with `InvalidAllocation` without modifying stored weights or balances.
 
 ### Rebalance threshold / drift threshold
 Also called **threshold** in the UI and contract.
