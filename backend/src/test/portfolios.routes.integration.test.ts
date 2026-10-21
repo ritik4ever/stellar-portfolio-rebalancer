@@ -825,8 +825,6 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
     describe('POST /api/v1/portfolio/:id/clone & GET /api/v1/portfolios', () => {
         let originalPortfolioId: string
-    describe('GET /api/portfolio/:id/history - paginated rebalance history', () => {
-        let portfolioId: string
 
         beforeEach(async () => {
             const res = await request(app)
@@ -890,7 +888,15 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
             expect(res.body.error?.code).toBe('NOT_FOUND')
         })
     })
-})
+
+    describe('GET /api/portfolio/:id/history - paginated rebalance history', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
                     allocations: { XLM: 60, USDC: 40 },
                     threshold: 5
                 })
