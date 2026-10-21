@@ -72,6 +72,25 @@ See `deployment/terraform/modules/elasticache/README.md` for the full failover d
 - **Heartbeat supervisor:** When a process calls `startAllWorkers()`, the runtime registers a stop-and-restart handler per worker and starts the heartbeat supervisor. A worker that misses `WORKER_SUPERVISOR_MISSED_HEARTBEATS` consecutive heartbeats (default 3, swept every `WORKER_SUPERVISOR_INTERVAL_MS`, default 30s) is restarted automatically; `WORKER_SUPERVISOR_MAX_RESTARTS` restarts per `WORKER_SUPERVISOR_RESTART_WINDOW_MS` window (defaults 3 per 5 min) bound crash loops. Set `WORKER_SUPERVISOR_ENABLED=false` to keep logging misses without restarting, and inspect `/api/v1/workers/health` for `summary.crashLooping` and per-worker supervisor state.
 - **Docker Compose:** The `backend` service runs `npm start` only. Ensure `REDIS_URL` points at the `redis` service (e.g. `redis://redis:6379`) if you expect queues to function. The optional `observability` profile runs another Node process on a separate port for observability stacks—see `deployment/docker-compose.yml`. Note that the Docker Compose configuration includes predefined resource limits (CPU and memory) for each service to guarantee reproducibility in local and preview environments. You can adjust these in a `docker-compose.override.yml` if necessary.
 
+### Docker API startup outcomes
+
+The backend container healthcheck polls `/ready`, not `/health`: `/health` only confirms that the HTTP process is responding, while `/ready` also checks the database and required subsystems. Docker reports:
+
+- `healthy` when `/ready` returns HTTP 200 (startup succeeded).
+- `starting` while the backend is starting or during temporary readiness failures. The probe runs every 5 seconds, allows 3 seconds per request, and has a 30-second start period.
+- `unhealthy` after six failed probes outside the start period (startup is blocked).
+
+Check the current state and probe details with:
+
+```sh
+docker compose ps backend
+docker inspect --format '{{json .State.Health}}' portfolio-backend
+docker compose logs --tail=100 backend
+curl -i http://localhost:3001/readiness
+```
+
+If the container remains `starting`, wait for readiness and inspect `/readiness` if the delay persists. If it becomes `unhealthy`, use the `checks.database` error and database path in `/readiness` to resolve connectivity, permissions, or database-lock issues, then retry startup. The deployment script uses `/ready` too and logs `STARTUP_OUTCOME=SUCCESS`, `TRANSIENT_DELAY`, or `BLOCKED`; a blocked outcome includes the owner action and follows the existing rollback policy.
+
 ## Contract event indexer
 
 - **Code:** `backend/src/services/contractEventIndexer.ts`.
