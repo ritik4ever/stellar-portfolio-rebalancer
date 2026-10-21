@@ -117,7 +117,7 @@ pub fn build_rebalance_preview(
         if let Some(price_data) =
             crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
-            if price_data.is_stale(current_time, 3600) {
+            if price_data.is_stale(current_time, REFLECTOR_PRICE_MAX_AGE_SECONDS) {
                 skipped_assets.push_back(asset.clone());
                 skip_reasons.set(asset.clone(), AssetSkipReason::StalePrice);
                 continue;
