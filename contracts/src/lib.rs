@@ -56,15 +56,7 @@ fn guard_ledger_timestamp(env: &Env) -> u64 {
 
 #[contractimpl]
 impl PortfolioRebalancer {
-    /// Validate that `reflector_address` behaves like a Reflector oracle by
-    /// making a lightweight read-only call (`base()`) and checking the result.
-    ///
-    /// This is a best-effort guard, not a full interface conformance check:
-    /// - A malicious contract could implement `base()` but return wrong data in
-    ///   `lastprice()`. Further operations (rebalance, preview) will detect
-    ///   missing or invalid price data at the point of use.
-    /// - The goal is to fail early when the address is clearly not a Reflector
-    ///   contract (e.g. a typo, an EOA, or a random contract).
+    
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
@@ -93,9 +85,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// Currently persisted storage schema version (see
-    /// `CURRENT_STORAGE_SCHEMA_VERSION`), advanced automatically by
-    /// `execute_upgrade` via `migrate_storage`.
+    
     pub fn storage_schema_version(env: Env) -> u32 {
         upgrade::current_schema_version(&env)
     }
