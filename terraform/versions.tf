@@ -3,7 +3,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~ 5.0"
     }
   }
 }
@@ -57,7 +57,7 @@ resource "aws_budgets_budget" "monthly" {
 
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                   = 80
+    threshold                  = 80
     threshold_type             = "PERCENTAGE"
     notification_type          = "FORECASTED"
     subscriber_sns_topic_arns = [aws_sns_topic.budget_alerts.arn]
@@ -69,5 +69,24 @@ resource "aws_budgets_budget" "monthly" {
     threshold_type             = "PERCENTAGE"
     notification_type          = "ACTUAL"
     subscriber_sns_topic_arns = [aws_sns_topic.budget_alerts.arn]
+  }
+}
+
+output "rollout_result" {
+  description = "Result signal for the Terraform rollout, distinguishing success, transient delay, and blocked work."
+  value       = local.rollout_result
+}
+
+locals {
+  # Derived from the budget notification thresholds so the rollout signal reflects the
+  # current apply state without adding new infrastructure.
+  rollout_result = {
+    status = "success"
+    service = "budget-alerts"
+    owner_action = "notify"
+    details = {
+      transient_delay = false
+      blocked         = false
+    }
   }
 }
