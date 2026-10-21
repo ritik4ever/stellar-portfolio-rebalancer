@@ -62,6 +62,11 @@ impl PortfolioRebalancer {
             return Err(Error::AlreadyInitialized);
         }
 
+        // The address that becomes the contract admin must authorize the
+        // initialization. Otherwise any caller could choose the admin and the
+        // oracle source that protect all subsequent privileged operations.
+        admin.require_auth();
+
         
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
         match reflector_client.try_base() {

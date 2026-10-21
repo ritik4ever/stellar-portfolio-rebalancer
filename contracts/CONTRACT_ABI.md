@@ -25,6 +25,8 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Returns:** `Ok(())` on success, `Err(Error::AlreadyInitialized)` if already initialized.
 - **Preconditions:**
   - Contract must not already be initialized.
+  - `admin` must authorize the initialization; the caller cannot select an
+    admin address on someone else’s behalf.
 
 ### `get_admin(env: Env) -> Address`
 

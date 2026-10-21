@@ -429,6 +429,46 @@ fn test_execute_rebalance_success() {
 }
 
 #[test]
+fn test_unauthorized_rebalance_does_not_advance_portfolio_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10_000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let mut allocations = Map::new(&env);
+    allocations.set(Address::generate(&env), 10_000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    let actual_balances = Map::new(&env);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 15_000;
+    });
+
+    let unauthorized = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "execute_rebalance",
+                args: (&pid, &actual_balances).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_execute_rebalance(&pid, &actual_balances);
+    assert!(unauthorized.is_err());
+    assert_eq!(client.get_portfolio(&pid).last_rebalance, 10_000);
+}
+
+#[test]
 fn test_batch_rebalance_mixed_success_and_failure() {
     let env = Env::default();
     env.mock_all_auths();
@@ -916,6 +956,21 @@ fn test_stale_data() {
 
     let actual_balances = Map::new(&env);
     let _result = client.try_execute_rebalance(&pid, &actual_balances);
+}
+
+#[test]
+fn test_stale_quote_at_maximum_age_is_accepted() {
+    let price = PriceData {
+        price: MOCK_REFLECTOR_PRICE,
+        timestamp: 10_000 - REFLECTOR_PRICE_MAX_AGE_SECONDS,
+    };
+
+    assert!(!price.is_stale(10_000, REFLECTOR_PRICE_MAX_AGE_SECONDS));
+    assert!(PriceData {
+        timestamp: price.timestamp - 1,
+        ..price
+    }
+    .is_stale(10_000, REFLECTOR_PRICE_MAX_AGE_SECONDS));
 }
 
 #[test]
@@ -1607,6 +1662,46 @@ fn test_initialize_accepts_valid_reflector_address() {
 
     let result = client.try_initialize(&admin, &reflector_id);
     assert_eq!(result, Ok(Ok(())));
+}
+
+#[test]
+fn test_initialize_requires_admin_authorization() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    let unauthorized = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_initialize(&admin, &reflector_id);
+    assert!(
+        unauthorized.is_err(),
+        "a caller must not initialize the contract for an unauthorized admin"
+    );
+
+    let initialized = client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_initialize(&admin, &reflector_id);
+    assert_eq!(initialized, Ok(Ok(())));
+    assert_eq!(client.get_admin(), admin);
 }
 
 #[test]
