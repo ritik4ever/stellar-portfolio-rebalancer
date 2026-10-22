@@ -1780,12 +1780,15 @@ getConsent(userId: string): ConsentRecord | undefined {
         isSimulated: eventData.isSimulated,
       };
 
-        this.db
+        const insert = this.db
           .prepare(
             `
                 INSERT INTO rebalance_history
-                    (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, portfolio_id, timestamp, trigger, reason_code, trades, gas_used, status, is_automatic, risk_alerts, error, details,
+                     event_source, on_chain_confirmed, on_chain_event_type, on_chain_tx_hash, on_chain_ledger,
+                     on_chain_contract_id, on_chain_paging_token, is_simulated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (on_chain_paging_token) WHERE on_chain_paging_token IS NOT NULL DO NOTHING
             `,
           )
           .run(
@@ -1801,7 +1804,27 @@ getConsent(userId: string): ConsentRecord | undefined {
             event.riskAlerts ? JSON.stringify(event.riskAlerts) : null,
             event.error ?? null,
             event.details ? JSON.stringify(event.details) : null,
+            event.eventSource ?? "offchain",
+            event.onChainConfirmed ? 1 : 0,
+            event.onChainEventType ?? null,
+            event.onChainTxHash ?? null,
+            event.onChainLedger ?? null,
+            event.onChainContractId ?? null,
+            event.onChainPagingToken ?? null,
+            event.isSimulated ? 1 : 0,
           );
+
+        if (insert.changes === 0 && event.onChainPagingToken != null) {
+          // The unique index is the durable boundary, including concurrent or
+          // restarted indexers. Never overwrite the original recorded event.
+          const existing = this.db
+            .prepare<[string], RebalanceHistoryRow>(
+              "SELECT * FROM rebalance_history WHERE on_chain_paging_token = ?",
+            )
+            .get(event.onChainPagingToken);
+          if (!existing) throw new Error("Replayed event could not be retrieved");
+          return rowToEvent(existing);
+        }
 
         return event;
       } catch (err) {
