@@ -23,12 +23,12 @@ import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
 import { redactString, redactObject } from '../utils/secretRedactor.js'
 import { ok, fail } from '../utils/apiResponse.js'
-import { ConflictError } from '../types/index.js'
-import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
+import { createPortfolioSchema, updatePortfolioSchema, updateAllocationsSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
+import { applyAllocationEdit, markRebalanceActive, markRebalanceInactive } from '../services/portfolioPersistenceBoundary.js'
 import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
 import { getPublicShareView } from '../services/publicShare.js'
 import { OG_IMAGE_CONTENT_TYPE, renderPortfolioOgCard } from '../services/ogImage.js'
-import type { Portfolio } from '../types/index.js'
+import { ConflictError, type Portfolio } from '../types/index.js'
 
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
 import { acquireWorkerLock, releaseWorkerLock } from '../queue/workers/workerRuntime.js'
@@ -127,22 +127,199 @@ portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema), asyn
     }
 })
 
-// Update portfolio with optimistic concurrency control
+// Update portfolio with optimistic concurrency control and boundary handling
 portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(updatePortfolioSchema), async (req: Request, res: Response) => {
     try {
         const portfolioId = req.params.id;
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
         const { version, ...updates } = req.body;
         if (version === undefined) return fail(res, 400, 'VALIDATION_ERROR', 'Version is required for update');
+
+        if (updates.allocations !== undefined) {
+            const decision = await applyAllocationEdit({
+                portfolioId,
+                allocations: updates.allocations,
+                expectedVersion: version,
+            });
+
+            if (!decision.applied) {
+                const status = decision.result === 'not_found'
+                    ? 404
+                    : decision.result === 'validation_error'
+                    ? 400
+                    : 409;
+                const errCode = decision.result === 'not_found'
+                    ? 'NOT_FOUND'
+                    : decision.result === 'validation_error'
+                    ? 'VALIDATION_ERROR'
+                    : 'CONFLICT';
+                return fail(res, status, errCode, decision.reason, {
+                    decision,
+                    committedVersion: decision.committedVersion,
+                    currentVersion: decision.committedVersion,
+                    executionState: decision.executionState,
+                    result: decision.result,
+                });
+            }
+
+            // Apply any remaining metadata updates if provided alongside allocations
+            const otherUpdates = { ...updates };
+            delete otherUpdates.allocations;
+            let finalPortfolio = decision.portfolio;
+            if (Object.keys(otherUpdates).length > 0) {
+                await portfolioStorage.updatePortfolio(portfolioId, otherUpdates, decision.committedVersion);
+                finalPortfolio = await portfolioStorage.getPortfolio(portfolioId);
+            }
+
+            return ok(res, {
+                portfolio: finalPortfolio,
+                decision,
+                committedVersion: finalPortfolio?.version ?? decision.committedVersion,
+                executionState: decision.executionState,
+                result: decision.result,
+            }, { status: 200 });
+        }
+
         const okUpdate = await portfolioStorage.updatePortfolio(portfolioId, updates, version);
-        if (!okUpdate) return fail(res, 409, 'CONFLICT', 'Version conflict', { currentVersion: (await portfolioStorage.getPortfolio(portfolioId))?.version });
         const updated = await portfolioStorage.getPortfolio(portfolioId);
-        return ok(res, { portfolio: updated }, { status: 200 });
+        if (!okUpdate) {
+            const currentVer = updated?.version;
+            return fail(res, 409, 'CONFLICT', 'Version conflict', {
+                currentVersion: currentVer,
+                committedVersion: currentVer,
+                executionState: 'idle',
+                result: 'conflict_version',
+            });
+        }
+        return ok(res, {
+            portfolio: updated,
+            committedVersion: updated?.version,
+            executionState: 'idle',
+            result: 'committed',
+            decision: {
+                applied: true,
+                committedVersion: updated?.version ?? (version + 1),
+                executionState: 'idle',
+                result: 'committed',
+                reason: 'Portfolio updated successfully',
+                portfolio: updated,
+            },
+        }, { status: 200 });
     } catch (error) {
         if (error instanceof ConflictError) {
-            return fail(res, 409, 'CONFLICT', error.message);
+            return fail(res, 409, 'CONFLICT', error.message, {
+                currentVersion: error.currentVersion,
+                committedVersion: error.currentVersion,
+                executionState: error.executionState ?? 'idle',
+                result: error.result ?? 'conflict_version',
+            });
         }
         logger.error('[ERROR] Update portfolio failed', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
+// Update portfolio allocations at the service boundary with deterministic rebalance handling
+portfoliosRouter.put('/portfolio/:id/allocations', validateRequest(updateAllocationsSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
+        const { allocations, version } = req.body;
+        const decision = await applyAllocationEdit({
+            portfolioId,
+            allocations,
+            expectedVersion: version,
+        });
+
+        if (!decision.applied) {
+            const status = decision.result === 'not_found'
+                ? 404
+                : decision.result === 'validation_error'
+                ? 400
+                : 409;
+            const errCode = decision.result === 'not_found'
+                ? 'NOT_FOUND'
+                : decision.result === 'validation_error'
+                ? 'VALIDATION_ERROR'
+                : 'CONFLICT';
+            return fail(res, status, errCode, decision.reason, {
+                decision,
+                committedVersion: decision.committedVersion,
+                currentVersion: decision.committedVersion,
+                executionState: decision.executionState,
+                result: decision.result,
+            });
+        }
+
+        return ok(res, {
+            portfolio: decision.portfolio,
+            decision,
+            committedVersion: decision.committedVersion,
+            executionState: decision.executionState,
+            result: decision.result,
+        }, { status: 200 });
+    } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message, {
+                currentVersion: error.currentVersion,
+                committedVersion: error.currentVersion,
+                executionState: error.executionState ?? 'idle',
+                result: error.result ?? 'conflict_version',
+            });
+        }
+        logger.error('[ERROR] Update allocations failed', { error: getErrorObject(error) });
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+    }
+});
+
+portfoliosRouter.patch('/portfolio/:id/allocations', validateRequest(updateAllocationsSchema), async (req: Request, res: Response) => {
+    try {
+        const portfolioId = req.params.id;
+        if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
+        const { allocations, version } = req.body;
+        const decision = await applyAllocationEdit({
+            portfolioId,
+            allocations,
+            expectedVersion: version,
+        });
+
+        if (!decision.applied) {
+            const status = decision.result === 'not_found'
+                ? 404
+                : decision.result === 'validation_error'
+                ? 400
+                : 409;
+            const errCode = decision.result === 'not_found'
+                ? 'NOT_FOUND'
+                : decision.result === 'validation_error'
+                ? 'VALIDATION_ERROR'
+                : 'CONFLICT';
+            return fail(res, status, errCode, decision.reason, {
+                decision,
+                committedVersion: decision.committedVersion,
+                currentVersion: decision.committedVersion,
+                executionState: decision.executionState,
+                result: decision.result,
+            });
+        }
+
+        return ok(res, {
+            portfolio: decision.portfolio,
+            decision,
+            committedVersion: decision.committedVersion,
+            executionState: decision.executionState,
+            result: decision.result,
+        }, { status: 200 });
+    } catch (error) {
+        if (error instanceof ConflictError) {
+            return fail(res, 409, 'CONFLICT', error.message, {
+                currentVersion: error.currentVersion,
+                committedVersion: error.currentVersion,
+                executionState: error.executionState ?? 'idle',
+                result: error.result ?? 'conflict_version',
+            });
+        }
+        logger.error('[ERROR] Update allocations failed', { error: getErrorObject(error) });
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
     }
 });
@@ -892,6 +1069,8 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
             return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
         }
 
+        markRebalanceActive(portfolioId, { trigger: 'manual' });
+
         try {
             const portfolio = await stellarService.getPortfolio(portfolioId);
             if (!portfolio) {
@@ -913,6 +1092,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
             const isFailed = result.status === 'failed';
+            markRebalanceInactive(portfolioId, { status: isFailed ? 'failed' : 'completed' });
             const errorReason = isFailed
                 ? (result.failureReason || result.explanation?.failureReason || result.error || 'Rebalance execution failed')
                 : undefined;
@@ -965,6 +1145,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
             return ok(res, { result });
         } catch (innerError) {
+            markRebalanceInactive(portfolioId, { status: 'failed' });
             // Preserve state consistency during interrupted or failed rebalances:
             // Persist the failed event so external error result and recorded history agree
             const failureReason = innerError instanceof ConflictError
@@ -1025,6 +1206,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
             throw innerError;
         } finally {
+            markRebalanceInactive(portfolioId);
             await releaseWorkerLock(portfolioId);
         }
     } catch (error) {

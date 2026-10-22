@@ -116,13 +116,44 @@ export interface RefreshTokenMetadata {
     lastUsedAt?: string
 }
 
-// Thrown when an update targets a stale portfolio version
+// Rebalance execution states at the service persistence boundary
+export type RebalanceExecutionState = 'idle' | 'rebalancing' | 'completed' | 'failed'
+
+// Stable outcome result codes for allocation edit operations
+export type AllocationEditResultCode =
+    | 'committed'              // Edit applied and persisted; version incremented
+    | 'conflict_rebalancing'  // Rejected: rebalance is currently active
+    | 'conflict_version'      // Rejected: expectedVersion is stale
+    | 'not_found'             // Portfolio not found
+    | 'validation_error'      // Invalid allocation percentages or constraints
+
+// Domain decision object documenting boundary outcome for an allocation edit
+export interface AllocationEditDecision {
+    result: AllocationEditResultCode
+    applied: boolean
+    committedVersion: number
+    executionState: RebalanceExecutionState
+    reason: string
+    portfolio?: Portfolio
+}
+
+// Thrown when an update targets a stale portfolio version or encounters a persistence conflict
 export class ConflictError extends Error {
     readonly currentVersion: number
-    constructor(currentVersion: number) {
-        super(`Portfolio was modified concurrently (current version: ${currentVersion})`)
+    readonly executionState?: RebalanceExecutionState
+    readonly result?: AllocationEditResultCode
+    constructor(
+        currentVersion: number,
+        customMessage?: string,
+        executionState?: RebalanceExecutionState,
+        result?: AllocationEditResultCode
+    ) {
+        const message = customMessage ?? `Portfolio was modified concurrently (current version: ${currentVersion})`
+        super(message)
         this.name = 'ConflictError'
         this.currentVersion = currentVersion
+        this.executionState = executionState ?? 'idle'
+        this.result = result ?? (this.executionState === 'rebalancing' ? 'conflict_rebalancing' : 'conflict_version')
     }
 }
 

@@ -23,6 +23,7 @@ import {
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
+import { markRebalanceActive, markRebalanceInactive } from "../../services/portfolioPersistenceBoundary.js";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
@@ -87,6 +88,8 @@ export async function processRebalanceJob(
       return;
     }
 
+    markRebalanceActive(portfolioId, { trigger: triggeredBy });
+
     const stellarService = new StellarService();
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
@@ -133,6 +136,7 @@ export async function processRebalanceJob(
         });
       }
 
+      markRebalanceInactive(portfolioId, { status: "completed" });
       logger.info("[WORKER:rebalance] Rebalance completed", {
         portfolioId,
         trades: rebalanceResult.trades,
@@ -151,6 +155,7 @@ export async function processRebalanceJob(
         });
       }
     } catch (err) {
+      markRebalanceInactive(portfolioId, { status: "failed" });
       const errorMessage = err instanceof Error ? err.message : String(err);
 
       try {
@@ -213,6 +218,7 @@ export async function processRebalanceJob(
 
       throw err;
     } finally {
+      markRebalanceInactive(portfolioId);
       await releaseWorkerLock(portfolioId);
     }
   });

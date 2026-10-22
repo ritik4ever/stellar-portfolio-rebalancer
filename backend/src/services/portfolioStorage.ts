@@ -124,6 +124,20 @@ export class PortfolioStorage {
         const portfolio = await this.getPortfolio(id)
         if (!portfolio) return false
 
+        // Check active rebalance boundary guard if allocations are being updated
+        if (updates.allocations !== undefined) {
+            const { isRebalanceActive } = await import('./portfolioPersistenceBoundary.js')
+            if (await isRebalanceActive(id)) {
+                const { ConflictError } = await import('../types/index.js')
+                throw new ConflictError(
+                    portfolio.version ?? -1,
+                    `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+                    'rebalancing',
+                    'conflict_rebalancing'
+                )
+            }
+        }
+
         if (expectedVersion !== undefined && portfolio.version !== expectedVersion) {
             const { ConflictError } = await import('../types/index.js')
             throw new ConflictError(portfolio.version ?? -1)
@@ -146,6 +160,24 @@ export class PortfolioStorage {
         }
         this.cacheSet(updated)
         return true
+    }
+
+    /**
+     * Edit allocations at the service boundary, documenting committed version,
+     * execution state, and a stable result.
+     */
+    async editAllocations(
+        id: string,
+        allocations: Record<string, number>,
+        expectedVersion?: number
+    ): Promise<import('../types/index.js').AllocationEditDecision> {
+        const { applyAllocationEdit } = await import('./portfolioPersistenceBoundary.js')
+        return applyAllocationEdit({
+            portfolioId: id,
+            allocations,
+            expectedVersion,
+            storage: this
+        })
     }
 
     async searchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false): Promise<Portfolio[]> {
