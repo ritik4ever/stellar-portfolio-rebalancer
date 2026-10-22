@@ -16,6 +16,7 @@ responds first. This change preserves that existing routing behavior.
 | `blocked` / `wrong_network` | The signature verifies over a recognized alternate-network message. Check `expectedNetwork` and `detectedNetwork`, then have the client sign the exact issued message. |
 | `blocked` / `invalid_signature` | Invalid, malformed, another account's signature, or an unrecognized signed message. Do not assume a network mismatch. |
 | `blocked` / `missing_challenge` or `expired_challenge` | Request a fresh challenge and sign it before expiry. |
+| `blocked` / `reused_challenge` | A signature was presented for a challenge already consumed by a successful verification. Terminal: the bound challenge cannot be revived; request a fresh one. |
 | `blocked` / `invalid_address` | The HTTP challenge verifier rejected the address. |
 | `blocked` / `token_issuance_failed` | Signature verification passed but token issuance failed; inspect correlated service health and request a fresh challenge. No successful authorization is recorded. |
 
@@ -25,6 +26,35 @@ credentials. Network context is captured at challenge issuance from
 correlation and trace IDs when available. `attempts`, `remainingAttempts` and
 `retryable` distinguish another permitted attempt from a consumed challenge.
 The HTTP path retains three attempts; the legacy path consumes on any attempt.
+
+## Expired or reused signed challenges at the service boundary
+
+Both verification services (`verifyChallenge` for `stellar_challenge`,
+`verifyWalletSignature` for `wallet_signature`) treat an expired or replayed
+signed challenge as a terminal rejection: no tokens are issued, the decision is
+`blocked` with `retryable: false`, and the HTTP result stays `401 UNAUTHORIZED`
+on `/api/auth/login` and `/api/auth/verify`. Signatures are never re-checked
+against an expired challenge; expiry is decided before verification.
+
+To keep that decision stable, each service records the bound challenge context
+(`walletId`, `challengeId`, `expectedNetwork` captured at issuance) when a
+challenge reaches a terminal state — consumed by a successful verification, or
+expired (including background cleanup). A later attempt with no active challenge
+consults that record within the same authentication path:
+
+- Replay of a consumed challenge: `reused_challenge`, documented with the bound
+  account, nonce, and network of the challenge it replays.
+- Attempt after expiry, including after cleanup: `expired_challenge`, likewise
+  bound to the original issuance context.
+- No terminal record (never issued, exhausted-retry purge, or older than the
+  fifteen-minute replay window): `missing_challenge` with account and network
+  only — no nonce can be attributed, and none is invented.
+
+Terminal records are kept for fifteen minutes per wallet and path, keyed only by
+the hashed `walletId`; raw addresses, nonces, and signatures are never retained
+or logged. Record retention classifies the audit decision only — it never
+authorizes, and clearing it falls back to the pre-existing `missing_challenge`
+rejection.
 
 No signatures, raw challenges, tokens, private keys, request bodies or exception
 text are added to these audit events. Treat wallet identifiers as pseudonymous
