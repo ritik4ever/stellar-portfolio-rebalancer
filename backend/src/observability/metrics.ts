@@ -637,3 +637,80 @@ export function recordHorizonSubmissionRetry(input: {
         console.error('[METRICS] Failed to record Horizon retry:', error)
     }
 }
+
+// ── Portfolio API pagination metrics (SPR-2026-184) ───────────────────────────
+//
+// Tracks pagination outcomes, durations, and dataset shifts across requests.
+// Distinct 'state' label allows operators to separate success, delay, and blocked work.
+
+export type PaginationState = 'success' | 'delayed' | 'blocked'
+
+const portfolioPaginationRequestsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}portfolio_pagination_requests_total`,
+    help: 'Total portfolio pagination requests partitioned by source, outcome, and delivery/work state',
+    labelNames: ['source', 'outcome', 'state'] as const,
+    registers: [register],
+})
+
+const portfolioPaginationItemsChangedTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}portfolio_pagination_items_changed_total`,
+    help: 'Total portfolio pagination queries where items changing during pagination were diagnosed',
+    labelNames: ['source', 'change_kind'] as const,
+    registers: [register],
+})
+
+const portfolioPaginationDurationSeconds = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}portfolio_pagination_duration_seconds`,
+    help: 'Duration of portfolio pagination queries in seconds',
+    labelNames: ['source', 'outcome', 'state'] as const,
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+    registers: [register],
+})
+
+/**
+ * Record a portfolio pagination request outcome and execution state.
+ */
+export function recordPortfolioPaginationOutcome(input: {
+    source: string
+    outcome: string
+    state: PaginationState
+    durationSeconds?: number
+}): void {
+    try {
+        portfolioPaginationRequestsTotal.inc({
+            source: input.source,
+            outcome: input.outcome,
+            state: input.state,
+        })
+        if (typeof input.durationSeconds === 'number' && input.durationSeconds >= 0) {
+            portfolioPaginationDurationSeconds.observe(
+                {
+                    source: input.source,
+                    outcome: input.outcome,
+                    state: input.state,
+                },
+                input.durationSeconds,
+            )
+        }
+    } catch (error) {
+        console.error('[METRICS] Failed to record portfolio pagination outcome:', error)
+    }
+}
+
+/**
+ * Record when dataset items changing during pagination are diagnosed.
+ */
+export function recordPortfolioPaginationItemsChanged(input: {
+    source: string
+    changeKind: 'items_inserted' | 'items_deleted' | 'count_drift'
+}): void {
+    try {
+        portfolioPaginationItemsChangedTotal.inc({
+            source: input.source,
+            change_kind: input.changeKind,
+        })
+    } catch (error) {
+        console.error('[METRICS] Failed to record portfolio pagination items changed:', error)
+    }
+}
+
