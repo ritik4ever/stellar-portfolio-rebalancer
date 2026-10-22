@@ -213,6 +213,37 @@ describe('SPR-2026-173: webhook delivery retry state consistency', () => {
             expect(entries).toHaveLength(1)
             expect(entries[0].deliveryId).toBe('rebalance-job-42')
         })
+        it('records an interrupted delivery without pretending it was attempted', async () => {
+            const fetchMock = vi.fn()
+            vi.stubGlobal('fetch', fetchMock)
+
+            const controller = new AbortController()
+            controller.abort(new Error('worker shutting down'))
+
+            const service = new NotificationService(deliveryConfig(3))
+            await service.notify({ ...payload, signal: controller.signal })
+
+            expect(fetchMock).not.toHaveBeenCalled()
+
+            const entries = await webhookDeadLetterQueue.list()
+            expect(entries).toHaveLength(1)
+            expect(entries[0]).toMatchObject({
+                attemptsExhausted: 0,
+                stoppedEarly: true,
+                deliveryId: deriveWebhookDeliveryId(payload),
+            })
+            // The delivery layer records the interrupted attempt itself; the
+            // dead-letter entry must agree with it instead of claiming the full
+            // retry budget was spent.
+            expect(logOutcomeSpy).toHaveBeenCalledWith(
+                userId,
+                'webhook',
+                'rebalance',
+                'failed',
+                expect.stringContaining('aborted'),
+                expect.objectContaining({ attempt: 1 }),
+            )
+        })
     })
 
 
