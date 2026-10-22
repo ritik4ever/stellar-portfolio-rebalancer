@@ -110,6 +110,15 @@ DB_PATH=./data/portfolio.db
 
 Start the backend and `DatabaseService` will create the SQLite schema on first run. Runtime files under `backend/data/` such as `.db`, `.db-wal`, and `.db-shm` are local-only artifacts and are intentionally ignored by git.
 
+To verify a clean checkout without a prebuilt database, run the setup validator. It uses a throwaway temporary directory and checks directory creation, schema bootstrap, repeatable startup, the other SQLite consumers and the error path:
+
+```bash
+cd backend
+npm run db:validate:dev
+```
+
+See [backend/docs/sqlite-dev-setup.md](../backend/docs/sqlite-dev-setup.md) for the setup contract, failure messages and reset flow.
+
 If you want a fresh local SQLite database, stop the backend and delete `backend/data/portfolio.db`, `backend/data/portfolio.db-wal`, and `backend/data/portfolio.db-shm`. The next backend start recreates the database automatically.
 
 Migration files live in `backend/src/db/migrations/`. Each migration must have both an `.up.sql` and `.down.sql` file. Add new PostgreSQL migrations as `NNN_description.up.sql` / `.down.sql`. For SQLite schema changes, update `backend/src/services/databaseService.ts`.

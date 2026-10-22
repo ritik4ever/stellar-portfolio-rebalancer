@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
+import { openSqliteDatabase, resolveSqliteDbPath } from '../db/sqliteBootstrap.js'
 import { trace } from '@opentelemetry/api'
 import { Horizon, SorobanRpc } from '@stellar/stellar-sdk'
 
@@ -259,8 +260,7 @@ export class StellarService {
     private db: Database.Database
 
     constructor() {
-        const dbPath = process.env.DB_PATH || './data/portfolio.db'
-        this.db = new Database(dbPath)
+        this.db = openSqliteDatabase(resolveSqliteDbPath())
     }
 
     async getPortfolio(portfolioId: string): Promise<any> {

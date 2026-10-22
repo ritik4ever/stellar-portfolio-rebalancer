@@ -194,9 +194,46 @@ jobs:
           PGDATABASE: migration_ci
         run: npm run db:migrate -- --dry-run
 
+  # Proves the documented SQLite development setup still works from a clean
+  # checkout: no prebuilt database, no inherited DB_PATH, and no runtime
+  # database artifacts checked in. See backend/docs/sqlite-dev-setup.md.
+  sqlite-dev-setup:
+    name: SQLite development setup (clean checkout)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
+
+      - name: Validate SQLite bootstrap from a clean environment
+        working-directory: ./backend
+        env:
+          # A stale DB_PATH from the runner must never mask a clean-checkout bug.
+          DB_PATH: ''
+        run: npm run db:validate:dev
+
+      - name: Fail if runtime database artifacts are tracked
+        run: |
+          tracked="$(git ls-files 'backend/data/*.db' 'backend/data/*.db-wal' 'backend/data/*.db-shm' 'backend/data/*.sqlite*')"
+          if [ -n "$tracked" ]; then
+            echo "Runtime SQLite artifacts must not be committed:"
+            echo "$tracked"
+            exit 1
+          fi
+
   slack-notification:
     name: Notify Slack on failure
-    needs: [openapi-contract, backend-tests, backend-coverage, migration-dry-run]
+    needs: [openapi-contract, backend-tests, backend-coverage, migration-dry-run, sqlite-dev-setup]
     if: always() && contains(needs.*.result, 'failure') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

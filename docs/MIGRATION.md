@@ -446,6 +446,7 @@ Each migration has a **down** file (e.g. `001_initial_schema.down.sql`) that rev
 - **When to use:** Development, staging, or demo environments. You can **skip** this migration in production by not running it, or run it once for a demo instance.
 - **To apply only schema (no demo data):** Ensure `002_seed_demo_data` is not applied (e.g. use a separate DB for prod and run only `001_initial_schema`, or roll back `002` after seeding a staging DB if you prefer).
 - **SQLite (local):** The backend also supports SQLite via `DB_PATH`, but there is no standalone SQLite migration runner in this repo. `backend/src/services/databaseService.ts` creates the SQLite schema on startup and applies incremental SQLite-only schema adjustments in code.
+- **SQLite clean-checkout validation:** Run `cd backend && npm run db:validate:dev` to prove a fresh clone can bootstrap SQLite (directory, schema, repeatable startup, shared consumers and clear errors) without a prebuilt database. The same check runs in the `sqlite-dev-setup` CI job. See `backend/docs/sqlite-dev-setup.md`.
 - **SQLite runtime artifacts:** Files created under `backend/data/` such as `.db`, `.db-wal`, and `.db-shm` are machine-specific local state and are intentionally excluded from version control.
 - **Tracked database sources only:** Keep SQL migration files, checked-in schema sources, and seed sources under version control. Do not commit generated SQLite database files.
 - **For schema changes that affect both PostgreSQL and SQLite, update:**

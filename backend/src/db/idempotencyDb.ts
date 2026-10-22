@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import type { IdempotencyRecord } from '../types/index.js'
+import { openSqliteDatabase, resolveSqliteDbPath } from './sqliteBootstrap.js'
 
 interface IdempotencyRow {
     key: string
@@ -24,8 +25,7 @@ export function closeIdempotencyDb(): void {
 
 function getDb(): Database.Database {
     if (!idemDb) {
-        const dbPath = process.env.DB_PATH || './data/portfolio.db'
-        idemDb = new Database(dbPath)
+        idemDb = openSqliteDatabase(resolveSqliteDbPath())
     }
     return idemDb
 }
