@@ -76,6 +76,70 @@ When the signal is `blocked`:
    ```
 5. Re-read `rollout_outcome`. Proceed to a full apply only when it returns `success`.
 
+## Validating Terraform Rollout from a Clean Environment (SPR-2026-271)
+
+Contributors can validate the configuration, state consistency, and plan reproducibility from a clean checkout or isolated service without relying on undocumented local state.
+
+### 1. Clean checkout prerequisites and defaults
+
+All variables in `variables.tf` provide documented, self-contained defaults (`project = "stellar-portfolio-rebalancer"`, `environment = "dev"`, `region = "us-east-1"`, `rollout_outcome_signal = "success"`). No undocumented local `.tfvars`, uncommitted credentials, or machine-local state files are required for initialisation or validation:
+
+```bash
+# From a clean checkout without existing .terraform/ directories or local state:
+cd terraform
+terraform init -input=false
+terraform fmt -check
+terraform validate
+```
+
+### 2. Reproducing a plan with no infrastructure changes
+
+To verify that an existing deployment has zero drift and matches the committed configuration:
+
+```bash
+# Check state consistency without local state contamination:
+terraform plan -detailed-exitcode -no-color
+
+# Or verify state refresh against remote infrastructure:
+terraform plan -refresh-only
+```
+
+- **Exit code 0**: No infrastructure changes needed. State is consistent and up-to-date.
+- **Exit code 2**: Differences present. Review the targeted diff before proceeding.
+- **Exit code 1**: Error encountered during planning.
+
+### 3. Isolated service plan and rollout
+
+When isolating a single service or resource (e.g. budgets or notification topic):
+
+```bash
+# Plan changes isolated to the budget alerts topic:
+terraform plan -target=aws_sns_topic.budget_alerts
+
+# Apply changes to the isolated service only:
+terraform apply -target=aws_sns_topic.budget_alerts
+```
+
+### 4. Rollback steps without undocumented local state
+
+If an apply reports `blocked` or fails midway:
+
+1. Inspect the structured signal output directly from state:
+   ```bash
+   terraform output -raw rollout_outcome
+   terraform output -raw rollout_affected_service
+   terraform output -raw rollout_owner_action
+   ```
+2. Confirm the blast radius is confined to the affected service:
+   ```bash
+   terraform plan -detailed-exitcode
+   ```
+3. Revert only the failed resource using the target address or restore from the remote state backend without destroying unrelated resources:
+   ```bash
+   terraform apply -target=<affected_service_resource> -var "rollout_outcome_signal=transient_delay"
+   ```
+4. Do not mutate local `.tfstate` files directly or delete remote lock entries outside approved runbooks.
+
 ### Variables
 
 | Variable | Default | Description |
@@ -112,6 +176,13 @@ step-by-step recovery procedure.
 terraform test
 ```
 
-Tests should cover the three signal outcomes and the validation constraint. The ECS rollout
-recovery module has its own focused test suite at
-`deployment/terraform/tests/ecs_rollout_recovery.tftest.hcl`.
+The native test suite in `terraform/tests/rollout_result.tftest.hcl` uses `mock_provider "aws" {}` to run fully offline without live credentials. It verifies:
+- `success`: Produces null partial-apply fields and clean flags.
+- `transient_delay`: Defaults `owner_action` to `retry_apply` and sets `is_partial = true`.
+- `blocked`: Defaults `owner_action` to `resolve_blocker` and sets `is_blocking = true`.
+- Custom `owner_action` overrides for non-success signals.
+- Clean environment default plan reproduction.
+- Validation constraint rejection of unknown signal tokens.
+
+The ECS rollout recovery module has its own focused test suite at `deployment/terraform/tests/ecs_rollout_recovery.tftest.hcl`. Offline JavaScript integration tests are also executable via `node --test deployment/deploy.test.mjs`.
+
