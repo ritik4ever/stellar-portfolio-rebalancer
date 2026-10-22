@@ -1,6 +1,7 @@
 import { isDbConfigured } from '../db/client.js'
 import * as portfolioDb from '../db/portfolioDb.js'
 import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import type { Portfolio } from '../types/index.js'
 
 const SLIPPAGE_MIN = 0.5
@@ -8,6 +9,26 @@ const SLIPPAGE_MAX = 5
 function clampSlippageTolerance(p: number): number {
     if (typeof p !== 'number' || Number.isNaN(p)) return 1
     return Math.max(SLIPPAGE_MIN, Math.min(SLIPPAGE_MAX, p))
+}
+
+/**
+ * Build a stable, opaque cursor for portfolio pagination.
+ * The cursor encodes the sort key (createdAt) plus the id as a tiebreaker so
+ * that concurrent inserts/deletes cannot shift the window between pages.
+ */
+function encodeCursor(createdAt: string, id: string): string {
+    return Buffer.from(`${createdAt}|${id}`, 'utf8').toString('base64url')
+}
+
+function decodeCursor(cursor: string): { createdAt: string; id: string } | undefined {
+    try {
+        const raw = Buffer.from(cursor, 'base64url').toString('utf8')
+        const sep = raw.indexOf('|')
+        if (sep <= 0) return undefined
+        return { createdAt: raw.slice(0, sep), id: raw.slice(sep + 1) }
+    } catch {
+        return undefined
+    }
 }
 
 
@@ -181,6 +202,68 @@ export class PortfolioStorage {
             all = all.filter(p => !p.archivedAt)
         }
         return all
+    }
+
+    /**
+     * Paginate portfolios using a stable cursor.
+     *
+     * Returns the page of portfolios plus the cursor to fetch the next page
+     * (undefined when the page is the last one) and the total reported count.
+     * The cursor is derived from the last item's (createdAt, id) so that
+     * concurrent inserts or deletes do not cause records to be skipped or
+     * duplicated between pages.
+     */
+    async getPortfoliosPage(
+        userAddress: string | undefined,
+        cursor: string | undefined,
+        limit: number,
+        includeArchived = false
+    ): Promise<{ items: Portfolio[]; nextCursor?: string; total: number }> {
+        const safeLimit = Math.max(1, Math.min(100, Math.floor(limit) || 20))
+        const decoded = cursor ? decodeCursor(cursor) : undefined
+        if (cursor && !decoded) {
+            const { ValidationError } = await import('../types/index.js')
+            throw new ValidationError('Invalid pagination cursor')
+        }
+
+        const all = await this.getAllPortfolios(includeArchived)
+        const scoped = userAddress
+            ? all.filter(p => p.userAddress === userAddress)
+            : all
+        const total = scoped.length
+
+        const sorted = scoped.slice().sort((a, b) => {
+            const ta = new Date(a.createdAt).getTime()
+            const tb = new Date(b.createdAt).getTime()
+            if (ta !== tb) return tb - ta
+            return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+        })
+
+        let start = 0
+        if (decoded) {
+            const idx = sorted.findIndex(
+                p => p.createdAt === decoded.createdAt && p.id === decoded.id
+            )
+            // If the anchor was deleted concurrently, resume from the first
+            // record strictly older than the anchor key.
+            if (idx >= 0) {
+                start = idx + 1
+            } else {
+                const anchorTime = new Date(decoded.createdAt).getTime()
+                start = sorted.findIndex(p => {
+                    const t = new Date(p.createdAt).getTime()
+                    if (t !== anchorTime) return t < anchorTime
+                    return p.id < decoded.id
+                })
+                if (start < 0) start = sorted.length
+            }
+        }
+
+        const items = sorted.slice(start, start + safeLimit)
+        const last = items[items.length - 1]
+        const hasMore = start + items.length < sorted.length
+        const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : undefined
+        return { items, nextCursor, total }
     }
 
     async getPortfolioCount(): Promise<number> {

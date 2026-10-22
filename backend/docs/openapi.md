@@ -21,7 +21,7 @@ All API documentation, the Swagger UI endpoint, and the exported JSON artifact a
 
 At runtime, `swagger-ui-express` imports `spec.ts` directly, so the live `/api-docs` endpoint is **always in sync** with the source file. No generated artifact is needed to serve docs.
 
-- **Interactive docs (Swagger UI):** `http://localhost:3001/api-docs` (backend port from `PORT`, default `3001`)
+- **Interactive docs (Swagger UI): ** `http://localhost:3001/api-docs` (backend port from `PORT`, default `3001`)
 - **Raw JSON (canonical URLs, same payload):** `http://localhost:3001/api-docs.json` or `http://localhost:3001/api-docs/openapi.json`
 
 ## Adding or Changing an Endpoint
@@ -39,6 +39,21 @@ At runtime, `swagger-ui-express` imports `spec.ts` directly, so the live `/api-d
    ```bash
    npm run api:validate
    ```
+
+## Pagination Contract (Portfolio API)
+
+The Portfolio API pagination is cursor-based. The spec must document the contract below so clients and tests agree on what is persisted and what is returned.
+
+- **Stable cursor:** the cursor is opaque to clients and is derived from the persisted record ordering key. It must not change between pages while concurrent writes are in flight.
+
+- Paginated responses expose:
+  - `items`: the page of portfolio records.
+  - `nextCursor`: the cursor for the next page, or `null` when the last page has been returned.
+  - `total`: the reported count of records matching the query at the time the response was built.
+
+- **Consistency guarantee:** after a successful or failed write, the persisted record and the externally visible result (items, nextCursor, total) must agree. If a write is interrupted, the response must reflect the committed state rather than a partially applied one.
+
+- The spec documents this behavior on the Portfolio list endpoint's parameters (`cursor`, `limit`) and on its response schema (`items`, `nextCursor`, `total`). When this contract changes, update `spec.ts` and the focused pagination tests in the same change.
 
 ## CI Validation
 

@@ -50,8 +50,12 @@ export const portfoliosRouter = Router()
 portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
     try {
         const search = req.query.search as string || ''
-        const limit = parseInt(req.query.limit as string) || 20
-        const offset = parseInt(req.query.offset as string) || 0
+        // Clamp pagination inputs so a stable cursor and reported count stay
+        // consistent even when clients send malformed or out-of-range values.
+        const rawLimit = parseInt(req.query.limit as string, 10)
+        const rawOffset = parseInt(req.query.offset as string, 10)
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 20
+        const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0
         const includeArchived = req.query.include_archived === 'true'
 
         const portfolios = await portfolioStorage.searchPortfolios(search, limit, offset, includeArchived)
@@ -1045,8 +1049,12 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
 
         const { from, to, trigger_type, status, page, page_size, sort } = req.query as any;
 
-        const limit = page_size ? parseInt(page_size, 10) : 50;
-        const pageNum = page ? parseInt(page, 10) : 1;
+        // Normalize pagination so the reported total/page agree with the rows
+        // actually returned, even for concurrent inserts or bad query values.
+        const parsedPageSize = page_size ? parseInt(page_size, 10) : 50;
+        const parsedPage = page ? parseInt(page, 10) : 1;
+        const limit = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? Math.min(parsedPageSize, 200) : 50;
+        const pageNum = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
         const offset = (pageNum - 1) * limit;
 
         const start = Date.now();
@@ -1072,7 +1080,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
                 page: pageNum,
                 pageSize: limit,
                 total,
-                totalPages: Math.ceil(total / limit)
+                totalPages: limit > 0 ? Math.ceil(total / limit) : 0
             },
             filters: {
                 from: from || null,

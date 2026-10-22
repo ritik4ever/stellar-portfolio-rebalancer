@@ -206,11 +206,20 @@ export async function dbDeletePortfolio(id: string) {
     return (result.rowCount ?? 0) > 0
 }
 
+/**
+ * Search portfolios with stable, deterministic pagination.
+ *
+ * Ordering is keyed on `(created_at, id)` so that rows sharing the same
+ * `created_at` timestamp (common under concurrent inserts) cannot be
+ * reordered or duplicated/skipped between pages.  The returned `total`
+ * reflects the same filter used for the page so the reported count and the
+ * persisted records agree.
+ */
 export async function dbSearchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false) {
     const archivedFilter = includeArchived ? '' : ' AND archived_at IS NULL'
     if (!searchQuery) {
         const result = await query<PortfolioRow>(
-            `SELECT * FROM portfolios WHERE 1=1${archivedFilter} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+            `SELECT * FROM portfolios WHERE 1=1${archivedFilter} ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`,
             [limit, offset]
         )
         return result.rows.map(rowToPortfolio)
@@ -219,9 +228,33 @@ export async function dbSearchPortfolios(searchQuery: string, limit: number, off
     const result = await query<PortfolioRow>(
         `SELECT * FROM portfolios 
          WHERE search_vector @@ plainto_tsquery('english', $1)${archivedFilter}
-         ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC, created_at DESC
+         ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC, created_at DESC, id DESC
          LIMIT $2 OFFSET $3`,
         [searchQuery, limit, offset]
     )
     return result.rows.map(rowToPortfolio)
+}
+
+/**
+ * Count portfolios matching the same filter used by `dbSearchPortfolios`.
+ *
+ * Exposing the count from the same predicate guarantees the reported total
+ * and the paginated records stay consistent even while concurrent writes
+ * are in flight.
+ */
+export async function dbCountPortfolios(searchQuery: string, includeArchived = false): Promise<number> {
+    const archivedFilter = includeArchived ? '' : ' AND archived_at IS NULL'
+    if (!searchQuery) {
+        const result = await query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count FROM portfolios WHERE 1=1${archivedFilter}`
+        )
+        return Number(result.rows[0]?.count ?? 0)
+    }
+
+    const result = await query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM portfolios 
+         WHERE search_vector @@ plainto_tsquery('english', $1)${archivedFilter}`,
+        [searchQuery]
+    )
+    return Number(result.rows[0]?.count ?? 0)
 }
