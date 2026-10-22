@@ -3,6 +3,7 @@ import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
+import { decodePortfolioCursor } from '../utils/portfolioPagination.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
 import { rebalanceHistoryService } from '../services/serviceContainer.js'
@@ -724,29 +725,38 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
         const address = (req.query.userAddress || req.query.address) as string | undefined
         const includeArchived = req.query.include_archived === 'true'
 
-        // Cursor pagination: `cursor` is the id of the last item from the
-        // previous page. It is stable across inserts/deletes because it is
-        // anchored to an item id rather than a numeric offset.
+        // Keyset (cursor) pagination:
+        // Ordering is deterministic and stable by (created_at ASC, id ASC).
+        // First page: cursor is not provided; returns oldest items.
+        // Final page: nextCursor is null; returns newest items.
+        // Empty result: items: [], count: 0, total: 0 (or total matching items), nextCursor: null.
         const rawLimit = parseInt(req.query.limit as string, 10)
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 20
-        const cursor = typeof req.query.cursor === 'string' && req.query.cursor.length > 0
-            ? req.query.cursor
+        const rawCursor = typeof req.query.cursor === 'string' && req.query.cursor.trim().length > 0
+            ? req.query.cursor.trim()
             : undefined
 
-        const { portfolios, nextCursor, total } = await portfolioStorage.searchPortfoliosPage({
+        if (rawCursor !== undefined) {
+            const decoded = decodePortfolioCursor(rawCursor)
+            if (!decoded) {
+                return fail(res, 400, 'INVALID_CURSOR', 'Invalid pagination cursor')
+            }
+        }
+
+        const { portfolios, nextCursor, total, count } = await portfolioStorage.searchPortfoliosPage({
             search,
             address,
             includeArchived,
             limit,
-            cursor,
+            cursor: rawCursor,
         })
 
         return ok(res, {
             portfolios,
             limit,
-            cursor: cursor ?? null,
+            cursor: rawCursor ?? null,
             nextCursor: nextCursor ?? null,
-            count: portfolios.length,
+            count: count ?? portfolios.length,
             total,
         })
     } catch (error) {
@@ -754,6 +764,9 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
+
+
+
 
 portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
