@@ -90,8 +90,30 @@ export async function processRebalanceJob(
     const stellarService = new StellarService();
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
+
+      // Record a pending event before execution so interrupted jobs leave an audit trail.
+      await rebalanceHistoryService.recordRebalanceEvent({
+        portfolioId,
+        trigger:
+          triggeredBy === "auto"
+            ? "Automatic Rebalancing"
+            : "Manual Rebalancing",
+        trades: 0,
+        gasUsed: "0 XLM",
+        status: "pending",
+        isAutomatic: triggeredBy === "auto",
+      }).catch((pendingErr) => {
+        logger.warn("[WORKER:rebalance] Failed to record pending event (non-fatal)", {
+          portfolioId,
+          error: pendingErr instanceof Error ? pendingErr.message : String(pendingErr),
+        });
+      });
+
+      const capturedVersion = portfolio?.version;
       const rebalanceResult =
         await stellarService.executeRebalance(portfolioId);
+
+      const executionFailed = rebalanceResult.status === "failed";
 
       await rebalanceHistoryService.recordRebalanceEvent({
         portfolioId,
@@ -103,9 +125,44 @@ export async function processRebalanceJob(
         gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
         feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
         slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
-        status: "completed",
+        status: executionFailed ? "failed" : "completed",
         isAutomatic: triggeredBy === "auto",
+        error: executionFailed ? (rebalanceResult.explanation ?? "Rebalance execution failed") : undefined,
       });
+
+      if (executionFailed) {
+        logger.warn("[WORKER:rebalance] Rebalance returned failed status", {
+          portfolioId,
+          explanation: rebalanceResult.explanation,
+        });
+        broadcastJobFailure(job.id || "unknown", portfolioId, triggeredBy, rebalanceResult.explanation ?? "Rebalance execution failed", job.attemptsMade);
+        if (triggeredBy === "auto") {
+          logAudit("auto_rebalance_failed", {
+            portfolioId,
+            jobId: job.id,
+            status: "failed",
+            explanation: rebalanceResult.explanation,
+          });
+        }
+        return;
+      }
+
+      // Persist post-rebalance portfolio state with optimistic CAS.
+      if (portfolio) {
+        try {
+          const { portfolioStorage } = await import("../../services/portfolioStorage.js");
+          await portfolioStorage.updatePortfolio(portfolioId, {
+            lastRebalance: new Date().toISOString(),
+            balances: rebalanceResult.newBalances ?? portfolio.balances,
+            totalValue: rebalanceResult.newTotalValue ?? portfolio.totalValue,
+          }, capturedVersion);
+        } catch (persistErr) {
+          logger.warn("[WORKER:rebalance] Portfolio state persistence failed after successful rebalance (non-fatal)", {
+            portfolioId,
+            error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          });
+        }
+      }
 
       try {
         await notificationService.notify({

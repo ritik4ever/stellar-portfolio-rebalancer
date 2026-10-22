@@ -1254,12 +1254,6 @@ export class DatabaseService {
     });
   }
 
-  private verifyBackupExists(): void {
-      // In production, this would check for a recent .db backup.
-      // For this implementation, we'll assume it passes or skip in test.
-      if (process.env.NODE_ENV === 'test') return;
-      // dummy implementation
-  }
 
   deletePortfolio(id: string): boolean {
     // Verify a recent backup before destructive delete
