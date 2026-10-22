@@ -14,6 +14,7 @@ import { dbQueryDuration } from "../observability/metrics.js";
 import {
   encodePortfolioCursor,
   decodePortfolioCursor,
+  diagnosePaginationChange,
   type PortfolioPageCursor,
   type PortfolioPaginationResult,
 } from "../utils/portfolioPagination.js";
@@ -1355,8 +1356,13 @@ export class DatabaseService {
       const hasMore = rows.length > limit;
       const pageRows = hasMore ? rows.slice(0, limit) : rows;
       const last = pageRows[pageRows.length - 1];
+      const { itemsChanged, changeKind } = diagnosePaginationChange({
+        currentTotal: total,
+        cursor: parsedCursor,
+      });
+
       const nextCursor = hasMore && last
-        ? encodePortfolioCursor({ createdAt: last.created_at, id: last.id })
+        ? encodePortfolioCursor({ createdAt: last.created_at, id: last.id, total })
         : null;
 
       return {
@@ -1366,10 +1372,11 @@ export class DatabaseService {
         nextCursor,
         count: pageRows.length,
         total,
+        itemsChanged,
+        changeKind,
       };
     });
   }
-
 
   private verifyBackupExists(): void {
       // In production, this would check for a recent .db backup.
