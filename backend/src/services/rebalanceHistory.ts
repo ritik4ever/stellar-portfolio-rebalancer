@@ -72,11 +72,16 @@ export class RebalanceHistoryService {
     }
 
     async recordRebalanceEvent(eventData: {
+        /** Optional caller-supplied identity, used to make retries idempotent. */
+        id?: string
         portfolioId: string
         trigger: string
         trades: number
         gasUsed: string
         status: 'completed' | 'failed' | 'pending'
+        timestamp?: string | Date
+        /** Extra persisted detail, merged over the derived analysis fields. */
+        details?: Record<string, unknown>
         isAutomatic?: boolean
         riskAlerts?: any[]
         error?: string
@@ -130,8 +135,9 @@ export class RebalanceHistoryService {
             gasFeeUsd: eventData.gasFeeUsd,
             gasPerTradeXlm: eventData.gasPerTradeXlm,
             gasWarning: eventData.gasWarning,
-            gasBreakdown: eventData.gasBreakdown
-        }
+            gasBreakdown: eventData.gasBreakdown,
+            ...(eventData.details ?? {}),
+        } as RebalanceEvent['details']
         const feePaid = this.deriveFeePaid(eventData, details)
         const slippageBps = this.deriveSlippageBps(eventData)
 
@@ -141,7 +147,11 @@ export class RebalanceHistoryService {
                     eventData.portfolio.allocations,
                     eventData.prices
                 )
-                details.riskMetrics = riskMetrics
+                if (details) {
+                    details.riskMetrics = riskMetrics
+                } else {
+                    ;(eventData as any).details = { ...((eventData as any).details ?? {}), riskMetrics }
+                }
             } catch (error) {
                 logger.warn('Failed to calculate risk metrics', { error })
             }
@@ -151,36 +161,22 @@ export class RebalanceHistoryService {
         const actor = eventData.actor ?? (eventData.isAutomatic ? 'system' : 'user')
         const source = eventData.source ?? (eventData.isAutomatic ? 'auto_rebalance' : 'dashboard')
 
-        // Record event in database
-        const inserted = await dbInsertRebalanceEvent({
-            portfolioId: eventData.portfolioId,
-            trigger: eventData.trigger,
-            trades: eventData.trades,
-            gasUsed: eventData.gasUsed,
+        const persistedDetails = {
+            ...(details as Record<string, unknown>),
             feePaid,
             slippageBps,
-            status: eventData.status,
-            isAutomatic: eventData.isAutomatic ?? false,
-            riskAlerts: eventData.riskAlerts ?? [],
-            error: eventData.error,
-            details,
-            eventSource,
-            actor,
-            source,
-            triggerMetadata: eventData.triggerMetadata,
-            onChainConfirmed: eventData.onChainConfirmed,
-            onChainEventType: eventData.onChainEventType,
-            onChainTxHash: eventData.onChainTxHash,
-            onChainLedger: eventData.onChainLedger,
-            onChainContractId: eventData.onChainContractId,
-            onChainPagingToken: eventData.onChainPagingToken,
-            isSimulated: eventData.isSimulated
-        })
+        } as Record<string, unknown>
 
-        const event: RebalanceEvent = {
-            id: inserted.id,
+        const insertedTimestamp =
+            eventData.timestamp instanceof Date
+                ? eventData.timestamp
+                : eventData.timestamp
+                  ? new Date(eventData.timestamp)
+                  : undefined
+
+        const event = await dbInsertRebalanceEvent({
+            id: eventData.id,
             portfolioId: eventData.portfolioId,
-            timestamp: new Date().toISOString(),
             trigger: eventData.trigger,
             trades: eventData.trades,
             gasUsed: eventData.gasUsed,
@@ -190,10 +186,12 @@ export class RebalanceHistoryService {
             isAutomatic: eventData.isAutomatic ?? false,
             riskAlerts: eventData.riskAlerts ?? [],
             error: eventData.error,
+            details: persistedDetails,
+            timestamp: insertedTimestamp,
+            eventSource,
             actor,
             source,
             triggerMetadata: eventData.triggerMetadata,
-            eventSource,
             onChainConfirmed: eventData.onChainConfirmed,
             onChainEventType: eventData.onChainEventType,
             onChainTxHash: eventData.onChainTxHash,
@@ -201,12 +199,7 @@ export class RebalanceHistoryService {
             onChainContractId: eventData.onChainContractId,
             onChainPagingToken: eventData.onChainPagingToken,
             isSimulated: eventData.isSimulated,
-            details: {
-                ...details,
-                feePaid,
-                slippageBps
-            },
-        }
+        })
 
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
             eventId: event.id,
