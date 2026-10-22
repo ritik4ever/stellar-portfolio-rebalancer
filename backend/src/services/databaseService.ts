@@ -34,6 +34,42 @@ export interface RebalanceHistoryQueryOptions {
   endTimestamp?: string;
 }
 
+/** Payload accepted when recording a rebalance event. */
+export interface RebalanceEventInput {
+  portfolioId: string;
+  trigger: string;
+  trades: number;
+  gasUsed: string;
+  status: "completed" | "failed" | "pending";
+  isAutomatic?: boolean;
+  riskAlerts?: any[];
+  error?: string;
+  details?: any;
+  timestamp?: string;
+  eventSource?: "offchain" | "simulated" | "onchain";
+  actor?: "user" | "system" | "admin" | "scheduler";
+  source?: "dashboard" | "api" | "contract" | "scheduler" | "auto_rebalance";
+  triggerMetadata?: Record<string, unknown>;
+  onChainConfirmed?: boolean;
+  onChainEventType?: string;
+  onChainTxHash?: string;
+  onChainLedger?: number;
+  onChainContractId?: string;
+  onChainPagingToken?: string;
+  isSimulated?: boolean;
+  reasonCode?: string;
+}
+
+/**
+ * Outcome of a rebalance event write. `inserted` is false when the event was
+ * already recorded (on-chain replay of the same paging token) and the stored
+ * row was returned untouched (#2104).
+ */
+export interface RebalanceEventOutcome {
+  event: RebalanceEvent;
+  inserted: boolean;
+}
+
 // ─────────────────────────────────────────────
 // Types (mirrored from portfolioStorage.ts)
 // ─────────────────────────────────────────────
@@ -1720,30 +1756,21 @@ getConsent(userId: string): ConsentRecord | undefined {
   // Rebalance history methods
   // ──────────────────────────────────────────
 
-  recordRebalanceEvent(eventData: {
-    portfolioId: string,
-    trigger: string,
-    trades: number,
-    gasUsed: string,
-    status: "completed" | "failed" | "pending";
-    isAutomatic?: boolean;
-    riskAlerts?: any[];
-    error?: string;
-    details?: any;
-    timestamp?: string;
-    eventSource?: "offchain" | "simulated" | "onchain";
-    actor?: "user" | "system" | "admin" | "scheduler";
-    source?: "dashboard" | "api" | "contract" | "scheduler" | "auto_rebalance";
-    triggerMetadata?: Record<string, unknown>;
-    onChainConfirmed?: boolean;
-    onChainEventType?: string;
-    onChainTxHash?: string;
-    onChainLedger?: number;
-    onChainContractId?: string;
-    onChainPagingToken?: string;
-    isSimulated?: boolean;
-    reasonCode?: string;
-  }): RebalanceEvent {
+  recordRebalanceEvent(eventData: RebalanceEventInput): RebalanceEvent {
+    return this.recordRebalanceEventOnce(eventData).event;
+  }
+
+  /**
+   * Records a rebalance event at most once per on-chain paging token and
+   * reports whether this call created the row.
+   *
+   * The paging-token unique index is the durable deduplication boundary, so a
+   * replayed page keeps the originally recorded row and reports
+   * `inserted: false` instead of counting as new work (#2104).
+   */
+  recordRebalanceEventOnce(
+    eventData: RebalanceEventInput,
+  ): RebalanceEventOutcome {
     try {
       const mergedDetails = {
         ...(eventData.details ?? {}),
@@ -1823,10 +1850,10 @@ getConsent(userId: string): ConsentRecord | undefined {
             )
             .get(event.onChainPagingToken);
           if (!existing) throw new Error("Replayed event could not be retrieved");
-          return rowToEvent(existing);
+          return { event: rowToEvent(existing), inserted: false };
         }
 
-        return event;
+        return { event, inserted: true };
       } catch (err) {
         throw new Error(
           `Failed to record rebalance event for portfolio '${eventData.portfolioId}': ${err}`,
@@ -1846,7 +1873,12 @@ getConsent(userId: string): ConsentRecord | undefined {
             .prepare<
               [string, number],
               RebalanceHistoryRow
-            >("SELECT * FROM rebalance_history WHERE portfolio_id = ? ORDER BY timestamp DESC LIMIT ?")
+            >(
+                `SELECT * FROM rebalance_history
+                 WHERE portfolio_id = ?
+                 ORDER BY timestamp DESC, on_chain_paging_token DESC NULLS LAST, id DESC
+                 LIMIT ?`
+              )
             .all(portfolioId, limit);
           return rows.map(rowToEvent);
         }
@@ -1855,7 +1887,11 @@ getConsent(userId: string): ConsentRecord | undefined {
           .prepare<
             [number],
             RebalanceHistoryRow
-          >("SELECT * FROM rebalance_history ORDER BY timestamp DESC LIMIT ?")
+          >(
+            `SELECT * FROM rebalance_history
+             ORDER BY timestamp DESC, on_chain_paging_token DESC NULLS LAST, id DESC
+             LIMIT ?`
+          )
           .all(limit);
         return rows.map(rowToEvent);
       } catch (err) {

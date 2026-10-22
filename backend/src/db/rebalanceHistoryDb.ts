@@ -77,7 +77,7 @@ export async function dbInsertRebalanceEvent(event: {
 
 export async function dbGetRebalanceHistoryByPortfolio(portfolioId: string, limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3`,
+        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 ORDER BY timestamp DESC, id DESC LIMIT $2 OFFSET $3`,
         [portfolioId, limit, offset]
     )
     return result.rows.map(rowToEvent)
@@ -126,7 +126,7 @@ export async function dbGetRebalanceCostSummary(portfolioId: string): Promise<Re
 
 export async function dbGetRebalanceHistoryAll(limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events ORDER BY timestamp DESC LIMIT $1 OFFSET $2`,
+        `SELECT * FROM rebalance_events ORDER BY timestamp DESC, id DESC LIMIT $1 OFFSET $2`,
         [limit, offset]
     )
     return result.rows.map(rowToEvent)
@@ -307,7 +307,7 @@ export async function dbGetPortfolioRebalanceHistory(
     // Data page
     params.push(filter.limit, filter.offset)
     const dataResult = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE ${where} ORDER BY timestamp ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        `SELECT * FROM rebalance_events WHERE ${where} ORDER BY timestamp ${order}, id ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
     )
 
