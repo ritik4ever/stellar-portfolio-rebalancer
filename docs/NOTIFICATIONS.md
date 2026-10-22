@@ -43,6 +43,26 @@ Retry behavior is loaded at startup from environment variables (validated in `st
 
 On each failed attempt (before the final failure), the service logs a `retried` row with the scheduled backoff delay. After all attempts are exhausted, a `failed` row is written and an error is logged with `maxAttempts` and the last error message.
 
+## State Consistency in Notification Delivery (SPR-2026-168)
+
+To prevent discrepancies between user-visible delivery results and persisted database records, the notification delivery subsystem enforces the following guarantees:
+
+### 1. Exactly-Once Visible Notification under Concurrency
+When concurrent operations trigger notification delivery for the same event (e.g., duplicate webhooks, rebalance queue retries, or concurrent API requests), deliveries are coordinated using a deterministic `deliveryId`:
+- **In-Flight Deduplication**: If a delivery is already in flight for a given `deliveryId`, concurrent requests wait on the in-flight execution rather than dispatching duplicate SMTP messages or webhooks.
+- **Completed Delivery Caching**: Subsequent triggers for an already-completed delivery are skipped with status `skipped` and reason `Duplicate notification: already sent for this event`.
+- **Traceable Attempts**: Every invocation records an entry in `notification_logs` associated with the `delivery_id`. The user receives exactly one notification, while audit logs maintain a full trace of all initiated and deduplicated attempts.
+
+### 2. Interrupted Work & Abort Consistency
+During network partitions, worker restarts, or process termination:
+- If delivery is interrupted or cancelled (e.g. via `AbortSignal` during backoff retry delay), `deliverWithBackoff` catches the interruption and guarantees that a final `failed` outcome is logged to `notification_logs` (`Interrupted: <reason>`).
+- Persisted records never remain stuck in a pending `retried` state when an operation has externally failed or aborted.
+
+### 3. Rebalance Workflow Agreement
+- Both completed and failed rebalances (manual or automated) trigger corresponding notification events and delivery attempts.
+- Rebalance status (`completed` | `failed`) and failure reasons are rendered consistently across templates and recorded in notification logs.
+
+
 ## Event Types
 
 ### 1. Rebalance Events

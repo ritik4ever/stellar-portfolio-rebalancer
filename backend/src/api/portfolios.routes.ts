@@ -6,6 +6,7 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
 import { rebalanceHistoryService } from '../services/serviceContainer.js'
+import { notificationService } from '../services/notificationService.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
@@ -927,6 +928,34 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 },
             });
 
+            const deliveryId = `manual-rebalance-${portfolioId}-${Date.now()}`;
+            try {
+                await notificationService.notify({
+                    userId: portfolio.userAddress,
+                    portfolioId,
+                    eventType: 'rebalance',
+                    title: isFailed ? 'Manual Portfolio Rebalance Failed' : 'Manual Portfolio Rebalance Completed',
+                    message: isFailed
+                        ? `Manual rebalance failed: ${errorReason}`
+                        : `Your portfolio rebalance completed. ${result.trades ?? 0} trades executed with ${result.gasUsed ?? '0 XLM'} gas used.`,
+                    deliveryId,
+                    data: {
+                        portfolioId,
+                        trades: result.trades,
+                        gasUsed: result.gasUsed,
+                        trigger: 'manual',
+                        status: isFailed ? 'failed' : 'completed',
+                        ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
+                    },
+                    timestamp: new Date().toISOString(),
+                });
+            } catch (notifyErr) {
+                logger.error('[REBALANCE] Notification failed (non-fatal)', {
+                    portfolioId,
+                    error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+                });
+            }
+
             return ok(res, { result });
         } catch (innerError) {
             // Preserve state consistency during interrupted or failed rebalances:
@@ -954,6 +983,32 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 logger.error('[ERROR] Failed to record failure rebalance event', {
                     error: getErrorObject(histErr),
                     portfolioId,
+                });
+            }
+
+            try {
+                const portfolio = await stellarService.getPortfolio(portfolioId).catch(() => null);
+                if (portfolio?.userAddress) {
+                    await notificationService.notify({
+                        userId: portfolio.userAddress,
+                        portfolioId,
+                        eventType: 'rebalance',
+                        title: 'Manual Portfolio Rebalance Failed',
+                        message: `Manual rebalance failed: ${failureReason}`,
+                        deliveryId: `manual-rebalance-${portfolioId}-${Date.now()}`,
+                        data: {
+                            portfolioId,
+                            trigger: 'manual',
+                            status: 'failed',
+                            failureReason,
+                        },
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            } catch (notifyErr) {
+                logger.error('[REBALANCE] Failure notification failed (non-fatal)', {
+                    portfolioId,
+                    error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
                 });
             }
 

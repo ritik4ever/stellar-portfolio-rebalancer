@@ -36,94 +36,220 @@ export interface DeliveryAttemptContext {
   userId: string;
   eventType: string;
   policy: DeliveryBackoffPolicy;
+  deliveryId?: string;
+  signal?: AbortSignal;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// In-flight deliveries map to prevent duplicate executions during concurrent work
+const inFlightDeliveries = new Map<string, Promise<void>>();
+// Cache recently completed deliveries to prevent duplicate notifications
+const completedDeliveries = new Map<string, { status: 'sent' | 'failed'; timestamp: number }>();
+
+/** Reset delivery tracking maps (used for test isolation) */
+export function _resetDeliveriesForTest(): void {
+  inFlightDeliveries.clear();
+  completedDeliveries.clear();
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      return reject(signal.reason ?? new Error('Notification delivery aborted'));
+    }
+    const timer = setTimeout(() => {
+      resolve();
+    }, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error('Notification delivery aborted'));
+      },
+      { once: true },
+    );
+  });
 }
 
 /**
- * Executes a provider delivery with configurable exponential backoff and structured logging.
+ * Executes a provider delivery with configurable exponential backoff, concurrency
+ * deduplication, and structured logging.
+ *
+ * Guarantees:
+ * 1. Exactly one user-visible notification during concurrent and repeated work.
+ * 2. Traceable delivery attempts in notification_logs.
+ * 3. State consistency: persisted records agree with externally visible results
+ *    even when delivery is interrupted or fails.
  */
 export async function deliverWithBackoff(
   ctx: DeliveryAttemptContext,
   execute: () => Promise<void>,
 ): Promise<void> {
-  const { provider, userId, eventType, policy } = ctx;
-  let lastError: unknown
-  const startedAt = Date.now()
+  const { provider, userId, eventType, policy, deliveryId, signal } = ctx;
 
-  for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
-    try {
-      await execute()
-      recordNotificationDeliveryAttempt(provider, 'success')
-      recordNotificationDelivery({
-        channel: provider,
-        outcome: 'success',
-        eventType,
-        durationSeconds: (Date.now() - startedAt) / 1000,
-      })
-      logOutcome(userId, provider, eventType, "sent", undefined, {
-        attempt,
-        maxAttempts: policy.maxAttempts,
-      })
-      return
-    } catch (error) {
-      lastError = error
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      const retriesRemaining = attempt < policy.maxAttempts
+  const deliveryKey = deliveryId
+    ? `${provider}:${userId}:${eventType}:${deliveryId}`
+    : undefined;
 
-      if (retriesRemaining) {
-        recordNotificationDeliveryAttempt(provider, 'retried')
-        const retryIndex = attempt - 1
-        const backoffDelayMs = computeBackoffDelayMs(policy, retryIndex)
-        logOutcome(userId, provider, eventType, "retried", errorMessage, {
-          attempt,
-          maxAttempts: policy.maxAttempts,
-          backoffDelayMs,
-          nextAttempt: attempt + 1,
-        })
-        logger.warn("Notification delivery failed; scheduling backoff retry", {
-          provider,
-          userId,
-          eventType,
-          attempt,
-          maxAttempts: policy.maxAttempts,
-          backoffDelayMs,
-          error: errorMessage,
-        })
-        await sleep(backoffDelayMs)
-        continue
-      }
+  // 1. Check if an identical notification was already sent successfully
+  if (deliveryKey) {
+    const prior = completedDeliveries.get(deliveryKey);
+    if (prior && prior.status === 'sent') {
+      logOutcome(userId, provider, eventType, "skipped", "Duplicate notification: already sent for this event", {
+        attempt: 1,
+        maxAttempts: policy.maxAttempts,
+        deliveryId,
+      });
+      return;
+    }
 
-      recordNotificationDeliveryAttempt(provider, 'failure')
-      recordNotificationDelivery({
-        channel: provider,
-        outcome: 'failure',
-        reason: classifyFailureReason(error),
-        eventType,
-        durationSeconds: (Date.now() - startedAt) / 1000,
-      })
-      logOutcome(userId, provider, eventType, "failed", errorMessage, {
-        attempt,
+    // 2. Concurrency control: if a delivery is currently in flight for the same event, deduplicate
+    if (inFlightDeliveries.has(deliveryKey)) {
+      logOutcome(userId, provider, eventType, "skipped", "Concurrent notification deduplicated: delivery in progress", {
+        attempt: 1,
         maxAttempts: policy.maxAttempts,
-      })
-      logger.error("Notification delivery exhausted retries", {
-        provider,
-        userId,
-        eventType,
-        attempt,
-        maxAttempts: policy.maxAttempts,
-        error: errorMessage,
-      })
-      throw error
+        deliveryId,
+      });
+      // Await existing delivery so caller finishes when message is actually delivered
+      await inFlightDeliveries.get(deliveryKey);
+      return;
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(String(lastError ?? "Notification delivery failed"))
+  const runDelivery = async (): Promise<void> => {
+    let lastError: unknown;
+    let finalOutcomeLogged = false;
+    let currentAttempt = 1;
+    const startedAt = Date.now();
+
+    try {
+      for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+        currentAttempt = attempt;
+
+        if (signal?.aborted) {
+          throw signal.reason ?? new Error('Notification delivery aborted');
+        }
+
+        try {
+          await execute();
+          finalOutcomeLogged = true;
+          recordNotificationDeliveryAttempt(provider, 'success');
+          recordNotificationDelivery({
+            channel: provider,
+            outcome: 'success',
+            eventType,
+            durationSeconds: (Date.now() - startedAt) / 1000,
+          });
+          logOutcome(userId, provider, eventType, "sent", undefined, {
+            attempt,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+          });
+          if (deliveryKey) {
+            completedDeliveries.set(deliveryKey, { status: 'sent', timestamp: Date.now() });
+          }
+          return;
+        } catch (error) {
+          lastError = error;
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const retriesRemaining = attempt < policy.maxAttempts && !signal?.aborted;
+
+          if (retriesRemaining) {
+            recordNotificationDeliveryAttempt(provider, 'retried');
+            const retryIndex = attempt - 1;
+            const backoffDelayMs = computeBackoffDelayMs(policy, retryIndex);
+            logOutcome(userId, provider, eventType, "retried", errorMessage, {
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              backoffDelayMs,
+              nextAttempt: attempt + 1,
+              deliveryId,
+            });
+            logger.warn("Notification delivery failed; scheduling backoff retry", {
+              provider,
+              userId,
+              eventType,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              backoffDelayMs,
+              deliveryId,
+              error: errorMessage,
+            });
+            await sleep(backoffDelayMs, signal);
+            continue;
+          }
+
+          finalOutcomeLogged = true;
+          recordNotificationDeliveryAttempt(provider, 'failure');
+          recordNotificationDelivery({
+            channel: provider,
+            outcome: 'failure',
+            reason: classifyFailureReason(error),
+            eventType,
+            durationSeconds: (Date.now() - startedAt) / 1000,
+          });
+          logOutcome(userId, provider, eventType, "failed", errorMessage, {
+            attempt,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+          });
+          if (deliveryKey) {
+            completedDeliveries.set(deliveryKey, { status: 'failed', timestamp: Date.now() });
+          }
+          logger.error("Notification delivery exhausted retries", {
+            provider,
+            userId,
+            eventType,
+            attempt,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+            error: errorMessage,
+          });
+          throw error;
+        }
+      }
+
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(String(lastError ?? "Notification delivery failed"));
+    } catch (unhandledError) {
+      // Interrupted work handling: if delivery failed or was cancelled before logging a final status
+      // (e.g. abort signal during backoff, process interruption, unexpected throw), ensure the database
+      // reflects 'failed' so persisted record agrees with external failure outcome.
+      if (!finalOutcomeLogged) {
+        finalOutcomeLogged = true;
+        const msg = unhandledError instanceof Error ? unhandledError.message : String(unhandledError);
+        recordNotificationDeliveryAttempt(provider, 'failure');
+        recordNotificationDelivery({
+          channel: provider,
+          outcome: 'failure',
+          reason: classifyFailureReason(unhandledError),
+          eventType,
+          durationSeconds: (Date.now() - startedAt) / 1000,
+        });
+        logOutcome(userId, provider, eventType, "failed", `Interrupted: ${msg}`, {
+          attempt: currentAttempt,
+          maxAttempts: policy.maxAttempts,
+          deliveryId,
+        });
+        if (deliveryKey) {
+          completedDeliveries.set(deliveryKey, { status: 'failed', timestamp: Date.now() });
+        }
+      }
+      throw unhandledError;
+    } finally {
+      if (deliveryKey) {
+        inFlightDeliveries.delete(deliveryKey);
+      }
+    }
+  };
+
+  const deliveryPromise = runDelivery();
+  if (deliveryKey) {
+    inFlightDeliveries.set(deliveryKey, deliveryPromise);
+  }
+
+  return deliveryPromise;
 }
 
 function logOutcome(
@@ -141,7 +267,7 @@ function logOutcome(
     status,
     errorMessage,
     metadata,
-  )
+  );
 }
 
 /**

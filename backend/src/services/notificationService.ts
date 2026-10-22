@@ -6,6 +6,7 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbGetLatestNotificationLog,
   dbSaveDigestEvent,
   dbGetAndDeleteDigestEventsBefore,
   dbInitDefaultNotificationPreferences,
@@ -20,7 +21,7 @@ import {
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import {
   normalizeNotificationPreferences,
   notificationPreferencesSchema,
@@ -52,6 +53,8 @@ export interface NotificationPayload {
   message: string;
   data?: any;
   timestamp: string;
+  deliveryId?: string;
+  signal?: AbortSignal;
 }
 
 
@@ -139,6 +142,8 @@ class WebhookProvider implements NotificationProvider {
           userId: payload.userId,
           eventType: payload.eventType,
           policy,
+          deliveryId: payload.deliveryId,
+          signal: payload.signal,
         },
         async () => {
           const controller = new AbortController();
@@ -185,7 +190,7 @@ class WebhookProvider implements NotificationProvider {
 // ─────────────────────────────────────────────
 
 class EmailProvider implements NotificationProvider {
-  private transporter: nodemailer.Transporter | null = null;
+  private transporter: Transporter | null = null;
   private warnLogged = false
 
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {
@@ -286,6 +291,11 @@ class EmailProvider implements NotificationProvider {
     };
 
     const policy = this.deliveryConfig.email;
+    const deliveryId =
+      payload.deliveryId ||
+      (payload.data?.deliveryId as string | undefined) ||
+      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
+      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
 
     await deliverWithBackoff(
       {
@@ -293,6 +303,8 @@ class EmailProvider implements NotificationProvider {
         userId: payload.userId,
         eventType: payload.eventType,
         policy,
+        deliveryId,
+        signal: payload.signal,
       },
       async () => {
         const info = await this.transporter!.sendMail(mailOptions);
@@ -302,6 +314,7 @@ class EmailProvider implements NotificationProvider {
           userId: payload.userId,
           messageId: info.messageId,
           maxAttempts: policy.maxAttempts,
+          deliveryId,
         });
       },
     );
@@ -587,6 +600,10 @@ export class NotificationService {
     prefs.webhookEnabled = false;
     prefs.slackEnabled = false;
     prefs.smsEnabled = false;
+    delete prefs.emailAddress;
+    delete prefs.webhookUrl;
+    delete prefs.slackWebhookUrl;
+    delete prefs.phoneNumber;
     dbSaveNotificationPreferences(prefs);
     logger.info("User unsubscribed from notifications", { userId });
   }
@@ -799,10 +816,92 @@ export class NotificationService {
   }
 
   /**
+   * Get delivery logs for a specific user with limit and optional deliveryId filtering
+   */
+  getDeliveryLogs(userId: string, limit: number = 50, deliveryId?: string): NotificationLog[] {
+    return dbGetNotificationLogs(userId, limit, deliveryId);
+  }
+
+  /**
    * Get delivery logs for a specific user
    */
   getLogs(userId: string): NotificationLog[] {
     return dbGetNotificationLogs(userId);
+  }
+
+  /**
+   * Get delivery status summary for a user, verifying agreement with persisted records
+   */
+  getDeliveryStatus(userId: string): {
+    latestDelivery?: NotificationLog;
+    channelStatus: Record<string, { enabled: boolean; lastStatus?: string }>;
+    totalDeliveries: number;
+  } {
+    const logs = dbGetNotificationLogs(userId, 50);
+    const prefs = this.getPreferences(userId);
+    const latestEmail = dbGetLatestNotificationLog(userId, 'email');
+    const latestWebhook = dbGetLatestNotificationLog(userId, 'webhook');
+    const latestSlack = dbGetLatestNotificationLog(userId, 'slack');
+    const latestSms = dbGetLatestNotificationLog(userId, 'sms');
+
+    return {
+      latestDelivery: logs[0],
+      channelStatus: {
+        email: {
+          enabled: prefs.emailEnabled,
+          lastStatus: latestEmail?.status,
+        },
+        webhook: {
+          enabled: prefs.webhookEnabled,
+          lastStatus: latestWebhook?.status,
+        },
+        slack: {
+          enabled: prefs.slackEnabled ?? false,
+          lastStatus: latestSlack?.status,
+        },
+        sms: {
+          enabled: prefs.smsEnabled ?? false,
+          lastStatus: latestSms?.status,
+        },
+      },
+      totalDeliveries: logs.length,
+    };
+  }
+
+  /**
+   * Send a test notification to verify delivery channels and consistency
+   */
+  async sendTestNotification(userId: string): Promise<{
+    message: string;
+    sentTo: {
+      email: string | null;
+      webhook: string | null;
+      telegram: string | null;
+    };
+    timestamp: string;
+  }> {
+    const prefs = this.getPreferences(userId);
+    const timestamp = new Date().toISOString();
+    const payload: NotificationPayload = {
+      userId,
+      eventType: "rebalance",
+      title: "Test Notification",
+      message: "This is a test notification from Stellar Portfolio Rebalancer.",
+      deliveryId: `test-${userId}-${Date.now()}`,
+      timestamp,
+    };
+
+    await this.notify(payload);
+
+    return {
+      message: "Test notification sent",
+      sentTo: {
+        email: prefs.emailEnabled ? prefs.emailAddress || null : null,
+        webhook: prefs.webhookEnabled ? prefs.webhookUrl || null : null,
+        telegram: null,
+      },
+      timestamp,
+    };
   }
 }
 

@@ -451,7 +451,7 @@ describe('Notification Preferences API Integration Tests', () => {
                     message: expect.stringContaining('unsubscribed')
                 }
             })
-            expect(res.body.error).toBeUndefined()
+            expect(res.body.error).toBeNull()
 
             const prefs = notificationService.getPreferences(TEST_USER)
             expect(prefs).toBeDefined()

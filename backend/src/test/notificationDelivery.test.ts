@@ -121,12 +121,13 @@ describe("deliverWithBackoff", () => {
       execute,
     );
 
+    const expectation = expect(promise).rejects.toThrow("HTTP 503");
+
     for (let i = 1; i <= 4; i++) {
       const delay = Math.min(1000 * Math.pow(2, i - 1), 60000);
       await vi.advanceTimersByTimeAsync(delay);
     }
 
-    const expectation = expect(promise).rejects.toThrow("HTTP 503");
     await expectation;
 
     expect(execute).toHaveBeenCalledTimes(5);
