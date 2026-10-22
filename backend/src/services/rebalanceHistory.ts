@@ -14,6 +14,21 @@ import type { RebalanceCostSummary, RebalanceHistoryQueryOptions } from '../db/r
 import { getFeatureFlags } from '../config/featureFlags.js'
 import type { PricesMap } from '../types/index.js'
 import { logger } from '../utils/logger.js'
+import {
+    bucketPortfolioId,
+    recordPortfolioPersistenceOutcome,
+} from '../observability/metrics.js'
+import type {
+    PortfolioPersistenceOutcome,
+    PortfolioPersistenceSource,
+    PortfolioPersistenceTransition,
+} from '../observability/metrics.js'
+
+function getSafeDatabaseErrorCode(error: unknown): string {
+    if (typeof error !== 'object' || error === null || !('code' in error)) return 'unknown'
+    const code = error.code
+    return typeof code === 'string' && /^[A-Z0-9]{5}$/.test(code) ? code : 'unknown'
+}
 
 export interface RebalanceEvent {
     id: string
@@ -114,6 +129,11 @@ export class RebalanceHistoryService {
         gasPerTradeXlm?: number
         gasWarning?: boolean
         gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
+        persistenceContext?: {
+            source: PortfolioPersistenceSource
+            retryAvailable?: boolean
+            stateTransition?: PortfolioPersistenceTransition
+        }
     }): Promise<RebalanceEvent> {
         const featureFlags = getFeatureFlags()
         const eventSource: RebalanceEvent['eventSource'] = eventData.eventSource
@@ -174,38 +194,83 @@ export class RebalanceHistoryService {
                   ? new Date(eventData.timestamp)
                   : undefined
 
-        const event = await dbInsertRebalanceEvent({
-            id: eventData.id,
-            portfolioId: eventData.portfolioId,
-            trigger: eventData.trigger,
-            trades: eventData.trades,
-            gasUsed: eventData.gasUsed,
-            feePaid,
-            slippageBps,
-            status: eventData.status,
-            isAutomatic: eventData.isAutomatic ?? false,
-            riskAlerts: eventData.riskAlerts ?? [],
-            error: eventData.error,
-            details: persistedDetails,
-            timestamp: insertedTimestamp,
-            eventSource,
-            actor,
-            source,
-            triggerMetadata: eventData.triggerMetadata,
-            onChainConfirmed: eventData.onChainConfirmed,
-            onChainEventType: eventData.onChainEventType,
-            onChainTxHash: eventData.onChainTxHash,
-            onChainLedger: eventData.onChainLedger,
-            onChainContractId: eventData.onChainContractId,
-            onChainPagingToken: eventData.onChainPagingToken,
-            isSimulated: eventData.isSimulated,
-        })
+        const persistenceContext = eventData.persistenceContext ?? { source: 'other' as const }
+        const stateTransition = persistenceContext.stateTransition ?? 'unknown'
+        const startedAt = Date.now()
+        let event: RebalanceEvent
+        try {
+            event = await dbInsertRebalanceEvent({
+                id: eventData.id,
+                portfolioId: eventData.portfolioId,
+                trigger: eventData.trigger,
+                trades: eventData.trades,
+                gasUsed: eventData.gasUsed,
+                feePaid,
+                slippageBps,
+                status: eventData.status,
+                isAutomatic: eventData.isAutomatic ?? false,
+                riskAlerts: eventData.riskAlerts ?? [],
+                error: eventData.error,
+                details: persistedDetails,
+                timestamp: insertedTimestamp,
+                eventSource,
+                actor,
+                source,
+                triggerMetadata: eventData.triggerMetadata,
+                onChainConfirmed: eventData.onChainConfirmed,
+                onChainEventType: eventData.onChainEventType,
+                onChainTxHash: eventData.onChainTxHash,
+                onChainLedger: eventData.onChainLedger,
+                onChainContractId: eventData.onChainContractId,
+                onChainPagingToken: eventData.onChainPagingToken,
+                isSimulated: eventData.isSimulated,
+            })
+        } catch (error) {
+            const outcome: PortfolioPersistenceOutcome = persistenceContext.retryAvailable
+                ? 'delayed'
+                : 'blocked'
+            const diagnostics = {
+                operation: 'record_rebalance_event',
+                source: persistenceContext.source,
+                outcome,
+                eventStatus: eventData.status,
+                stateTransition,
+                retryAvailable: persistenceContext.retryAvailable ?? false,
+                portfolioBucket: bucketPortfolioId(eventData.portfolioId),
+                durationMs: Date.now() - startedAt,
+                errorType: error instanceof Error ? 'Error' : 'NonError',
+                databaseErrorCode: getSafeDatabaseErrorCode(error),
+            }
+            recordPortfolioPersistenceOutcome({
+                source: persistenceContext.source,
+                outcome,
+                eventStatus: eventData.status,
+                stateTransition,
+            })
+            if (outcome === 'delayed') {
+                logger.warn(diagnostics, 'Portfolio persistence write delayed')
+            } else {
+                logger.error(diagnostics, 'Portfolio persistence write blocked')
+            }
+            throw error
+        }
 
+        recordPortfolioPersistenceOutcome({
+            source: persistenceContext.source,
+            outcome: 'success',
+            eventStatus: eventData.status,
+            stateTransition,
+        })
         logger.info('[REBALANCE-HISTORY] Recorded rebalance event', {
             eventId: event.id,
             isAutomatic: eventData.isAutomatic ?? false,
             actor,
-            source
+            source: persistenceContext.source,
+            outcome: 'success',
+            eventStatus: eventData.status,
+            stateTransition,
+            portfolioBucket: bucketPortfolioId(eventData.portfolioId),
+            durationMs: Date.now() - startedAt,
         })
         return event
     }

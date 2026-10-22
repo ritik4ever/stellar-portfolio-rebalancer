@@ -1173,6 +1173,10 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 status: isFailed ? 'failed' : 'completed',
                 isAutomatic: false,
                 error: errorReason,
+                persistenceContext: {
+                    source: 'api',
+                    stateTransition: isFailed ? 'unknown' : 'committed',
+                },
                 details: {
                     actor: 'user',
                     source: 'api',
@@ -1229,6 +1233,10 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                     status: 'failed',
                     isAutomatic: false,
                     error: failureReason,
+                    persistenceContext: {
+                        source: 'api',
+                        stateTransition: 'unknown',
+                    },
                     details: {
                         actor: 'user',
                         source: 'api',
@@ -1370,5 +1378,4 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history/export', validateQuery(re
         return fail(res, 500, 'INTERNAL_ERROR', 'Failed to export rebalance history');
     }
 });
-
 

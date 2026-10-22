@@ -70,6 +70,27 @@ When a portfolio rebalance starts (either manual via `POST /api/portfolio/:id/re
 - When the rebalance completes, `markRebalanceInactive(portfolioId, { status: 'completed' })` clears the active lock.
 - Subsequent allocation edits providing matching `expectedVersion: N + 1` succeed immediately, committing version `N + 2` with `executionState: 'idle'` and `result: 'committed'`.
 
+## Persistence Outcome Signals
+
+Rebalance-history writes emit the Prometheus counter
+`stellar_portfolio_portfolio_persistence_outcomes_total` (the configured metrics
+prefix may change the name). Its bounded labels are:
+
+| Label | Values | Meaning |
+|-------|--------|---------|
+| `source` | `api`, `worker`, `other` | Persistence caller |
+| `outcome` | `success`, `delayed`, `blocked` | Write succeeded, will be retried, or cannot be retried |
+| `event_status` | `completed`, `failed`, `pending` | Rebalance event status being persisted |
+| `state_transition` | `committed`, `not_committed`, `unknown` | Whether the portfolio transition is known to have committed |
+
+Structured logs use the same dimensions and include the write operation,
+duration, a bounded portfolio bucket, and a safe database error code when
+available. They do not include the raw portfolio ID or database error message.
+Worker write failures are `delayed` only when another BullMQ attempt is
+configured; exhausted worker attempts and synchronous API write failures are
+`blocked`. A persistence failure still propagates to the caller, and the
+counter/log signal does not change retry or state-transition behavior.
+
 ---
 
 ## API Endpoints

@@ -91,6 +91,7 @@ export async function processRebalanceJob(
     markRebalanceActive(portfolioId, { trigger: triggeredBy });
 
     const stellarService = new StellarService();
+    const retryAvailable = job.attemptsMade + 1 < (job.opts.attempts ?? 1);
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
       const rebalanceResult =
@@ -108,6 +109,11 @@ export async function processRebalanceJob(
         slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
+        persistenceContext: {
+          source: "worker",
+          retryAvailable,
+          stateTransition: "committed",
+        },
       });
 
       try {
@@ -167,6 +173,11 @@ export async function processRebalanceJob(
           status: "failed",
           isAutomatic: triggeredBy === "auto",
           error: errorMessage,
+          persistenceContext: {
+            source: "worker",
+            retryAvailable,
+            stateTransition: "unknown",
+          },
         });
       } catch (histErr) {
         logger.error("[WORKER:rebalance] Failed to record failure event", {

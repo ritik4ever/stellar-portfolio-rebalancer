@@ -746,3 +746,33 @@ export function recordPortfolioPaginationItemsChanged(input: {
     }
 }
 
+// ── Portfolio persistence outcomes (#2083) ──────────────────────────────────
+
+export type PortfolioPersistenceSource = 'api' | 'worker' | 'other'
+export type PortfolioPersistenceOutcome = 'success' | 'delayed' | 'blocked'
+export type PortfolioPersistenceTransition = 'committed' | 'not_committed' | 'unknown'
+
+const portfolioPersistenceOutcomesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}portfolio_persistence_outcomes_total`,
+    help: 'Portfolio persistence write outcomes by source, retry state, event status, and state transition',
+    labelNames: ['source', 'outcome', 'event_status', 'state_transition'] as const,
+    registers: [register],
+})
+
+export function recordPortfolioPersistenceOutcome(input: {
+    source: PortfolioPersistenceSource
+    outcome: PortfolioPersistenceOutcome
+    eventStatus: 'completed' | 'failed' | 'pending'
+    stateTransition: PortfolioPersistenceTransition
+}): void {
+    try {
+        portfolioPersistenceOutcomesTotal.inc({
+            source: input.source,
+            outcome: input.outcome,
+            event_status: input.eventStatus,
+            state_transition: input.stateTransition,
+        })
+    } catch (error) {
+        console.error('[METRICS] Failed to record portfolio persistence outcome:', error)
+    }
+}
