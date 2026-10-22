@@ -1,7 +1,15 @@
 use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, Map, String, Vec};
 
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
+/// Denominator used for target allocation percentages (10,000 basis points = 100.00%).
 pub const ALLOCATION_DENOMINATOR: u32 = 10_000;
+/// Minimum allowed target weight for an individual asset in basis points (1 bps = 0.01%).
+/// Target weights equal to 0 bps are rejected with `Error::InvalidAllocation`.
+pub const MIN_TARGET_WEIGHT_BPS: u32 = 1;
+/// Maximum allowed target weight for an individual asset in basis points (10,000 bps = 100.00%).
+pub const MAX_TARGET_WEIGHT_BPS: u32 = ALLOCATION_DENOMINATOR;
+/// Strict sum invariant: all asset target weights must sum to exactly 10,000 basis points (100.00%).
+pub const TARGET_WEIGHT_SUM_BPS: u32 = ALLOCATION_DENOMINATOR;
 pub const REFLECTOR_PRICE_DECIMALS: u32 = 14;
 pub const DEFAULT_ASSET_DECIMALS: u32 = 7;
 pub const MAX_ASSET_DECIMALS: u32 = 18;
