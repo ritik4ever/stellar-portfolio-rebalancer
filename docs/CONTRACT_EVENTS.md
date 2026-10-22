@@ -9,7 +9,7 @@ For the frontend-facing view of supported methods, expected arguments, and grace
 * **Code constant:** `BACKEND_CONTRACT_EVENT_SCHEMA_VERSION` in `backend/src/config/contractEventSchema.ts`.
 * **Environment:** `CONTRACT_EVENT_SCHEMA_VERSION` (optional). If set, it **must** equal the code constant or every `syncOnce` call becomes a no-op and `lastError` describes the mismatch. Readiness treats an enabled indexer with a failed schema check as **not ready**.
 
-Bump the constant when you change topic strings or tuple layouts expected below, and document the migration for deployers.
+Bump the contract and backend constants when you change topic strings or tuple layouts expected below, and document the migration for deployers. Schema version 2 adds the stored rebalance threshold to `portfolio.created`.
 
 ## Correlation-ID module decision
 
@@ -39,7 +39,7 @@ Starting from `CONTRACT_VERSION = 2`, newly created portfolios include `strategy
 
 Legacy portfolios (created before the schema bump) are migrated on first read: the old XDR is deserialized as `LegacyPortfolio`, converted with `StrategyType::Threshold` + default `StrategyConfig`, and re-written under `DataKey::PortfolioV2`. Old entries under `DataKey::Portfolio(u64)` are removed after migration.
 
-Event topics and payload shapes remain unchanged — the strategy fields are storage-only and do not alter event payloads. Backend indexers that decode `Portfolio` from events (e.g. `portfolio.created`) will see the new fields automatically once old portfolios are migrated.
+The strategy fields are storage-only and do not alter event payloads. Backend indexers that decode `Portfolio` from events (e.g. `portfolio.created`) will see the new fields automatically once old portfolios are migrated.
 
 ## Expected event topics and payloads
 
@@ -47,7 +47,7 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
 | Topic[0]    | Topic[1]            | Payload shape (Rust tuple)                                        | Indexed as                           |
 | ----------- | ------------------- | ----------------------------------------------------------------- | ------------------------------------ |
-| `portfolio` | `created`           | `(portfolio_id, user)`                                            | `portfolio_created`                  |
+| `portfolio` | `created`           | `(portfolio_id, user, rebalance_threshold)`                       | `portfolio_created`                  |
 | `portfolio` | `deposit`           | `(portfolio_id, asset, amount)`                                   | `deposit`                            |
 | `portfolio` | `withdraw`          | `(portfolio_id, asset, amount)`                                   | `withdraw`                           |
 | `portfolio` | `rebalanced`        | `(portfolio_id, timestamp)`                                       | `rebalance_executed`                 |
@@ -56,7 +56,7 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
 | Topic[0]    | Topic[1]            | Payload shape (Rust)                                              | Indexed as                           |
 | ----------  | ----------          | ----------------------                                            | ------------                         |
-| `portfolio` | `created`           | `(portfolio_id: u64, user: Address)`                              | `portfolio_created`                  |
+| `portfolio` | `created`           | `(portfolio_id: u64, user: Address, rebalance_threshold: u32)`    | `portfolio_created`                 |
 | `portfolio` | `deposit`           | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit`                            |
 | `portfolio` | `withdraw`          | `(portfolio_id: u64, asset: Address, amount: i128)`               | `withdraw`                           |
 | `portfolio` | `rebalanced`        | `(portfolio_id: u64, current_time: u64)`                          | `rebalance_executed`                 |
@@ -66,6 +66,13 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 | `portfolio` | `alloc_upd`         | `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` | `allocation_updated` |
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
+
+`portfolio.created` is emitted once after the new portfolio and its user count are
+stored. Its `rebalance_threshold` is the committed configuration value in the
+`1..=50` percent range. A rejected creation emits no `portfolio.created` event
+and does not consume a portfolio ID. The backend indexer continues to read the
+first two payload fields; consumers that need to reconstruct the threshold can
+read the third field.
 
 ### Governance: two-step admin transfer
 
@@ -136,7 +143,7 @@ The contract test suite emits canonical event sequences that backend integration
 1. Run the contract tests to generate snapshot files:
 
    ```bash
-   cd contracts && cargo test
+   cd contracts && cargo test --features testutils
    ```
 
 2. Snapshot JSON files are written to `contracts/test_snapshots/test/`. Each file captures the full Soroban test environment after a test completes, including all emitted events.

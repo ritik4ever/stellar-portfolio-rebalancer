@@ -74,7 +74,7 @@ The `snapshot_nav` and `get_nav_history` functions introduced in `contracts/src/
 >
 > ```bash
 > cd contracts
-> cargo test test_benchmark_nav_operations -- --nocapture
+> cargo test --features testutils test_benchmark_nav_operations -- --nocapture
 > ```
 
 | Function | Scenario | Estimated CPU Instructions | Estimated Memory Bytes | Notes |

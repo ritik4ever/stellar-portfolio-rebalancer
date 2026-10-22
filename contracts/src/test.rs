@@ -1792,6 +1792,22 @@ fn count_portfolio_created_events(env: &Env) -> usize {
         .count()
 }
 
+fn portfolio_created_payload(env: &Env) -> Option<(u64, Address, u32)> {
+    all_events(env)
+        .into_iter()
+        .find(|(_, topics, _)| {
+            topics.len() >= 2
+                && Symbol::try_from_val(env, &topics.get(0).unwrap())
+                    == Ok(Symbol::new(env, "portfolio"))
+                && Symbol::try_from_val(env, &topics.get(1).unwrap())
+                    == Ok(Symbol::new(env, "created"))
+        })
+        .map(|(_, _, data)| {
+            <(u64, Address, u32)>::try_from_val(env, &data)
+                .expect("portfolio.created includes its stored rebalance threshold")
+        })
+}
+
 #[test]
 fn test_create_portfolio_accepts_min_rebalance_threshold() {
     let env = Env::default();
@@ -1800,7 +1816,17 @@ fn test_create_portfolio_accepts_min_rebalance_threshold() {
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
 
     let allocations = single_asset_allocations(&env);
     let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
@@ -1833,6 +1859,16 @@ fn test_create_portfolio_accepts_min_rebalance_threshold() {
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
 
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "an accepted threshold must emit portfolio_created"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((pid, user.clone(), MIN_REBALANCE_THRESHOLD))
+    );
+
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.rebalance_threshold, MIN_REBALANCE_THRESHOLD);
     assert_eq!(portfolio.user, user);
@@ -1842,11 +1878,6 @@ fn test_create_portfolio_accepts_min_rebalance_threshold() {
         "creating a portfolio must not move funds"
     );
     assert_eq!(client.get_user_portfolio_count(&user), 1);
-    assert_eq!(
-        count_portfolio_created_events(&env),
-        1,
-        "an accepted threshold must emit portfolio_created"
-    );
 }
 
 #[test]
@@ -1857,7 +1888,17 @@ fn test_create_portfolio_accepts_max_rebalance_threshold() {
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
 
     let allocations = single_asset_allocations(&env);
     let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
@@ -1890,6 +1931,16 @@ fn test_create_portfolio_accepts_max_rebalance_threshold() {
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
 
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "an accepted threshold must emit portfolio_created"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((pid, user.clone(), MAX_REBALANCE_THRESHOLD))
+    );
+
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.rebalance_threshold, MAX_REBALANCE_THRESHOLD);
     assert_eq!(portfolio.user, user);
@@ -1899,11 +1950,6 @@ fn test_create_portfolio_accepts_max_rebalance_threshold() {
         "creating a portfolio must not move funds"
     );
     assert_eq!(client.get_user_portfolio_count(&user), 1);
-    assert_eq!(
-        count_portfolio_created_events(&env),
-        1,
-        "an accepted threshold must emit portfolio_created"
-    );
 }
 
 #[test]
@@ -1934,6 +1980,10 @@ fn test_create_portfolio_rejects_threshold_above_max_preserves_state() {
         count_portfolio_created_events(&env),
         1,
         "an accepted threshold emits portfolio_created"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((pid, user.clone(), 5))
     );
 
     client.deposit(&pid, &asset, &1_000, &String::from_str(&env, ""));
@@ -1972,6 +2022,7 @@ fn test_create_portfolio_rejects_threshold_above_max_preserves_state() {
         0,
         "a rejected threshold must not emit portfolio_created"
     );
+    assert_eq!(portfolio_created_payload(&env), None);
 
     // Stored configuration is preserved.
     let portfolio = client.get_portfolio(&pid);
@@ -1999,6 +2050,16 @@ fn test_create_portfolio_rejects_threshold_above_max_preserves_state() {
         pid + 1,
         "a rejected threshold must not consume a portfolio id"
     );
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "the recovered creation emits exactly one event"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((next_pid, user.clone(), 5))
+    );
+    assert_eq!(client.get_portfolio(&next_pid).rebalance_threshold, 5);
 }
 
 #[test]
@@ -2061,6 +2122,7 @@ fn test_create_portfolio_rejects_threshold_below_min_preserves_state() {
         0,
         "a rejected threshold must not emit portfolio_created"
     );
+    assert_eq!(portfolio_created_payload(&env), None);
 
     // Stored configuration and balances are preserved.
     let portfolio = client.get_portfolio(&pid);
@@ -2086,10 +2148,19 @@ fn test_create_portfolio_rejects_threshold_below_min_preserves_state() {
         pid + 1,
         "a rejected threshold must not consume a portfolio id"
     );
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "the recovered creation emits exactly one event"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((next_pid, user.clone(), 5))
+    );
+    assert_eq!(client.get_portfolio(&next_pid).rebalance_threshold, 5);
 }
 
 #[test]
-#[should_panic]
 fn test_create_portfolio_threshold_requires_owner_signature() {
     let env = Env::default();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
@@ -2098,15 +2169,36 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let stranger = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
-
-    let allocations = single_asset_allocations(&env);
-    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
-
-    // A wallet that is not the portfolio owner cannot submit a threshold.
     client
         .mock_auths(&[MockAuth {
-            address: &stranger,
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    let asset = env.register_stellar_asset_contract(admin.clone());
+    StellarAssetClient::new(&env, &asset)
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &asset,
+                fn_name: "mint",
+                args: (&user, 2_000i128).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .mint(&user, &2_000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), ALLOCATION_DENOMINATOR);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let pid = client
+        .mock_auths(&[MockAuth {
+            address: &user,
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "create_portfolio",
@@ -2114,7 +2206,7 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
                     &user,
                     &allocations,
                     &asset_decimals,
-                    MIN_REBALANCE_THRESHOLD,
+                    5u32,
                     50u32,
                     CURRENT_SLIPPAGE_POLICY_VERSION,
                 )
@@ -2126,10 +2218,73 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
             &user,
             &allocations,
             &asset_decimals,
-            &MIN_REBALANCE_THRESHOLD,
+            &5,
             &50,
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
+    client
+        .mock_auths(&[MockAuth {
+            address: &user,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "deposit",
+                args: (&pid, &asset, 1_000i128, &String::from_str(&env, "")).into_val(&env),
+                sub_invokes: &[MockAuthInvoke {
+                    contract: &asset,
+                    fn_name: "transfer",
+                    args: (&user, &contract_id, 1_000i128).into_val(&env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .deposit(&pid, &asset, &1_000, &String::from_str(&env, ""));
+
+    let token = TokenClient::new(&env, &asset);
+
+    // A wallet that is not the portfolio owner cannot submit a threshold at
+    // either accepted bound, even when that wallet signs the invocation.
+    for threshold in [MIN_REBALANCE_THRESHOLD, MAX_REBALANCE_THRESHOLD] {
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &stranger,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "create_portfolio",
+                    args: (
+                        &user,
+                        &allocations,
+                        &asset_decimals,
+                        threshold,
+                        50u32,
+                        CURRENT_SLIPPAGE_POLICY_VERSION,
+                    )
+                        .into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_create_portfolio(
+                &user,
+                &allocations,
+                &asset_decimals,
+                &threshold,
+                &50,
+                &CURRENT_SLIPPAGE_POLICY_VERSION,
+            );
+
+        assert!(result.is_err(), "non-owner signature must be rejected");
+        assert_eq!(count_portfolio_created_events(&env), 0);
+        assert_eq!(client.get_user_portfolio_count(&user), 1);
+        assert_eq!(client.get_portfolio(&pid).rebalance_threshold, 5);
+        assert_eq!(
+            client
+                .get_portfolio(&pid)
+                .current_balances
+                .get(asset.clone()),
+            Some(1_000)
+        );
+        assert_eq!(token.balance(&contract_id), 1_000);
+        assert_eq!(token.balance(&user), 1_000);
+    }
 }
 
 // ── Oracle caller authorization regressions (SPR-2026-201/202/203) ───────────
@@ -4500,6 +4655,74 @@ fn test_default_circuit_breaker_config() {
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.circuit_breaker_config.spike_threshold_bps, DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS);
     assert_eq!(portfolio.circuit_breaker_config.window_seconds, DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS);
+}
+
+#[test]
+fn test_set_pf_circuit_breaker_rejects_invalid_spike_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Test spike_threshold_bps == 0 (too low)
+    let result = client.try_set_pf_circuit_breaker(&pid, &0, &3600);
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Test spike_threshold_bps > 10000 (too high)
+    let result = client.try_set_pf_circuit_breaker(&pid, &10001, &3600);
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Valid values should work
+    let result = client.try_set_pf_circuit_breaker(&pid, &1, &3600);
+    assert_eq!(result, Ok(()));
+    let result = client.try_set_pf_circuit_breaker(&pid, &10000, &3600);
+    assert_eq!(result, Ok(()));
+}
+
+#[test]
+fn test_set_pf_circuit_breaker_rejects_invalid_window_seconds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Test window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS (too low)
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &(MIN_CIRCUIT_BREAKER_WINDOW_SECONDS - 1));
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Test window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS (too high)
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &(MAX_CIRCUIT_BREAKER_WINDOW_SECONDS + 1));
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Valid boundary values should work
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &MIN_CIRCUIT_BREAKER_WINDOW_SECONDS);
+    assert_eq!(result, Ok(()));
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &MAX_CIRCUIT_BREAKER_WINDOW_SECONDS);
+    assert_eq!(result, Ok(()));
+    
+    // Valid middle value should work
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &3600);
+    assert_eq!(result, Ok(()));
 }
 
 #[test]

@@ -339,6 +339,13 @@ const notificationDeliveryDuration = new Histogram({
     registers: [register],
 })
 
+const notificationDeliveryStalledTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}notification_delivery_stalled_total`,
+    help: 'Total notification deliveries that were accepted but not confirmed within the timeout window',
+    labelNames: ['channel', 'reason', 'event_type'] as const,
+    registers: [register],
+})
+
 export type NotificationDeliveryOutcome = 'success' | 'failure'
 
 /** Terminal outcome of a delivery (after any retries). */
@@ -371,6 +378,25 @@ export function recordNotificationDeliveryAttempt(
     outcome: 'success' | 'failure' | 'retried',
 ): void {
     notificationDeliveryAttemptsTotal.inc({ channel, outcome })
+}
+
+/**
+ * Record a delivery that the provider accepted but never confirmed (e.g. the
+ * provider timed out after accepting the message). This is distinct from a
+ * hard failure: the message may still be delivered, so operators need to see
+ * it as "delay/unknown" rather than "blocked". `reason` must be a coarse,
+ * bounded classification — never the raw provider error string.
+ */
+export function recordNotificationDeliveryStalled(input: {
+    channel: string
+    reason: string
+    eventType?: string
+}): void {
+    notificationDeliveryStalledTotal.inc({
+        channel: input.channel,
+        reason: input.reason,
+        event_type: input.eventType ?? 'unknown',
+    })
 }
 
 const idempotencyCleanupRunsTotal = new Counter({

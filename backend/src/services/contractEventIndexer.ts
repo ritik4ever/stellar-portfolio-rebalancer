@@ -554,6 +554,7 @@ export class ContractEventIndexerService {
             let ingested = 0
             let latestLedger = storedLatestLedger
             let pagesRead = 0
+            const pageCursors = new Set<string>(cursor ? [cursor] : [])
 
             while (pagesRead < this.maxPagesPerSync) {
                 const response = await this.rpcExecute((s) =>
@@ -569,6 +570,14 @@ export class ContractEventIndexerService {
 
                 if (!response.events.length) break
 
+                const nextCursor = response.events[response.events.length - 1]?.pagingToken
+                if (!nextCursor) {
+                    throw new Error('INDEXER_CURSOR_MISSING: nonempty event page has no resume token')
+                }
+                if (pageCursors.has(nextCursor)) {
+                    throw new Error('INDEXER_CURSOR_STALLED: RPC repeated an event page; retry from the last completed page')
+                }
+
                 for (const event of response.events) {
                     let indexed: ReturnType<typeof this.toIndexedOnChainEvent>
                     try {
@@ -579,21 +588,12 @@ export class ContractEventIndexerService {
                     }
                     if (!indexed) continue
 
-                    const dedupKey = `${indexed.ledger}:${indexed.txHash}:${indexed.kind}:${indexed.portfolioId}`
+                    if (!indexed.pagingToken) {
+                        throw new Error('INDEXER_CURSOR_MISSING: indexed event has no durable identity')
+                    }
+                    const dedupKey = indexed.pagingToken
                     if (this.seenEventKeys.has(dedupKey)) {
                         continue
-                    }
-                    this.seenEventKeys.add(dedupKey)
-                    
-                    // Prevent unbounded memory growth
-                    if (this.seenEventKeys.size > 10000) {
-                        const iterator = this.seenEventKeys.values()
-                        for (let i = 0; i < 1000; i++) {
-                            const val = iterator.next().value
-                            if (val !== undefined) {
-                                this.seenEventKeys.delete(val)
-                            }
-                        }
                     }
 
                     databaseService.ensurePortfolioExists(indexed.portfolioId, indexed.userAddress || 'ONCHAIN-INDEXER')
@@ -615,11 +615,23 @@ export class ContractEventIndexerService {
                         onChainPagingToken: indexed.pagingToken,
                         isSimulated: false
                     })
+                    // Failed writes must remain retryable. The database's paging-token
+                    // constraint provides deduplication after a restart or cache eviction.
+                    this.seenEventKeys.add(dedupKey)
+                    if (this.seenEventKeys.size > 10000) {
+                        const iterator = this.seenEventKeys.values()
+                        for (let i = 0; i < 1000; i++) {
+                            const val = iterator.next().value
+                            if (val !== undefined) this.seenEventKeys.delete(val)
+                        }
+                    }
                     ingested++
                 }
 
-                const nextCursor = response.events[response.events.length - 1]?.pagingToken
-                if (!nextCursor || nextCursor === cursor) break
+                // Checkpoint only fully processed pages; partially committed pages can
+                // safely replay because their event writes are idempotent.
+                databaseService.setIndexerState(INDEXER_CURSOR_KEY, nextCursor)
+                pageCursors.add(nextCursor)
                 cursor = nextCursor
                 startLedger = undefined
             }
