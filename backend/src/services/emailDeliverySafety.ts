@@ -19,6 +19,7 @@ export interface EmailNotificationIdentity {
   eventType: string;
   title: string;
   timestamp: string;
+  deliveryId?: string;
 }
 
 const DEFAULT_MESSAGE_ID_DOMAIN = "stellarportfolio.com";
@@ -82,13 +83,17 @@ export function deriveEmailMessageId(
   identity: EmailNotificationIdentity,
   from: string | undefined = process.env.SMTP_FROM,
 ): string {
-  const seed = [
-    identity.userId,
-    identity.portfolioId ?? "",
-    identity.eventType,
-    identity.timestamp,
-    identity.title,
-  ].join("|");
+  // Match the retry wrapper's logical identity. Presentation fields can change
+  // when a producer reconstructs the same rebalance event for redelivery.
+  const seed = identity.deliveryId
+    ? JSON.stringify([identity.userId, identity.eventType, identity.deliveryId])
+    : [
+        identity.userId,
+        identity.portfolioId ?? "",
+        identity.eventType,
+        identity.timestamp,
+        identity.title,
+      ].join("|");
   const digest = createHash("sha256").update(seed).digest("hex").slice(0, 32);
   return `<${digest}@${senderDomain(from)}>`;
 }

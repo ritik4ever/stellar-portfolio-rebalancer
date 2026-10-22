@@ -283,6 +283,12 @@ class EmailProvider implements NotificationProvider {
       return;
     }
 
+    const deliveryId =
+      payload.deliveryId ||
+      (payload.data?.deliveryId as string | undefined) ||
+      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
+      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
+
     const mailOptions = {
       from: process.env.SMTP_FROM || "noreply@stellarportfolio.com",
       to: recipientEmail,
@@ -291,15 +297,10 @@ class EmailProvider implements NotificationProvider {
       html: this.formatHtmlEmail(payload),
       // Stable across retries so a possibly-delivered message can be
       // correlated instead of silently duplicated (#2091).
-      messageId: deriveEmailMessageId(payload),
+      messageId: deriveEmailMessageId({ ...payload, deliveryId }),
     };
 
     const policy = this.deliveryConfig.email;
-    const deliveryId =
-      payload.deliveryId ||
-      (payload.data?.deliveryId as string | undefined) ||
-      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
-      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
 
     await deliverWithBackoff(
       {
