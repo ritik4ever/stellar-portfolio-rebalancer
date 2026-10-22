@@ -3,7 +3,11 @@ import { StellarService } from '../services/stellar.js'
 import { ReflectorService } from '../services/reflector.js'
 import { databaseService } from '../services/databaseService.js'
 import { portfolioStorage } from '../services/portfolioStorage.js'
-import { decodePortfolioCursor } from '../utils/portfolioPagination.js'
+import {
+    decodePortfolioCursor,
+    recordPaginationSignal,
+    type PaginationState,
+} from '../utils/portfolioPagination.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
 import { rebalanceHistoryService } from '../services/serviceContainer.js'
@@ -720,6 +724,9 @@ portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Resp
 })
 
 portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
+    const startTime = Date.now()
+    const source = ((req.headers['x-caller-source'] || req.headers['x-source']) as string) || 'api'
+
     try {
         const search = (req.query.search as string) || ''
         const address = (req.query.userAddress || req.query.address) as string | undefined
@@ -739,16 +746,46 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
         if (rawCursor !== undefined) {
             const decoded = decodePortfolioCursor(rawCursor)
             if (!decoded) {
+                recordPaginationSignal({
+                    source,
+                    outcome: 'invalid_cursor',
+                    state: 'blocked',
+                    context: {
+                        source,
+                        rawCursor,
+                        reason: 'malformed_cursor',
+                    },
+                    durationSeconds: (Date.now() - startTime) / 1000,
+                })
                 return fail(res, 400, 'INVALID_CURSOR', 'Invalid pagination cursor')
             }
         }
 
-        const { portfolios, nextCursor, total, count } = await portfolioStorage.searchPortfoliosPage({
+        const { portfolios, nextCursor, total, count, itemsChanged, changeKind } = await portfolioStorage.searchPortfoliosPage({
             search,
             address,
             includeArchived,
             limit,
             cursor: rawCursor,
+        })
+
+        const outcome = itemsChanged ? 'items_changed' : 'success'
+        recordPaginationSignal({
+            source,
+            outcome,
+            state: 'success',
+            context: {
+                source,
+                limit,
+                count: count ?? portfolios.length,
+                total,
+                hasMore: nextCursor !== null,
+                itemsChanged: !!itemsChanged,
+                changeKind: changeKind ?? 'none',
+                firstItemId: portfolios[0]?.id,
+                lastItemId: portfolios[portfolios.length - 1]?.id,
+            },
+            durationSeconds: (Date.now() - startTime) / 1000,
         })
 
         return ok(res, {
@@ -760,11 +797,26 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
             total,
         })
     } catch (error) {
+        const durationSeconds = (Date.now() - startTime) / 1000
+        const errMsg = getErrorMessage(error).toLowerCase()
+        const isDelay = errMsg.includes('timeout') || errMsg.includes('busy') || errMsg.includes('lock')
+        const state: PaginationState = isDelay ? 'delayed' : 'blocked'
+
+        recordPaginationSignal({
+            source,
+            outcome: isDelay ? 'timeout_delayed' : 'error',
+            state,
+            context: {
+                source,
+                error: getErrorMessage(error),
+            },
+            durationSeconds,
+        })
+
         logger.error('[ERROR] Get portfolios list failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
-
 
 
 
