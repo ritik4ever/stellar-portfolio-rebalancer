@@ -1,14 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as notificationDb from "../db/notificationDb.js";
-<<<<<<< HEAD
-import { deliverWithBackoff, NotificationDeliveryError, _resetDeliveriesForTest } from "../services/notificationDelivery.js";
-=======
 import {
   deliverStateForFailureKind,
   deliverWithBackoff,
   NotificationDeliveryError,
+  _resetDeliveriesForTest,
 } from "../services/notificationDelivery.js";
->>>>>>> origin/main
 import { webhookDeadLetterQueue } from "../services/webhookDeadLetter.js";
 
 vi.mock("../services/webhookDeadLetter.js", () => ({
@@ -306,6 +303,7 @@ describe("deliverWithBackoff", () => {
         retryable: false,
         stoppedEarly: true,
         idempotencyKey: "webhook:abc123",
+        deliveryState: "blocked",
       }),
     );
   });
@@ -347,6 +345,7 @@ describe("deliverWithBackoff", () => {
         failureKind: "permanent",
         stoppedEarly: true,
         idempotencyKey: "webhook:def456",
+        deliveryState: "blocked",
       }),
     );
   });
