@@ -715,7 +715,7 @@ portfoliosRouter.put(
     validateRequest(exportScheduleSchema),
     async (req: Request, res: Response) => {
         try {
-            const portfolioId = req.params.id
+            const portfolioId = req.params.id as string
             const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
             if (portfolio.userAddress !== req.user!.address) {
@@ -746,7 +746,7 @@ portfoliosRouter.put(
 /** Read the current schedule for a portfolio. */
 portfoliosRouter.get('/portfolio/:id/export-schedule', requireJwt, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         if (portfolio.userAddress !== req.user!.address) {
@@ -766,7 +766,7 @@ portfoliosRouter.get('/portfolio/:id/export-schedule', requireJwt, async (req: R
 /** Cancel a recurring export. */
 portfoliosRouter.delete('/portfolio/:id/export-schedule', requireJwt, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
         if (portfolio.userAddress !== req.user!.address) {
@@ -786,7 +786,7 @@ portfoliosRouter.delete('/portfolio/:id/export-schedule', requireJwt, async (req
 // Portfolio export (JSON, CSV, PDF) — GDPR data portability
 portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQuery(portfolioExportQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         const format = req.query.format as 'json' | 'csv' | 'pdf'
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -819,8 +819,8 @@ portfoliosRouter.get('/portfolio/:id/export', requireJwtWhenEnabled, validateQue
 
 portfoliosRouter.get('/portfolio/:id/export/status/:jobId', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
-        const jobId = req.params.jobId
+        const portfolioId = req.params.id as string
+        const jobId = req.params.jobId as string
         
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -872,7 +872,7 @@ portfoliosRouter.get('/portfolio/:id/export/status/:jobId', requireJwtWhenEnable
 
 portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Response) => {
     try {
-        const address = req.params.address
+        const address = req.params.address as string
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
         const authConfig = getAuthConfig()
         const allowPublicInDemo =
@@ -902,7 +902,8 @@ portfoliosRouter.get('/user/:address/portfolios', async (req: Request, res: Resp
 
 portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
     const startTime = Date.now()
-    const source = ((req.headers['x-caller-source'] || req.headers['x-source']) as string) || 'api'
+    const rawHeader = req.headers['x-caller-source'] || req.headers['x-source']
+    const source = (Array.isArray(rawHeader) ? rawHeader[0] : (rawHeader as string)) || 'api'
 
     try {
         const search = (req.query.search as string) || ''
@@ -999,7 +1000,7 @@ portfoliosRouter.get('/portfolios', async (req: Request, res: Response) => {
 
 portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const parsed = clonePortfolioSchema.safeParse(req.body ?? {})
@@ -1041,7 +1042,7 @@ portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempote
 
 portfoliosRouter.get('/portfolio/:id/rebalance-plan', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -1096,7 +1097,7 @@ portfoliosRouter.post('/portfolios/rebalance-plans', validateRequest(batchRebala
 
 portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const portfolio = await portfolioStorage.getPortfolio(portfolioId) as Portfolio | undefined
         if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
@@ -1110,7 +1111,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', async (req: Request, r
 
 portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         const estimate = await stellarService.estimateRebalanceGas(portfolioId)
 
@@ -1123,7 +1124,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-estimate', async (req: Request, r
 
 portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validateRequest(rebalancePortfolioSchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id;
+        const portfolioId = req.params.id as string;
 
         console.log(`[INFO] Attempting manual rebalance for portfolio: ${portfolioId}`);
 
@@ -1286,7 +1287,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
 portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolioRebalanceHistoryQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id;
+        const portfolioId = req.params.id as string;
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
         }
@@ -1342,7 +1343,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
 
 portfoliosRouter.get('/portfolio/:id/rebalance-history/export', validateQuery(rebalanceHistoryExportQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id;
+        const portfolioId = req.params.id as string;
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID is required');
         }
