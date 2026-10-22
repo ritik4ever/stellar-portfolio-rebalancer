@@ -7,6 +7,7 @@ vi.mock('../services/databaseService.js', () => ({
     databaseService: {
         getIndexerState: vi.fn(), setIndexerState: vi.fn(),
         ensurePortfolioExists: vi.fn(), recordRebalanceEvent: vi.fn(),
+        recordRebalanceEventOnce: vi.fn(() => ({ event: { id: 'mock-event' }, inserted: true })),
     },
 }))
 vi.mock('../utils/logger.js', () => ({
@@ -37,6 +38,9 @@ describe('contract event replay recovery (#2101)', () => {
         state = new Map()
         vi.mocked(databaseService.getIndexerState).mockImplementation((key) => state.get(key))
         vi.mocked(databaseService.setIndexerState).mockImplementation((key, value) => { state.set(key, value) })
+        vi.mocked(databaseService.recordRebalanceEventOnce).mockImplementation(
+            () => ({ event: { id: 'mock-event' } as any, inserted: true })
+        )
         rpc.getLatestLedger.mockResolvedValue({ sequence: 1000 })
         rpc.getEvents.mockResolvedValue(page())
     })
@@ -46,13 +50,13 @@ describe('contract event replay recovery (#2101)', () => {
     it('retries an unwritten event without repeating a successful write after a partial-page failure', async () => {
         const recorded: string[] = []
         let fail = true
-        vi.mocked(databaseService.recordRebalanceEvent).mockImplementation((data) => {
+        vi.mocked(databaseService.recordRebalanceEventOnce).mockImplementation((data) => {
             if (data.onChainPagingToken === 'b' && fail) {
                 fail = false
                 throw new Error('temporary database failure')
             }
             recorded.push(data.onChainPagingToken!)
-            return { id: data.onChainPagingToken } as any
+            return { event: { id: data.onChainPagingToken } as any, inserted: true }
         })
         rpc.getEvents.mockResolvedValueOnce(page(event('a'), event('b')))
         await indexer.syncOnce()
@@ -71,7 +75,7 @@ describe('contract event replay recovery (#2101)', () => {
         rpc.getEvents.mockResolvedValue(page(event('a')))
         await indexer.syncOnce()
         expect(rpc.getEvents).toHaveBeenCalledTimes(2)
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(1)
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(1)
         expect(state.get(CURSOR)).toBe('a')
         expect(indexer.getStatus().lastError).toContain('INDEXER_CURSOR_STALLED')
         expect(indexer.getStatus().consecutiveFailures).toBe(1)
@@ -79,7 +83,7 @@ describe('contract event replay recovery (#2101)', () => {
         rpc.getEvents.mockResolvedValueOnce(page(event('b'))).mockResolvedValue(page())
         await indexer.syncOnce()
         expect(rpc.getEvents.mock.calls[2][0].cursor).toBe('a')
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(2)
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(2)
         expect(state.get(CURSOR)).toBe('b')
         expect(indexer.getStatus().lastError).toBeUndefined()
     })
@@ -89,7 +93,7 @@ describe('contract event replay recovery (#2101)', () => {
             .mockResolvedValueOnce(page(event('b'))).mockResolvedValue(page(event('a')))
         await indexer.syncOnce()
         expect(rpc.getEvents).toHaveBeenCalledTimes(3)
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(2)
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(2)
         expect(state.get(CURSOR)).toBe('b')
         expect(indexer.getStatus().lastError).toContain('INDEXER_CURSOR_STALLED')
     })
@@ -98,7 +102,7 @@ describe('contract event replay recovery (#2101)', () => {
         rpc.getEvents.mockResolvedValue(page(event('')))
         await indexer.syncOnce()
         expect(rpc.getEvents).toHaveBeenCalledTimes(1)
-        expect(databaseService.recordRebalanceEvent).not.toHaveBeenCalled()
+        expect(databaseService.recordRebalanceEventOnce).not.toHaveBeenCalled()
         expect(state.get(CURSOR)).toBeUndefined()
         expect(indexer.getStatus().lastError).toContain('INDEXER_CURSOR_MISSING')
     })
@@ -106,6 +110,6 @@ describe('contract event replay recovery (#2101)', () => {
     it('keeps distinct event tokens in the same transaction and portfolio', async () => {
         rpc.getEvents.mockResolvedValueOnce(page(event('a', 'same-tx'), event('b', 'same-tx')))
         await indexer.syncOnce()
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(2)
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(2)
     })
 })
