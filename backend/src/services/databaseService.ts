@@ -9,11 +9,13 @@ import { logger } from "../utils/logger.js";
 import { ConflictError, BackupVerificationError } from "../types/index.js";
 
 import type { Portfolio } from "../types/index.js";
+import { isRebalanceActiveSync } from "./portfolioPersistenceBoundary.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 import { dbQueryDuration } from "../observability/metrics.js";
 import {
   encodePortfolioCursor,
   decodePortfolioCursor,
+  diagnosePaginationChange,
   type PortfolioPageCursor,
   type PortfolioPaginationResult,
 } from "../utils/portfolioPagination.js";
@@ -1148,6 +1150,15 @@ export class DatabaseService {
         const current = rowToPortfolio(row);
         const merged = { ...current, ...updates };
 
+        if (updates.allocations !== undefined && isRebalanceActiveSync(id)) {
+          throw new ConflictError(
+            current.version ?? -1,
+            `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+            "rebalancing",
+            "conflict_rebalancing"
+          );
+        }
+
         if (expectedVersion !== undefined) {
           // Compare-and-set: only update when version matches
           const result = this.db
@@ -1209,6 +1220,24 @@ export class DatabaseService {
         if (err instanceof ConflictError) throw err;
         throw new Error(`Failed to update portfolio '${id}': ${err}`);
       }
+    });
+  }
+
+  /**
+   * Edit allocations at the service boundary, documenting committed version,
+   * execution state, and a stable result.
+   */
+  async editAllocations(
+    id: string,
+    allocations: Record<string, number>,
+    expectedVersion?: number
+  ): Promise<import("../types/index.js").AllocationEditDecision> {
+    const { applyAllocationEdit } = await import("./portfolioPersistenceBoundary.js");
+    return applyAllocationEdit({
+      portfolioId: id,
+      allocations,
+      expectedVersion,
+      storage: this as any,
     });
   }
 
@@ -1355,8 +1384,13 @@ export class DatabaseService {
       const hasMore = rows.length > limit;
       const pageRows = hasMore ? rows.slice(0, limit) : rows;
       const last = pageRows[pageRows.length - 1];
+      const { itemsChanged, changeKind } = diagnosePaginationChange({
+        currentTotal: total,
+        cursor: parsedCursor,
+      });
+
       const nextCursor = hasMore && last
-        ? encodePortfolioCursor({ createdAt: last.created_at, id: last.id })
+        ? encodePortfolioCursor({ createdAt: last.created_at, id: last.id, total })
         : null;
 
       return {
@@ -1366,10 +1400,11 @@ export class DatabaseService {
         nextCursor,
         count: pageRows.length,
         total,
+        itemsChanged,
+        changeKind,
       };
     });
   }
-
 
   private verifyBackupExists(): void {
       // In production, this would check for a recent .db backup.

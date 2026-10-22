@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Keypair } from '@stellar/stellar-sdk';
 import { logger, logAudit } from '../utils/logger.js';
 import { recordAuthSecurityEvent } from '../observability/metrics.js';
-import { authorizationContext, detectOtherNetwork, recordWalletAuthorization } from './walletAuthorization.js';
+import { authorizationContext, classifyChallengeReplay, detectOtherNetwork, recordChallengeDisposition, recordWalletAuthorization } from './walletAuthorization.js';
 import type { WalletAuthorizationContext } from './walletAuthorization.js';
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────
@@ -82,7 +82,9 @@ export function verifyWalletSignature(
 ): boolean {
   const entry = challengeStore.get(address);
   if (!entry) {
-    recordWalletAuthorization('wallet_signature', authorizationContext(address), 'blocked', 'missing_challenge', { retryable: false });
+    const replay = classifyChallengeReplay('wallet_signature', address);
+    recordWalletAuthorization('wallet_signature', replay?.context ?? authorizationContext(address),
+      'blocked', replay?.reason ?? 'missing_challenge', { retryable: false });
     recordAuthSecurityEvent("expired_challenge");
     logAudit("auth_expired_challenge", { address });
     logger.warn("Auth attempt with no active challenge", { address });
@@ -90,6 +92,7 @@ export function verifyWalletSignature(
   }
   if (Date.now() > entry.expiresAt) {
     challengeStore.delete(address);
+    recordChallengeDisposition('wallet_signature', 'expired', entry.context);
     recordWalletAuthorization('wallet_signature', entry.context, 'blocked', 'expired_challenge', { retryable: false });
     recordAuthSecurityEvent("expired_challenge");
     logAudit("auth_expired_challenge", { address });
@@ -112,6 +115,7 @@ export function verifyWalletSignature(
       logAudit("auth_failed_signature", { address });
       recordFailedSignature(address);
     } else {
+      recordChallengeDisposition('wallet_signature', 'consumed', entry.context);
       recordWalletAuthorization('wallet_signature', entry.context, 'success', 'authorized');
     }
     return valid;

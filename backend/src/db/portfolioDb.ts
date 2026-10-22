@@ -149,6 +149,20 @@ export async function dbUpdatePortfolio(
     },
     expectedVersion?: number
 ) {
+    if (updates.allocations !== undefined) {
+        const { isRebalanceActive } = await import('../services/portfolioPersistenceBoundary.js')
+        if (await isRebalanceActive(id)) {
+            const current = await query<{ version: number }>('SELECT version FROM portfolios WHERE id = $1', [id])
+            const { ConflictError } = await import('../types/index.js')
+            throw new ConflictError(
+                current.rows[0]?.version ?? -1,
+                `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+                'rebalancing',
+                'conflict_rebalancing'
+            )
+        }
+    }
+
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1

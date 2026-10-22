@@ -5,6 +5,7 @@ import type { Portfolio } from '../types/index.js'
 import {
     encodePortfolioCursor,
     decodePortfolioCursor,
+    diagnosePaginationChange,
     type PortfolioPageCursor,
     type PortfolioPaginationResult,
 } from '../utils/portfolioPagination.js'
@@ -130,6 +131,20 @@ export class PortfolioStorage {
         const portfolio = await this.getPortfolio(id)
         if (!portfolio) return false
 
+        // Check active rebalance boundary guard if allocations are being updated
+        if (updates.allocations !== undefined) {
+            const { isRebalanceActive } = await import('./portfolioPersistenceBoundary.js')
+            if (await isRebalanceActive(id)) {
+                const { ConflictError } = await import('../types/index.js')
+                throw new ConflictError(
+                    portfolio.version ?? -1,
+                    `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+                    'rebalancing',
+                    'conflict_rebalancing'
+                )
+            }
+        }
+
         if (expectedVersion !== undefined && portfolio.version !== expectedVersion) {
             const { ConflictError } = await import('../types/index.js')
             throw new ConflictError(portfolio.version ?? -1)
@@ -152,6 +167,24 @@ export class PortfolioStorage {
         }
         this.cacheSet(updated)
         return true
+    }
+
+    /**
+     * Edit allocations at the service boundary, documenting committed version,
+     * execution state, and a stable result.
+     */
+    async editAllocations(
+        id: string,
+        allocations: Record<string, number>,
+        expectedVersion?: number
+    ): Promise<import('../types/index.js').AllocationEditDecision> {
+        const { applyAllocationEdit } = await import('./portfolioPersistenceBoundary.js')
+        return applyAllocationEdit({
+            portfolioId: id,
+            allocations,
+            expectedVersion,
+            storage: this
+        })
     }
 
     async searchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false): Promise<Portfolio[]> {
@@ -203,13 +236,20 @@ export class PortfolioStorage {
                 cursor: parsedCursor,
                 includeArchived,
             })
+            const total = page.total ?? page.count
+            const { itemsChanged, changeKind } = diagnosePaginationChange({
+                currentTotal: total,
+                cursor: parsedCursor,
+            })
             return {
                 portfolios: page.portfolios as Portfolio[],
                 limit,
                 cursor: cursorStr,
-                nextCursor: page.nextCursor ? encodePortfolioCursor(page.nextCursor) : null,
+                nextCursor: page.nextCursor ? encodePortfolioCursor({ ...page.nextCursor, total }) : null,
                 count: page.count,
-                total: page.total ?? page.count,
+                total,
+                itemsChanged,
+                changeKind,
             }
         }
 
@@ -229,6 +269,10 @@ export class PortfolioStorage {
         }
 
         const total = all.length
+        const { itemsChanged, changeKind } = diagnosePaginationChange({
+            currentTotal: total,
+            cursor: parsedCursor,
+        })
 
         // Ascending ordering: oldest items first by (created_at ASC, id ASC)
         all.sort((a, b) => {
@@ -253,7 +297,7 @@ export class PortfolioStorage {
         const pageItems = hasMore ? paged.slice(0, limit) : paged
         const last = pageItems[pageItems.length - 1]
         const nextCursor = hasMore && last
-            ? encodePortfolioCursor({ createdAt: last.createdAt, id: last.id })
+            ? encodePortfolioCursor({ createdAt: last.createdAt, id: last.id, total })
             : null
 
         return {
@@ -263,9 +307,10 @@ export class PortfolioStorage {
             nextCursor,
             count: pageItems.length,
             total,
+            itemsChanged,
+            changeKind,
         }
     }
-
 
     async getAllPortfolios(includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {

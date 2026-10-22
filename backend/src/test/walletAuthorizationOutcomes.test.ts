@@ -52,8 +52,34 @@ describe('wallet authorization operator outcomes', () => {
             expect(logged).not.toContain(secret)
         }
         await expect(verifyChallenge(address, signature)).rejects.toThrow('No active challenge')
-        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'missing_challenge' })
+        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'reused_challenge', retryable: false })
+        expect(events().at(-1)).toMatchObject({
+            walletId: events()[0].walletId,
+            challengeId: events()[0].challengeId,
+            expectedNetwork: events()[0].expectedNetwork,
+        })
         expect(doubles.issueTokens).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the bound account, nonce, and network on replays after expiry', async () => {
+        const nonce = createChallenge(address)
+        const signature = sign(keypair, nonce)
+        vi.setSystemTime(Date.now() + 5 * 60 * 1000)
+        await expect(verifyChallenge(address, signature)).rejects.toThrow('Challenge expired')
+        const expired = events().at(-1)
+        expect(expired).toMatchObject({ outcome: 'blocked', reason: 'expired_challenge', retryable: false })
+        await expect(verifyChallenge(address, signature)).rejects.toThrow('No active challenge')
+        expect(events().at(-1)).toEqual(expired)
+    })
+
+    it('falls back to missing_challenge once the replay window passes', async () => {
+        const nonce = createChallenge(address)
+        const signature = sign(keypair, nonce)
+        await verifyChallenge(address, signature)
+        vi.setSystemTime(Date.now() + 15 * 60 * 1000 + 1)
+        await expect(verifyChallenge(address, signature)).rejects.toThrow('No active challenge')
+        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'missing_challenge' })
+        expect(events().at(-1)).not.toHaveProperty('challengeId')
     })
 
     it.each([

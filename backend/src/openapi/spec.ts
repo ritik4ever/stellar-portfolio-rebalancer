@@ -397,6 +397,135 @@ const spec: Record<string, any> = {
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
+            put: {
+                tags: ['Portfolio'],
+                summary: 'Update portfolio',
+                description: 'Update portfolio metadata and allocations with optimistic concurrency control and persistence boundary handling.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['version'],
+                                properties: {
+                                    version: { type: 'integer', description: 'Expected portfolio version for optimistic locking', example: 1 },
+                                    allocations: { type: 'object', additionalProperties: { type: 'number' }, example: { XLM: 60, USDC: 40 } },
+                                    threshold: { type: 'number', minimum: 0.1, maximum: 50, example: 5 },
+                                    name: { type: 'string', nullable: true, example: 'Core rebalance holdings' },
+                                    description: { type: 'string', nullable: true, example: 'Updated targets' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Portfolio updated successfully',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolio: { $ref: '#/components/schemas/Portfolio' },
+                                                committedVersion: { type: 'integer', example: 2 },
+                                                executionState: { type: 'string', enum: ['idle', 'rebalancing', 'completed', 'failed'], example: 'idle' },
+                                                result: { type: 'string', enum: ['committed', 'conflict_rebalancing', 'conflict_version', 'not_found', 'validation_error'], example: 'committed' },
+                                                decision: { $ref: '#/components/schemas/AllocationEditDecision' },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Version conflict or active rebalance in flight', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/allocations': {
+            put: {
+                tags: ['Portfolio'],
+                summary: 'Update portfolio allocations at service boundary',
+                description: 'Specify and implement an allocation edit during rebalance at the service boundary. Documents committed portfolio version and execution state with a stable result code.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/UpdateAllocationsRequest',
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Allocations updated successfully',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolio: { $ref: '#/components/schemas/Portfolio' },
+                                                decision: { $ref: '#/components/schemas/AllocationEditDecision' },
+                                                committedVersion: { type: 'integer', example: 2 },
+                                                executionState: { type: 'string', enum: ['idle', 'rebalancing', 'completed', 'failed'], example: 'idle' },
+                                                result: { type: 'string', enum: ['committed', 'conflict_rebalancing', 'conflict_version', 'not_found', 'validation_error'], example: 'committed' },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Conflict: active rebalance in flight or stale expectedVersion', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Schema validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            patch: {
+                tags: ['Portfolio'],
+                summary: 'Patch portfolio allocations at service boundary',
+                description: 'Alias for PUT /api/portfolio/{id}/allocations with boundary handling.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/UpdateAllocationsRequest',
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Allocations updated successfully' },
+                    '400': { description: 'Validation error' },
+                    '404': { description: 'Portfolio not found' },
+                    '409': { description: 'Conflict' },
+                    '422': { description: 'Schema validation error' },
+                    '500': { description: 'Internal error' },
+                },
+            },
         },
         '/api/portfolios': {
             get: {
@@ -1780,6 +1909,59 @@ const spec: Record<string, any> = {
                     simulated: { type: 'boolean', example: true },
                     dataSource: { type: 'string', example: 'coingecko_market_chart' },
                     disclaimer: { type: 'string' },
+                },
+            },
+            UpdateAllocationsRequest: {
+                type: 'object',
+                required: ['allocations'],
+                properties: {
+                    allocations: {
+                        type: 'object',
+                        additionalProperties: { type: 'number' },
+                        description: 'Target asset weights summing to exactly 100%, between 1 and 10 assets.',
+                        example: { XLM: 60, USDC: 40 },
+                    },
+                    version: {
+                        type: 'integer',
+                        description: 'Optional expected version for compare-and-set concurrency guard.',
+                        example: 1,
+                    },
+                },
+            },
+            AllocationEditDecision: {
+                type: 'object',
+                required: ['result', 'applied', 'committedVersion', 'executionState', 'reason'],
+                properties: {
+                    result: {
+                        type: 'string',
+                        enum: ['committed', 'conflict_rebalancing', 'conflict_version', 'not_found', 'validation_error'],
+                        description: 'Stable result code documenting the persistence boundary outcome.',
+                        example: 'committed',
+                    },
+                    applied: {
+                        type: 'boolean',
+                        description: 'Whether the allocation edit was committed to storage.',
+                        example: true,
+                    },
+                    committedVersion: {
+                        type: 'integer',
+                        description: 'The committed version number of the portfolio record.',
+                        example: 2,
+                    },
+                    executionState: {
+                        type: 'string',
+                        enum: ['idle', 'rebalancing', 'completed', 'failed'],
+                        description: 'Current execution state of the rebalancing workflow.',
+                        example: 'idle',
+                    },
+                    reason: {
+                        type: 'string',
+                        description: 'Human-readable explanation of the boundary decision.',
+                        example: 'Allocation edit successfully committed',
+                    },
+                    portfolio: {
+                        $ref: '#/components/schemas/Portfolio',
+                    },
                 },
             },
         },
