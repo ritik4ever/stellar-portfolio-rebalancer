@@ -163,8 +163,17 @@ describe('SPR-2026-188: State consistency in API error serialization', () => {
             portfolioId: PORTFOLIO_ID,
             status: 'failed',
             trigger: 'Manual Rebalancing (Failed)',
-            error: 'Rebalance execution failed due to an unexpected error'
+            error: 'Rebalance execution failed due to an unexpected error',
+            details: expect.objectContaining({
+                source: 'api',
+                outcome: 'failed',
+                failureReason: 'Rebalance execution failed due to an unexpected error',
+                diagnosticContext: expect.stringContaining('FATAL: password authentication failed'),
+            })
         }))
+        const callArgs = mockRecordRebalanceEvent.mock.calls[0][0]
+        expect(callArgs.details.diagnosticContext).not.toContain('secret_db_admin')
+        expect(callArgs.details.diagnosticContext).toContain('[REDACTED]')
         expect(mockReleaseWorkerLock).toHaveBeenCalledWith(PORTFOLIO_ID)
     })
 

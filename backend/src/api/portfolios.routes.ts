@@ -21,6 +21,7 @@ import { buildRebalancePlan, buildBatchRebalancePlan } from '../services/rebalan
 
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
+import { redactString, redactObject } from '../utils/secretRedactor.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
 import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
@@ -963,6 +964,8 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
             const failureReason = innerError instanceof ConflictError
                 ? 'Rebalance conflict: execution already in progress'
                 : 'Rebalance execution failed due to an unexpected error';
+            const rawErrorMessage = innerError instanceof Error ? innerError.message : String(innerError);
+            const sanitizedDiagnostics = redactString(rawErrorMessage);
 
             try {
                 await rebalanceHistoryService.recordRebalanceEvent({
@@ -976,7 +979,9 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                     details: {
                         actor: 'user',
                         source: 'api',
+                        outcome: 'failed',
                         failureReason,
+                        diagnosticContext: sanitizedDiagnostics,
                     },
                 });
             } catch (histErr) {

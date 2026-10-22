@@ -108,4 +108,14 @@ describe('secretRedactor', () => {
         const url = 'https://api.example.com/data?api_key=supersecret&foo=bar'
         expect(redactString(url)).toBe('https://api.example.com/data?api_key=[REDACTED]&foo=bar')
     })
+
+    it('redacts database URI credentials in strings', () => {
+        const uri = 'postgres://admin:super_secret_pw@db.internal:5432/portfolio'
+        expect(redactString(uri)).toBe('postgres://[REDACTED]@db.internal:5432/portfolio')
+    })
+
+    it('redacts password authentication messages in error strings', () => {
+        const err = 'FATAL: password authentication failed for user "secret_db_admin"'
+        expect(redactString(err)).toBe('FATAL: password authentication failed for user [REDACTED]')
+    })
 })
