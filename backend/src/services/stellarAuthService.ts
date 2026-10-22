@@ -15,9 +15,12 @@ import { logger } from '../utils/logger.js'
 const CHALLENGE_TTL_MS = 5 * 60 * 1000  // 5 minutes
 const CHALLENGE_CLEANUP_INTERVAL_MS = 60 * 1000  // GC every minute
 
+export const MAX_CHALLENGE_ATTEMPTS = 3
+
 interface ChallengeEntry {
     nonce: string
     expiresAt: number
+    attempts: number
 }
 
 // In-memory nonce store — keyed by address.
@@ -46,7 +49,7 @@ export function createChallenge(address: string): string {
         throw new Error('Invalid Stellar address')
     }
     const nonce = randomBytes(32).toString('hex')
-    challenges.set(address, { nonce, expiresAt: Date.now() + CHALLENGE_TTL_MS })
+    challenges.set(address, { nonce, expiresAt: Date.now() + CHALLENGE_TTL_MS, attempts: 0 })
     return nonce
 }
 
@@ -79,7 +82,20 @@ export async function verifyChallenge(
     }
 
     if (!valid) {
-        logger.warn('[stellarAuth] Invalid signature', { address: address.slice(0, 8) + '...' })
+        entry.attempts += 1
+        if (entry.attempts >= MAX_CHALLENGE_ATTEMPTS) {
+            challenges.delete(address)
+            logger.warn('[stellarAuth] Invalid signature, maximum retry attempts exhausted', {
+                address: address.slice(0, 8) + '...',
+                attempts: entry.attempts,
+            })
+            throw new InvalidSignatureError('Signature verification failed: retry limit exceeded')
+        }
+        logger.warn('[stellarAuth] Invalid signature', {
+            address: address.slice(0, 8) + '...',
+            attempts: entry.attempts,
+            remainingAttempts: MAX_CHALLENGE_ATTEMPTS - entry.attempts,
+        })
         throw new InvalidSignatureError('Signature verification failed')
     }
 
