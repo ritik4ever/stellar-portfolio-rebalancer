@@ -34,7 +34,7 @@ vi.mock('../services/tokenRevocation.js', () => ({
 }))
 
 import { issueChallenge, verifyWalletSignature } from '../services/authService.js'
-import { createChallenge, verifyChallenge, InvalidSignatureError } from '../services/stellarAuthService.js'
+import { createChallenge, verifyChallenge, InvalidSignatureError, MAX_CHALLENGE_ATTEMPTS } from '../services/stellarAuthService.js'
 
 const CHALLENGE_PREFIX = 'stellar-rebalancer:auth:'
 const sign = (kp: Keypair, msg: string) => Buffer.from(kp.sign(Buffer.from(msg, 'utf8'))).toString('base64')
@@ -163,6 +163,29 @@ describe('wallet challenge binding (account, nonce, network)', () => {
       const tokens = await verifyChallenge(address, sign(keypair, nonce))
       expect(tokens.refreshToken).toBeTruthy()
       expect(dbDouble.createRefreshToken).toHaveBeenCalledTimes(1)
+    })
+
+    it('enforces bounded retries and explicit stop when cross-network signatures exhaust attempts', async () => {
+      const nonce = createChallenge(address)
+      const crossNetworkSig = sign(keypair, `Public Global Stellar Network ; September 2015:${nonce}`)
+
+      // Retries within the bound: rejected without duplicating side effects
+      for (let i = 1; i < MAX_CHALLENGE_ATTEMPTS; i++) {
+        await expect(verifyChallenge(address, crossNetworkSig)).rejects.toThrow('Signature verification failed')
+        expectNoSideEffects()
+      }
+
+      // Final attempt exhausts bounded retries and triggers explicit stop
+      await expect(verifyChallenge(address, crossNetworkSig)).rejects.toThrow(
+        'Signature verification failed: retry limit exceeded',
+      )
+      expectNoSideEffects()
+
+      // Once exhausted, the challenge is purged: subsequent attempt reports no active challenge
+      await expect(verifyChallenge(address, sign(keypair, nonce))).rejects.toThrow(
+        'No active challenge for this address',
+      )
+      expectNoSideEffects()
     })
 
     it('does not accept another account\'s signature over the bound nonce', async () => {
