@@ -884,11 +884,54 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque pagination cursor from previous nextCursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "List of portfolios",
+            "description": "Paginated list of portfolios",
             "content": {
               "application/json": {
                 "schema": {
@@ -905,6 +948,23 @@
                           "items": {
                             "$ref": "#/components/schemas/Portfolio"
                           }
+                        },
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "cursor": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "nextCursor": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "count": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
                         }
                       }
                     },
@@ -917,6 +977,16 @@
                       "format": "date-time"
                     }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or cursor error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
