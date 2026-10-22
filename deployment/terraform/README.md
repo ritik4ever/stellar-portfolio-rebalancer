@@ -294,6 +294,36 @@ remain unaffected.
 See `modules/ecs/rollout_recovery.tf` for the full in-code procedure and the
 `tests/ecs_rollout_recovery.tftest.hcl` test suite.
 
+### Validating Terraform Rollout from a Clean Environment (SPR-2026-271)
+
+To validate state consistency, plan reproducibility, and safe rollback boundaries without relying on undocumented local state:
+
+1. **Clean checkout verification**:
+   No local `.tfstate` files or undocumented machine variables are required. Remote state backend configuration in `providers.tf` is fully declared with S3 and DynamoDB locking.
+   ```bash
+   cd deployment/terraform
+   terraform init -input=false
+   terraform validate
+   ```
+
+2. **Reproducing a plan with no infrastructure changes**:
+   Select the target workspace and execute a detailed plan check:
+   ```bash
+   terraform workspace select staging
+   terraform plan -detailed-exitcode -var-file=staging.tfvars -no-color
+   ```
+   Exit code 0 confirms exact state consistency and zero infrastructure drift between the repository and AWS.
+
+3. **Isolated service execution**:
+   To test or roll out an isolated service (e.g. ECS service only):
+   ```bash
+   terraform plan -target=module.ecs.aws_ecs_service.main -var-file=staging.tfvars
+   ```
+
+4. **Rollback steps without undocumented local state**:
+   If an apply is interrupted or results in `ecs_rollout_status == "blocked"`, execute the targeted rollback command or re-run with the previous task revision ARN from state outputs. Never delete or bypass remote state locks.
+
+
 ## Modules
 
 - `vpc`: VPC and networking configuration

@@ -509,3 +509,68 @@ test('rotation smoke: identical active and previous keys are rejected', () => {
   assert.equal(result.status, 2);
   assert.doesNotMatch(result.stdout + result.stderr, /same-key/);
 });
+
+// ── Terraform clean-environment rollout validation (SPR-2026-271) ──────────
+
+test('clean checkout: terraform root module defines rollout outcomes, state consistency, and rollback outputs (SPR-2026-271)', () => {
+  const rootDir = process.cwd();
+  const tfRolloutResult = readFileSync(path.join(rootDir, 'terraform', 'rollout_result.tf'), 'utf8');
+  const tfOutputs = readFileSync(path.join(rootDir, 'terraform', 'outputs.tf'), 'utf8');
+  const tfVariables = readFileSync(path.join(rootDir, 'terraform', 'variables.tf'), 'utf8');
+  const tfVersions = readFileSync(path.join(rootDir, 'terraform', 'versions.tf'), 'utf8');
+
+  // Verify versions and required version >= 1.5.0
+  assert.match(tfVersions, /required_version\s*=\s*">= 1\.5\.0"/);
+
+  // Verify variable declaration with validation
+  assert.match(tfVariables, /variable\s+"rollout_outcome_signal"/);
+  assert.match(tfVariables, /contains\(\["success",\s*"transient_delay",\s*"blocked"\],\s*var\.rollout_outcome_signal\)/);
+  assert.match(tfVariables, /variable\s+"rollout_affected_service"/);
+  assert.match(tfVariables, /variable\s+"rollout_owner_action"/);
+
+  // Verify structured rollout_result local and output
+  assert.match(tfRolloutResult, /status\s*=\s*var\.rollout_outcome_signal/);
+  assert.match(tfRolloutResult, /is_partial\s*=\s*var\.rollout_outcome_signal != "success"/);
+  assert.match(tfRolloutResult, /is_blocking\s*=\s*var\.rollout_outcome_signal == "blocked"/);
+  assert.match(tfRolloutResult, /output\s+"rollout_result"/);
+
+  // Verify flattened rollback and outcome outputs
+  assert.match(tfOutputs, /output\s+"rollout_outcome"/);
+  assert.match(tfOutputs, /output\s+"rollout_affected_service"/);
+  assert.match(tfOutputs, /output\s+"rollout_owner_action"/);
+});
+
+test('clean checkout: terraform root module includes native test suite for rollout outcomes (SPR-2026-271)', () => {
+  const rootDir = process.cwd();
+  const tftestPath = path.join(rootDir, 'terraform', 'tests', 'rollout_result.tftest.hcl');
+  assert.ok(existsSync(tftestPath), 'terraform/tests/rollout_result.tftest.hcl must exist');
+
+  const testContent = readFileSync(tftestPath, 'utf8');
+  assert.match(testContent, /mock_provider\s+"aws"/);
+  assert.match(testContent, /run\s+"success_signal_produces_clean_rollout_result"/);
+  assert.match(testContent, /run\s+"transient_delay_defaults_to_retry_apply"/);
+  assert.match(testContent, /run\s+"blocked_signal_defaults_to_resolve_blocker"/);
+  assert.match(testContent, /run\s+"clean_environment_plan_has_deterministic_defaults"/);
+  assert.match(testContent, /run\s+"invalid_signal_value_is_rejected_by_validation"/);
+});
+
+test('clean checkout: terraform rollout documentation details clean plan reproduction, state consistency, and rollback steps without undocumented local state (SPR-2026-271)', () => {
+  const rootDir = process.cwd();
+  const tfReadme = readFileSync(path.join(rootDir, 'terraform', 'README.md'), 'utf8');
+  const depTfReadme = readFileSync(path.join(rootDir, 'deployment', 'terraform', 'README.md'), 'utf8');
+  const opsDoc = readFileSync(path.join(rootDir, 'docs', 'OPERATIONS.md'), 'utf8');
+
+  // Verify SPR-2026-271 references
+  assert.match(tfReadme, /SPR-2026-271/);
+  assert.match(depTfReadme, /SPR-2026-271/);
+  assert.match(opsDoc, /SPR-2026-271/);
+
+  // Verify clean checkout, plan with no infrastructure changes, and rollback documentation
+  for (const doc of [tfReadme, depTfReadme, opsDoc]) {
+    assert.match(doc, /clean checkout|clean environment/i);
+    assert.match(doc, /plan -detailed-exitcode|plan -refresh-only/);
+    assert.match(doc, /undocumented local state/);
+    assert.match(doc, /rollback/i);
+  }
+});
+
