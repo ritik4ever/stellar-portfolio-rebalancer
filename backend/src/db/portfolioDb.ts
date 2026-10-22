@@ -28,6 +28,16 @@ export interface PortfolioPage {
     portfolios: ReturnType<typeof rowToPortfolio>[]
     nextCursor: PortfolioPageCursor | null
     count: number
+    total?: number
+}
+
+export interface PortfolioPaginationResult<T = ReturnType<typeof rowToPortfolio>> {
+    portfolios: T[]
+    limit: number
+    cursor: string | null
+    nextCursor: string | null
+    count: number
+    total: number
 }
 
 function rowToPortfolio(r: PortfolioRow) {
@@ -262,40 +272,53 @@ export async function dbSearchPortfolios(searchQuery: string, limit: number, off
  * rows returned in this page, not the total matching rows.
  */
 export async function dbGetPortfolioPage(options: {
+    search?: string
     userAddress?: string
     limit: number
     cursor?: PortfolioPageCursor | null
     includeArchived?: boolean
-}): Promise<PortfolioPage> {
-    const { userAddress, limit, cursor, includeArchived = false } = options
+}): Promise<PortfolioPage & { total: number }> {
+    const { search, userAddress, limit, cursor, includeArchived = false } = options
 
     if (!Number.isInteger(limit) || limit <= 0) {
         throw new Error('limit must be a positive integer')
     }
 
-    const conditions: string[] = []
-    const values: unknown[] = []
+    const baseConditions: string[] = []
+    const baseValues: unknown[] = []
     let i = 1
 
     if (userAddress !== undefined) {
-        conditions.push(`user_address = $${i++}`)
-        values.push(userAddress)
+        baseConditions.push(`user_address = $${i++}`)
+        baseValues.push(userAddress)
     }
     if (!includeArchived) {
-        conditions.push('archived_at IS NULL')
+        baseConditions.push('archived_at IS NULL')
     }
-    if (cursor) {
-        // Keyset predicate matching the (created_at, id) ordering.
-        conditions.push(`(created_at, id) > ($${i++}::timestamptz, $${i++})`)
-        values.push(cursor.createdAt, cursor.id)
+    if (search && search.trim().length > 0) {
+        baseConditions.push(`(name ILIKE $${i} OR description ILIKE $${i++})`)
+        baseValues.push(`%${search.trim()}%`)
     }
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    // Fetch one extra row to determine whether a next page exists.
-    values.push(limit + 1)
+    const baseWhere = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : ''
+    const countResult = await query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM portfolios ${baseWhere}`,
+        baseValues
+    )
+    const total = parseInt(countResult.rows[0]?.count ?? '0', 10)
+
+    const pagedConditions = [...baseConditions]
+    const pagedValues = [...baseValues]
+    if (cursor) {
+        pagedConditions.push(`(created_at, id) > ($${i++}::timestamptz, $${i++})`)
+        pagedValues.push(cursor.createdAt, cursor.id)
+    }
+
+    const pagedWhere = pagedConditions.length > 0 ? `WHERE ${pagedConditions.join(' AND ')}` : ''
+    pagedValues.push(limit + 1)
     const result = await query<PortfolioRow>(
-        `SELECT * FROM portfolios ${where} ORDER BY created_at ASC, id ASC LIMIT $${i}`,
-        values
+        `SELECT * FROM portfolios ${pagedWhere} ORDER BY created_at ASC, id ASC LIMIT $${i}`,
+        pagedValues
     )
 
     const hasMore = result.rows.length > limit
@@ -305,8 +328,11 @@ export async function dbGetPortfolioPage(options: {
     return {
         portfolios: pageRows.map(rowToPortfolio),
         nextCursor: hasMore && last
-            ? { createdAt: last.created_at.toISOString(), id: last.id }
+            ? { createdAt: last.created_at.toISOString(), id: last.id, total }
             : null,
-        count: pageRows.length
+        count: pageRows.length,
+        total,
     }
 }
+
+

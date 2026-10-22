@@ -12,6 +12,13 @@ import type { Portfolio } from "../types/index.js";
 import { isRebalanceActiveSync } from "./portfolioPersistenceBoundary.js";
 import { AssetRegistryConflictError } from "./assetRegistryValidation.js";
 import { dbQueryDuration } from "../observability/metrics.js";
+import {
+  encodePortfolioCursor,
+  decodePortfolioCursor,
+  diagnosePaginationChange,
+  type PortfolioPageCursor,
+  type PortfolioPaginationResult,
+} from "../utils/portfolioPagination.js";
 
 const SLOW_QUERY_THRESHOLD_MS = 100;
 
@@ -53,6 +60,7 @@ interface PortfolioRow {
   version: number;
   strategy?: string;
   strategy_config?: string;
+  archived_at?: string | null;
 }
 
 interface PortfolioDraftRow {
@@ -595,6 +603,7 @@ function rowToPortfolio(row: PortfolioRow): Portfolio {
           `portfolio(${row.id}).strategy_config`,
         )
       : undefined,
+    archivedAt: row.archived_at ?? undefined,
   };
 }
 
@@ -839,6 +848,10 @@ export class DatabaseService {
     if (!cols.some((c) => c.name === "name")) {
       this.db.exec("ALTER TABLE portfolios ADD COLUMN name TEXT");
       logger.info("[DB] Migration: added name column to portfolios");
+    }
+    if (!cols.some((c) => c.name === "archived_at")) {
+      this.db.exec("ALTER TABLE portfolios ADD COLUMN archived_at TEXT");
+      logger.info("[DB] Migration: added archived_at column to portfolios");
     }
 
     const consentCols = this.db
@@ -1279,6 +1292,117 @@ export class DatabaseService {
       } catch (err) {
         throw new Error(`Failed to count portfolios: ${err}`);
       }
+    });
+  }
+
+  archivePortfolio(id: string): boolean {
+    return this._withTiming("archivePortfolio", () => {
+      try {
+        const info = this.db
+          .prepare("UPDATE portfolios SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
+          .run(new Date().toISOString(), id);
+        return info.changes > 0;
+      } catch (err) {
+        throw new Error(`Failed to archive portfolio: ${err}`);
+      }
+    });
+  }
+
+  restorePortfolio(id: string): boolean {
+    return this._withTiming("restorePortfolio", () => {
+      try {
+        const info = this.db
+          .prepare("UPDATE portfolios SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL")
+          .run(id);
+        return info.changes > 0;
+      } catch (err) {
+        throw new Error(`Failed to restore portfolio: ${err}`);
+      }
+    });
+  }
+
+  searchPortfoliosPage(options: {
+    search?: string;
+    address?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    cursor?: string | PortfolioPageCursor | null;
+  }): PortfolioPaginationResult<Portfolio> {
+    return this._withTiming("searchPortfoliosPage", () => {
+      const { search = "", address, includeArchived = false, limit = 20, cursor } = options;
+
+      let parsedCursor: PortfolioPageCursor | null = null;
+      let cursorStr: string | null = null;
+      if (typeof cursor === "string" && cursor.trim().length > 0) {
+        cursorStr = cursor.trim();
+        parsedCursor = decodePortfolioCursor(cursorStr);
+      } else if (cursor && typeof cursor === "object" && "createdAt" in cursor && "id" in cursor) {
+        parsedCursor = cursor;
+        cursorStr = encodePortfolioCursor(cursor);
+      }
+
+      const conditions: string[] = [];
+      const values: unknown[] = [];
+
+      if (address) {
+        conditions.push("user_address = ?");
+        values.push(address);
+      }
+      if (!includeArchived) {
+        conditions.push("archived_at IS NULL");
+      }
+      if (search && search.trim().length > 0) {
+        conditions.push("(name LIKE ? OR description LIKE ?)");
+        const like = `%${search.trim()}%`;
+        values.push(like, like);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const totalResult = this.db
+        .prepare(`SELECT COUNT(*) as cnt FROM portfolios ${whereClause}`)
+        .get(...values) as { cnt: number } | undefined;
+      const total = totalResult?.cnt ?? 0;
+
+      const pagedConditions = [...conditions];
+      const pagedValues = [...values];
+
+      if (parsedCursor) {
+        pagedConditions.push("((created_at > ?) OR (created_at = ? AND id > ?))");
+        pagedValues.push(parsedCursor.createdAt, parsedCursor.createdAt, parsedCursor.id);
+      }
+
+      const pagedWhere = pagedConditions.length > 0 ? `WHERE ${pagedConditions.join(" AND ")}` : "";
+      pagedValues.push(limit + 1);
+
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM portfolios ${pagedWhere} ORDER BY created_at ASC, id ASC LIMIT ?`
+        )
+        .all(...pagedValues) as PortfolioRow[];
+
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      const last = pageRows[pageRows.length - 1];
+      const { itemsChanged, changeKind } = diagnosePaginationChange({
+        currentTotal: total,
+        cursor: parsedCursor,
+      });
+
+      const nextCursor = hasMore && last
+        ? encodePortfolioCursor({ createdAt: last.created_at, id: last.id, total })
+        : null;
+
+      return {
+        portfolios: pageRows.map(rowToPortfolio),
+        limit,
+        cursor: cursorStr,
+        nextCursor,
+        count: pageRows.length,
+        total,
+        itemsChanged,
+        changeKind,
+      };
     });
   }
 
