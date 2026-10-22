@@ -59,6 +59,12 @@ export const updatePortfolioSchema = createPortfolioSchema.partial().extend({
     version: z.number().int().min(1, "Version must be a positive integer")
 });
 
+// Schema for PUT /portfolio/:id/allocations
+export const updateAllocationsSchema = z.object({
+    allocations: portfolioAllocationsSchema,
+    version: z.number().int().min(1, "Version must be a positive integer")
+}).strict();
+
 // Schema for POST /portfolio/:id/clone
 export const clonePortfolioSchema = z.object({
     name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name cannot exceed 100 characters').optional()
