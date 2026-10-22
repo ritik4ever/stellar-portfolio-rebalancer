@@ -532,10 +532,17 @@ const spec: Record<string, any> = {
                 tags: ['Portfolio'],
                 summary: 'List all portfolios',
                 description: 'Get all portfolios, optionally filtered by user address query parameter.',
-                parameters: [{ name: 'userAddress', in: 'query', required: false, schema: { type: 'string' } }],
+                parameters: [
+                    { name: 'userAddress', in: 'query', required: false, schema: { type: 'string' } },
+                    { name: 'address', in: 'query', required: false, schema: { type: 'string' } },
+                    { name: 'search', in: 'query', required: false, schema: { type: 'string' } },
+                    { name: 'cursor', in: 'query', required: false, schema: { type: 'string' }, description: 'Opaque pagination cursor from previous nextCursor' },
+                    { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 20 } },
+                    { name: 'include_archived', in: 'query', required: false, schema: { type: 'boolean', default: false } },
+                ],
                 responses: {
                     '200': {
-                        description: 'List of portfolios',
+                        description: 'Paginated list of portfolios',
                         content: {
                             'application/json': {
                                 schema: {
@@ -549,6 +556,11 @@ const spec: Record<string, any> = {
                                                     type: 'array',
                                                     items: { $ref: '#/components/schemas/Portfolio' },
                                                 },
+                                                limit: { type: 'integer' },
+                                                cursor: { type: 'string', nullable: true },
+                                                nextCursor: { type: 'string', nullable: true },
+                                                count: { type: 'integer' },
+                                                total: { type: 'integer' },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
@@ -558,6 +570,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '400': { description: 'Validation or cursor error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
