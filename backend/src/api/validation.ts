@@ -488,3 +488,25 @@ export const userPreferencesSchema = z.object({
 export const userPreferencesQuerySchema = z.object({
     userAddress: z.string().min(1, "userAddress is required")
 });
+
+// ─── Rebalance backtest (SPR-2026-151) ───────────────────────────────────────
+export const BACKTEST_MIN_DAYS = 7
+export const BACKTEST_MAX_DAYS = 365
+
+export const backtestRequestSchema = z.object({
+    allocations: portfolioAllocationsSchema,
+    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
+    days: z.number().int()
+        .min(BACKTEST_MIN_DAYS, `days must be between ${BACKTEST_MIN_DAYS} and ${BACKTEST_MAX_DAYS}`)
+        .max(BACKTEST_MAX_DAYS, `days must be between ${BACKTEST_MIN_DAYS} and ${BACKTEST_MAX_DAYS}`)
+        .default(90),
+    initialValue: z.number().positive().max(1_000_000_000).default(10_000),
+    from: isoDateString.optional(),
+    to: isoDateString.optional(),
+}).strict()
+    .refine((data) => (data.from === undefined) === (data.to === undefined), {
+        message: 'from and to must be provided together',
+    })
+    .refine((data) => !data.from || !data.to || Date.parse(data.from) <= Date.parse(data.to), {
+        message: 'from must not be after to',
+    });
