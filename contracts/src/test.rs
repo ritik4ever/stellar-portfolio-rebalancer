@@ -2132,6 +2132,97 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
         );
 }
 
+// ── Drift threshold trigger boundaries (SPR-2026-196) ────────────────────────
+//
+// Drift is measured in basis points of the portfolio value and compared with
+// `rebalance_threshold * (ALLOCATION_DENOMINATOR / 100)` using a strict `>`.
+// Both assets share the mock price, so exact integer token balances map 1:1 to
+// basis points when the total is 10_000 units. Drift exactly equal to the
+// threshold must NOT trigger a rebalance; one unit more must. Checking never
+// mutates the stored configuration or balances.
+
+/// Creates a two-asset portfolio, deposits exact integer balances and returns
+/// `(check_rebalance_needed, stored_threshold, stored_balances)`.
+fn drift_boundary_outcome(
+    threshold: u32,
+    target_a_bps: u32,
+    deposit_a: i128,
+    deposit_b: i128,
+) -> (bool, u32, (i128, i128)) {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset_a = create_token_and_mint(&env, &admin, &user, deposit_a);
+    let asset_b = create_token_and_mint(&env, &admin, &user, deposit_b);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset_a.clone(), target_a_bps);
+    allocations.set(asset_b.clone(), ALLOCATION_DENOMINATOR - target_a_bps);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, threshold, 50);
+    client.deposit(&pid, &asset_a, &deposit_a, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset_b, &deposit_b, &String::from_str(&env, ""));
+
+    let needed = client.check_rebalance_needed(&pid);
+    let portfolio = client.get_portfolio(&pid);
+    (
+        needed,
+        portfolio.rebalance_threshold,
+        (
+            portfolio.current_balances.get(asset_a).unwrap(),
+            portfolio.current_balances.get(asset_b).unwrap(),
+        ),
+    )
+}
+
+#[test]
+fn test_min_threshold_drift_exactly_at_boundary_does_not_trigger() {
+    // 50/50 target, 5_100/4_900 held => 100 bps drift == 1% minimum threshold.
+    let (needed, stored, balances) =
+        drift_boundary_outcome(MIN_REBALANCE_THRESHOLD, 5000, 5_100, 4_900);
+    assert!(!needed);
+    assert_eq!(stored, MIN_REBALANCE_THRESHOLD);
+    assert_eq!(balances, (5_100, 4_900));
+}
+
+#[test]
+fn test_min_threshold_drift_one_unit_above_boundary_triggers() {
+    // 5_101/4_899 => 101 bps drift, one unit above the 1% minimum threshold.
+    let (needed, stored, balances) =
+        drift_boundary_outcome(MIN_REBALANCE_THRESHOLD, 5000, 5_101, 4_899);
+    assert!(needed);
+    assert_eq!(stored, MIN_REBALANCE_THRESHOLD);
+    assert_eq!(balances, (5_101, 4_899));
+}
+
+#[test]
+fn test_max_threshold_drift_exactly_at_boundary_does_not_trigger() {
+    // 80/20 target, 3_000/7_000 held => 5_000 bps drift == 50% maximum threshold.
+    let (needed, stored, balances) =
+        drift_boundary_outcome(MAX_REBALANCE_THRESHOLD, 8000, 3_000, 7_000);
+    assert!(!needed);
+    assert_eq!(stored, MAX_REBALANCE_THRESHOLD);
+    assert_eq!(balances, (3_000, 7_000));
+}
+
+#[test]
+fn test_max_threshold_drift_one_unit_above_boundary_triggers() {
+    // 2_999/7_001 => 5_001 bps drift, one unit above the 50% maximum threshold.
+    let (needed, stored, balances) =
+        drift_boundary_outcome(MAX_REBALANCE_THRESHOLD, 8000, 2_999, 7_001);
+    assert!(needed);
+    assert_eq!(stored, MAX_REBALANCE_THRESHOLD);
+    assert_eq!(balances, (2_999, 7_001));
+}
+
 // ── Oracle caller authorization regressions (SPR-2026-201/202/203) ───────────
 //
 // The contract accepts prices from exactly one authorized source: the Reflector
