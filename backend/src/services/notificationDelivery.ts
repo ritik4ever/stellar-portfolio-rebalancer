@@ -40,6 +40,18 @@ export interface DeliveryAttemptContext {
   signal?: AbortSignal;
 }
 
+/**
+ * Operator-facing delivery state derived from the outcome of a delivery.
+ *
+ * - `success`: the provider confirmed acceptance.
+ * - `delayed`: the provider proved it did not act, but retries are exhausted or
+ *   still pending. The work is not blocked; it can be replayed safely.
+ * - `blocked`: the outcome is unknown (ambiguous) or the provider rejected
+ *   the message permanently. Replaying automatically would risk a duplicate
+ *   or just fail again, so an operator must intervene.
+ */
+export type DeliveryState = "success" | "delayed" | "blocked";
+
 // In-flight deliveries map to prevent duplicate executions during concurrent work
 const inFlightDeliveries = new Map<string, Promise<void>>();
 // Cache recently completed deliveries to prevent duplicate notifications
@@ -146,6 +158,15 @@ export function assessDeliveryFailure(error: unknown): DeliveryFailureAssessment
 }
 
 /**
+ * Map a failure kind to the operator-facing delivery state. Retryable failures
+ * are delayed work (safe to replay); ambiguous and permanent failures are blocked
+ * (replaying automatically would risk a duplicate or just fail again).
+ */
+export function deliveryStateForFailureKind(kind: DeliveryFailureKind): DeliveryState {
+  return kind === "retryable" ? "delayed" : "blocked";
+}
+
+/**
  * Executes a provider delivery with configurable exponential backoff, concurrency
  * deduplication, and structured logging.
  *
@@ -154,6 +175,8 @@ export function assessDeliveryFailure(error: unknown): DeliveryFailureAssessment
  * 2. Traceable delivery attempts in notification_logs.
  * 3. State consistency: persisted records agree with externally visible results
  *    even when delivery is interrupted or fails.
+ * 4. Operators can distinguish success, delay, and blocked work from the
+ *    `deliveryState` log metadata and the metric outcome label.
  */
 export async function deliverWithBackoff(
   ctx: DeliveryAttemptContext,
@@ -173,6 +196,7 @@ export async function deliverWithBackoff(
         attempt: 1,
         maxAttempts: policy.maxAttempts,
         deliveryId,
+        deliveryState: "success",
       });
       return;
     }
@@ -186,6 +210,7 @@ export async function deliverWithBackoff(
         deliveryId,
         retryable: false,
         stoppedEarly: true,
+        deliveryState: "blocked",
       });
       return;
     }
@@ -196,6 +221,7 @@ export async function deliverWithBackoff(
         attempt: 1,
         maxAttempts: policy.maxAttempts,
         deliveryId,
+        deliveryState: "delayed",
       });
       // Await existing delivery so caller finishes when message is actually delivered
       await inFlightDeliveries.get(deliveryKey);
@@ -231,6 +257,7 @@ export async function deliverWithBackoff(
             attempt,
             maxAttempts: policy.maxAttempts,
             deliveryId,
+            deliveryState: "success",
           });
           if (deliveryKey) {
             completedDeliveries.set(deliveryKey, { status: 'sent', timestamp: Date.now() });
@@ -262,6 +289,7 @@ export async function deliverWithBackoff(
               deliveryId,
               failureKind: assessment.kind,
               idempotencyKey: assessment.idempotencyKey,
+              deliveryState: "delayed",
             });
             logger.warn("Notification delivery failed; scheduling backoff retry", {
               provider,
@@ -280,11 +308,22 @@ export async function deliverWithBackoff(
 
           finalOutcomeLogged = true;
           const ambiguous = assessment.kind === "ambiguous";
+          const deliveryState = deliveryStateForFailureKind(assessment.kind);
+          // Retryable failures that exhausted the retry budget are delayed work:
+          // the provider proved it did not act, so a replay is safe. Ambiguous
+          // and permanent failures are blocked.
+          const metricOutcome: 'success' | 'failure' | 'delayed' =
+            deliveryState === "delayed" ? 'delayed' : 'failure';
+          const metricReason = ambiguous
+            ? 'delivery_unknown'
+            : deliveryState === "delayed"
+              ? 'retry_exhausted'
+              : assessment.reason;
           recordNotificationDeliveryAttempt(provider, 'failure');
           recordNotificationDelivery({
             channel: provider,
-            outcome: 'failure',
-            reason: ambiguous ? 'delivery_unknown' : assessment.reason,
+            outcome: metricOutcome,
+            reason: metricReason,
             eventType,
             durationSeconds: (Date.now() - startedAt) / 1000,
           });
@@ -302,6 +341,7 @@ export async function deliverWithBackoff(
               retryable: false,
               stoppedEarly,
               idempotencyKey: assessment.idempotencyKey,
+              deliveryState,
             },
           );
           if (deliveryKey) {
@@ -354,115 +394,109 @@ export async function deliverWithBackoff(
           throw error;
         }
       }
-
-      throw lastError instanceof Error
-        ? lastError
-        : new Error(String(lastError ?? "Notification delivery failed"));
-    } catch (unhandledError) {
-      // Interrupted work handling: if delivery failed or was cancelled before logging a final status
-      // (e.g. abort signal during backoff, process interruption, unexpected throw), ensure the database
-      // reflects 'failed' so persisted record agrees with external failure outcome.
+    } finally {
       if (!finalOutcomeLogged) {
-        finalOutcomeLogged = true;
-        const msg = unhandledError instanceof Error ? unhandledError.message : String(unhandledError);
-        recordNotificationDeliveryAttempt(provider, 'failure');
-        recordNotificationDelivery({
-          channel: provider,
-          outcome: 'failure',
-          reason: classifyFailureReason(unhandledError),
-          eventType,
-          durationSeconds: (Date.now() - startedAt) / 1000,
-        });
-        logOutcome(userId, provider, eventType, "failed", `Interrupted: ${msg}`, {
+        // Delivery was aborted before a terminal outcome was recorded.
+        // Treat it as delayed work so operators know a replay is safe.
+        logOutcome(userId, provider, eventType, "failed", "Delivery aborted before completion", {
           attempt: currentAttempt,
           maxAttempts: policy.maxAttempts,
           deliveryId,
+          deliveryState: "deliayed",
         });
-        if (deliveryKey) {
-          completedDeliveries.set(deliveryKey, { status: 'failed', timestamp: Date.now() });
-        }
-      }
-      throw unhandledError;
-    } finally {
-      if (deliveryKey) {
-        inFlightDeliveries.delete(deliveryKey);
       }
     }
   };
 
-  const deliveryPromise = runDelivery();
   if (deliveryKey) {
-    inFlightDeliveries.set(deliveryKey, deliveryPromise);
+    const inFlight = runDelivery();
+    inFlightDeliveries.set(deliveryKey, inFlight);
+    try {
+      await inFlight;
+    } finally {
+      inFlightDeliveries.delete(deliveryKey);
+    }
+    return;
   }
 
-  return deliveryPromise;
+  await runDelivery();
+}
+
+/**
+ * Bounded, consistent classification of a delivery error for metric labels.
+ * Never includes the raw message (ids, timestamps) to keep label cardinality low.
+ */
+export function classifyFailureReason(error: unknown): string {
+  const code = extractCode(error);
+  const message = extractMessage(error);
+  const status = extractStatus(error);
+
+  if (status === 401 || status === 403) return "auth";
+  if (status === 428) return "rate_limited";
+  if (status === 408) return "timeout";
+  if (status !== undefined && status >= 500) return "server_error";
+  if (status !== undefined && status >= 400) return "client_error";
+
+  if (code === "ETIMEDOUT" || code === "ESCKETTIMEDOUT") return "timeout";
+  if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EPIPE") {
+    return "connection_refused";
+  }
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "dns";
+  if (code === "EAUTH" || code.startsWith("EAUTH")) return "auth";
+  if (/timeout|timed out/i.test(message)) return "timeout";
+  if (/auth|unauthorized|forbidden/i.test(message)) return "auth";
+  if (/rate limit|too many requests/i.test(message)) return "rate_limited";
+  if (/recipient|address/i.test(message)) return "invalid_recipient";
+  if (/connection refused|connection reset/i.test(message)) {
+    return "connection_refused";
+  }
+  return "unknown";
+}
+
+function extractCode(error: unknown): string {
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code.toUpperCase();
+  }
+  return "";
+}
+
+function extractMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return String(error ?? "");
+}
+
+function extractStatus(error: unknown): number | undefined {
+  if (error && typeof error === "object") {
+    const candidate = error as { status?: unknown; statusCode?: unknown };
+    for (const value of [candidate.status, candidate.statusCode]) {
+      if (typeof value === "number") return value;
+    }
+  }
+  return undefined;
 }
 
 function logOutcome(
   userId: string,
   provider: NotificationProviderName,
   eventType: string,
-  status: "sent" | "failed" | "retried" | "skipped" | "uncertain",
+  outcome: string,
   errorMessage: string | undefined,
   metadata: NotificationLogMetadata,
 ): void {
-  dbLogNotificationOutcome(
-    userId,
-    provider,
-    eventType,
-    status,
-    errorMessage,
-    metadata,
-  );
-}
-
-/**
- * Bucket a delivery error into a small, bounded set of reasons for the metric
- * label. Raw error strings are deliberately not used — they are unbounded and
- * would explode Prometheus label cardinality.
- */
-export function classifyFailureReason(error: unknown): string {
-  const err = error as { code?: string; status?: number; response?: { status?: number }; message?: string } | undefined
-  const status = err?.status ?? err?.response?.status
-  const code = typeof err?.code === 'string' ? err.code.toUpperCase() : ''
-  const message = (err?.message ?? String(error ?? '')).toLowerCase()
-
-  if (status === 401 || status === 403) return 'auth'
-  if (status === 408 || status === 429) return status === 429 ? 'rate_limited' : 'timeout'
-  if (typeof status === 'number' && status >= 500) return 'server_error'
-  if (typeof status === 'number' && status >= 400) return 'client_error'
-
-  if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || message.includes('timeout') || message.includes('timed out')) {
-    return 'timeout'
+  try {
+    dbLogNotificationOutcome(userId, provider, eventType, outcome, errorMessage, metadata);
+  } catch (error) {
+    logger.error("Failed to persist notification delivery outcome", {
+      provider,
+      userId,
+      eventType,
+      outcome,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'EPIPE') return 'connection_refused'
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || message.includes('getaddrinfo')) return 'dns'
-  if (code.startsWith('EAUTH') || message.includes('invalid login') || message.includes('unauthorized')) return 'auth'
-  if (message.includes('not configured') || message.includes('missing config')) return 'not_configured'
-  if (message.includes('invalid') && message.includes('address')) return 'invalid_recipient'
-  if (code) return code.toLowerCase()
-
-  return 'unknown'
-}
-
-/**
- * Record a delivery for a channel that does not go through `deliverWithBackoff`
- * (a fire-and-forget send, or a provider with its own retry handling), so every
- * channel reports through the same counters.
- */
-export function recordChannelDelivery(input: {
-  channel: NotificationProviderName
-  success: boolean
-  error?: unknown
-  eventType?: string
-  durationMs?: number
-}): void {
-  recordNotificationDeliveryAttempt(input.channel, input.success ? 'success' : 'failure')
-  recordNotificationDelivery({
-    channel: input.channel,
-    outcome: input.success ? 'success' : 'failure',
-    reason: input.success ? undefined : classifyFailureReason(input.error),
-    eventType: input.eventType,
-    durationSeconds: typeof input.durationMs === 'number' ? input.durationMs / 1000 : undefined,
-  })
 }

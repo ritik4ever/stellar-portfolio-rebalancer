@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as notificationDb from "../db/notificationDb.js";
-import { deliverWithBackoff, NotificationDeliveryError } from "../services/notificationDelivery.js";
+import {
+  deliverStateForFailureKind,
+  deliverWithBackoff,
+  NotificationDeliveryError,
+} from "../services/notificationDelivery.js";
 import { webhookDeadLetterQueue } from "../services/webhookDeadLetter.js";
 
 vi.mock("../services/webhookDeadLetter.js", () => ({
@@ -11,6 +15,20 @@ vi.mock("../services/webhookDeadLetter.js", () => ({
     _resetForTest: vi.fn(),
   },
 }));
+
+describe("deliverStateForFailureKind", () => {
+  it("maps retryable failures to delayed work", () => {
+    expect(deliveryStateForFailureKind("retryable")).toBe("delayed");
+  });
+
+  it("maps ambiguous failures to blocked work", () => {
+    expect(deliveryStateForFailureKind("ambiguous")).toBe("blocked");
+  });
+
+  it("maps permanent failures to blocked work", () => {
+    expect(deliveryStateForFailureKind("permanent")).toBe("blocked");
+  });
+});
 
 describe("deliverWithBackoff", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -30,8 +48,8 @@ describe("deliverWithBackoff", () => {
   it("retries with configured backoff before succeeding", async () => {
     const execute = vi
       .fn()
-      .mockRejectedValueOnce(new Error("temporary failure"))
-      .mockResolvedValueOnce(undefined);
+      .mockRejectedOnce(new Error("temporary failure"))
+      .mockResolvedOnce(undefined);
 
     const promise = deliverWithBackoff(
       {
@@ -58,7 +76,7 @@ describe("deliverWithBackoff", () => {
       "rebalance",
       "retried",
       "temporary failure",
-      expect.objectContaining({ attempt: 1, backoffDelayMs: 1000 }),
+      expect.objectContaining({ attempt: 1, backoffDelayMs: 1000, deliveryState: "delayed" }),
     );
     expect(logSpy).toHaveBeenCalledWith(
       "user-1",
@@ -66,12 +84,12 @@ describe("deliverWithBackoff", () => {
       "rebalance",
       "sent",
       undefined,
-      expect.objectContaining({ attempt: 2 }),
+      expect.objectContaining({ attempt: 2, deliveryState: "success" }),
     );
   });
 
-  it("logs failed after exhausting max attempts", async () => {
-    const execute = vi.fn().mockRejectedValue(new Error("persistent failure"));
+  it("logs delayed work after exhausting max attempts on a retryable failure", async () => {
+    const execute = vi.fn().mockRejected(new Error("persistent failure"));
 
     const promise = deliverWithBackoff(
       {
@@ -99,7 +117,7 @@ describe("deliverWithBackoff", () => {
       "riskChange",
       "failed",
       "persistent failure",
-      expect.objectContaining({ attempt: 2, maxAttempts: 2 }),
+      expect.objectContaining({ attempt: 2, maxAttempts: 2, deliveryState: "delayed" }),
     );
   });
 
@@ -109,7 +127,7 @@ describe("deliverWithBackoff", () => {
       reason: "delivery_unknown",
       idempotencyKey: "<abc@example.com>",
     });
-    const execute = vi.fn().mockRejectedValue(ambiguous);
+    const execute = vi.fn().mockRejected(ambiguous);
 
     const promise = deliverWithBackoff(
       {
@@ -151,6 +169,7 @@ describe("deliverWithBackoff", () => {
         retryable: false,
         stoppedEarly: true,
         idempotencyKey: "<abc@example.com>",
+        deliveryState: "blocked",
       }),
     );
   });
@@ -161,7 +180,7 @@ describe("deliverWithBackoff", () => {
       reason: "rejected",
       idempotencyKey: "<def@example.com>",
     });
-    const execute = vi.fn().mockRejectedValue(permanent);
+    const execute = vi.fn().mockRejected(permanent);
 
     const promise = deliverWithBackoff(
       {
@@ -192,12 +211,13 @@ describe("deliverWithBackoff", () => {
         failureKind: "permanent",
         stoppedEarly: true,
         idempotencyKey: "<def@example.com>",
+        deliveryState: "blocked",
       }),
     );
   });
 
   it("retries webhook up to 5 times with exponential backoff", async () => {
-    const execute = vi.fn().mockRejectedValue(new Error("HTTP 503"));
+    const execute = vi.fn().mockRejected(new Error("HTTP 503"));
 
     const promise = deliverWithBackoff(
       {
@@ -230,7 +250,7 @@ describe("deliverWithBackoff", () => {
       "rebalance",
       "failed",
       "HTTP 503",
-      expect.objectContaining({ attempt: 5, maxAttempts: 5 }),
+      expect.objectContaining({ attempt: 5, maxAttempts: 5, deliveryState: "delayed" }),
     );
   });
 });
