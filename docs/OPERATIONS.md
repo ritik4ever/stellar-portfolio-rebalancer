@@ -702,3 +702,15 @@ action, so outcomes are distinguishable without re-running the procedure.
 - Contributor setup: [docs/CONTRIBUTING.md](CONTRIBUTING.md)
 - OpenAPI source of truth: [backend/docs/openapi.md](../backend/docs/openapi.md)
 - Disaster Recovery Runbook: [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md)
+
+### Smoke check: key overlap and stale notification worker credentials
+
+`deployment/rotation-smoke.mjs` confirms the active key version and detects a notification worker that still holds a stale key, printing only 12-character SHA-256 fingerprints (never key values).
+
+```bash
+ROTATION_ACTIVE_KEY="$NEW_KEY" ROTATION_PREVIOUS_KEY="$OLD_KEY" \
+ROTATION_WORKER_KEY="$WORKER_KEY" ROTATION_ACTIVE_VERSION=v2 \
+  node deployment/rotation-smoke.mjs
+```
+
+Exit codes: `0` worker uses the active key (overlap reported via `"overlap": true`); `1` worker holds the previous/unknown key (restart or reload it); `2` missing or invalid input. Tests: `node --test deployment/deploy.test.mjs`.

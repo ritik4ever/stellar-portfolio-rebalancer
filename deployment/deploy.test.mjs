@@ -440,3 +440,70 @@ test('rotation config: both ARNs valid with USE_AWS_SECRETS_MANAGER=true passes'
     `Expected exit 0 but got ${result.status ?? result.exitCode}.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
   assert.match(result.stdout, /VALIDATION_PASSED/);
 });
+
+// ── Secret rotation smoke check (SPR-2026-280) ───────────────────────────────
+
+function runRotationSmoke(env) {
+  return spawnSync(process.execPath, [path.join(process.cwd(), 'deployment', 'rotation-smoke.mjs')], {
+    env: { PATH: process.env.PATH, ...env },
+    encoding: 'utf8',
+  });
+}
+
+test('rotation smoke: worker on new key during overlap passes and leaks no key values', () => {
+  const result = runRotationSmoke({
+    ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
+    ROTATION_PREVIOUS_KEY: 'old-secret-key-BBBB',
+    ROTATION_WORKER_KEY: 'new-secret-key-AAAA',
+    ROTATION_ACTIVE_VERSION: 'v2',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, 'ok');
+  assert.equal(report.overlap, true);
+  assert.equal(report.activeVersion, 'v2');
+  assert.equal(report.activeFingerprint, report.workerFingerprint);
+  assert.notEqual(report.activeFingerprint, report.previousFingerprint);
+  assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
+});
+
+test('rotation smoke: worker retaining the previous key fails as stale', () => {
+  const result = runRotationSmoke({
+    ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
+    ROTATION_PREVIOUS_KEY: 'old-secret-key-BBBB',
+    ROTATION_WORKER_KEY: 'old-secret-key-BBBB',
+  });
+  assert.equal(result.status, 1);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, 'stale-worker');
+  assert.equal(report.reason, 'worker holds previous key');
+  assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
+});
+
+test('rotation smoke: unknown worker key fails and no overlap is reported after cutover', () => {
+  const result = runRotationSmoke({
+    ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
+    ROTATION_WORKER_KEY: 'mystery-key-CCCC',
+  });
+  assert.equal(result.status, 1);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.reason, 'worker holds unknown key');
+  assert.equal(report.overlap, false);
+  assert.doesNotMatch(result.stdout + result.stderr, /mystery-key/);
+});
+
+test('rotation smoke: clean environment with no inputs is rejected without crashing', () => {
+  const result = runRotationSmoke({});
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /ROTATION_ACTIVE_KEY/);
+});
+
+test('rotation smoke: identical active and previous keys are rejected', () => {
+  const result = runRotationSmoke({
+    ROTATION_ACTIVE_KEY: 'same-key-DDDD',
+    ROTATION_PREVIOUS_KEY: 'same-key-DDDD',
+    ROTATION_WORKER_KEY: 'same-key-DDDD',
+  });
+  assert.equal(result.status, 2);
+  assert.doesNotMatch(result.stdout + result.stderr, /same-key/);
+});
