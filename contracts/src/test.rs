@@ -4658,6 +4658,74 @@ fn test_default_circuit_breaker_config() {
 }
 
 #[test]
+fn test_set_pf_circuit_breaker_rejects_invalid_spike_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Test spike_threshold_bps == 0 (too low)
+    let result = client.try_set_pf_circuit_breaker(&pid, &0, &3600);
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Test spike_threshold_bps > 10000 (too high)
+    let result = client.try_set_pf_circuit_breaker(&pid, &10001, &3600);
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Valid values should work
+    let result = client.try_set_pf_circuit_breaker(&pid, &1, &3600);
+    assert_eq!(result, Ok(()));
+    let result = client.try_set_pf_circuit_breaker(&pid, &10000, &3600);
+    assert_eq!(result, Ok(()));
+}
+
+#[test]
+fn test_set_pf_circuit_breaker_rejects_invalid_window_seconds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    
+    client.initialize(&admin, &reflector_id);
+    
+    let mut allocations = Map::new(&env);
+    let asset = Address::generate(&env);
+    allocations.set(asset.clone(), 10000);
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &allocations, 5, 50);
+    
+    // Test window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS (too low)
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &(MIN_CIRCUIT_BREAKER_WINDOW_SECONDS - 1));
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Test window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS (too high)
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &(MAX_CIRCUIT_BREAKER_WINDOW_SECONDS + 1));
+    assert_eq!(result, Err(Ok(Error::InvalidAssetThreshold)));
+    
+    // Valid boundary values should work
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &MIN_CIRCUIT_BREAKER_WINDOW_SECONDS);
+    assert_eq!(result, Ok(()));
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &MAX_CIRCUIT_BREAKER_WINDOW_SECONDS);
+    assert_eq!(result, Ok(()));
+    
+    // Valid middle value should work
+    let result = client.try_set_pf_circuit_breaker(&pid, &100, &3600);
+    assert_eq!(result, Ok(()));
+}
+
+#[test]
 fn test_global_max_slippage_cap_aggregate_breach() {
     let env = Env::default();
     env.mock_all_auths();
