@@ -346,7 +346,39 @@ const notificationDeliveryStalledTotal = new Counter({
     registers: [register],
 })
 
-export type NotificationDeliveryOutcome = 'success' | 'failure'
+export type NotificationDeliveryOutcome = 'success' | 'failure' | 'delayed'
+
+/**
+ * Terminal outcome of one webhook delivery attempt, in the operator vocabulary
+ * used by the delivery records: `success`, `delayed` (retry still scheduled) or
+ * `blocked` (needs an operator). See `services/webhookDeliveryOutcome.ts`.
+ */
+export type WebhookDeliveryOutcomeLabel = 'success' | 'delayed' | 'blocked'
+
+const webhookDeliveryOutcomeTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}webhook_delivery_outcome_total`,
+    help: 'Webhook delivery attempts by actionable outcome (success, delayed, blocked)',
+    labelNames: ['outcome', 'reason', 'event_type'] as const,
+    registers: [register],
+})
+
+/**
+ * Record the actionable outcome of a webhook delivery attempt. `reason` is a
+ * bounded classification, never the raw provider message, so the label set
+ * stays finite; the destination is deliberately not a label (it contains a
+ * capability token and would explode cardinality).
+ */
+export function recordWebhookDeliveryOutcome(input: {
+    outcome: WebhookDeliveryOutcomeLabel
+    reason: string
+    eventType?: string
+}): void {
+    webhookDeliveryOutcomeTotal.inc({
+        outcome: input.outcome,
+        reason: input.reason,
+        event_type: input.eventType ?? 'unknown',
+    })
+}
 
 /** Terminal outcome of a delivery (after any retries). */
 export function recordNotificationDelivery(input: {

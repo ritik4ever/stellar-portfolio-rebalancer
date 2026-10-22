@@ -12,17 +12,11 @@
  *  7. 4xx non-retryable status → dead-letter outcome, retryable: false.
  *  8. Successful 2xx delivery returns delivered: true, no retryAfterMs.
  *
- * Source bugs worked around in this file (deliberately NOT fixed to keep the
- * test honest about what the source actually does):
- *   - webhook.ts imports 'cypto' (typo for 'crypto'). We mock 'cypto' via
- *     vi.mock to redirect it to the real node:crypto, so the module loads.
+ * SPR-2026-174 repaired the `'cypto'` import typo in webhook.ts, so the module
+ * now loads against node's real `crypto` and the previous `vi.mock('cypto')`
+ * shim is no longer needed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import crypto from "node:crypto";
-
-// ─── Source bug: webhook.ts says `import crypto from 'cypto'` (typo) ─────────
-// We mock the non-existent 'cypto' package so that the webhook module loads.
-vi.mock("cypto", () => ({ default: crypto }));
 
 // ─── Axios mock ───────────────────────────────────────────────────────────────
 // We mock the entire axios module so fireWebhook never opens a real socket.

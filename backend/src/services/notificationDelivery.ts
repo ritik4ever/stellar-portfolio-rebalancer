@@ -180,7 +180,12 @@ export function deliveryStateForFailureKind(kind: DeliveryFailureKind): Delivery
  */
 export async function deliverWithBackoff(
   ctx: DeliveryAttemptContext,
-  execute: () => Promise<void>,
+  /**
+   * Performs one attempt. Receives the 1-based attempt number so providers can
+   * record which attempt an outcome belongs to; older single-argument callbacks
+   * keep working unchanged.
+   */
+  execute: (attempt: number) => Promise<void>,
 ): Promise<void> {
   const { provider, userId, eventType, policy, deliveryId, signal } = ctx;
 
@@ -244,7 +249,7 @@ export async function deliverWithBackoff(
         }
 
         try {
-          await execute();
+          await execute(attempt);
           finalOutcomeLogged = true;
           recordNotificationDeliveryAttempt(provider, 'success');
           recordNotificationDelivery({
@@ -402,7 +407,7 @@ export async function deliverWithBackoff(
           attempt: currentAttempt,
           maxAttempts: policy.maxAttempts,
           deliveryId,
-          deliveryState: "deliayed",
+          deliveryState: "delayed",
         });
       }
     }
@@ -484,7 +489,7 @@ function logOutcome(
   userId: string,
   provider: NotificationProviderName,
   eventType: string,
-  outcome: string,
+  outcome: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain',
   errorMessage: string | undefined,
   metadata: NotificationLogMetadata,
 ): void {
