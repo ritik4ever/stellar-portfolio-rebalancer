@@ -2161,7 +2161,6 @@ fn test_create_portfolio_rejects_threshold_below_min_preserves_state() {
 }
 
 #[test]
-#[should_panic]
 fn test_create_portfolio_threshold_requires_owner_signature() {
     let env = Env::default();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
@@ -2170,15 +2169,36 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let stranger = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
-
-    let allocations = single_asset_allocations(&env);
-    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
-
-    // A wallet that is not the portfolio owner cannot submit a threshold.
     client
         .mock_auths(&[MockAuth {
-            address: &stranger,
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
+
+    let asset = env.register_stellar_asset_contract(admin.clone());
+    StellarAssetClient::new(&env, &asset)
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &asset,
+                fn_name: "mint",
+                args: (&user, 2_000i128).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .mint(&user, &2_000);
+    let mut allocations = Map::new(&env);
+    allocations.set(asset.clone(), ALLOCATION_DENOMINATOR);
+    let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
+    let pid = client
+        .mock_auths(&[MockAuth {
+            address: &user,
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "create_portfolio",
@@ -2186,7 +2206,7 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
                     &user,
                     &allocations,
                     &asset_decimals,
-                    MIN_REBALANCE_THRESHOLD,
+                    5u32,
                     50u32,
                     CURRENT_SLIPPAGE_POLICY_VERSION,
                 )
@@ -2198,10 +2218,73 @@ fn test_create_portfolio_threshold_requires_owner_signature() {
             &user,
             &allocations,
             &asset_decimals,
-            &MIN_REBALANCE_THRESHOLD,
+            &5,
             &50,
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
+    client
+        .mock_auths(&[MockAuth {
+            address: &user,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "deposit",
+                args: (&pid, &asset, 1_000i128, &String::from_str(&env, "")).into_val(&env),
+                sub_invokes: &[MockAuthInvoke {
+                    contract: &asset,
+                    fn_name: "transfer",
+                    args: (&user, &contract_id, 1_000i128).into_val(&env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .deposit(&pid, &asset, &1_000, &String::from_str(&env, ""));
+
+    let token = TokenClient::new(&env, &asset);
+
+    // A wallet that is not the portfolio owner cannot submit a threshold at
+    // either accepted bound, even when that wallet signs the invocation.
+    for threshold in [MIN_REBALANCE_THRESHOLD, MAX_REBALANCE_THRESHOLD] {
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &stranger,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "create_portfolio",
+                    args: (
+                        &user,
+                        &allocations,
+                        &asset_decimals,
+                        threshold,
+                        50u32,
+                        CURRENT_SLIPPAGE_POLICY_VERSION,
+                    )
+                        .into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_create_portfolio(
+                &user,
+                &allocations,
+                &asset_decimals,
+                &threshold,
+                &50,
+                &CURRENT_SLIPPAGE_POLICY_VERSION,
+            );
+
+        assert!(result.is_err(), "non-owner signature must be rejected");
+        assert_eq!(count_portfolio_created_events(&env), 0);
+        assert_eq!(client.get_user_portfolio_count(&user), 1);
+        assert_eq!(client.get_portfolio(&pid).rebalance_threshold, 5);
+        assert_eq!(
+            client
+                .get_portfolio(&pid)
+                .current_balances
+                .get(asset.clone()),
+            Some(1_000)
+        );
+        assert_eq!(token.balance(&contract_id), 1_000);
+        assert_eq!(token.balance(&user), 1_000);
+    }
 }
 
 // ── Oracle caller authorization regressions (SPR-2026-201/202/203) ───────────
