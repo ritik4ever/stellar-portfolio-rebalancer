@@ -151,3 +151,30 @@ In leap years (e.g., 2024, 2028), February 29 is a valid calendar day. The servi
 | `422`  | `VALIDATION_ERROR` | Allocations do not sum to 100%, threshold < 1% or > 50%, or invalid date range. |
 | `503`  | `HISTORICAL_DATA_UNAVAILABLE` | External market price history provider is down or rate-limited. Synthetic fallbacks are prohibited. |
 | `500`  | `INTERNAL_ERROR` | Unexpected simulation failure. |
+
+
+## Known feed gaps and related follow-up issues
+
+The current fetch boundary excludes the open UTC day and filters the requested
+range, but does not require a complete daily series. The simulator skips missing
+days, reports them through `absentDayReasons`, and can return `completed` when at
+least two overlapping days remain. Requested dates outside the returned history
+can also be clipped from the evaluated window. Operators should inspect the
+returned date range and absent-day details before treating a result as covering
+the entire requested window.
+
+- #2076 (SPR-2026-152): define bounded retry or explicit stop behavior for
+  incomplete market history before simulation.
+- #2078 (SPR-2026-154): add structured source and outcome diagnostics that
+  distinguish complete history from blocked or delayed work without logging
+  provider credentials.
+- #2073 (SPR-2026-149): add equivalent diagnostics for the volatility pause.
+  The current circuit breaker checks the configured 24h-change threshold, then
+  price freshness (10 minutes), then correlation. A latest-value snapshot alone
+  cannot identify every missed feed interval.
+
+Existing coverage includes the backtest calendar/leap-day tests in
+`backend/src/test/backtest.test.ts` (SPR-2026-151 / #2075), plus circuit-breaker
+and shared volatility-threshold tests. Those tests do not establish complete
+requested-window validation or structured missing-interval outcomes. This note
+records the gaps; it does not implement the linked issues.
