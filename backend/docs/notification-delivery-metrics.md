@@ -42,6 +42,9 @@ messages contain ids and timestamps and would explode label cardinality.
 
 ## Instrumentation points
 
+For duplicate rebalance events, delivery identity and interpretation of `skipped`
+attempt records are specified in [Email notification service boundary](email-notification-boundary.md).
+
 `deliverWithBackoff` in `services/notificationDelivery.ts` instruments every
 channel that goes through the retry wrapper (email and webhook today) — success,
 each retry, and the terminal failure.
