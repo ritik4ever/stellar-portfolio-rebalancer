@@ -450,7 +450,7 @@ function runRotationSmoke(env) {
   });
 }
 
-test('rotation smoke: worker on new key during overlap passes and leaks no key values', () => {
+test('rotation smoke: worker on new key during overlap reports success and leaks no key values', () => {
   const result = runRotationSmoke({
     ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
     ROTATION_PREVIOUS_KEY: 'old-secret-key-BBBB',
@@ -460,6 +460,9 @@ test('rotation smoke: worker on new key during overlap passes and leaks no key v
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, 'ok');
+  assert.equal(report.outcome, 'success');
+  assert.equal(report.ownerAction, null);
+  assert.equal(report.workerCredentialState, 'current');
   assert.equal(report.overlap, true);
   assert.equal(report.activeVersion, 'v2');
   assert.equal(report.activeFingerprint, report.workerFingerprint);
@@ -467,7 +470,7 @@ test('rotation smoke: worker on new key during overlap passes and leaks no key v
   assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
 });
 
-test('rotation smoke: worker retaining the previous key fails as stale', () => {
+test('rotation smoke: worker retaining the previous key during overlap reports transient delay', () => {
   const result = runRotationSmoke({
     ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
     ROTATION_PREVIOUS_KEY: 'old-secret-key-BBBB',
@@ -477,10 +480,32 @@ test('rotation smoke: worker retaining the previous key fails as stale', () => {
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, 'stale-worker');
   assert.equal(report.reason, 'worker holds previous key');
+  assert.equal(report.outcome, 'transient_delay');
+  assert.equal(report.ownerAction, 'wait_for_worker_credential_refresh');
+  assert.equal(report.workerCredentialState, 'previous');
+  assert.match(report.detail, /overlap window is open/);
   assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
 });
 
-test('rotation smoke: unknown worker key fails and no overlap is reported after cutover', () => {
+test('rotation smoke: worker retaining the previous key after overlap closes reports blocked work', () => {
+  const result = runRotationSmoke({
+    ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
+    ROTATION_PREVIOUS_KEY: 'old-secret-key-BBBB',
+    ROTATION_WORKER_KEY: 'old-secret-key-BBBB',
+    ROTATION_OVERLAP_OPEN: 'false',
+  });
+  assert.equal(result.status, 1);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, 'stale-worker');
+  assert.equal(report.reason, 'worker holds previous key after overlap closed');
+  assert.equal(report.outcome, 'blocked');
+  assert.equal(report.ownerAction, 'restart_notification_worker');
+  assert.equal(report.overlap, false);
+  assert.match(report.detail, /Restart the notification worker/);
+  assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
+});
+
+test('rotation smoke: unknown worker key fails as blocked and no overlap is reported after cutover', () => {
   const result = runRotationSmoke({
     ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
     ROTATION_WORKER_KEY: 'mystery-key-CCCC',
@@ -488,14 +513,20 @@ test('rotation smoke: unknown worker key fails and no overlap is reported after 
   assert.equal(result.status, 1);
   const report = JSON.parse(result.stdout);
   assert.equal(report.reason, 'worker holds unknown key');
+  assert.equal(report.outcome, 'blocked');
+  assert.equal(report.ownerAction, 'restart_notification_worker');
+  assert.equal(report.workerCredentialState, 'unknown');
   assert.equal(report.overlap, false);
   assert.doesNotMatch(result.stdout + result.stderr, /mystery-key/);
 });
 
-test('rotation smoke: clean environment with no inputs is rejected without crashing', () => {
+test('rotation smoke: clean environment with no inputs is reported as blocked without crashing', () => {
   const result = runRotationSmoke({});
   assert.equal(result.status, 2);
   assert.match(result.stdout, /ROTATION_ACTIVE_KEY/);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.outcome, 'blocked');
+  assert.equal(report.ownerAction, 'fix_rotation_inputs');
 });
 
 test('rotation smoke: identical active and previous keys are rejected', () => {
@@ -505,5 +536,24 @@ test('rotation smoke: identical active and previous keys are rejected', () => {
     ROTATION_WORKER_KEY: 'same-key-DDDD',
   });
   assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.outcome, 'blocked');
+  assert.equal(report.ownerAction, 'fix_rotation_inputs');
   assert.doesNotMatch(result.stdout + result.stderr, /same-key/);
+});
+
+test('rotation smoke: invalid overlap flag is rejected as blocked', () => {
+  const result = runRotationSmoke({
+    ROTATION_ACTIVE_KEY: 'new-secret-key-AAAA',
+    ROTATION_PREVIOUS_KEY: 'old-secret-key-BBBB',
+    ROTATION_WORKER_KEY: 'new-secret-key-AAAA',
+    ROTATION_OVERLAP_OPEN: 'maybe',
+  });
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, 'invalid');
+  assert.equal(report.outcome, 'blocked');
+  assert.equal(report.ownerAction, 'fix_rotation_inputs');
+  assert.match(report.error, /ROTATION_OVERLAP_OPEN/);
+  assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
 });
