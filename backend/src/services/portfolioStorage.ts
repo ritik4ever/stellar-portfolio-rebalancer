@@ -5,6 +5,7 @@ import type { Portfolio } from '../types/index.js'
 import {
     encodePortfolioCursor,
     decodePortfolioCursor,
+    diagnosePaginationChange,
     type PortfolioPageCursor,
     type PortfolioPaginationResult,
 } from '../utils/portfolioPagination.js'
@@ -203,13 +204,20 @@ export class PortfolioStorage {
                 cursor: parsedCursor,
                 includeArchived,
             })
+            const total = page.total ?? page.count
+            const { itemsChanged, changeKind } = diagnosePaginationChange({
+                currentTotal: total,
+                cursor: parsedCursor,
+            })
             return {
                 portfolios: page.portfolios as Portfolio[],
                 limit,
                 cursor: cursorStr,
-                nextCursor: page.nextCursor ? encodePortfolioCursor(page.nextCursor) : null,
+                nextCursor: page.nextCursor ? encodePortfolioCursor({ ...page.nextCursor, total }) : null,
                 count: page.count,
-                total: page.total ?? page.count,
+                total,
+                itemsChanged,
+                changeKind,
             }
         }
 
@@ -229,6 +237,10 @@ export class PortfolioStorage {
         }
 
         const total = all.length
+        const { itemsChanged, changeKind } = diagnosePaginationChange({
+            currentTotal: total,
+            cursor: parsedCursor,
+        })
 
         // Ascending ordering: oldest items first by (created_at ASC, id ASC)
         all.sort((a, b) => {
@@ -253,7 +265,7 @@ export class PortfolioStorage {
         const pageItems = hasMore ? paged.slice(0, limit) : paged
         const last = pageItems[pageItems.length - 1]
         const nextCursor = hasMore && last
-            ? encodePortfolioCursor({ createdAt: last.createdAt, id: last.id })
+            ? encodePortfolioCursor({ createdAt: last.createdAt, id: last.id, total })
             : null
 
         return {
@@ -263,9 +275,10 @@ export class PortfolioStorage {
             nextCursor,
             count: pageItems.length,
             total,
+            itemsChanged,
+            changeKind,
         }
     }
-
 
     async getAllPortfolios(includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
