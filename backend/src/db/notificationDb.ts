@@ -402,6 +402,11 @@ export interface NotificationLogMetadata {
     stoppedEarly?: boolean
     /** Stable Message-ID for the logical notification, reused across attempts. */
     idempotencyKey?: string
+    /**
+     * Operator-facing outcome of the attempt: `success`, `delayed` (work is
+     * still pending and replay is safe) or `blocked` (needs an operator).
+     */
+    deliveryState?: 'success' | 'delayed' | 'blocked'
 }
 
 export interface NotificationLog {
