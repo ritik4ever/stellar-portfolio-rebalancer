@@ -1,12 +1,16 @@
-# Portfolio API Pagination Boundary Handling (SPR-2026-181)
+# Portfolio API Pagination Boundary Handling and Observability (SPR-2026-181 & SPR-2026-184)
 
 ## Overview
 
-The Portfolio API (`GET /api/portfolios` and `GET /api/v1/portfolios`) implements cursor-based keyset pagination to provide a predictable, stable, and deterministic rebalancing portfolio listing.
+The Portfolio API (`GET /api/portfolios` and `GET /api/v1/portfolios`) implements cursor-based keyset pagination to provide a predictable, stable, and deterministic portfolio listing.
 
-Cursor-based keyset pagination prevents data anomalies (such as duplicate rows or skipped rows) that occur with traditional `LIMIT` / `OFFSET` pagination when records are inserted or deleted while a client traverses pages.
+Cursor-based keyset pagination prevents duplicate and missed rows that occur with traditional `LIMIT` / `OFFSET` pagination when records are inserted or deleted while a client traverses pages.
 
-## Public Service Boundary Contract
+In addition, comprehensive observability signals allow operators to distinguish between `success`, `delayed`, and `blocked` work, and to diagnose dataset mutations occurring during traversal without exposing any secrets.
+
+---
+
+## Public Service Boundary Contract (SPR-2026-181)
 
 ### Deterministic Keyset Ordering
 
@@ -23,7 +27,8 @@ The pagination `cursor` is a deterministic, URL-safe base64-encoded string repre
 ```json
 {
   "createdAt": "2026-10-22T08:00:00.000Z",
-  "id": "portfolio-001"
+  "id": "portfolio-001",
+  "total": 45
 }
 ```
 Clients must treat cursors as opaque tokens.
@@ -38,7 +43,7 @@ Every paginated portfolio response returns:
     "portfolios": [ ... ],
     "limit": 20,
     "cursor": null,
-    "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2LTEwLTIyVDA4OjAwOjAwLjAwMFoiLCJpZCI6InBvcnRmb2xpby0wMDEifQ",
+    "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2LTEwLTIyVDA4OjAwOjAwLjAwMFoiLCJpZCI6InBvcnRmb2xpby0wMDEiLCJ0b3RhbCI6NDV9",
     "count": 20,
     "total": 45
   },
@@ -90,6 +95,35 @@ Every paginated portfolio response returns:
 
 7. **Invalid Cursor Handling**:
    - Malformed or corrupt cursor strings return HTTP `400 Bad Request` with error code `INVALID_CURSOR`.
+
+---
+
+## Observability & Actionable Outcomes (SPR-2026-184)
+
+Operators can distinguish between **success**, **delay**, and **blocked** work from available metrics and structured logs.
+
+### Operator Signals
+
+| State | Condition | Operator Meaning | Available Signals |
+|---|---|---|---|
+| `success` | Valid page retrieved, cursor advanced cleanly. | Traversal proceeding normally. | Metric: `portfolio_pagination_requests_total{state="success"}`<br>Log: `info` level, event `portfolio_pagination` |
+| `delayed` | Transient database retry, connection timeout, lock contention. | Temporary lag/backoff. Replay is safe; work is delayed rather than dead. | Metric: `portfolio_pagination_requests_total{state="delayed"}`<br>Log: `warn` level with timeout context |
+| `blocked` | Malformed/invalid cursor (`INVALID_CURSOR`), client validation failure, unrecoverable query error. | Request rejected or blocked. Automated retries will not succeed without client correction. | Metric: `portfolio_pagination_requests_total{state="blocked"}`<br>Log: `warn` level with `reason: "malformed_cursor"` |
+
+### Diagnosing Items Changing During Pagination
+
+When dataset mutations happen while a client paginates, the cursor coordinates diagnose the shift:
+- `items_inserted`: Underlying total increased between page fetches (`total > cursor.total`).
+- `items_deleted`: Underlying total decreased between page fetches (`total < cursor.total`).
+- Metrics counter: `portfolio_pagination_items_changed_total{source, change_kind}`.
+
+### Zero Secret Exposure
+
+All context logging passes through `sanitizePaginationContext` and the centralized `secretRedactor`:
+- Stellar secret keys (`S...`), private keys, API keys, passwords, and bearer tokens are automatically scrubbed (`[REDACTED]`).
+- Only safe operational identifiers (`source`, `limit`, `count`, `total`, `changeKind`, `durationSeconds`) are emitted in signals.
+
+---
 
 ## Testing
 
