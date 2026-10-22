@@ -19,7 +19,7 @@
     "start:backend": "cd backend && npm start",
     "start:frontend": "cd frontend && npm run preview",
     "test": "node scripts/run-test-suite.mjs",
-    "test:contracts": "cd contracts && cargo test",
+    "test:contracts": "cd contracts && cargo test --features testutils",
     "test:backend": "cd backend && npm test",
     "test:frontend": "cd frontend && npm test",
     "test:vitest": "vitest run",

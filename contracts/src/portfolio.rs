@@ -271,10 +271,15 @@ pub fn validate_portfolio_storage_footprint(
     Ok(estimate)
 }
 
-pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {
+pub fn emit_portfolio_created(
+    env: &Env,
+    portfolio_id: u64,
+    user: Address,
+    rebalance_threshold: u32,
+) {
     env.events().publish(
         (symbol_short!("portfolio"), symbol_short!("created")),
-        (portfolio_id, user),
+        (portfolio_id, user, rebalance_threshold),
     );
 }
 

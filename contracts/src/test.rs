@@ -1792,6 +1792,22 @@ fn count_portfolio_created_events(env: &Env) -> usize {
         .count()
 }
 
+fn portfolio_created_payload(env: &Env) -> Option<(u64, Address, u32)> {
+    all_events(env)
+        .into_iter()
+        .find(|(_, topics, _)| {
+            topics.len() >= 2
+                && Symbol::try_from_val(env, &topics.get(0).unwrap())
+                    == Ok(Symbol::new(env, "portfolio"))
+                && Symbol::try_from_val(env, &topics.get(1).unwrap())
+                    == Ok(Symbol::new(env, "created"))
+        })
+        .map(|(_, _, data)| {
+            <(u64, Address, u32)>::try_from_val(env, &data)
+                .expect("portfolio.created includes its stored rebalance threshold")
+        })
+}
+
 #[test]
 fn test_create_portfolio_accepts_min_rebalance_threshold() {
     let env = Env::default();
@@ -1800,7 +1816,17 @@ fn test_create_portfolio_accepts_min_rebalance_threshold() {
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
 
     let allocations = single_asset_allocations(&env);
     let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
@@ -1833,6 +1859,16 @@ fn test_create_portfolio_accepts_min_rebalance_threshold() {
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
 
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "an accepted threshold must emit portfolio_created"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((pid, user.clone(), MIN_REBALANCE_THRESHOLD))
+    );
+
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.rebalance_threshold, MIN_REBALANCE_THRESHOLD);
     assert_eq!(portfolio.user, user);
@@ -1842,11 +1878,6 @@ fn test_create_portfolio_accepts_min_rebalance_threshold() {
         "creating a portfolio must not move funds"
     );
     assert_eq!(client.get_user_portfolio_count(&user), 1);
-    assert_eq!(
-        count_portfolio_created_events(&env),
-        1,
-        "an accepted threshold must emit portfolio_created"
-    );
 }
 
 #[test]
@@ -1857,7 +1888,17 @@ fn test_create_portfolio_accepts_max_rebalance_threshold() {
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &reflector_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &reflector_id);
 
     let allocations = single_asset_allocations(&env);
     let asset_decimals = allocation_decimals(&env, &allocations, DEFAULT_ASSET_DECIMALS);
@@ -1890,6 +1931,16 @@ fn test_create_portfolio_accepts_max_rebalance_threshold() {
             &CURRENT_SLIPPAGE_POLICY_VERSION,
         );
 
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "an accepted threshold must emit portfolio_created"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((pid, user.clone(), MAX_REBALANCE_THRESHOLD))
+    );
+
     let portfolio = client.get_portfolio(&pid);
     assert_eq!(portfolio.rebalance_threshold, MAX_REBALANCE_THRESHOLD);
     assert_eq!(portfolio.user, user);
@@ -1899,11 +1950,6 @@ fn test_create_portfolio_accepts_max_rebalance_threshold() {
         "creating a portfolio must not move funds"
     );
     assert_eq!(client.get_user_portfolio_count(&user), 1);
-    assert_eq!(
-        count_portfolio_created_events(&env),
-        1,
-        "an accepted threshold must emit portfolio_created"
-    );
 }
 
 #[test]
@@ -1934,6 +1980,10 @@ fn test_create_portfolio_rejects_threshold_above_max_preserves_state() {
         count_portfolio_created_events(&env),
         1,
         "an accepted threshold emits portfolio_created"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((pid, user.clone(), 5))
     );
 
     client.deposit(&pid, &asset, &1_000, &String::from_str(&env, ""));
@@ -1972,6 +2022,7 @@ fn test_create_portfolio_rejects_threshold_above_max_preserves_state() {
         0,
         "a rejected threshold must not emit portfolio_created"
     );
+    assert_eq!(portfolio_created_payload(&env), None);
 
     // Stored configuration is preserved.
     let portfolio = client.get_portfolio(&pid);
@@ -1999,6 +2050,16 @@ fn test_create_portfolio_rejects_threshold_above_max_preserves_state() {
         pid + 1,
         "a rejected threshold must not consume a portfolio id"
     );
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "the recovered creation emits exactly one event"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((next_pid, user.clone(), 5))
+    );
+    assert_eq!(client.get_portfolio(&next_pid).rebalance_threshold, 5);
 }
 
 #[test]
@@ -2061,6 +2122,7 @@ fn test_create_portfolio_rejects_threshold_below_min_preserves_state() {
         0,
         "a rejected threshold must not emit portfolio_created"
     );
+    assert_eq!(portfolio_created_payload(&env), None);
 
     // Stored configuration and balances are preserved.
     let portfolio = client.get_portfolio(&pid);
@@ -2086,6 +2148,16 @@ fn test_create_portfolio_rejects_threshold_below_min_preserves_state() {
         pid + 1,
         "a rejected threshold must not consume a portfolio id"
     );
+    assert_eq!(
+        count_portfolio_created_events(&env),
+        1,
+        "the recovered creation emits exactly one event"
+    );
+    assert_eq!(
+        portfolio_created_payload(&env),
+        Some((next_pid, user.clone(), 5))
+    );
+    assert_eq!(client.get_portfolio(&next_pid).rebalance_threshold, 5);
 }
 
 #[test]

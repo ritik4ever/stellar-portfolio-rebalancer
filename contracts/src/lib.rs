@@ -325,7 +325,7 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::UserPortfolioCount(user.clone()), &(user_count + 1));
-        portfolio::emit_portfolio_created(&env, portfolio_id, user);
+        portfolio::emit_portfolio_created(&env, portfolio_id, user, rebalance_threshold);
         Ok(portfolio_id)
     }
 

@@ -22,7 +22,7 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 /// stored under `DataKey::Portfolio(u64)` are migrated on read.
 pub const CONTRACT_VERSION: u32 = 2;
 /// Contract event schema version matching backend expected schema version.
-pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
+pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 2;
 /// Persistent storage schema version. Tracked separately from
 /// `CONTRACT_EVENT_SCHEMA_VERSION` (which only versions emitted event
 /// shapes): this one versions the on-chain storage layout itself and is
