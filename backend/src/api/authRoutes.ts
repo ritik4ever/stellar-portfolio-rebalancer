@@ -6,7 +6,7 @@ import {
     logout,
     revokeDeviceSession,
     issueChallenge,
-    verifyWalletSignature,
+    authenticateWalletSignature,
     getRecentAuthAuditEvents
 } from '../services/authService.js'
 import { createChallenge, verifyChallenge, InvalidSignatureError } from '../services/stellarAuthService.js'
@@ -78,12 +78,15 @@ router.post('/login', validateRequest(loginSchema), async (req: Request, res: Re
             return fail(res, 400, 'VALIDATION_ERROR', 'signature is required — request a challenge first via POST /auth/challenge')
         }
         const trimmed = address.trim()
-        const valid = verifyWalletSignature(trimmed, signature.trim())
-        if (!valid) {
+        const metadata = extractMetadata(req)
+        const tokens = await authenticateWalletSignature(
+            trimmed,
+            signature.trim(),
+            () => issueTokens(trimmed, metadata),
+        )
+        if (!tokens) {
             return fail(res, 401, 'UNAUTHORIZED', 'Invalid or expired signature — request a new challenge and sign it with your wallet')
         }
-        const metadata = extractMetadata(req)
-        const tokens = await issueTokens(trimmed, metadata)
         return ok(res, {
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
