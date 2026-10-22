@@ -33,6 +33,7 @@ import {
   type NotificationDeliveryConfig,
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
+import { deriveEmailMessageId, toEmailDeliveryError } from "./emailDeliverySafety.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 import { sendSlackNotification } from '../notifications/slack.js'
 import { createTwilioClient, generateVerificationCode, hashVerificationCode, normalizePhoneNumber, sendSms, verifyCodeHash, type SmsClient } from '../notifications/sms.js'
@@ -288,6 +289,9 @@ class EmailProvider implements NotificationProvider {
       subject: `[Stellar Portfolio] ${payload.title}`,
       text: this.formatTextEmail(payload),
       html: this.formatHtmlEmail(payload),
+      // Stable across retries so a possibly-delivered message can be
+      // correlated instead of silently duplicated (#2091).
+      messageId: deriveEmailMessageId(payload),
     };
 
     const policy = this.deliveryConfig.email;
@@ -307,15 +311,23 @@ class EmailProvider implements NotificationProvider {
         signal: payload.signal,
       },
       async () => {
-        const info = await this.transporter!.sendMail(mailOptions);
-        logger.info("Email notification sent successfully", {
-          to: recipientEmail,
-          event: payload.eventType,
-          userId: payload.userId,
-          messageId: info.messageId,
-          maxAttempts: policy.maxAttempts,
-          deliveryId,
-        });
+        try {
+          const info = await this.transporter!.sendMail(mailOptions);
+          logger.info("Email notification sent successfully", {
+            to: recipientEmail,
+            event: payload.eventType,
+            userId: payload.userId,
+            messageId: info.messageId,
+            idempotencyKey: mailOptions.messageId,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+          });
+        } catch (error) {
+          // Classify the SMTP failure before the generic backoff logic sees it:
+          // a timeout or dropped connection after the body was accepted may
+          // already have delivered the message, so it must not be retried.
+          throw toEmailDeliveryError(error, mailOptions.messageId);
+        }
       },
     );
   }
