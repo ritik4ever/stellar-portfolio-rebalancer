@@ -1,6 +1,17 @@
+import { redactArgs } from './secretRedactor.js'
+import { logger } from './logger.js'
+import {
+    recordPortfolioPaginationOutcome,
+    recordPortfolioPaginationItemsChanged,
+    type PaginationState,
+} from '../observability/metrics.js'
+
+export type { PaginationState }
+
 export interface PortfolioPageCursor {
     createdAt: string
     id: string
+    total?: number
 }
 
 export interface PortfolioPaginationResult<T = unknown> {
@@ -10,6 +21,8 @@ export interface PortfolioPaginationResult<T = unknown> {
     nextCursor: string | null
     count: number
     total: number
+    itemsChanged?: boolean
+    changeKind?: 'none' | 'items_inserted' | 'items_deleted' | 'count_drift'
 }
 
 /**
@@ -19,6 +32,7 @@ export function encodePortfolioCursor(cursor: PortfolioPageCursor): string {
     const payload = JSON.stringify({
         createdAt: cursor.createdAt,
         id: cursor.id,
+        ...(typeof cursor.total === 'number' ? { total: cursor.total } : {}),
     })
     return Buffer.from(payload, 'utf8').toString('base64url')
 }
@@ -48,6 +62,7 @@ export function decodePortfolioCursor(raw: string): PortfolioPageCursor | null {
                 return {
                     createdAt: new Date(parsed.createdAt).toISOString(),
                     id: parsed.id,
+                    ...(typeof parsed.total === 'number' ? { total: parsed.total } : {}),
                 }
             }
         }
@@ -70,6 +85,7 @@ export function decodePortfolioCursor(raw: string): PortfolioPageCursor | null {
                 return {
                     createdAt: new Date(parsed.createdAt).toISOString(),
                     id: parsed.id,
+                    ...(typeof parsed.total === 'number' ? { total: parsed.total } : {}),
                 }
             }
         } catch {
@@ -92,4 +108,88 @@ export function decodePortfolioCursor(raw: string): PortfolioPageCursor | null {
     }
 
     return null
+}
+
+/**
+ * Diagnose whether items changed in the underlying dataset during pagination traversal.
+ */
+export function diagnosePaginationChange(params: {
+    currentTotal: number
+    cursor?: PortfolioPageCursor | null
+}): {
+    itemsChanged: boolean
+    changeKind: 'none' | 'items_inserted' | 'items_deleted' | 'count_drift'
+} {
+    const { currentTotal, cursor } = params
+    if (!cursor || typeof cursor.total !== 'number') {
+        return { itemsChanged: false, changeKind: 'none' }
+    }
+    if (currentTotal === cursor.total) {
+        return { itemsChanged: false, changeKind: 'none' }
+    }
+    if (currentTotal > cursor.total) {
+        return { itemsChanged: true, changeKind: 'items_inserted' }
+    }
+    return { itemsChanged: true, changeKind: 'items_deleted' }
+}
+
+/**
+ * Sanitize diagnostic context to guarantee secrets (e.g. private keys, credentials, tokens)
+ * are redacted before writing to logs or emitting signals.
+ */
+export function sanitizePaginationContext<T extends Record<string, unknown>>(context: T): T {
+    try {
+        const cloned = JSON.parse(JSON.stringify(context))
+        return redactArgs([cloned])[0] as T
+    } catch {
+        return context
+    }
+}
+
+/**
+ * Surface actionable Portfolio API pagination outcome signal:
+ * - Records Prometheus counters partitioned by source, outcome, and state (success, delayed, blocked)
+ * - Emits items_changed diagnostic counters when mutations occur during pagination
+ * - Produces sanitized, structured logs with safe context (no secrets exposed)
+ */
+export function recordPaginationSignal(params: {
+    source: string
+    outcome: string
+    state: PaginationState
+    context: Record<string, unknown>
+    durationSeconds?: number
+}): void {
+    const { source, outcome, state, context, durationSeconds } = params
+
+    // 1. Prometheus metrics
+    recordPortfolioPaginationOutcome({
+        source,
+        outcome,
+        state,
+        durationSeconds,
+    })
+
+    const changeKind = context.changeKind as string | undefined
+    if (changeKind === 'items_inserted' || changeKind === 'items_deleted' || changeKind === 'count_drift') {
+        recordPortfolioPaginationItemsChanged({
+            source,
+            changeKind,
+        })
+    }
+
+    // 2. Structured logging
+    const safeContext = sanitizePaginationContext({
+        source,
+        outcome,
+        state,
+        ...context,
+    })
+
+    if (state === 'blocked') {
+        logger.warn(safeContext, 'Portfolio pagination blocked')
+    } else if (state === 'delayed') {
+        logger.warn(safeContext, 'Portfolio pagination delayed')
+    } else {
+        logger.info(safeContext, 'Portfolio pagination success')
+    }
 }
