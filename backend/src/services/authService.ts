@@ -107,6 +107,39 @@ export function getAuthConfig(): {
   };
 }
 
+/**
+ * Report JWT rotation state using labels only; never return either secret.
+ * `current` is the signing key used for newly issued tokens and `previous`
+ * is accepted only while its configured grace period is active.
+ */
+export function getJwtRotationStatus(): {
+  activeVersion: 'current' | null;
+  previousVersion: 'previous' | null;
+  previousGraceActive: boolean;
+  previousGraceUntil: string | null;
+} {
+  const activeConfigured = Boolean(
+    process.env.JWT_SECRET && process.env.JWT_SECRET.length >= MIN_SECRET_LENGTH,
+  );
+  const previousConfigured = Boolean(
+    process.env.JWT_PREVIOUS_SECRET &&
+      process.env.JWT_PREVIOUS_SECRET.length >= MIN_SECRET_LENGTH,
+  );
+  const graceUntil = process.env.JWT_PREVIOUS_SECRET_GRACE_UNTIL?.trim() || null;
+  const graceUntilMs = graceUntil ? Date.parse(graceUntil) : Number.NaN;
+  const previousGraceActive =
+    previousConfigured &&
+    !Number.isNaN(graceUntilMs) &&
+    Date.now() <= graceUntilMs;
+
+  return {
+    activeVersion: activeConfigured ? 'current' : null,
+    previousVersion: previousConfigured ? 'previous' : null,
+    previousGraceActive,
+    previousGraceUntil: previousConfigured ? graceUntil : null,
+  };
+}
+
 export function generateAccessToken(address: string): string {
   return jwt.sign(
     { sub: address, type: "access" } as TokenPayload,

@@ -47,6 +47,7 @@ describe("authService – JWT secret enforcement", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -87,6 +88,43 @@ describe("authService – JWT secret enforcement", () => {
       const cfg = getAuthConfig();
       expect(cfg.accessExpirySec).toBe(900);
       expect(cfg.refreshExpirySec).toBe(604800);
+    });
+  });
+
+  describe("getJwtRotationStatus", () => {
+    it("reports current and previous labels during the overlap without exposing secrets", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      vi.stubEnv("JWT_SECRET", "c".repeat(32));
+      vi.stubEnv("JWT_PREVIOUS_SECRET", "p".repeat(32));
+      vi.stubEnv("JWT_PREVIOUS_SECRET_GRACE_UNTIL", "2026-01-01T01:00:00.000Z");
+      const { getJwtRotationStatus } = await import("../services/authService.js");
+
+      const status = getJwtRotationStatus();
+
+      expect(status).toEqual({
+        activeVersion: "current",
+        previousVersion: "previous",
+        previousGraceActive: true,
+        previousGraceUntil: "2026-01-01T01:00:00.000Z",
+      });
+      expect(JSON.stringify(status)).not.toContain("c".repeat(32));
+      expect(JSON.stringify(status)).not.toContain("p".repeat(32));
+    });
+
+    it("reports an expired overlap without treating the previous key as active", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T02:00:00.000Z"));
+      vi.stubEnv("JWT_SECRET", "c".repeat(32));
+      vi.stubEnv("JWT_PREVIOUS_SECRET", "p".repeat(32));
+      vi.stubEnv("JWT_PREVIOUS_SECRET_GRACE_UNTIL", "2026-01-01T01:00:00.000Z");
+      const { getJwtRotationStatus } = await import("../services/authService.js");
+
+      expect(getJwtRotationStatus()).toMatchObject({
+        activeVersion: "current",
+        previousVersion: "previous",
+        previousGraceActive: false,
+      });
     });
   });
 
