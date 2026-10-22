@@ -21,6 +21,7 @@ import {
     webhookDeadLetterQueue,
     queryDeadLetterItems,
     postDeadLetterPayload,
+    type DeadLetterItem,
 } from '../services/webhookDeadLetter.js'
 import { deliverWithBackoff } from '../services/notificationDelivery.js'
 import { getNotificationDeliveryConfig } from '../config/notificationDeliveryConfig.js'
@@ -339,50 +340,178 @@ notificationsRouter.post('/notifications/test', requireJwtWhenEnabled, async (re
     }
 })
 
-// Get webhook dead letter queue items
-notificationsRouter.get('/notifications/webhooks/dead-letter', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
+// ── Webhook dead-letter queue (admin) ─────────────────────────────────────────
+//
+// These endpoints are the operator-facing view of the persisted dead-letter
+// records written by the webhook delivery path. They must agree with what the
+// retry logic actually did:
+//   * only definitively failed deliveries are listed (unknown outcomes are never
+//     queued, so nothing here is "maybe already delivered"),
+//   * `deliveryId` ties an entry back to its `notification_logs` rows,
+//   * a successful replay removes the entry, a failed one re-queues it with the
+//     incremented attempt count so nothing is silently lost.
+
+function webhookReplayPolicy() {
+    const config = getNotificationDeliveryConfig()
+    return {
+        ...config.webhook,
+        maxAttempts: Math.min(config.webhook.maxAttempts, 5),
+    }
+}
+
+/**
+ * Replay one dead-letter entry through the normal delivery pipeline (retry +
+ * logging) and keep the queue in sync with the outcome.
+ */
+async function replayDeadLetterItem(item: DeadLetterItem): Promise<void> {
+    const policy = webhookReplayPolicy()
+
     try {
-        const limit = Math.min(Number(req.query.limit) || 50, 200)
-        const items = queryDeadLetterItems(limit)
-        return ok(res, { items, total: webhookDeadLetterQueue.size })
+        await deliverWithBackoff(
+            {
+                provider: 'webhook',
+                userId: item.userId,
+                eventType: item.eventType,
+                policy,
+                deliveryId: item.deliveryId,
+            },
+            () => postDeadLetterPayload(item, policy.requestTimeoutMs || 5000),
+        )
     } catch (error) {
-        logger.error('Failed to read webhook dead letter queue', { error: getErrorObject(error) })
+        await webhookDeadLetterQueue.requeue(item)
+        throw error
+    }
+}
+
+function asQueryText(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function asQueryNumber(value: unknown): number | undefined {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function asPathParam(value: string | string[]): string {
+    return Array.isArray(value) ? value[0] ?? '' : value
+}
+
+// List webhook dead-letter items
+notificationsRouter.get('/admin/notifications/dead-letter', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const items = await webhookDeadLetterQueue.list()
+        const listing = queryDeadLetterItems(items, {
+            userId: asQueryText(req.query.userId),
+            eventType: asQueryText(req.query.eventType),
+            search: asQueryText(req.query.search),
+            page: asQueryNumber(req.query.page),
+            pageSize: asQueryNumber(req.query.pageSize) ?? asQueryNumber(req.query.limit),
+        })
+
+        return ok(res, listing)
+    } catch (error) {
+        logger.error('Failed to list webhook dead-letter items', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-// Replay a webhook dead letter item
-notificationsRouter.post('/notifications/webhooks/dead-letter/:id/replay', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
+// Replay a webhook dead-letter item
+notificationsRouter.post('/admin/notifications/dead-letter/:id/replay', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const id = req.params.id
-        const item = webhookDeadLetterQueue.get(id)
+        // Claim the entry first so a concurrent replay cannot deliver it twice.
+        const item = await webhookDeadLetterQueue.replay(asPathParam(req.params.id))
         if (!item) {
-            return fail(res, 404, 'NOT_FOUND', 'Dead letter item not found')
+            return fail(res, 404, 'NOT_FOUND', 'Dead-letter item not found')
         }
 
-        const config = getNotificationDeliveryConfig()
-        const result = await deliverBackoff(item.url, item.payload, config)
-
-        if (result.success) {
-            webhookDeadLetterQueue.remove(id)
-            return ok(res, { replayed: true, attempts: result.attempts })
+        try {
+            await replayDeadLetterItem(item)
+        } catch (replayError) {
+            logger.error('Webhook dead-letter replay failed; item re-queued', {
+                error: getErrorObject(replayError),
+                itemId: item.id,
+                deliveryId: item.deliveryId,
+            })
+            return fail(res, 502, 'REPLAY_FAILED', 'Replay delivery failed, item re-queued')
         }
 
-        return fail(res, 502, 'DELIVERY_FAILED', 'Replay delivery failed')
+        return ok(res, {
+            replayed: true,
+            id: item.id,
+            deliveryId: item.deliveryId,
+            attemptsExhausted: item.attemptsExhausted,
+        })
     } catch (error) {
-        logger.error('Failed to replay webhook dead letter item', { error: getErrorObject(error) })
+        logger.error('Failed to replay webhook dead-letter item', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
 
-// Purge the webhook dead letter queue
-notificationsRouter.delete('/notifications/webhooks/dead-letter', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
+// Replay several webhook dead-letter items (or every queued item)
+notificationsRouter.post('/admin/notifications/dead-letter/batch-replay', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const count = webhookDeadLetterQueue.size
-        webhookDeadLetterQueue.clear()
-        return ok(res, { purged: count })
+        const { ids, replayAll } = (req.body ?? {}) as { ids?: string[]; replayAll?: boolean }
+
+        if (!Array.isArray(ids) && !replayAll) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Either ids array or replayAll flag is required')
+        }
+
+        const allItems = await webhookDeadLetterQueue.list()
+        const itemsToReplay = replayAll
+            ? allItems
+            : allItems.filter((item) => ids!.includes(item.id))
+
+        if (itemsToReplay.length === 0) {
+            return fail(res, 404, 'NOT_FOUND', 'No matching dead-letter items found')
+        }
+
+        const results = {
+            total: itemsToReplay.length,
+            succeeded: 0,
+            failed: 0,
+            failedIds: [] as string[],
+        }
+
+        for (const item of itemsToReplay) {
+            // Claim the entry first so it is delivered at most once, even if two
+            // batch replays overlap.
+            const claimed = await webhookDeadLetterQueue.replay(item.id)
+            if (!claimed) {
+                results.failed++
+                results.failedIds.push(item.id)
+                continue
+            }
+
+            try {
+                await replayDeadLetterItem(claimed)
+                results.succeeded++
+            } catch {
+                results.failed++
+                results.failedIds.push(item.id)
+            }
+        }
+
+        return ok(res, {
+            message: `Batch replay completed: ${results.succeeded} succeeded, ${results.failed} failed`,
+            results,
+        })
     } catch (error) {
-        logger.error('Failed to purge webhook dead letter queue', { error: getErrorObject(error) })
+        logger.error('Failed to batch replay webhook dead-letter items', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+// Drop a webhook dead-letter item without replaying it
+notificationsRouter.delete('/admin/notifications/dead-letter/:id', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const deleted = await webhookDeadLetterQueue.delete(asPathParam(req.params.id))
+        if (!deleted) {
+            return fail(res, 404, 'NOT_FOUND', 'Dead-letter item not found')
+        }
+
+        return ok(res, { deleted: true, id: asPathParam(req.params.id) })
+    } catch (error) {
+        logger.error('Failed to delete webhook dead-letter item', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

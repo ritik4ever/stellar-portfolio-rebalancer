@@ -39,6 +39,7 @@ import {
   reportWebhookDeliveryOutcome,
 } from "./webhookDeliveryOutcome.js";
 import { deriveEmailMessageId, toEmailDeliveryError } from "./emailDeliverySafety.js";
+import { deriveWebhookDeliveryId, isAmbiguousWebhookFailure, toWebhookDeliveryError } from "./webhookDeliverySafety.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 import { sendSlackNotification } from '../notifications/slack.js'
 import { createTwilioClient, generateVerificationCode, hashVerificationCode, normalizePhoneNumber, sendSms, verifyCodeHash, type SmsClient } from '../notifications/sms.js'
@@ -160,6 +161,19 @@ class WebhookProvider implements NotificationProvider {
     // Redacted destination, safe for logs/metrics: the URL path usually holds
     // the receiver's capability token.
     const source = redactWebhookEndpoint(webhookUrl);
+    const payloadDeliveryId = payload.deliveryId;
+    // Stable for every retry and for a later dead-letter replay; the receiver
+    // uses it to treat a repeated POST as the same notification.
+    const webhookDeliveryId =
+      payloadDeliveryId ??
+      deriveWebhookDeliveryId({
+        userId: payload.userId,
+        eventType: payload.eventType,
+        timestamp: payload.timestamp,
+        title: payload.title,
+      });
+
+    let attemptsMade = 0;
 
     try {
       await deliverWithBackoff(
@@ -168,10 +182,11 @@ class WebhookProvider implements NotificationProvider {
           userId: payload.userId,
           eventType: payload.eventType,
           policy,
-          deliveryId: payload.deliveryId,
+          deliveryId: payloadDeliveryId,
           signal: payload.signal,
         },
         async (attempt) => {
+          attemptsMade++;
           const startedAt = Date.now();
 
           // Recorded before the request so a worker restart between send and
@@ -179,7 +194,7 @@ class WebhookProvider implements NotificationProvider {
           reportWebhookDeliveryAttemptStarted({
             source,
             eventType: payload.eventType,
-            deliveryId: payload.deliveryId,
+            deliveryId: webhookDeliveryId,
             userId: payload.userId,
             attempt,
             maxAttempts: policy.maxAttempts,
@@ -195,6 +210,7 @@ class WebhookProvider implements NotificationProvider {
               headers: {
                 'Content-Type': 'application/json',
                 'X-Webhook-Event': payload.eventType,
+                'X-Webhook-Delivery-Id': webhookDeliveryId,
               },
               body: JSON.stringify(webhookPayload),
               signal: controller.signal,
@@ -207,11 +223,10 @@ class WebhookProvider implements NotificationProvider {
               // 400 that will never succeed.
               throw webhookResponseError(response.status);
             }
-
             reportWebhookDeliveryOutcome({
               source,
               eventType: payload.eventType,
-              deliveryId: payload.deliveryId,
+              deliveryId: webhookDeliveryId,
               userId: payload.userId,
               attempt,
               maxAttempts: policy.maxAttempts,
@@ -222,7 +237,7 @@ class WebhookProvider implements NotificationProvider {
             reportWebhookDeliveryOutcome({
               source,
               eventType: payload.eventType,
-              deliveryId: payload.deliveryId,
+              deliveryId: webhookDeliveryId,
               userId: payload.userId,
               attempt,
               maxAttempts: policy.maxAttempts,
@@ -230,18 +245,44 @@ class WebhookProvider implements NotificationProvider {
               error,
               elapsedMs: Date.now() - startedAt,
             });
-            throw error;
+            // Timeouts/socket resets after the request was dispatched are
+            // classified as ambiguous so the delivery is stopped instead of
+            // retried against an endpoint that may already have it.
+            throw toWebhookDeliveryError(error, webhookDeliveryId);
           } finally {
             clearTimeout(timeoutId);
           }
         },
       );
-    } catch {
+    } catch (error) {
+      // A timeout or dropped socket after the request was dispatched leaves the
+      // outcome unknown: the endpoint may already have processed the payload.
+      // Queueing it for replay would risk duplicating that side effect, so the
+      // `uncertain` delivery log row stays the single record of this attempt.
+      if (isAmbiguousWebhookFailure(error)) {
+        logger.error(
+          "[Webhook] Delivery outcome unknown; not moving to the dead-letter queue to avoid a duplicate replay",
+          {
+            userId: payload.userId,
+            eventType: payload.eventType,
+            deliveryId: webhookDeliveryId,
+            webhookUrl,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        return;
+      }
+
       const deadLetterItem: DeadLetterItem = {
         id: randomBytes(16).toString('hex'),
         payload: webhookPayload,
-        errorMessage: 'Exhausted all webhook retry attempts',
-        attemptsExhausted: policy.maxAttempts,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : `Webhook delivery failed after ${attemptsMade} attempt(s)`,
+        attemptsExhausted: attemptsMade,
+        stoppedEarly: attemptsMade < policy.maxAttempts,
+        deliveryId: webhookDeliveryId,
         timestamp: new Date().toISOString(),
         webhookUrl,
         userId: payload.userId,

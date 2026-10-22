@@ -4,6 +4,8 @@ import { logger } from '../utils/logger.js'
 import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
 
 const DLQ_KEY = 'dead_letter:webhook'
+/** Tracks which deliveries already have a dead-letter entry (SPR-2026-173). */
+const DLQ_DEDUPE_KEY = 'dead_letter:webhook:delivery_ids'
 
 // #1207 seed-then-replay integration coverage: replay() re-delivers the original
 // payload and drops the entry on success, or bumps attemptsExhausted on repeat failure.
@@ -12,16 +14,32 @@ export interface DeadLetterItem {
     id: string
     payload: unknown
     errorMessage: string
+    /**
+     * Attempts actually made for this delivery. Equal to the configured max
+     * attempts when the retry budget was exhausted, lower when the retry loop
+     * stopped early (for example when the caller aborted the delivery).
+     */
     attemptsExhausted: number
     timestamp: string
     webhookUrl: string
     userId: string
     eventType: string
+    /**
+     * Stable idempotency id of the delivery, also sent to the endpoint as
+     * `X-Webhook-Delivery-Id`. Correlates this entry with the delivery rows in
+     * `notification_logs` and lets a replay be recognised by the receiver.
+     * At most one dead-letter entry exists per deliveryId.
+     */
+    deliveryId?: string
+    /** True when the retry loop stopped before using the full attempt budget. */
+    stoppedEarly?: boolean
 }
 
 class WebhookDeadLetterQueue {
     private redis: Redis | null = null
     private fallbackList: DeadLetterItem[] = []
+    /** Delivery ids already present in the fallback list (dedupe mirror). */
+    private fallbackDeliveryIds = new Set<string>()
     private useRedis = false
     private initialized = false
     /** Single in-flight init promise shared by all concurrent callers. */
@@ -75,8 +93,37 @@ class WebhookDeadLetterQueue {
         this.initialized = true
     }
 
-    async push(item: DeadLetterItem): Promise<void> {
+    /**
+     * Enqueue a dead-letter entry.
+     *
+     * Entries are deduplicated per `deliveryId`: concurrent or repeated work for
+     * the same delivery (a deduplicated waiter that saw the same failure, an
+     * operator-triggered retry, ...) must not produce several replayable copies
+     * of one notification. Returns `true` when the item was enqueued.
+     *
+     * `requeue()` opts out of the check because it re-adds an entry that this
+     * queue itself just released for a replay.
+     */
+    async push(item: DeadLetterItem): Promise<boolean> {
+        return this.enqueue(item, { dedupe: true })
+    }
+
+    private async enqueue(item: DeadLetterItem, options: { dedupe: boolean }): Promise<boolean> {
         if (!this.initialized) await this.init()
+
+        if (options.dedupe && item.deliveryId) {
+            const reserved = await this.reserveDeliveryId(item.deliveryId)
+            if (!reserved) {
+                logger.info('[DLQ] Delivery already dead-lettered; skipping duplicate entry', {
+                    userId: item.userId,
+                    eventType: item.eventType,
+                    deliveryId: item.deliveryId,
+                })
+                return false
+            }
+        } else if (item.deliveryId) {
+            await this.markDeliveryId(item.deliveryId)
+        }
 
         const serialized = JSON.stringify(item)
         if (this.useRedis && this.redis) {
@@ -84,32 +131,89 @@ class WebhookDeadLetterQueue {
                 .catch((err) => {
                     logger.error('[DLQ] Failed to push to Redis', { error: err.message })
                     this.fallbackList.push(item)
+                    if (item.deliveryId) this.fallbackDeliveryIds.add(item.deliveryId)
                 })
         } else {
             this.fallbackList.push(item)
+            if (item.deliveryId) this.fallbackDeliveryIds.add(item.deliveryId)
         }
         logger.warn('[DLQ] Webhook delivery moved to dead-letter queue', {
             userId: item.userId,
             eventType: item.eventType,
             attempts: item.attemptsExhausted,
+            deliveryId: item.deliveryId,
+            stoppedEarly: item.stoppedEarly,
         })
+        return true
+    }
+
+    /**
+     * Atomically claim the dead-letter slot for a delivery id.
+     * Redis `SADD` returns 0 when the member already exists, so two concurrent
+     * failures cannot both enqueue an entry for the same delivery.
+     */
+    private async reserveDeliveryId(deliveryId: string): Promise<boolean> {
+        if (this.useRedis && this.redis) {
+            try {
+                const added = await this.redis.sadd(DLQ_DEDUPE_KEY, deliveryId)
+                return Number(added) > 0
+            } catch (err) {
+                logger.error('[DLQ] Delivery id reservation failed; falling back to list scan', {
+                    error: err instanceof Error ? err.message : String(err),
+                })
+                const items = await this.list()
+                return !items.some((existing) => existing.deliveryId === deliveryId)
+            }
+        }
+
+        if (this.fallbackDeliveryIds.has(deliveryId)) return false
+        this.fallbackDeliveryIds.add(deliveryId)
+        return true
+    }
+
+    /** Re-register a delivery id without the "already present" check. */
+    private async markDeliveryId(deliveryId: string): Promise<void> {
+        if (this.useRedis && this.redis) {
+            await this.redis.sadd(DLQ_DEDUPE_KEY, deliveryId).catch((err: Error) => {
+                logger.error('[DLQ] Failed to record delivery id', { error: err.message })
+            })
+            return
+        }
+        this.fallbackDeliveryIds.add(deliveryId)
+    }
+
+    /** Release the dedupe slot once an entry leaves the queue. */
+    private async releaseDeliveryId(deliveryId: string | undefined): Promise<void> {
+        if (!deliveryId) return
+
+        if (this.useRedis && this.redis) {
+            await this.redis.srem(DLQ_DEDUPE_KEY, deliveryId).catch((err: Error) => {
+                logger.error('[DLQ] Failed to release delivery id', { error: err.message })
+            })
+            return
+        }
+        this.fallbackDeliveryIds.delete(deliveryId)
     }
 
     /**
      * Re-queue a previously replayed item after delivery failed again.
      * Persists the incremented attempt count so operators can see how many
      * times the payload has been replayed while sitting in the dead-letter.
+     * The entry keeps its `deliveryId`, so the persisted record still points at
+     * the same delivery as the `notification_logs` rows.
      */
     async requeue(item: DeadLetterItem): Promise<void> {
-        await this.push({
+        const requeued = {
             ...item,
             attemptsExhausted: item.attemptsExhausted + 1,
-        })
+        }
+        await this.enqueue(requeued, { dedupe: false })
         logger.warn('[DLQ] Failed replay re-queued with incremented attempts', {
             itemId: item.id,
             userId: item.userId,
             eventType: item.eventType,
-            attempts: item.attemptsExhausted + 1,
+            attempts: requeued.attemptsExhausted,
+            deliveryId: item.deliveryId,
         })
     }
 
@@ -136,7 +240,8 @@ class WebhookDeadLetterQueue {
                 const parsed = JSON.parse(items[i]) as DeadLetterItem
                 if (parsed.id === itemId) {
                     await this.redis.lrem(DLQ_KEY, 1, items[i])
-                    logger.info('[DLQ] Replayed item removed from queue', { itemId })
+                    await this.releaseDeliveryId(parsed.deliveryId)
+                    logger.info('[DLQ] Replayed item removed from queue', { itemId, deliveryId: parsed.deliveryId })
                     return parsed
                 }
             }
@@ -144,6 +249,7 @@ class WebhookDeadLetterQueue {
             const idx = this.fallbackList.findIndex((i) => i.id === itemId)
             if (idx !== -1) {
                 const [item] = this.fallbackList.splice(idx, 1)
+                await this.releaseDeliveryId(item.deliveryId)
                 return item
             }
         }
@@ -159,13 +265,15 @@ class WebhookDeadLetterQueue {
                 const parsed = JSON.parse(items[i]) as DeadLetterItem
                 if (parsed.id === itemId) {
                     await this.redis.lrem(DLQ_KEY, 1, items[i])
+                    await this.releaseDeliveryId(parsed.deliveryId)
                     return true
                 }
             }
         } else {
             const idx = this.fallbackList.findIndex((i) => i.id === itemId)
             if (idx !== -1) {
-                this.fallbackList.splice(idx, 1)
+                const [item] = this.fallbackList.splice(idx, 1)
+                await this.releaseDeliveryId(item.deliveryId)
                 return true
             }
         }
@@ -183,6 +291,7 @@ class WebhookDeadLetterQueue {
 
     _resetForTest(): void {
         this.fallbackList = []
+        this.fallbackDeliveryIds.clear()
         this.initialized = false
         this.initPromise = null
         this.useRedis = false
@@ -301,6 +410,10 @@ export async function postDeadLetterPayload(
                 'Content-Type': 'application/json',
                 'X-Webhook-Event': item.eventType,
                 'X-Webhook-Replay': 'true',
+                // Reuse the original delivery id so the receiver can recognise
+                // the replay as the same notification (item.id is only used for
+                // entries created before delivery ids were recorded).
+                'X-Webhook-Delivery-Id': item.deliveryId ?? item.id,
             },
             body: JSON.stringify(item.payload),
             signal: controller.signal,
