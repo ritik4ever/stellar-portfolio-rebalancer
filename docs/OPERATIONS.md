@@ -164,7 +164,7 @@ If the container remains `starting`, wait for readiness and inspect `/readiness`
 
 ### Durable cursor
 
-The indexer persists its resume state in the `contract_event_indexer_state` table. The `kv_store` keys remain populated as legacy compatibility mirrors only.
+The incremental sync persists its resume state in these `kv_store` keys:
 
 | Key                                   | Purpose                                              |
 | ------------------------------------- | ---------------------------------------------------- |
@@ -182,7 +182,7 @@ The cursor is written after each fetched page is processed and again when a sync
 ### Inspecting indexer position
 
 - **API:** `GET /api/v1/indexer/cursor` returns stored cursor, latest ledger, last successful/failed sync timestamps, and errors.
-- **SQL:** `SELECT * FROM contract_event_indexer_state WHERE name = 'soroban_event_indexer'` (legacy mirrors are also visible with `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'`).
+- **SQL:** `SELECT * FROM kv_store WHERE key LIKE 'soroban_event_indexer%'` shows the incremental sync's durable cursor and latest ledger.
 
 ### Re-sync and backfill
 
@@ -200,6 +200,22 @@ The script requires `ADMIN_REINDEX_KEY` to be set (matches the env var on the se
 ### RPC resilience
 
 The indexer uses bounded exponential backoff when the Soroban RPC is unreachable. It tracks last successful sync time, last failed sync time, and a ring buffer of recent error summaries. These are exposed through the `/api/v1/indexer/cursor` and `/ready` endpoints so operators can tell whether the indexer is healthy, catching up, or stuck.
+
+A nonempty page must supply a new resume token. If RPC repeats a cursor (including
+a cycle such as A → B → A), the current sync stops with `INDEXER_CURSOR_STALLED`.
+A missing page token or indexed-event token stops it with `INDEXER_CURSOR_MISSING`.
+These failures use the existing error status and consecutive-failure backoff; they
+are not reported as successful syncs. The normal page limit still bounds passes
+whose cursors keep advancing.
+
+Only completed pages advance the stored cursor. After a failed write or stalled
+page, the next poll retries from that checkpoint. Successfully written events are
+cached only after persistence, and the existing unique paging-token index returns
+the original history row on replay, including after a process restart. Distinct
+event tokens in the same transaction remain distinct. No new schema is required.
+Historical rows written without paging tokens cannot be deduplicated retroactively.
+For a persistent cursor error, inspect the configured RPC endpoint and its event
+pagination before requesting a re-sync; avoid deleting recorded history to retry.
 
 ## Notification delivery backoff
 

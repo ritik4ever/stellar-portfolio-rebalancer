@@ -283,10 +283,11 @@ describe('contractEventIndexer', () => {
             pagingToken: 'token-1'
         } as unknown as SorobanRpc.Api.EventResponse
 
-        rpcServerMock.getEvents.mockResolvedValue({
-            events: [mockEvent],
-            latestLedger: 1000
-        })
+        // Each replay reaches an empty terminal page; endlessly returning the
+        // same page is now an explicit cursor-stall failure (#2101).
+        rpcServerMock.getEvents
+            .mockResolvedValueOnce({ events: [mockEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
 
         safeScValToNativeSpy.mockImplementation((val) => {
             if (val === 'topic1') return 'portfolio'
@@ -324,10 +325,11 @@ describe('contractEventIndexer', () => {
             pagingToken: 'token-1'
         } as unknown as SorobanRpc.Api.EventResponse
 
-        rpcServerMock.getEvents.mockResolvedValue({
-            events: [mockEvent],
-            latestLedger: 1000
-        })
+        rpcServerMock.getEvents
+            .mockResolvedValueOnce({ events: [mockEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [mockEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
 
         safeScValToNativeSpy.mockImplementation((val) => {
             if (val === 'topic1') return 'portfolio'
@@ -340,9 +342,7 @@ describe('contractEventIndexer', () => {
         const result1 = await contractEventIndexerService.syncOnce()
 
         // Act - Second Run (simulating script re-run without clearing memory)
-        // Note: For a true script re-run, memory is cleared, but database deduplication 
-        // would handle it. Since we only have in-memory dedup for this implementation,
-        // this test proves the service logic idempotency.
+        // Persistent deduplication after restart is covered by databaseService.test.ts.
         const result2 = await contractEventIndexerService.syncOnce()
 
         // Assert
