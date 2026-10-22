@@ -704,6 +704,14 @@ impl PortfolioRebalancer {
 
     pub fn set_circuit_breaker_config(env: Env, config: CircuitBreakerConfig) {
         require_admin(&env);
+        
+        if config.spike_threshold_bps == 0 || config.spike_threshold_bps > 10000 {
+            panic!("spike_threshold_bps must be between 1 and 10000");
+        }
+        if config.window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS || config.window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS {
+            panic!("window_seconds must be between {} and {}", MIN_CIRCUIT_BREAKER_WINDOW_SECONDS, MAX_CIRCUIT_BREAKER_WINDOW_SECONDS);
+        }
+        
         env.storage()
             .instance()
             .set(&DataKey::CircuitBreakerConfig, &config);
@@ -714,8 +722,8 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::CircuitBreakerConfig)
             .unwrap_or(CircuitBreakerConfig {
-                spike_threshold_bps: 500,
-                window_seconds: 3600,
+                spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+                window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
             })
     }
 
@@ -1120,6 +1128,10 @@ impl PortfolioRebalancer {
         portfolio.user.require_auth();
 
         if spike_threshold_bps == 0 || spike_threshold_bps > 10000 {
+            return Err(Error::InvalidAssetThreshold);
+        }
+        
+        if window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS || window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS {
             return Err(Error::InvalidAssetThreshold);
         }
         
