@@ -392,8 +392,8 @@ describe('Portfolio API pagination observability outcomes (SPR-2026-184)', () =>
                 source: 'api',
                 limit: 20,
                 total: 50,
-                secretKey: 'SB7W4WKVYGYG5ZYYX2G2I32D6Y6L7J5B7W4WKVYGYG5ZYYX2G2I32D6Y6L7J',
-                apiKey: 'cg-1234567890abcdef',
+                secretKey: 'test_dummy_secret_key_for_sanitizer',
+                apiKey: 'test_dummy_api_key_for_sanitizer',
                 token: 'Bearer sensitive-token-here',
                 password: 'super_secret_db_password',
             }

@@ -1,5 +1,9 @@
 # Portfolio API Pagination Boundary Handling and Observability (SPR-2026-181 & SPR-2026-184)
 
+> **Related Issues**: Fixes #2105 (SPR-2026-181) & Fixes #2108 (SPR-2026-184)  
+> **Batch ID**: SPR-2026-181  
+> **Area**: backend  
+
 ## Overview
 
 The Portfolio API (`GET /api/portfolios` and `GET /api/v1/portfolios`) implements cursor-based keyset pagination to provide a predictable, stable, and deterministic portfolio listing.
