@@ -42,7 +42,12 @@ const SENSITIVE_KEY_TOKENS = [
 
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-const isSensitiveKey = (key: string): boolean => {
+/**
+ * True when a field name itself denotes a secret (`apiKey`, `smtp_pass`, …).
+ * Exported so the response path can mask sensitive `details` fields with the
+ * same key list the logger and the debug endpoint use.
+ */
+export const isSensitiveKey = (key: string): boolean => {
     const normalized = normalizeKey(key);
     return SENSITIVE_KEY_TOKENS.some(token => normalized.includes(normalizeKey(token)));
 };
