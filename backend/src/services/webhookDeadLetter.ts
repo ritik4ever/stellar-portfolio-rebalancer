@@ -2,6 +2,8 @@ import Redis from 'ioredis'
 import { REDIS_URL, isRedisAvailable } from '../queue/connection.js'
 import { logger } from '../utils/logger.js'
 import { getRedisClientOptions } from '../config/redisConnectionOptions.js'
+import { deliverWithBackoff } from './notificationDelivery.js'
+import { deriveWebhookIdempotencyKey, toWebhookDeliveryError } from './webhookDeliverySafety.js'
 
 const DLQ_KEY = 'dead_letter:webhook'
 
@@ -17,6 +19,7 @@ export interface DeadLetterItem {
     webhookUrl: string
     userId: string
     eventType: string
+    idempotencyKey?: string
 }
 
 class WebhookDeadLetterQueue {
@@ -282,33 +285,69 @@ function clampPageSize(value: unknown): number {
 }
 
 /**
- * POST one dead-letter payload back to its webhook URL.
+ * POST one dead-letter payload back to its webhook URL with proper
+ * retry handling and idempotency.
  *
- * Extracted so the single-item and batch replay endpoints share one definition
- * of what a replay *is* — previously the whole request/timeout closure was
- * duplicated between them and could drift apart.
+ * Uses deliverWithBackoff so retries are bounded and side effects are not
+ * duplicated. The idempotency key is derived from the original payload
+ * (if not already stored) so a replay after worker restart does not
+ * accidentally send a duplicate.
  */
 export async function postDeadLetterPayload(
     item: DeadLetterItem,
     timeoutMs: number,
 ): Promise<void> {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    // Derive idempotency key from payload if not already stored.
+    const idempotencyKey = item.idempotencyKey ?? deriveWebhookIdempotencyKey({
+      userId: item.userId,
+      eventType: item.eventType,
+      title: (item.payload as Record<string, unknown>)?.title as string ?? "webhook",
+      timestamp: item.timestamp,
+    });
+
+    const policy = {
+      maxAttempts: 3,
+      initialBackoffMs: 1000,
+      maxBackoffMs: 10000,
+      backoffMultiplier: 2,
+      requestTimeoutMs: timeoutMs,
+    };
+
     try {
-        const response = await fetch(item.webhookUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Webhook-Event': item.eventType,
-                'X-Webhook-Replay': 'true',
-            },
-            body: JSON.stringify(item.payload),
-            signal: controller.signal,
-        })
-        if (!response.ok) {
-            throw new Error(`Webhook responded with status ${response.status}`)
-        }
-    } finally {
-        clearTimeout(timeoutId)
+      await deliverWithBackoff(
+        {
+          provider: "webhook",
+          userId: item.userId,
+          eventType: item.eventType,
+          policy,
+          deliveryId: idempotencyKey,
+        },
+        async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+          try {
+              const response = await fetch(item.webhookUrl, {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'X-Webhook-Event': item.eventType,
+                      'X-Webhook-Replay': 'true',
+                      'X-Webhook-Idempotency-Key': idempotencyKey,
+                  },
+                  body: JSON.stringify(item.payload),
+                  signal: controller.signal,
+              })
+              if (!response.ok) {
+                  throw new Error(`Webhook responded with status ${response.status}`)
+              }
+          } finally {
+              clearTimeout(timeoutId)
+          }
+        },
+      );
+    } catch (error) {
+      // Re-throw with proper classification so caller can decide
+      // whether to re-queue or not.
+      throw toWebhookDeliveryError(error, idempotencyKey);
     }
 }

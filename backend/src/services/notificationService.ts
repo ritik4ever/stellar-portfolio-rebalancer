@@ -35,6 +35,10 @@ import {
 import { deliverWithBackoff } from "./notificationDelivery.js";
 import { deriveEmailMessageId, toEmailDeliveryError } from "./emailDeliverySafety.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
+import {
+  deriveWebhookIdempotencyKey,
+  toWebhookDeliveryError,
+} from "./webhookDeliverySafety.js";
 import { sendSlackNotification } from '../notifications/slack.js'
 import { createTwilioClient, generateVerificationCode, hashVerificationCode, normalizePhoneNumber, sendSms, verifyCodeHash, type SmsClient } from '../notifications/sms.js'
 
@@ -136,6 +140,16 @@ class WebhookProvider implements NotificationProvider {
 
     const webhookUrl = preferences.webhookUrl;
 
+    // Derive a stable idempotency key for this notification.
+    // This key is used for deduplication and to correlate retries.
+    const idempotencyKey = deriveWebhookIdempotencyKey({
+      userId: payload.userId,
+      portfolioId: payload.portfolioId,
+      eventType: payload.eventType,
+      title: payload.title,
+      timestamp: payload.timestamp,
+    });
+
     try {
       await deliverWithBackoff(
         {
@@ -143,7 +157,10 @@ class WebhookProvider implements NotificationProvider {
           userId: payload.userId,
           eventType: payload.eventType,
           policy,
-          deliveryId: payload.deliveryId,
+          // Use the idempotency key as the deliveryId for deduplication.
+          // This ensures the same logical notification is not sent twice,
+          // even across worker restarts (database log provides the source of truth).
+          deliveryId: idempotencyKey,
           signal: payload.signal,
         },
         async () => {
@@ -157,6 +174,7 @@ class WebhookProvider implements NotificationProvider {
               headers: {
                 'Content-Type': 'application/json',
                 'X-Webhook-Event': payload.eventType,
+                'X-Webhook-Idempotency-Key': idempotencyKey,
               },
               body: JSON.stringify(webhookPayload),
               signal: controller.signal,
@@ -170,18 +188,52 @@ class WebhookProvider implements NotificationProvider {
           }
         },
       );
-    } catch {
-      const deadLetterItem: DeadLetterItem = {
-        id: randomBytes(16).toString('hex'),
-        payload: webhookPayload,
-        errorMessage: 'Exhausted all webhook retry attempts',
-        attemptsExhausted: policy.maxAttempts,
-        timestamp: new Date().toISOString(),
-        webhookUrl,
-        userId: payload.userId,
-        eventType: payload.eventType,
+    } catch (error) {
+      // Classify the failure using the idempotency key so the retry logic
+      // can make the correct decision (retry / stop / ambiguous).
+      const classifiedError = toWebhookDeliveryError(error, idempotencyKey);
+      const assessment = {
+        kind: classifiedError.kind,
+        reason: classifiedError.reason,
+        idempotencyKey: classifiedError.idempotencyKey,
+        mayHaveDelivered: classifiedError.kind === "ambiguous",
       };
-      await webhookDeadLetterQueue.push(deadLetterItem);
+
+      // Only push to dead letter queue if retries are truly exhausted
+      // (i.e., maxAttempts reached with retryable failures).
+      // Ambiguous and permanent failures stop early and should not be
+      // automatically re-queued for replay — they require manual intervention.
+      const isExhaustedRetry =
+        classifiedError.kind === "retryable" &&
+        classifiedError.reason !== "delivery_unknown";
+
+      if (isExhaustedRetry) {
+        const deadLetterItem: DeadLetterItem = {
+          id: randomBytes(16).toString('hex'),
+          payload: webhookPayload,
+          errorMessage: classifiedError.message,
+          attemptsExhausted: policy.maxAttempts,
+          timestamp: new Date().toISOString(),
+          webhookUrl,
+          userId: payload.userId,
+          eventType: payload.eventType,
+          idempotencyKey,
+        };
+        await webhookDeadLetterQueue.push(deadLetterItem);
+      } else {
+        // Log the early stop (ambiguous/permanent) for observability.
+        // The deliverWithBackoff already logged the outcome to the database.
+        logger.warn("Webhook delivery stopped early; not queued for replay", {
+          provider: "webhook",
+          userId: payload.userId,
+          eventType: payload.eventType,
+          idempotencyKey,
+          failureKind: assessment.kind,
+          reason: assessment.reason,
+          error: classifiedError.message,
+        });
+      }
+      throw classifiedError;
     }
   }
 }

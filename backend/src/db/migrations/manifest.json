@@ -5,7 +5,7 @@
   },
   {
     "file": "001_initial_schema.up.sql",
-    "sha256": "f245a8a1e5c72fe55f8dd24369d625023bd0c3d7a6fbaaba3b507d9e72adbcca"
+    "sha256": "eeffca407e85fd177a14f38e773a5354466520e7f59c5c1d8857f7273125edaa"
   },
   {
     "file": "002_seed_demo_data.down.sql",
