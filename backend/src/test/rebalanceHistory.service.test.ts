@@ -34,7 +34,35 @@ describe('RebalanceHistoryService', () => {
     })
 
     it('records enriched rebalance events with derived details', async () => {
-        recordMock.mockImplementation((event) => ({ id: 'evt-1', ...event }))
+        recordMock.mockImplementation((event) => {
+            const { randomUUID } = require('node:crypto')
+            return {
+                id: 'evt-1',
+                portfolioId: event.portfolioId,
+                timestamp: (event.timestamp instanceof Date ? event.timestamp : new Date()).toISOString(),
+                trigger: event.trigger,
+                trades: event.trades,
+                gasUsed: event.gasUsed,
+                feePaid: event.feePaid ?? 0,
+                slippageBps: event.slippageBps ?? 0,
+                status: event.status,
+                isAutomatic: event.isAutomatic ?? false,
+                riskAlerts: event.riskAlerts ?? [],
+                error: event.error,
+                actor: event.actor,
+                source: event.source,
+                triggerMetadata: event.triggerMetadata,
+                eventSource: event.eventSource,
+                onChainConfirmed: event.onChainConfirmed,
+                onChainEventType: event.onChainEventType,
+                onChainTxHash: event.onChainTxHash,
+                onChainLedger: event.onChainLedger,
+                onChainContractId: event.onChainContractId,
+                onChainPagingToken: event.onChainPagingToken,
+                isSimulated: event.isSimulated,
+                details: event.details,
+            }
+        })
 
         const { RebalanceHistoryService } = await import('../services/rebalanceHistory.js')
         const service = new RebalanceHistoryService({
