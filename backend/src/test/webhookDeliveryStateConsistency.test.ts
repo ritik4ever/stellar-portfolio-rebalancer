@@ -281,6 +281,19 @@ describe('SPR-2026-173: webhook delivery retry state consistency', () => {
             expect(entries[0].attemptsExhausted).toBe(3)
         })
 
+        it('replaces an existing entry for the delivery when re-queueing', async () => {
+            const item = makeItem({ id: 'dl-replace', deliveryId: 'whk_replace', attemptsExhausted: 2 })
+            await webhookDeadLetterQueue.push(item)
+
+            // Even if a caller re-queues without replaying first, the queue must
+            // never hold two replayable copies of one delivery.
+            await webhookDeadLetterQueue.requeue(item)
+
+            const entries = await webhookDeadLetterQueue.list()
+            expect(entries).toHaveLength(1)
+            expect(entries[0].attemptsExhausted).toBe(3)
+        })
+
         it('replays with the original delivery id so the receiver can deduplicate', async () => {
             const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 })
             vi.stubGlobal('fetch', fetchMock)

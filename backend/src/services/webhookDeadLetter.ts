@@ -200,13 +200,20 @@ class WebhookDeadLetterQueue {
      * Persists the incremented attempt count so operators can see how many
      * times the payload has been replayed while sitting in the dead-letter.
      * The entry keeps its `deliveryId`, so the persisted record still points at
-     * the same delivery as the `notification_logs` rows.
+     * the same delivery as the `notification_logs` rows, and any entry already
+     * queued for that delivery is replaced so the queue never holds two
+     * replayable copies of one notification.
      */
     async requeue(item: DeadLetterItem): Promise<void> {
         const requeued = {
             ...item,
             attemptsExhausted: item.attemptsExhausted + 1,
         }
+
+        if (requeued.deliveryId) {
+            await this.removeByDeliveryId(requeued.deliveryId)
+        }
+
         await this.enqueue(requeued, { dedupe: false })
         logger.warn('[DLQ] Failed replay re-queued with incremented attempts', {
             itemId: item.id,
@@ -215,6 +222,23 @@ class WebhookDeadLetterQueue {
             attempts: requeued.attemptsExhausted,
             deliveryId: item.deliveryId,
         })
+    }
+
+    /** Drop any queued entry for a delivery id (used by `requeue`). */
+    private async removeByDeliveryId(deliveryId: string): Promise<void> {
+        if (this.useRedis && this.redis) {
+            const items = await this.redis.lrange(DLQ_KEY, 0, -1).catch(() => null)
+            if (!items) return
+            for (const raw of items) {
+                const parsed = JSON.parse(raw) as DeadLetterItem
+                if (parsed.deliveryId === deliveryId) {
+                    await this.redis.lrem(DLQ_KEY, 1, raw)
+                }
+            }
+            return
+        }
+
+        this.fallbackList = this.fallbackList.filter((entry) => entry.deliveryId !== deliveryId)
     }
 
     async list(): Promise<DeadLetterItem[]> {
