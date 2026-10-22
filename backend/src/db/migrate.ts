@@ -6,23 +6,52 @@
  *   npm run db:migrate -- --dry-run   - Show what would run without applying
  *   npm run db:migrate -- --rollback [n] - Roll back last n migrations (default 1)
  *   npm run db:migrate -- --status     - List applied and pending migrations
+ *
+ * Each migration (and each rollback) runs in a single transaction together with
+ * its schema_migrations bookkeeping, so a migration is either fully applied and
+ * recorded or not applied at all. See docs/MIGRATION.md ("Verifying migrations").
+ *
+ * MIGRATIONS_DIR (optional) overrides the directory that is scanned. It exists so
+ * the smoke check (`npm run db:migrate:verify`) can inject deliberately broken
+ * fixtures; leave it unset in normal use.
  */
 import 'dotenv/config'
 import { createHash } from 'crypto'
 import { readFileSync, readdirSync, writeFileSync } from 'fs'
 import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
+import { dirname, join, resolve } from 'path'
 import { getPool, closePool, isDbConfigured } from './client.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const MIGRATIONS_DIR = join(__dirname, 'migrations')
+const MIGRATIONS_DIR = process.env.MIGRATIONS_DIR?.trim()
+    ? resolve(process.env.MIGRATIONS_DIR.trim())
+    : join(__dirname, 'migrations')
 const MANIFEST_PATH = join(MIGRATIONS_DIR, 'manifest.json')
 
+// A migration is identified by (version, name): several versions in this repo
+// (009, 011, 013) intentionally have more than one migration, so `version` alone
+// cannot be the primary key.
 const MIGRATION_TABLE = `CREATE TABLE IF NOT EXISTS schema_migrations (
-    version VARCHAR(64) PRIMARY KEY,
+    version VARCHAR(64) NOT NULL,
     name VARCHAR(256) NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (version, name)
 );`
+
+// Databases created before this change have PRIMARY KEY (version) only. Widen it
+// in place; existing rows stay valid and the statement is a no-op afterwards.
+const MIGRATION_TABLE_UPGRADE = `DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'schema_migrations'::regclass
+          AND conname = 'schema_migrations_pkey'
+          AND array_length(conkey, 1) = 1
+    ) THEN
+        ALTER TABLE schema_migrations DROP CONSTRAINT schema_migrations_pkey;
+        ALTER TABLE schema_migrations ADD PRIMARY KEY (version, name);
+    END IF;
+END $$;`
 
 interface MigrationFile {
     version: string
@@ -114,19 +143,58 @@ function discoverMigrations(): MigrationFile[] {
             downPath: join(MIGRATIONS_DIR, down)
         })
     }
-    migrations.sort((a, b) => a.version.localeCompare(b.version, 'en'))
+    migrations.sort(compareMigrations)
     return migrations
+}
+
+/** Total order: version, then name, so migrations sharing a version are deterministic. */
+function compareMigrations(
+    a: { version: string; name: string },
+    b: { version: string; name: string }
+): number {
+    return a.version.localeCompare(b.version, 'en') || a.name.localeCompare(b.name, 'en')
+}
+
+function migrationKey(m: { version: string; name: string }): string {
+    return `${m.version}_${m.name}`
 }
 
 async function ensureMigrationsTable(): Promise<void> {
     await getPool().query(MIGRATION_TABLE)
+    await getPool().query(MIGRATION_TABLE_UPGRADE)
 }
 
-async function getAppliedVersions(): Promise<string[]> {
-    const result = await getPool().query<{ version: string }>(
-        'SELECT version FROM schema_migrations ORDER BY version ASC'
+async function getAppliedMigrations(): Promise<{ version: string; name: string }[]> {
+    const result = await getPool().query<{ version: string; name: string }>(
+        'SELECT version, name FROM schema_migrations'
     )
-    return result.rows.map((r) => r.version)
+    return result.rows.sort(compareMigrations)
+}
+
+/**
+ * Runs `sql` and the bookkeeping statement in one transaction so an interrupted
+ * or failing migration leaves neither schema changes nor a schema_migrations row.
+ */
+async function runInTransaction(
+    sql: string,
+    bookkeeping: { text: string; values: string[] }
+): Promise<void> {
+    const client = await getPool().connect()
+    try {
+        await client.query('BEGIN')
+        await client.query(sql)
+        await client.query(bookkeeping.text, bookkeeping.values)
+        await client.query('COMMIT')
+    } catch (err) {
+        try {
+            await client.query('ROLLBACK')
+        } catch {
+            // connection already gone; the server discards the open transaction
+        }
+        throw err
+    } finally {
+        client.release()
+    }
 }
 
 async function run() {
@@ -154,16 +222,17 @@ async function run() {
 
     try {
         await ensureMigrationsTable()
-        const applied = await getAppliedVersions()
+        const applied = await getAppliedMigrations()
+        const appliedKeys = new Set(applied.map(migrationKey))
 
         if (status) {
             console.log('Applied migrations:')
-            for (const v of applied) {
-                const m = migrations.find((x) => x.version === v)
-                console.log('  ', v, m ? m.name : '(unknown)')
+            for (const a of applied) {
+                const known = migrations.some((x) => migrationKey(x) === migrationKey(a))
+                console.log('  ', a.version, known ? a.name : `${a.name} (unknown)`)
             }
             console.log('\nPending migrations:')
-            const pending = migrations.filter((m) => !applied.includes(m.version))
+            const pending = migrations.filter((m) => !appliedKeys.has(migrationKey(m)))
             for (const m of pending) {
                 console.log('  ', m.version, m.name)
             }
@@ -181,9 +250,9 @@ async function run() {
                 return
             }
             if (dryRun) {
-                console.log('[DRY RUN] Would roll back:', toRollback.join(', '))
-                for (const v of toRollback) {
-                    const m = migrations.find((x) => x.version === v)
+                console.log('[DRY RUN] Would roll back:', toRollback.map(migrationKey).join(', '))
+                for (const a of toRollback) {
+                    const m = migrations.find((x) => migrationKey(x) === migrationKey(a))
                     if (m) {
                         try {
                             const sql = readFileSync(m.downPath, 'utf8')
@@ -196,10 +265,10 @@ async function run() {
                 await closePool()
                 process.exit(0)
             }
-            for (const v of toRollback) {
-                const m = migrations.find((x) => x.version === v)
+            for (const a of toRollback) {
+                const m = migrations.find((x) => migrationKey(x) === migrationKey(a))
                 if (!m) {
-                    console.error('Migration version not found:', v)
+                    console.error('Migration version not found:', migrationKey(a))
                     process.exit(1)
                 }
                 let downSql: string
@@ -210,8 +279,10 @@ async function run() {
                     process.exit(1)
                 }
                 console.log('Rolling back', m.version, m.name, '...')
-                await getPool().query(downSql)
-                await getPool().query('DELETE FROM schema_migrations WHERE version = $1', [m.version])
+                await runInTransaction(downSql, {
+                    text: 'DELETE FROM schema_migrations WHERE version = $1 AND name = $2',
+                    values: [m.version, m.name]
+                })
                 console.log('Rolled back', m.version, m.name)
             }
             console.log('Rollback completed.')
@@ -219,7 +290,7 @@ async function run() {
             process.exit(0)
         }
 
-        const pending = migrations.filter((m) => !applied.includes(m.version))
+        const pending = migrations.filter((m) => !appliedKeys.has(migrationKey(m)))
         if (pending.length === 0) {
             console.log('No pending migrations.')
             await closePool()
@@ -247,11 +318,10 @@ async function run() {
         for (const m of pending) {
             const sql = readFileSync(m.upPath, 'utf8')
             console.log('Applying', m.version, m.name, '...')
-            await getPool().query(sql)
-            await getPool().query(
-                'INSERT INTO schema_migrations (version, name) VALUES ($1, $2)',
-                [m.version, m.name]
-            )
+            await runInTransaction(sql, {
+                text: 'INSERT INTO schema_migrations (version, name) VALUES ($1, $2)',
+                values: [m.version, m.name]
+            })
             console.log('Applied', m.version, m.name)
         }
         console.log('Migrations completed successfully.')
