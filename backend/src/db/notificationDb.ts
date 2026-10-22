@@ -394,6 +394,14 @@ export interface NotificationLogMetadata {
     backoffDelayMs?: number
     nextAttempt?: number
     deliveryId?: string
+    /** Retry safety classification of the last failure. */
+    failureKind?: 'retryable' | 'ambiguous' | 'permanent'
+    /** False when the delivery was stopped instead of retried. */
+    retryable?: boolean
+    /** True when a non-retryable failure stopped the attempt sequence early. */
+    stoppedEarly?: boolean
+    /** Stable Message-ID for the logical notification, reused across attempts. */
+    idempotencyKey?: string
 }
 
 export interface NotificationLog {
@@ -401,7 +409,7 @@ export interface NotificationLog {
     userId: string
     provider: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram'
     eventType: string
-    status: 'sent' | 'failed' | 'retried' | 'skipped'
+    status: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain'
     errorMessage?: string
     attemptNumber?: number
     backoffDelayMs?: number
@@ -422,7 +430,7 @@ export function dbLogNotificationOutcome(
     userId: string,
     provider: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram',
     eventType: string,
-    status: 'sent' | 'failed' | 'retried' | 'skipped',
+    status: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain',
     errorMessage?: string,
     metadata?: NotificationLogMetadata
 ): void {
