@@ -7124,3 +7124,390 @@ fn test_target_weight_invariant_safe_recovery_after_rejection() {
     assert_eq!(p.target_allocations.get(asset2.clone()).unwrap(), 3000);
     assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
 }
+
+
+// ── Target-weight invariant bounds regressions (SPR-2026-191) ───────────────
+//
+// Target weights must strictly sum to `TARGET_WEIGHT_SUM_BPS` (10,000 bps / 100%)
+// in integer units, and each asset weight must be bounded by
+// `MIN_TARGET_WEIGHT_BPS..=MAX_TARGET_WEIGHT_BPS` (1..=10,000 bps).
+// Regressions below pin both boundaries:
+// 1. Under-allocation sum immediately below 100% (9,999 bps) is rejected atomically.
+// 2. Over-allocation sum immediately above 100% (10,001 bps) is rejected atomically.
+// 3. Zero-weight asset (0 bps) is rejected atomically.
+// 4. Exact 100% boundary transitions with exact integer token units are accepted.
+// 5. Creation-time boundary handling enforces the invariant without partial state.
+// 6. Failed boundary invocations preserve stored target weights, portfolio balances,
+//    and underlying contract token balances, with full safe recovery afterwards.
+
+#[test]
+fn test_target_weight_bounds_under_allocation_sum_9999_bps_rejected_preserves_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+
+    let mut initial_allocations = Map::new(&env);
+    initial_allocations.set(asset1.clone(), 5000);
+    initial_allocations.set(asset2.clone(), 5000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &initial_allocations, 5, 50);
+
+    // Deposit exact integer token units
+    client.deposit(&pid, &asset1, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100_0000000, &String::from_str(&env, ""));
+
+    let token1 = TokenClient::new(&env, &asset1);
+    let token2 = TokenClient::new(&env, &asset2);
+    assert_eq!(token1.balance(&user), 100_0000000);
+    assert_eq!(token1.balance(&contract_id), 100_0000000);
+    assert_eq!(token2.balance(&user), 100_0000000);
+    assert_eq!(token2.balance(&contract_id), 100_0000000);
+
+    // Boundary under-allocation: exactly 1 bps below 10,000 bps (5000 + 4999 = 9,999 bps)
+    let mut under_allocations = Map::new(&env);
+    under_allocations.set(asset1.clone(), 5000);
+    under_allocations.set(asset2.clone(), 4999);
+
+    let res = client.try_update_allocations(&pid, &under_allocations);
+    assert_eq!(res, Err(Ok(Error::InvalidAllocation)));
+    assert_eq!(count_alloc_upd_events(&env), 0);
+
+    // Stored target weights, current balances, and on-chain funds preserved
+    let p = client.get_portfolio(&pid);
+    assert_eq!(p.target_allocations.get(asset1.clone()).unwrap(), 5000);
+    assert_eq!(p.target_allocations.get(asset2.clone()).unwrap(), 5000);
+    assert_eq!(p.current_balances.get(asset1.clone()).unwrap(), 100_0000000);
+    assert_eq!(p.current_balances.get(asset2.clone()).unwrap(), 100_0000000);
+    assert_eq!(token1.balance(&user), 100_0000000);
+    assert_eq!(token1.balance(&contract_id), 100_0000000);
+    assert_eq!(token2.balance(&user), 100_0000000);
+    assert_eq!(token2.balance(&contract_id), 100_0000000);
+
+    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
+}
+
+#[test]
+fn test_target_weight_bounds_over_allocation_sum_10001_bps_rejected_preserves_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = create_token_and_mint(&env, &admin, &user, 300_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 300_0000000);
+
+    let mut initial_allocations = Map::new(&env);
+    initial_allocations.set(asset1.clone(), 6000);
+    initial_allocations.set(asset2.clone(), 4000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &initial_allocations, 5, 50);
+
+    // Deposit exact integer token units
+    client.deposit(&pid, &asset1, &150_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &150_0000000, &String::from_str(&env, ""));
+
+    let token1 = TokenClient::new(&env, &asset1);
+    let token2 = TokenClient::new(&env, &asset2);
+
+    // Boundary over-allocation: exactly 1 bps above 10,000 bps (6001 + 4000 = 10,001 bps)
+    let mut over_allocations = Map::new(&env);
+    over_allocations.set(asset1.clone(), 6001);
+    over_allocations.set(asset2.clone(), 4000);
+
+    let res = client.try_update_allocations(&pid, &over_allocations);
+    assert_eq!(res, Err(Ok(Error::InvalidAllocation)));
+    assert_eq!(count_alloc_upd_events(&env), 0);
+
+    // Verify stored weights, balances, and funds remain strictly unchanged
+    let p = client.get_portfolio(&pid);
+    assert_eq!(p.target_allocations.get(asset1.clone()).unwrap(), 6000);
+    assert_eq!(p.target_allocations.get(asset2.clone()).unwrap(), 4000);
+    assert_eq!(p.current_balances.get(asset1.clone()).unwrap(), 150_0000000);
+    assert_eq!(p.current_balances.get(asset2.clone()).unwrap(), 150_0000000);
+    assert_eq!(token1.balance(&user), 150_0000000);
+    assert_eq!(token1.balance(&contract_id), 150_0000000);
+    assert_eq!(token2.balance(&user), 150_0000000);
+    assert_eq!(token2.balance(&contract_id), 150_0000000);
+
+    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
+}
+
+#[test]
+fn test_target_weight_bounds_zero_bps_rejected_preserves_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = create_token_and_mint(&env, &admin, &user, 100_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 100_0000000);
+
+    let mut initial_allocations = Map::new(&env);
+    initial_allocations.set(asset1.clone(), 5000);
+    initial_allocations.set(asset2.clone(), 5000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &initial_allocations, 5, 50);
+    client.deposit(&pid, &asset1, &50_0000000, &String::from_str(&env, ""));
+
+    let token1 = TokenClient::new(&env, &asset1);
+
+    // Individual weight boundary violation: 0 bps (10,000 + 0 = 10,000 bps sum, but 0 is forbidden)
+    let mut zero_weight_allocations = Map::new(&env);
+    zero_weight_allocations.set(asset1.clone(), TARGET_WEIGHT_SUM_BPS);
+    zero_weight_allocations.set(asset2.clone(), 0);
+
+    let res = client.try_update_allocations(&pid, &zero_weight_allocations);
+    assert_eq!(res, Err(Ok(Error::InvalidAllocation)));
+    assert_eq!(count_alloc_upd_events(&env), 0);
+
+    // Verify stored allocations, balances, and token balances preserved
+    let p = client.get_portfolio(&pid);
+    assert_eq!(p.target_allocations.get(asset1.clone()).unwrap(), 5000);
+    assert_eq!(p.target_allocations.get(asset2.clone()).unwrap(), 5000);
+    assert_eq!(p.current_balances.get(asset1.clone()).unwrap(), 50_0000000);
+    assert_eq!(token1.balance(&user), 50_0000000);
+    assert_eq!(token1.balance(&contract_id), 50_0000000);
+
+    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
+}
+
+#[test]
+fn test_target_weight_bounds_exact_100_percent_transition_with_integer_units() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = create_token_and_mint(&env, &admin, &user, 300_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 300_0000000);
+    let asset3 = create_token_and_mint(&env, &admin, &user, 300_0000000);
+
+    let mut initial_allocations = Map::new(&env);
+    initial_allocations.set(asset1.clone(), 5000);
+    initial_allocations.set(asset2.clone(), 3000);
+    initial_allocations.set(asset3.clone(), 2000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &initial_allocations, 5, 50);
+
+    // Deposit exact integer token units
+    client.deposit(&pid, &asset1, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset2, &100_0000000, &String::from_str(&env, ""));
+    client.deposit(&pid, &asset3, &100_0000000, &String::from_str(&env, ""));
+
+    let token1 = TokenClient::new(&env, &asset1);
+    let token2 = TokenClient::new(&env, &asset2);
+    let token3 = TokenClient::new(&env, &asset3);
+
+    // Exact 100% transition: 3334 + 3333 + 3333 = 10,000 bps
+    let mut new_allocations = Map::new(&env);
+    new_allocations.set(asset1.clone(), 3334);
+    new_allocations.set(asset2.clone(), 3333);
+    new_allocations.set(asset3.clone(), 3333);
+
+    let res = client.try_update_allocations(&pid, &new_allocations);
+    assert_eq!(res, Ok(Ok(())));
+    assert_eq!(count_alloc_upd_events(&env), 1);
+
+    // Target weights updated
+    let p = client.get_portfolio(&pid);
+    assert_eq!(p.target_allocations.get(asset1.clone()).unwrap(), 3334);
+    assert_eq!(p.target_allocations.get(asset2.clone()).unwrap(), 3333);
+    assert_eq!(p.target_allocations.get(asset3.clone()).unwrap(), 3333);
+
+    // Existing balances and funds strictly preserved
+    assert_eq!(p.current_balances.get(asset1.clone()).unwrap(), 100_0000000);
+    assert_eq!(p.current_balances.get(asset2.clone()).unwrap(), 100_0000000);
+    assert_eq!(p.current_balances.get(asset3.clone()).unwrap(), 100_0000000);
+    assert_eq!(token1.balance(&user), 200_0000000);
+    assert_eq!(token1.balance(&contract_id), 100_0000000);
+    assert_eq!(token2.balance(&user), 200_0000000);
+    assert_eq!(token2.balance(&contract_id), 100_0000000);
+    assert_eq!(token3.balance(&user), 200_0000000);
+    assert_eq!(token3.balance(&contract_id), 100_0000000);
+
+    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
+}
+
+#[test]
+fn test_target_weight_bounds_create_portfolio_boundaries() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = Address::generate(&env);
+    let asset2 = Address::generate(&env);
+
+    // 1. Under-allocation at creation: 9,999 bps
+    let mut under_alloc = Map::new(&env);
+    under_alloc.set(asset1.clone(), 5000);
+    under_alloc.set(asset2.clone(), 4999);
+    let decimals_under = allocation_decimals(&env, &under_alloc, DEFAULT_ASSET_DECIMALS);
+
+    let res_under = client.try_create_portfolio(
+        &user,
+        &under_alloc,
+        &decimals_under,
+        &MIN_REBALANCE_THRESHOLD,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    assert_eq!(res_under, Err(Ok(Error::InvalidAllocation)));
+    assert_eq!(client.get_user_portfolio_count(&user), 0);
+    assert_eq!(count_portfolio_created_events(&env), 0);
+
+    // 2. Over-allocation at creation: 10,001 bps
+    let mut over_alloc = Map::new(&env);
+    over_alloc.set(asset1.clone(), 5000);
+    over_alloc.set(asset2.clone(), 5001);
+    let decimals_over = allocation_decimals(&env, &over_alloc, DEFAULT_ASSET_DECIMALS);
+
+    let res_over = client.try_create_portfolio(
+        &user,
+        &over_alloc,
+        &decimals_over,
+        &MIN_REBALANCE_THRESHOLD,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    assert_eq!(res_over, Err(Ok(Error::InvalidAllocation)));
+    assert_eq!(client.get_user_portfolio_count(&user), 0);
+    assert_eq!(count_portfolio_created_events(&env), 0);
+
+    // 3. Exact 10,000 bps accepted at creation
+    let mut exact_alloc = Map::new(&env);
+    exact_alloc.set(asset1.clone(), 5000);
+    exact_alloc.set(asset2.clone(), 5000);
+    let decimals_exact = allocation_decimals(&env, &exact_alloc, DEFAULT_ASSET_DECIMALS);
+
+    let res_exact = client.try_create_portfolio(
+        &user,
+        &exact_alloc,
+        &decimals_exact,
+        &MIN_REBALANCE_THRESHOLD,
+        &50,
+        &CURRENT_SLIPPAGE_POLICY_VERSION,
+    );
+    assert!(res_exact.is_ok());
+    assert_eq!(client.get_user_portfolio_count(&user), 1);
+    assert_eq!(count_portfolio_created_events(&env), 1);
+}
+
+#[test]
+fn test_target_weight_bounds_safe_recovery_across_multiple_boundary_rejections() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000;
+    });
+
+    let contract_id = env.register_contract(None, PortfolioRebalancer);
+    let client = PortfolioRebalancerClient::new(&env, &contract_id);
+    let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.initialize(&admin, &reflector_id);
+
+    let asset1 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+    let asset2 = create_token_and_mint(&env, &admin, &user, 200_0000000);
+
+    let mut initial_allocations = Map::new(&env);
+    initial_allocations.set(asset1.clone(), 5000);
+    initial_allocations.set(asset2.clone(), 5000);
+
+    let pid = create_portfolio_with_defaults(&env, &client, &user, &initial_allocations, 5, 50);
+    client.deposit(&pid, &asset1, &100_0000000, &String::from_str(&env, ""));
+
+    let token1 = TokenClient::new(&env, &asset1);
+    let token2 = TokenClient::new(&env, &asset2);
+
+    // 1. Boundary attempt below: 9,999 bps
+    let mut bad_under = Map::new(&env);
+    bad_under.set(asset1.clone(), 4999);
+    bad_under.set(asset2.clone(), 5000);
+    assert_eq!(client.try_update_allocations(&pid, &bad_under), Err(Ok(Error::InvalidAllocation)));
+
+    // Funds and weights intact
+    let p1 = client.get_portfolio(&pid);
+    assert_eq!(p1.target_allocations.get(asset1.clone()).unwrap(), 5000);
+    assert_eq!(p1.target_allocations.get(asset2.clone()).unwrap(), 5000);
+    assert_eq!(token1.balance(&user), 100_0000000);
+    assert_eq!(token1.balance(&contract_id), 100_0000000);
+
+    // State change: user deposits asset2
+    client.deposit(&pid, &asset2, &80_0000000, &String::from_str(&env, ""));
+    assert_eq!(token2.balance(&user), 120_0000000);
+    assert_eq!(token2.balance(&contract_id), 80_0000000);
+
+    // 2. Boundary attempt above: 10,001 bps
+    let mut bad_over = Map::new(&env);
+    bad_over.set(asset1.clone(), 5001);
+    bad_over.set(asset2.clone(), 5000);
+    assert_eq!(client.try_update_allocations(&pid, &bad_over), Err(Ok(Error::InvalidAllocation)));
+
+    // Funds and weights intact after deposit
+    let p2 = client.get_portfolio(&pid);
+    assert_eq!(p2.target_allocations.get(asset1.clone()).unwrap(), 5000);
+    assert_eq!(p2.target_allocations.get(asset2.clone()).unwrap(), 5000);
+    assert_eq!(p2.current_balances.get(asset1.clone()).unwrap(), 100_0000000);
+    assert_eq!(p2.current_balances.get(asset2.clone()).unwrap(), 80_0000000);
+    assert_eq!(token1.balance(&user), 100_0000000);
+    assert_eq!(token1.balance(&contract_id), 100_0000000);
+    assert_eq!(token2.balance(&user), 120_0000000);
+    assert_eq!(token2.balance(&contract_id), 80_0000000);
+
+    // 3. Safe recovery: submit valid 100% allocation (6500 + 3500 = 10,000 bps)
+    let mut valid = Map::new(&env);
+    valid.set(asset1.clone(), 6500);
+    valid.set(asset2.clone(), 3500);
+    assert_eq!(client.try_update_allocations(&pid, &valid), Ok(Ok(())));
+    assert_eq!(count_alloc_upd_events(&env), 1);
+
+    let p3 = client.get_portfolio(&pid);
+    assert_eq!(p3.target_allocations.get(asset1.clone()).unwrap(), 6500);
+    assert_eq!(p3.target_allocations.get(asset2.clone()).unwrap(), 3500);
+    assert_eq!(p3.current_balances.get(asset1.clone()).unwrap(), 100_0000000);
+    assert_eq!(p3.current_balances.get(asset2.clone()).unwrap(), 80_0000000);
+    assert_eq!(client.try_check_invariants(&pid), Ok(Ok(())));
+}
