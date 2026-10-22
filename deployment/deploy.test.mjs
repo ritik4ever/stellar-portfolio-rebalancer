@@ -477,6 +477,7 @@ test('rotation smoke: worker retaining the previous key fails as stale', () => {
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, 'stale-worker');
   assert.equal(report.reason, 'worker holds previous key');
+  assert.equal(report.recommendedAction, 'restart-worker-with-current-secret');
   assert.doesNotMatch(result.stdout + result.stderr, /secret-key/);
 });
 
@@ -488,6 +489,7 @@ test('rotation smoke: unknown worker key fails and no overlap is reported after 
   assert.equal(result.status, 1);
   const report = JSON.parse(result.stdout);
   assert.equal(report.reason, 'worker holds unknown key');
+  assert.equal(report.recommendedAction, 'restart-worker-with-current-secret');
   assert.equal(report.overlap, false);
   assert.doesNotMatch(result.stdout + result.stderr, /mystery-key/);
 });
