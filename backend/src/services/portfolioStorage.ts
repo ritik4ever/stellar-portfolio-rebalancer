@@ -2,6 +2,12 @@ import { isDbConfigured } from '../db/client.js'
 import * as portfolioDb from '../db/portfolioDb.js'
 import { randomUUID } from 'node:crypto'
 import type { Portfolio } from '../types/index.js'
+import {
+    encodePortfolioCursor,
+    decodePortfolioCursor,
+    type PortfolioPageCursor,
+    type PortfolioPaginationResult,
+} from '../utils/portfolioPagination.js'
 
 const SLIPPAGE_MIN = 0.5
 const SLIPPAGE_MAX = 5
@@ -169,6 +175,97 @@ export class PortfolioStorage {
         all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         return all.slice(offset, offset + limit)
     }
+
+    async searchPortfoliosPage(options: {
+        search?: string
+        address?: string
+        includeArchived?: boolean
+        limit?: number
+        cursor?: string | PortfolioPageCursor | null
+    }): Promise<PortfolioPaginationResult<Portfolio>> {
+        const { search = '', address, includeArchived = false, limit = 20, cursor } = options
+
+        let parsedCursor: PortfolioPageCursor | null = null
+        let cursorStr: string | null = null
+        if (typeof cursor === 'string' && cursor.trim().length > 0) {
+            cursorStr = cursor.trim()
+            parsedCursor = decodePortfolioCursor(cursorStr)
+        } else if (cursor && typeof cursor === 'object' && 'createdAt' in cursor && 'id' in cursor) {
+            parsedCursor = cursor
+            cursorStr = encodePortfolioCursor(cursor)
+        }
+
+        if (isDbConfigured()) {
+            const page = await portfolioDb.dbGetPortfolioPage({
+                search,
+                userAddress: address,
+                limit,
+                cursor: parsedCursor,
+                includeArchived,
+            })
+            return {
+                portfolios: page.portfolios as Portfolio[],
+                limit,
+                cursor: cursorStr,
+                nextCursor: page.nextCursor ? encodePortfolioCursor(page.nextCursor) : null,
+                count: page.count,
+                total: page.total ?? page.count,
+            }
+        }
+
+        let all = Array.from(this.portfolios.values())
+        if (!includeArchived) {
+            all = all.filter(p => !p.archivedAt)
+        }
+        if (address) {
+            all = all.filter(p => p.userAddress === address)
+        }
+        if (search) {
+            const q = search.toLowerCase()
+            all = all.filter(p =>
+                (p.name && p.name.toLowerCase().includes(q)) ||
+                (p.description && p.description.toLowerCase().includes(q))
+            )
+        }
+
+        const total = all.length
+
+        // Ascending ordering: oldest items first by (created_at ASC, id ASC)
+        all.sort((a, b) => {
+            const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            if (diff !== 0) return diff
+            return a.id.localeCompare(b.id)
+        })
+
+        let paged = all
+        if (parsedCursor) {
+            const cursorTime = new Date(parsedCursor.createdAt).getTime()
+            const cursorId = parsedCursor.id
+            paged = all.filter(p => {
+                const itemTime = new Date(p.createdAt).getTime()
+                if (itemTime > cursorTime) return true
+                if (itemTime === cursorTime) return p.id.localeCompare(cursorId) > 0
+                return false
+            })
+        }
+
+        const hasMore = paged.length > limit
+        const pageItems = hasMore ? paged.slice(0, limit) : paged
+        const last = pageItems[pageItems.length - 1]
+        const nextCursor = hasMore && last
+            ? encodePortfolioCursor({ createdAt: last.createdAt, id: last.id })
+            : null
+
+        return {
+            portfolios: pageItems,
+            limit,
+            cursor: cursorStr,
+            nextCursor,
+            count: pageItems.length,
+            total,
+        }
+    }
+
 
     async getAllPortfolios(includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
