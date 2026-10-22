@@ -27,6 +27,11 @@
     "changelog:update": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
     "changelog:preview": "conventional-changelog -p conventionalcommits",
     "validate:env-examples": "node scripts/validate-env-examples.mjs",
+    "validate:compose-resources": "node scripts/validate-compose-resources.mjs",
+    "validate:funding": "node scripts/validate-funding.mjs",
+    "validate:release-verification": "node scripts/validate-release-verification.mjs",
+    "validate:env-ref": "node scripts/validate-environment-reference.mjs",
+    "validate:renovate": "node scripts/validate-renovate-config.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "quick:pre-commit": "node scripts/run-local-checks.mjs pre-commit",
     "quick:pre-push": "node scripts/run-local-checks.mjs pre-push",
@@ -39,6 +44,7 @@
     "lint:frontend": "cd frontend && npm run lint",
     "audit:policy": "node scripts/check-npm-audit-baseline.mjs",
     "audit:policy:update": "node scripts/check-npm-audit-baseline.mjs --write-baseline",
+    "sbom": "bash scripts/generate-sbom.sh",
 
     "test:chaos": "node scripts/chaos/kill-backend-mid-rebalance.mjs",
 
@@ -52,7 +58,7 @@
     "vitest": "^4.1.10"
   },
   "engines": {
-    "node": ">=20.19.0",
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
     "npm": ">=10.0.0"
   },
   "repository": {

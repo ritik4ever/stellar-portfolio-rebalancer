@@ -112,6 +112,26 @@ describe('AssetSearch', () => {
     expect(screen.getByText('BTC')).toBeInTheDocument()
   })
 
+  it('populates recent searches after simulated asset selections', async () => {
+    render(
+      <AssetSearch value="" onChange={mockOnChange} supportedContracts={[]} />,
+    )
+
+    const input = screen.getByRole('searchbox')
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'XLM' } })
+
+    await waitFor(() => {
+      expect(screen.getByText('XLM')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('XLM').closest('button')!)
+    fireEvent.focus(input)
+
+    expect(screen.getByText('Recent searches')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /XLM/i })).toBeInTheDocument()
+  })
+
   it('limits recent searches to max 10 items', () => {
     const manySearches = Array.from({ length: 15 }, (_, i) => `ASSET${i}`)
     lsMock.setItem('asset_recent_searches', JSON.stringify(manySearches))

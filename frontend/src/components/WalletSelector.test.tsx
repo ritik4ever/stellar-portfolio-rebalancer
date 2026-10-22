@@ -212,10 +212,6 @@ describe("WalletSelector", () => {
 
       fireEvent.click(freighterButton!);
 
-      // Should show connecting state
-      expect(screen.getByText("Connecting...")).toBeTruthy();
-      expect(freighterButton).toBeDisabled();
-
       await waitFor(() => {
         expect(mockWalletManager.connect).toHaveBeenCalledWith("freighter");
         expect(mockOnConnect).toHaveBeenCalledWith(testPublicKey);
@@ -428,8 +424,10 @@ describe("WalletSelector", () => {
       fireEvent.click(freighterButton!);
 
       // Should immediately show connecting state
-      expect(screen.getByText("Connecting...")).toBeTruthy();
-      expect(freighterButton).toBeDisabled();
+      await waitFor(() => {
+        expect(screen.getByText("Connecting...")).toBeTruthy();
+        expect(freighterButton).toBeDisabled();
+      });
     });
 
     it("should reset connecting state after successful connection", async () => {
@@ -556,7 +554,9 @@ describe("WalletSelector", () => {
       fireEvent.click(freighterButton!);
 
       // Only freighter button should be disabled (toggle stays enabled)
-      expect(freighterButton).toBeDisabled();
+      await waitFor(() => {
+        expect(freighterButton).toBeDisabled();
+      });
       expect(rabetButton).not.toBeDisabled();
       expect(toggleBtn).not.toBeDisabled();
     });

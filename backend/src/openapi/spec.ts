@@ -704,27 +704,9 @@ const spec: Record<string, any> = {
                 summary: 'Dry-run rebalance',
                 description: 'Preview likely rebalance outcome (estimated trades, skipped assets, guardrails) without executing trades or writing rebalance history.',
                 parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-                requestBody: {
-                    content: {
-                        'application/json': {
-                            schema: {
-                                type: 'object',
-                                properties: {
-                                    options: {
-                                        type: 'object',
-                                        properties: {
-                                            slippageOverrides: { type: 'object', additionalProperties: { type: 'number' } },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
                 responses: {
                     '200': { description: 'Dry-run preview', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-                    '403': { description: 'Forbidden', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
@@ -1194,6 +1176,53 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/status': {
+            get: {
+                tags: ['System'],
+                summary: 'Public connectivity status',
+                description: 'Unauthenticated, cache-friendly status report for the Reflector oracle and the Stellar DEX, built from live probes (oracle reachability plus Horizon strict-send route finding). Always answers 200; the body carries the health. Use /api/health for a machine liveness gate.',
+                responses: {
+                    '200': {
+                        description: 'Public connectivity report',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                status: { type: 'string', enum: ['healthy', 'degraded', 'unhealthy'] },
+                                                timestamp: { type: 'string', format: 'date-time' },
+                                                checks: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        reflector_oracle: { $ref: '#/components/schemas/PublicStatusCheck' },
+                                                        stellar_dex: { $ref: '#/components/schemas/PublicStatusCheck' },
+                                                    },
+                                                },
+                                                cache: {
+                                                    type: 'object',
+                                                    properties: {
+                                                        cached: { type: 'boolean' },
+                                                        age_ms: { type: 'integer' },
+                                                        ttl_ms: { type: 'integer' },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
         '/api/system/status': {
             get: {
                 tags: ['System'],
@@ -1282,6 +1311,7 @@ const spec: Record<string, any> = {
                 responses: {
                     '200': { description: 'Unsubscribed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiEnvelope' } } } },
                     '400': { description: 'userId required', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' }, examples: { QueryValidationError: { $ref: '#/components/examples/QueryValidationError' } } } } },
+                    '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -1393,6 +1423,76 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/v1/backtest': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Run historical portfolio rebalance simulation',
+                description: 'Simulates portfolio performance against buy-and-hold across a historical daily price window with leap day boundary handling, documenting included days and absent-day reasons.',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: { $ref: '#/components/schemas/BacktestRequest' },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Backtest simulation results with boundary and leap day documentation',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestResult' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Unprocessable entity / schema validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Historical price data unavailable from provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal simulation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/backtest': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Run historical portfolio rebalance simulation (legacy path)',
+                description: 'Legacy path for historical portfolio rebalancing simulation.',
+                deprecated: true,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: { $ref: '#/components/schemas/BacktestRequest' },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Backtest simulation results',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestResult' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Historical price data unavailable from provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
     },
     components: {
         securitySchemes: {
@@ -1479,6 +1579,22 @@ const spec: Record<string, any> = {
                     timestamp: { type: 'string', format: 'date-time' },
                 },
             },
+            PublicStatusCheck: {
+                type: 'object',
+                required: ['status', 'last_checked', 'latency_ms', 'reason', 'message'],
+                properties: {
+                    status: { type: 'string', enum: ['ok', 'degraded', 'down'], example: 'ok' },
+                    last_checked: { type: 'string', format: 'date-time' },
+                    latency_ms: { type: 'integer', example: 84 },
+                    reason: {
+                        type: 'string',
+                        example: 'ok',
+                        description: 'Probe-specific reason code, e.g. oracle: ok/not_configured/unreachable/timeout/http_error/no_data/stale; DEX: ok/no_path/timeout/http_error/api_unavailable/unsupported_asset/error.',
+                    },
+                    message: { type: 'string', example: 'Reflector oracle is reachable and serving fresh quotes.' },
+                    details: { type: 'object', additionalProperties: true },
+                },
+            },
             Portfolio: { type: 'object' },
             PortfolioSummary: {
                 type: 'object',
@@ -1521,6 +1637,136 @@ const spec: Record<string, any> = {
                     events: { $ref: '#/components/schemas/NotificationEventsInput' },
                     digestMode: { type: 'string', enum: ['immediate','daily','weekly'], description: 'Delivery mode for notifications: immediate (per-event), daily digest, or weekly digest.' },
                     priceAlertThresholds: { type: 'object', additionalProperties: { type: 'number', minimum: 1 }, description: 'Per-asset price alert threshold overrides keyed by asset code (e.g. XLM).', example: { XLM: 7, BTC: 3 } },
+                },
+            },
+            BacktestRequest: {
+                type: 'object',
+                required: ['allocations', 'threshold'],
+                properties: {
+                    allocations: {
+                        type: 'object',
+                        additionalProperties: { type: 'number' },
+                        description: 'Target allocation weights summing to 100%.',
+                        example: { XLM: 50, USDC: 50 },
+                    },
+                    threshold: {
+                        type: 'number',
+                        minimum: 1,
+                        maximum: 50,
+                        description: 'Rebalance drift trigger threshold in percentage points (1-50).',
+                        example: 5,
+                    },
+                    days: {
+                        type: 'integer',
+                        minimum: 7,
+                        maximum: 365,
+                        default: 90,
+                        description: 'Historical lookback period in days (7-365).',
+                    },
+                    initialValue: {
+                        type: 'number',
+                        default: 10000,
+                        description: 'Starting portfolio value in USD.',
+                    },
+                    from: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Optional start ISO date-time of the historical window.',
+                    },
+                    to: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Optional end ISO date-time of the historical window.',
+                    },
+                },
+            },
+            BacktestResult: {
+                type: 'object',
+                properties: {
+                    threshold: { type: 'number', example: 5 },
+                    allocations: { type: 'object', example: { XLM: 50, USDC: 50 } },
+                    startTimestamp: { type: 'integer', example: 1709078400 },
+                    endTimestamp: { type: 'integer', example: 1709251200 },
+                    startDate: { type: 'string', example: '2024-02-28' },
+                    endDate: { type: 'string', example: '2024-03-01' },
+                    days: { type: 'integer', example: 3 },
+                    initialValue: { type: 'number', example: 10000 },
+                    finalValue: { type: 'number', example: 10520.45 },
+                    totalReturnPct: { type: 'number', example: 5.2 },
+                    buyAndHoldFinalValue: { type: 'number', example: 10210.10 },
+                    buyAndHoldReturnPct: { type: 'number', example: 2.1 },
+                    rebalanceCount: { type: 'integer', example: 1 },
+                    maxDrawdownPct: { type: 'number', example: 3.4 },
+                    maxDriftObservedPct: { type: 'number', example: 8.5 },
+                    events: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                timestamp: { type: 'integer' },
+                                date: { type: 'string' },
+                                maxDriftPct: { type: 'number' },
+                                asset: { type: 'string' },
+                                portfolioValue: { type: 'number' },
+                            },
+                        },
+                    },
+                    timeline: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                timestamp: { type: 'integer' },
+                                date: { type: 'string' },
+                                value: { type: 'number' },
+                                buyAndHoldValue: { type: 'number' },
+                                maxDriftPct: { type: 'number' },
+                                rebalanced: { type: 'boolean' },
+                            },
+                        },
+                    },
+                    includedDays: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'List of UTC dates (YYYY-MM-DD) with complete asset quotes included in the backtest simulation.',
+                        example: ['2024-02-28', '2024-02-29', '2024-03-01'],
+                    },
+                    absentDayReasons: {
+                        type: 'object',
+                        additionalProperties: { type: 'string' },
+                        description: 'Map of absent UTC calendar dates to explicit reason for omission (e.g. leap day quotes unavailable, incomplete asset coverage).',
+                        example: { '2024-02-29': 'Leap day price feed unavailable for asset(s): BTC' },
+                    },
+                    absentDays: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                date: { type: 'string' },
+                                timestamp: { type: 'integer' },
+                                isLeapDay: { type: 'boolean' },
+                                missingAssets: { type: 'array', items: { type: 'string' } },
+                                reason: { type: 'string' },
+                            },
+                        },
+                    },
+                    decision: {
+                        type: 'object',
+                        properties: {
+                            status: { type: 'string', example: 'completed' },
+                            totalWindowDays: { type: 'integer', example: 3 },
+                            includedDaysCount: { type: 'integer', example: 3 },
+                            absentDaysCount: { type: 'integer', example: 0 },
+                            hasLeapDay: { type: 'boolean', example: true },
+                            leapDayIncluded: { type: 'boolean', example: true },
+                            includedDays: { type: 'array', items: { type: 'string' } },
+                            absentDayReasons: { type: 'object', additionalProperties: { type: 'string' } },
+                            evaluationSummary: { type: 'string', example: 'Evaluated 3 of 3 window days; leap day (Feb 29) successfully included.' },
+                        },
+                    },
+                    simulated: { type: 'boolean', example: true },
+                    dataSource: { type: 'string', example: 'coingecko_market_chart' },
+                    disclaimer: { type: 'string' },
                 },
             },
         },

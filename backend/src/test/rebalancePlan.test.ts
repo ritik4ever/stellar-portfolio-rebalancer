@@ -68,6 +68,75 @@ describe('buildRebalancePlan', () => {
     expect(plan.estimatedFees.tradeCount).toBe(0)
     expect(plan.estimatedFees.xlm).toBe(0)
   })
+
+  it('matches the worked example described in Advanced.md', () => {
+    const portfolio = makePortfolio(
+      '42',
+      { XLM: 50, USDC: 50 },
+      { XLM: 48000, USDC: 4000 },
+    )
+    const workedPrices: PricesMap = {
+      XLM: { price: 0.125, change: 0, timestamp: 1727632800000 },
+      USDC: { price: 1.0, change: 0, timestamp: 1727632800000 },
+    }
+
+    const plan = buildRebalancePlan(portfolio, workedPrices, feedMeta)
+
+    expect(plan.portfolioId).toBe('42')
+    expect(plan.totalValue).toBe(10000)
+    expect(plan.maxSlippagePercent).toBe(1)
+    expect(plan.estimatedSlippageBps).toBe(100)
+    expect(plan.estimatedFees).toEqual({
+      xlm: 0.00002,
+      usd: 0.0000025,
+      perTradeXlm: 0.00001,
+      tradeCount: 2,
+    })
+
+    const usdcAsset = plan.assets.find((a) => a.asset === 'USDC')
+    const xlmAsset = plan.assets.find((a) => a.asset === 'XLM')
+
+    expect(usdcAsset).toMatchObject({
+      asset: 'USDC',
+      action: 'buy',
+      currentBalance: 4000,
+      currentValue: 4000,
+      currentAllocationPercent: 40,
+      targetAllocationPercent: 50,
+      targetValue: 5000,
+      driftPercent: 10,
+      buyAmount: 1000,
+      sellAmount: 0,
+      tradeValue: 1000,
+      projectedBalance: 5000,
+      projectedValue: 5000,
+      projectedAllocationPercent: 50,
+      price: 1,
+    })
+
+    expect(xlmAsset).toMatchObject({
+      asset: 'XLM',
+      action: 'sell',
+      currentBalance: 48000,
+      currentValue: 6000,
+      currentAllocationPercent: 60,
+      targetAllocationPercent: 50,
+      targetValue: 5000,
+      driftPercent: 10,
+      buyAmount: 0,
+      sellAmount: 8000,
+      tradeValue: 1000,
+      projectedBalance: 40000,
+      projectedValue: 5000,
+      projectedAllocationPercent: 50,
+      price: 0.125,
+    })
+
+    expect(plan.projectedAllocations).toEqual({
+      USDC: 50,
+      XLM: 50,
+    })
+  })
 })
 
 describe('buildBatchRebalancePlan', () => {

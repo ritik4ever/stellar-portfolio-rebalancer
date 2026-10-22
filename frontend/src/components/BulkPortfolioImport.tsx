@@ -11,15 +11,17 @@ type ParsedRow = {
 
 type RowStatus = 'pending' | 'error' | 'corrected' | 'success'
 
+
+
+type SuccessSummary = {
+  portfolioId: string
+}
+
 type EditableRow = {
   original: ParsedRow
   current: ParsedRow
   status: RowStatus
   errors: BulkImportRowError[]
-}
-
-type SuccessSummary = {
-  portfolioId: string
 }
 
 function detectLikelyJson(file: File): boolean {
@@ -78,7 +80,7 @@ function readFileText(file: File): Promise<string> {
 export default function BulkPortfolioImport(props: {
   userAddressForDemo?: string | null
   onImported?: (portfolioId: string) => void
-}): JSX.Element {
+}) {
   const { onImported } = props
 
   const [file, setFile] = useState<File | null>(null)

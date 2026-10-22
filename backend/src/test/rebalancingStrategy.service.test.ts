@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { shouldRebalanceByStrategy, REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
+import {
+    computeDcaSchedule,
+    crossCheckRebalanceDecision,
+    shouldRebalanceByStrategy,
+    REBALANCE_STRATEGIES,
+} from '../services/rebalancingStrategyService.js'
 import type { Portfolio, PricesMap } from '../types/index.js'
 
 const basePortfolio = (overrides: Partial<Portfolio> = {}): Portfolio => ({
@@ -23,7 +28,7 @@ const stablePrices: PricesMap = {
 describe('rebalancingStrategyService', () => {
     it('covers all exported strategy types', () => {
         const strategyTypes = REBALANCE_STRATEGIES.map(s => s.value).sort()
-        expect(strategyTypes).toEqual(['custom', 'periodic', 'threshold', 'volatility'])
+        expect(strategyTypes).toEqual(['custom', 'dca', 'periodic', 'threshold', 'volatility'])
     })
 
     it('triggers threshold strategy when drift exceeds configured threshold', () => {
@@ -94,5 +99,129 @@ describe('rebalancingStrategyService', () => {
         expect(reloaded.strategyConfig).toEqual(persisted.strategyConfig)
         expect(beforeRestart).toBe(afterRestart)
         expect(afterRestart).toBe(false)
+    })
+
+    describe('DCA strategy schedule computation', () => {
+        const DCA_PORTFOLIO = basePortfolio({
+            strategy: 'dca',
+            strategyConfig: { dcaAmount: 100, dcaIntervalDays: 30 },
+            lastRebalance: '2026-01-01T00:00:00.000Z'
+        })
+
+        it('computes scheduled buy amount and interval from strategyConfig', () => {
+            const schedule = computeDcaSchedule(DCA_PORTFOLIO, DCA_PORTFOLIO.strategyConfig!)
+            expect(schedule.intervalDays).toBe(30)
+            expect(schedule.intervalMs).toBe(30 * 24 * 60 * 60 * 1000)
+            expect(schedule.amount).toBe(100)
+            expect(schedule.nextBuyAtMs).toBe(
+                new Date('2026-01-01T00:00:00.000Z').getTime() + schedule.intervalMs
+            )
+        })
+
+        it('falls back to intervalDays and the 7-day default when DCA fields are absent', () => {
+            const intervalFallback = computeDcaSchedule(
+                basePortfolio({ strategy: 'dca', strategyConfig: { intervalDays: 14 } }),
+                { intervalDays: 14 }
+            )
+            expect(intervalFallback.intervalDays).toBe(14)
+            expect(intervalFallback.amount).toBe(0)
+
+            const defaults = computeDcaSchedule(basePortfolio({ strategy: 'dca' }), {})
+            expect(defaults.intervalDays).toBe(7)
+            expect(defaults.amount).toBe(0)
+        })
+
+        it('triggers only after the DCA interval has elapsed', () => {
+            const dueAt = new Date('2026-01-01T00:00:00.000Z').getTime() + 30 * 24 * 60 * 60 * 1000
+            expect(shouldRebalanceByStrategy({ portfolio: DCA_PORTFOLIO, prices: stablePrices, now: dueAt - 1 })).toBe(false)
+            expect(shouldRebalanceByStrategy({ portfolio: DCA_PORTFOLIO, prices: stablePrices, now: dueAt })).toBe(true)
+        })
+
+        it('does not trigger when no buy amount is configured', () => {
+            const noAmount = basePortfolio({
+                strategy: 'dca',
+                strategyConfig: { dcaAmount: 0, dcaIntervalDays: 7 },
+                lastRebalance: '2026-01-01T00:00:00.000Z'
+            })
+            const dueAt = new Date('2026-01-01T00:00:00.000Z').getTime() + 8 * 24 * 60 * 60 * 1000
+            expect(shouldRebalanceByStrategy({ portfolio: noAmount, prices: stablePrices, now: dueAt })).toBe(false)
+        })
+
+        it('is drift-independent – triggers even when allocations are in balance', () => {
+            const balanced = basePortfolio({
+                strategy: 'dca',
+                strategyConfig: { dcaAmount: 100, dcaIntervalDays: 30 },
+                balances: { BTC: 100, ETH: 100 },
+                lastRebalance: '2026-01-01T00:00:00.000Z'
+            })
+            const dueAt = new Date('2026-01-01T00:00:00.000Z').getTime() + 30 * 24 * 60 * 60 * 1000
+            expect(shouldRebalanceByStrategy({ portfolio: balanced, prices: stablePrices, now: dueAt })).toBe(true)
+        })
+    })
+
+    describe('crossCheckRebalanceDecision', () => {
+        const driftedCtx = () => ({
+            portfolio: basePortfolio({
+                strategy: 'threshold',
+                threshold: 5,
+                balances: { BTC: 1.8, ETH: 0.2 }
+            }),
+            prices: stablePrices
+        })
+
+        it('agrees and executes when backend and on-chain decisions match', async () => {
+            const result = await crossCheckRebalanceDecision(driftedCtx(), async () => true)
+            expect(result.backendDecision).toBe(true)
+            expect(result.onChainDecision).toBe(true)
+            expect(result.agreement).toBe(true)
+            expect(result.finalDecision).toBe(true)
+            expect(result.warning).toBeUndefined()
+        })
+
+        it('warns but does not block when decisions disagree in warn-only mode', async () => {
+            const result = await crossCheckRebalanceDecision(driftedCtx(), async () => false, {
+                requireAgreement: false,
+                alertOnDisagreement: true
+            })
+            expect(result.backendDecision).toBe(true)
+            expect(result.onChainDecision).toBe(false)
+            expect(result.agreement).toBe(false)
+            // Backend decision wins during warn-only rollout.
+            expect(result.finalDecision).toBe(true)
+            expect(result.warning).toBeDefined()
+        })
+
+        it('blocks execution on disagreement when requireAgreement is enabled (fail-safe)', async () => {
+            const result = await crossCheckRebalanceDecision(driftedCtx(), async () => false, {
+                requireAgreement: true,
+                alertOnDisagreement: true
+            })
+            expect(result.agreement).toBe(false)
+            expect(result.finalDecision).toBe(false)
+        })
+
+        it('falls back to the backend decision when the on-chain check fails', async () => {
+            const result = await crossCheckRebalanceDecision(
+                driftedCtx(),
+                async () => { throw new Error('rpc unavailable') }
+            )
+            expect(result.backendDecision).toBe(true)
+            expect(result.onChainDecision).toBe(true)
+            expect(result.agreement).toBe(true)
+            expect(result.finalDecision).toBe(true)
+            expect(result.warning).toBeDefined()
+        })
+
+        it('agrees on no-op when both sides agree that no rebalance is needed', async () => {
+            const calmCtx = () => ({
+                portfolio: basePortfolio({ strategy: 'threshold', threshold: 5 }),
+                prices: stablePrices
+            })
+            const result = await crossCheckRebalanceDecision(calmCtx(), async () => false)
+            expect(result.backendDecision).toBe(false)
+            expect(result.onChainDecision).toBe(false)
+            expect(result.agreement).toBe(true)
+            expect(result.finalDecision).toBe(false)
+        })
     })
 })

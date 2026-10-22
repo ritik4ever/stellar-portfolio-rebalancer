@@ -147,6 +147,41 @@ describe('PortfolioWizard Page', () => {
     expect(cooldownInput).toHaveValue(48);
   });
 
+  it('shows and validates the DCA schedule, then submits it in the payload', async () => {
+    mockMutateAsync.mockResolvedValue({ id: 'dca-portfolio' });
+    mockPost.mockResolvedValue({ hash: 'dca-share' });
+
+    renderWizard('GBDCA...');
+    fireEvent.change(screen.getByLabelText(/rebalancing strategy/i), { target: { value: 'dca' } });
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    expect(screen.getByText('Step 4: Configure DCA Schedule')).toBeInTheDocument();
+    const amountInput = screen.getByLabelText('DCA Amount');
+    fireEvent.change(amountInput, { target: { value: '0' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/positive amount/i);
+    expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
+
+    fireEvent.change(amountInput, { target: { value: '250' } });
+    fireEvent.change(screen.getByLabelText(/interval \(days\)/i), { target: { value: '14' } });
+    fireEvent.change(screen.getByLabelText(/start date/i), { target: { value: '2026-09-01' } });
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    expect(screen.getByText('Step 5: Review & Sign')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /sign with freighter/i }));
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+        strategy: 'dca',
+        strategyConfig: {
+          dcaAmount: 250,
+          dcaIntervalDays: 14,
+          dcaStartDate: '2026-09-01',
+        },
+      }));
+    });
+  });
+
   it('shows summary and signs using Freighter in Step 4 and shows success in Step 5', async () => {
     mockMutateAsync.mockResolvedValue({ id: 'portfolio-123' });
     mockPost.mockResolvedValue({ hash: 'share-abc' });

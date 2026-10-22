@@ -1,15 +1,6 @@
-/**
- * PortfolioSetup.tsx
- *
- * Allows users to configure and create a new portfolio rebalancing strategy.
- * Updated to include real-time inline validation for allocation inputs:
- *   - Per-field error if value is < 0 or > 100
- *   - Live summary showing how far the total deviates from 100%
- *   - Red border highlight on invalid inputs
- *   - Submit blocked until all fields and total are valid
- */
 
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence added to animate error messages in/out
 // TanStack Query Mutations
 import {
@@ -24,24 +15,32 @@ import {
   CheckCircle,
   Save,
   User,
-  Zap,
   RefreshCw,
+  RotateCcw,
+  X,
 } from "lucide-react";
 
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
 import { percentageToBps } from "../utils/calculations";
 import BulkPortfolioImport from "./BulkPortfolioImport";
+import { useAssets } from "../hooks/queries/useAssetsQuery";
+import {
+  loadPortfolioSetupDraft,
+  savePortfolioSetupDraft,
+  clearPortfolioSetupDraft,
+  type PortfolioSetupDraft,
+} from "../hooks/usePortfolio";
+import {
+  loadPortfolioCloneDraft,
+  clearPortfolioCloneDraft,
+  type PortfolioCloneDraft,
+} from "../utils/portfolioCloneDraft";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 
-
-interface AssetOption {
-  value: string
-  label: string
-}
 
 interface PortfolioSetupProps {
   onNavigate: (view: string) => void
@@ -52,13 +51,6 @@ interface Allocation {
   asset: string
   percentage: number
 }
-
-const DEFAULT_ASSET_OPTIONS: AssetOption[] = [
-  { value: 'XLM', label: 'XLM (Stellar Lumens)' },
-  { value: 'USDC', label: 'USDC (USD Coin)' },
-  { value: 'BTC', label: 'BTC (Bitcoin)' },
-  { value: 'ETH', label: 'ETH (Ethereum)' },
-]
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
@@ -183,6 +175,22 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   );
   const [entryMode, setEntryMode] = useState<'manual' | 'bulk'>('manual');
 
+  const [pendingDraft, setPendingDraft] = useState<PortfolioSetupDraft | null>(
+    () => {
+      const result = loadPortfolioSetupDraft(publicKey);
+      return result.status === 'loaded' ? result.draft : null;
+    },
+  );
+  const [draftError, setDraftError] = useState<string | null>(() => {
+    const result = loadPortfolioSetupDraft(publicKey);
+    return result.status === 'failed' ? result.error : null;
+  });
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftPromptResolved, setDraftPromptResolved] = useState(
+    () => loadPortfolioSetupDraft(publicKey).status !== 'loaded',
+  );
+  const hasMountedDraftSaver = useRef(false);
+
 
 
   useEffect(() => {
@@ -299,17 +307,9 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   }
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation()
+  const { data: selectableAssets = [], isLoading: assetsLoading } = useAssets()
 
-  // ── Validation ─────────────────────────────────────────────────────────────
-
-  /**
-   * Validates a single allocation percentage.
-   * Returns an error string if the value is out of range, or null if acceptable.
-   *
-   * Rules:
-   *   - Must not be negative (< 0)
-   *   - Must not exceed 100 (> 100)
-   */
+ 
   const getAllocationError = (percentage: number): string | null => {
     if (percentage < 0) return 'Cannot be negative'
     if (percentage > 100) return 'Cannot exceed 100%'
@@ -322,11 +322,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     0,
   )
 
-  /**
-   * True when the total is within 0.01% of 100.
-   * The small tolerance prevents false negatives from floating-point arithmetic
-   * e.g. 33.3 + 33.3 + 33.4 = 100.00000000000001 without this guard.
-   */
+ 
   const isValidTotal = Math.abs(totalPercentage - 100) < 0.01
 
   /**
@@ -360,6 +356,51 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     }
   }
 
+  const getThresholdError = (val: number | undefined): string | null => {
+    if (val === undefined || Number.isNaN(val)) return 'Threshold is required'
+    if (val < 1 || val > 50) return 'Threshold must be between 1% and 50%'
+    return null
+  }
+
+  const getIntervalDaysError = (val: number | undefined): string | null => {
+    if (val === undefined || Number.isNaN(val)) return 'Interval is required'
+    if (val < 1 || val > 365) return 'Interval must be between 1 and 365 days'
+    return null
+  }
+
+  const getVolatilityThresholdError = (val: number | undefined): string | null => {
+    if (val === undefined || Number.isNaN(val)) return 'Volatility threshold is required'
+    if (val < 1 || val > 100) return 'Volatility threshold must be between 1% and 100%'
+    return null
+  }
+
+  const getMinDaysBetweenRebalanceError = (val: number | undefined): string | null => {
+    if (val === undefined || Number.isNaN(val)) return 'Minimum days is required'
+    if (val < 0 || val > 365) return 'Minimum days must be between 0 and 365 days'
+    return null
+  }
+
+  const thresholdError = strategy !== 'periodic' ? getThresholdError(threshold) : null;
+
+  const intervalDaysError = strategy === 'periodic'
+    ? getIntervalDaysError(strategyConfig.intervalDays)
+    : null;
+
+  const volatilityThresholdPctError = strategy === 'volatility'
+    ? getVolatilityThresholdError(strategyConfig.volatilityThresholdPct)
+    : null;
+
+  const minDaysBetweenRebalanceError = strategy === 'custom'
+    ? getMinDaysBetweenRebalanceError(strategyConfig.minDaysBetweenRebalance)
+    : null;
+
+  const hasStrategyConfigError = !!(
+    intervalDaysError ||
+    volatilityThresholdPctError ||
+    minDaysBetweenRebalanceError ||
+    thresholdError
+  );
+
   /**
    * True if any individual allocation row has a validation error.
    * Used alongside isValidTotal to gate the submit button —
@@ -367,9 +408,13 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    */
   const hasAnyFieldError = allocations.some(
     (a) => getAllocationError(a.percentage) !== null,
-  )
+  ) || hasStrategyConfigError;
 
   /** Remaining percentage to reach 100% (positive = under, negative = over, 0 = exact) */
+  const remainingAllocation = (rows: Allocation[]): number =>
+    parseFloat(
+      (100 - rows.reduce((sum, alloc) => sum + alloc.percentage, 0)).toFixed(2),
+    );
   const remaining = remainingAllocation(allocations);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -475,14 +520,28 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
         {} as Record<string, number>,
       )
 
+      let finalStrategyConfig: Record<string, number> | undefined = undefined;
+      if (strategy === 'periodic') {
+        finalStrategyConfig = {
+          intervalDays: strategyConfig.intervalDays ?? 7,
+        };
+      } else if (strategy === 'volatility') {
+        finalStrategyConfig = {
+          volatilityThresholdPct: strategyConfig.volatilityThresholdPct ?? 10,
+        };
+      } else if (strategy === 'custom') {
+        finalStrategyConfig = {
+          minDaysBetweenRebalance: strategyConfig.minDaysBetweenRebalance ?? 1,
+        };
+      }
+
       await createPortfolioMutation.mutateAsync({
         userAddress: publicKey || 'demo-user',
         allocations: allocationsMap,
-        threshold,
+        threshold: strategy === 'periodic' ? (threshold ?? 5) : threshold,
         slippageTolerance,
         strategy: strategy || 'threshold',
-        strategyConfig:
-          Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
+        strategyConfig: finalStrategyConfig,
       })
 
       clearPortfolioSetupDraft(publicKey)
@@ -499,10 +558,8 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   // Compute once before render so the value is consistent across the JSX tree
   const totalStatus = totalDeviationMessage();
-  // Alias so the mobile action bar can reference the same submit handler
-  const handleSubmit = createPortfolio;
 
-  const handleBulkImportSuccess = (portfolioId: string) => {
+  const handleBulkImportSuccess = (_portfolioId: string) => {
     setSuccess(true)
     setTimeout(() => {
       onNavigate('dashboard')
@@ -1127,14 +1184,24 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="strategySelect">
                     Rebalancing Strategy
                   </label>
                   <select
+                    id="strategySelect"
                     value={strategy}
                     onChange={(e) => {
-                      setStrategy(e.target.value)
-                      setStrategyConfig({})
+                      const newStrat = e.target.value;
+                      setStrategy(newStrat);
+                      if (newStrat === 'periodic') {
+                        setStrategyConfig({ intervalDays: 7 });
+                      } else if (newStrat === 'volatility') {
+                        setStrategyConfig({ volatilityThresholdPct: 10 });
+                      } else if (newStrat === 'custom') {
+                        setStrategyConfig({ minDaysBetweenRebalance: 1 });
+                      } else {
+                        setStrategyConfig({});
+                      }
                     }}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
@@ -1157,87 +1224,187 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
                 {strategy === 'periodic' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="intervalDays">
                       Interval (days)
                     </label>
                     <input
+                      id="intervalDays"
                       type="number"
                       min="1"
                       max="365"
-                      value={strategyConfig.intervalDays ?? 7}
-                      onChange={(e) =>
+                      value={Number.isNaN(strategyConfig.intervalDays) ? '' : (strategyConfig.intervalDays ?? 7)}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? NaN : parseInt(e.target.value);
                         setStrategyConfig((c) => ({
                           ...c,
-                          intervalDays: parseInt(e.target.value) || 7,
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          intervalDays: val,
+                        }));
+                      }}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                        intervalDaysError
+                          ? 'border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30'
+                          : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
                     />
+                    <AnimatePresence>
+                      {intervalDaysError && (
+                        <motion.p
+                          role="alert"
+                          initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                          animate={{
+                            opacity: 1,
+                            height: 'auto',
+                            marginTop: 4,
+                          }}
+                          exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex items-center text-xs text-red-600 pl-1"
+                        >
+                          <AlertCircle className="w-3 h-3 mr-1 flex-shrink-0" />
+                          {intervalDaysError}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
 
                 {strategy === 'volatility' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="volatilityThresholdPct">
                       Volatility threshold (%)
                     </label>
                     <input
+                      id="volatilityThresholdPct"
                       type="number"
                       min="1"
                       max="100"
-                      value={strategyConfig.volatilityThresholdPct ?? 10}
-                      onChange={(e) =>
+                      value={Number.isNaN(strategyConfig.volatilityThresholdPct) ? '' : (strategyConfig.volatilityThresholdPct ?? 10)}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? NaN : parseInt(e.target.value);
                         setStrategyConfig((c) => ({
                           ...c,
-                          volatilityThresholdPct:
-                            parseInt(e.target.value) || 10,
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          volatilityThresholdPct: val,
+                        }));
+                      }}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                        volatilityThresholdPctError
+                          ? 'border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30'
+                          : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
                     />
+                    <AnimatePresence>
+                      {volatilityThresholdPctError && (
+                        <motion.p
+                          role="alert"
+                          initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                          animate={{
+                            opacity: 1,
+                            height: 'auto',
+                            marginTop: 4,
+                          }}
+                          exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex items-center text-xs text-red-600 pl-1"
+                        >
+                          <AlertCircle className="w-3 h-3 mr-1 flex-shrink-0" />
+                          {volatilityThresholdPctError}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
 
                 {strategy === 'custom' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="minDaysBetweenRebalance">
                       Min days between rebalances
                     </label>
                     <input
+                      id="minDaysBetweenRebalance"
                       type="number"
                       min="0"
                       max="365"
-                      value={strategyConfig.minDaysBetweenRebalance ?? 1}
-                      onChange={(e) =>
+                      value={Number.isNaN(strategyConfig.minDaysBetweenRebalance) ? '' : (strategyConfig.minDaysBetweenRebalance ?? 1)}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? NaN : parseInt(e.target.value);
                         setStrategyConfig((c) => ({
                           ...c,
-                          minDaysBetweenRebalance:
-                            parseInt(e.target.value) || 1,
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          minDaysBetweenRebalance: val,
+                        }));
+                      }}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                        minDaysBetweenRebalanceError
+                          ? 'border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30'
+                          : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
                     />
+                    <AnimatePresence>
+                      {minDaysBetweenRebalanceError && (
+                        <motion.p
+                          role="alert"
+                          initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                          animate={{
+                            opacity: 1,
+                            height: 'auto',
+                            marginTop: 4,
+                          }}
+                          exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex items-center text-xs text-red-600 pl-1"
+                        >
+                          <AlertCircle className="w-3 h-3 mr-1 flex-shrink-0" />
+                          {minDaysBetweenRebalanceError}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Rebalance Threshold (%)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={threshold}
-                    onChange={(e) =>
-                      setThreshold(parseInt(e.target.value) || 5)
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Trigger rebalance when any asset drifts by this percentage
-                  </p>
-                </div>
+                {strategy !== 'periodic' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="threshold">
+                      Rebalance Threshold (%)
+                    </label>
+                    <input
+                      id="threshold"
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={Number.isNaN(threshold) ? '' : (threshold ?? 5)}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? NaN : parseInt(e.target.value);
+                        setThreshold(val);
+                      }}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent transition-colors bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                        thresholdError
+                          ? 'border-red-500 focus:ring-red-400 bg-red-50 dark:bg-red-900/30'
+                          : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
+                    />
+                    <AnimatePresence>
+                      {thresholdError && (
+                        <motion.p
+                          role="alert"
+                          initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                          animate={{
+                            opacity: 1,
+                            height: 'auto',
+                            marginTop: 4,
+                          }}
+                          exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex items-center text-xs text-red-600 pl-1"
+                        >
+                          <AlertCircle className="w-3 h-3 mr-1 flex-shrink-0" />
+                          {thresholdError}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Trigger rebalance when any asset drifts by this percentage
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1355,6 +1522,28 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
              *   - createPortfolioMutation.isPending: API call is already in progress
              * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
              */}
+            <button
+              type="button"
+              onClick={createPortfolio}
+              disabled={
+                hasAnyFieldError ||
+                !isValidTotal ||
+                createPortfolioMutation.isPending
+              }
+              className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white p-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              {createPortfolioMutation.isPending ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  Creating Portfolio...
+                </>
+              ) : (
+                <>
+                  <Save className="w-5 h-5" />
+                  Create Portfolio
+                </>
+              )}
+            </button>
 
           </div>
         </div>
@@ -1400,8 +1589,12 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
               <button
                 type="button"
                 onClick={createPortfolio}
-
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                disabled={
+                  hasAnyFieldError ||
+                  !isValidTotal ||
+                  createPortfolioMutation.isPending
+                }
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
                 {createPortfolioMutation.isPending ? (
                   <>

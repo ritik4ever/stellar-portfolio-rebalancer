@@ -61,11 +61,11 @@ beforeAll(async () => {
 })
 
 describe('debug routes — secret redaction', () => {
-    it('GET /debug/coingecko-test does not expose testUrl', async () => {
+    it('GET /debug/coingecko-test does not expose testUrl or apiKeySet', async () => {
         const res = await request(app).get('/api/debug/coingecko-test')
         expect(res.status).toBe(200)
         expect(res.body.data).not.toHaveProperty('testUrl')
-        expect(res.body.data).toHaveProperty('apiKeySet')
+        expect(res.body.data).not.toHaveProperty('apiKeySet')
         expect(res.body.data).toHaveProperty('responseStatus')
     })
 

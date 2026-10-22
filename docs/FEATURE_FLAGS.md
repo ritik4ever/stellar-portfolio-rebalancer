@@ -39,7 +39,7 @@ The following flags do not exist in code yet — no environment variable is curr
 | Planned variable | Default (non‑prod) | Default (production) | Effect once implemented |
 |----------|-------------------|----------------------|--------|
 | `ENABLE_DCA_STRATEGY` | `false` | `false` | Would gate DCA (dollar-cost averaging) rebalance strategy support described conceptually in [`docs/REBALANCING_STRATEGIES.md`](REBALANCING_STRATEGIES.md). No DCA strategy code exists yet — the flag is a placeholder for the eventual rollout. |
-| `ENABLE_BULK_IMPORT` | `true` | `false` | Would gate the portfolio bulk import endpoint (`POST /api/v1/portfolio/import`, implemented in `backend/src/api/portfolioImportRoutes.ts` / `backend/src/services/portfolioImportService.ts`). Today this endpoint is **always enabled** and reads no feature flag; this entry documents the intended flag name for adding a kill switch. |
+| `ENABLE_BULK_IMPORT` | `true` | `false` | Would gate the portfolio bulk import endpoint (`POST /api/v1/portfolio/import`, implemented in `backend/src/api/portfolioImportRoutes.ts` / `backend/src/services/portfolioImportService.ts`). Today this endpoint is **always enabled** and reads no feature flag; this entry documents the intended flag name for adding a kill switch when implemented. |
 
 **Local toggling (once implemented):** set the variable in `backend/.env` (or `config/feature-flags.staging.json` via `FEATURE_FLAGS_FILE`, see [File-Based Overrides](#file-based-overrides-staging--local)) the same way as any other backend boolean flag, then restart the backend.
 

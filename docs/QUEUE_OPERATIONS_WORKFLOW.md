@@ -435,7 +435,7 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version-file: '.nvmrc'
 
       - name: Check Queue Health
         env:

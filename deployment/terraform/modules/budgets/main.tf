@@ -126,8 +126,8 @@ resource "aws_sns_topic" "budget_alerts" {
 }
 
 resource "aws_sns_topic_policy" "budget_alerts" {
-  count  = var.create_sns_topic ? 1 : 0
-  arn    = aws_sns_topic.budget_alerts[0].arn
+  count = var.create_sns_topic ? 1 : 0
+  arn   = aws_sns_topic.budget_alerts[0].arn
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -157,9 +157,8 @@ resource "aws_cloudwatch_metric_alarm" "daily_spend_anomaly" {
   alarm_description   = "Alert when daily spend exceeds threshold"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.budget_alerts[0].arn] : var.notification_sns_topics
 
-  dimensions {
-    Name  = "Currency"
-    Value = "USD"
+  dimensions = {
+    Currency = "USD"
   }
 
   tags = {

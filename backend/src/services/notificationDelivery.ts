@@ -36,101 +36,373 @@ export interface DeliveryAttemptContext {
   userId: string;
   eventType: string;
   policy: DeliveryBackoffPolicy;
+  deliveryId?: string;
+  signal?: AbortSignal;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// In-flight deliveries map to prevent duplicate executions during concurrent work
+const inFlightDeliveries = new Map<string, Promise<void>>();
+// Cache recently completed deliveries to prevent duplicate notifications
+const completedDeliveries = new Map<string, { status: 'sent' | 'failed' | 'uncertain'; timestamp: number }>();
+
+/** Reset delivery tracking maps (used for test isolation) */
+export function _resetDeliveriesForTest(): void {
+  inFlightDeliveries.clear();
+  completedDeliveries.clear();
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      return reject(signal.reason ?? new Error('Notification delivery aborted'));
+    }
+    const timer = setTimeout(() => {
+      resolve();
+    }, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error('Notification delivery aborted'));
+      },
+      { once: true },
+    );
+  });
 }
 
 /**
- * Executes a provider delivery with configurable exponential backoff and structured logging.
+ * How a failed delivery attempt relates to the provider's side effect.
+ *
+ * - `retryable`: the provider proved it did not act on the message (no
+ *   connection, explicit 4xx/5xx rejection, ...), so a retry cannot duplicate
+ *   anything.
+ * - `ambiguous`: the request reached the provider but the confirmation never
+ *   arrived (for example an SMTP timeout after the message body was accepted).
+ *   The provider may already have delivered, so retrying risks a duplicate.
+ * - `permanent`: the provider refused the message; retrying cannot help.
+ */
+export type DeliveryFailureKind = "retryable" | "ambiguous" | "permanent";
+
+export interface DeliveryFailureAssessment {
+  kind: DeliveryFailureKind;
+  /** Bounded reason, safe to use as a metric label. */
+  reason: string;
+  /** Stable key identifying the logical notification across attempts. */
+  idempotencyKey?: string;
+  /** True when the provider may already have performed the side effect. */
+  mayHaveDelivered: boolean;
+}
+
+export interface NotificationDeliveryErrorOptions {
+  kind: DeliveryFailureKind;
+  reason: string;
+  idempotencyKey?: string;
+  cause?: unknown;
+}
+
+/**
+ * Error thrown by a provider that knows more about a failure than the generic
+ * network error can express — most importantly, whether the message may
+ * already have been accepted by the provider.
+ */
+export class NotificationDeliveryError extends Error {
+  readonly kind: DeliveryFailureKind;
+  readonly reason: string;
+  readonly idempotencyKey?: string;
+
+  constructor(message: string, options: NotificationDeliveryErrorOptions) {
+    super(message);
+    this.name = "NotificationDeliveryError";
+    this.kind = options.kind;
+    this.reason = options.reason;
+    this.idempotencyKey = options.idempotencyKey;
+    if (options.cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+/**
+ * Classify any delivery error for retry purposes. Providers that can tell an
+ * ambiguous outcome apart from a definite failure throw a
+ * `NotificationDeliveryError`; everything else keeps the previous behaviour of
+ * being retried within the configured bound.
+ */
+export function assessDeliveryFailure(error: unknown): DeliveryFailureAssessment {
+  if (error instanceof NotificationDeliveryError) {
+    return {
+      kind: error.kind,
+      reason: error.reason,
+      idempotencyKey: error.idempotencyKey,
+      mayHaveDelivered: error.kind === "ambiguous",
+    };
+  }
+
+  return {
+    kind: "retryable",
+    reason: classifyFailureReason(error),
+    mayHaveDelivered: false,
+  };
+}
+
+/**
+ * Executes a provider delivery with configurable exponential backoff, concurrency
+ * deduplication, and structured logging.
+ *
+ * Guarantees:
+ * 1. Exactly one user-visible notification during concurrent and repeated work.
+ * 2. Traceable delivery attempts in notification_logs.
+ * 3. State consistency: persisted records agree with externally visible results
+ *    even when delivery is interrupted or fails.
  */
 export async function deliverWithBackoff(
   ctx: DeliveryAttemptContext,
   execute: () => Promise<void>,
 ): Promise<void> {
-  const { provider, userId, eventType, policy } = ctx;
-  let lastError: unknown
-  const startedAt = Date.now()
+  const { provider, userId, eventType, policy, deliveryId, signal } = ctx;
 
-  for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
-    try {
-      await execute()
-      recordNotificationDeliveryAttempt(provider, 'success')
-      recordNotificationDelivery({
-        channel: provider,
-        outcome: 'success',
-        eventType,
-        durationSeconds: (Date.now() - startedAt) / 1000,
-      })
-      logOutcome(userId, provider, eventType, "sent", undefined, {
-        attempt,
-        maxAttempts: policy.maxAttempts,
-      })
-      return
-    } catch (error) {
-      lastError = error
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      const retriesRemaining = attempt < policy.maxAttempts
+  const deliveryKey = deliveryId
+    ? `${provider}:${userId}:${eventType}:${deliveryId}`
+    : undefined;
 
-      if (retriesRemaining) {
-        recordNotificationDeliveryAttempt(provider, 'retried')
-        const retryIndex = attempt - 1
-        const backoffDelayMs = computeBackoffDelayMs(policy, retryIndex)
-        logOutcome(userId, provider, eventType, "retried", errorMessage, {
-          attempt,
-          maxAttempts: policy.maxAttempts,
-          backoffDelayMs,
-          nextAttempt: attempt + 1,
-        })
-        logger.warn("Notification delivery failed; scheduling backoff retry", {
-          provider,
-          userId,
-          eventType,
-          attempt,
-          maxAttempts: policy.maxAttempts,
-          backoffDelayMs,
-          error: errorMessage,
-        })
-        await sleep(backoffDelayMs)
-        continue
-      }
+  // 1. Check if an identical notification was already sent successfully
+  if (deliveryKey) {
+    const prior = completedDeliveries.get(deliveryKey);
+    if (prior && prior.status === 'sent') {
+      logOutcome(userId, provider, eventType, "skipped", "Duplicate notification: already sent for this event", {
+        attempt: 1,
+        maxAttempts: policy.maxAttempts,
+        deliveryId,
+      });
+      return;
+    }
 
-      recordNotificationDeliveryAttempt(provider, 'failure')
-      recordNotificationDelivery({
-        channel: provider,
-        outcome: 'failure',
-        reason: classifyFailureReason(error),
-        eventType,
-        durationSeconds: (Date.now() - startedAt) / 1000,
-      })
-      logOutcome(userId, provider, eventType, "failed", errorMessage, {
-        attempt,
+    // A previous attempt with an unknown outcome must not be repeated
+    // automatically: the provider may already have delivered the message.
+    if (prior && prior.status === 'uncertain') {
+      logOutcome(userId, provider, eventType, "skipped", "Delivery outcome unknown for this event; not resending automatically", {
+        attempt: 1,
         maxAttempts: policy.maxAttempts,
-      })
-      logger.error("Notification delivery exhausted retries", {
-        provider,
-        userId,
-        eventType,
-        attempt,
+        deliveryId,
+        retryable: false,
+        stoppedEarly: true,
+      });
+      return;
+    }
+
+    // 2. Concurrency control: if a delivery is currently in flight for the same event, deduplicate
+    if (inFlightDeliveries.has(deliveryKey)) {
+      logOutcome(userId, provider, eventType, "skipped", "Concurrent notification deduplicated: delivery in progress", {
+        attempt: 1,
         maxAttempts: policy.maxAttempts,
-        error: errorMessage,
-      })
-      throw error
+        deliveryId,
+      });
+      // Await existing delivery so caller finishes when message is actually delivered
+      await inFlightDeliveries.get(deliveryKey);
+      return;
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(String(lastError ?? "Notification delivery failed"))
+  const runDelivery = async (): Promise<void> => {
+    let lastError: unknown;
+    let finalOutcomeLogged = false;
+    let currentAttempt = 1;
+    const startedAt = Date.now();
+
+    try {
+      for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+        currentAttempt = attempt;
+
+        if (signal?.aborted) {
+          throw signal.reason ?? new Error('Notification delivery aborted');
+        }
+
+        try {
+          await execute();
+          finalOutcomeLogged = true;
+          recordNotificationDeliveryAttempt(provider, 'success');
+          recordNotificationDelivery({
+            channel: provider,
+            outcome: 'success',
+            eventType,
+            durationSeconds: (Date.now() - startedAt) / 1000,
+          });
+          logOutcome(userId, provider, eventType, "sent", undefined, {
+            attempt,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+          });
+          if (deliveryKey) {
+            completedDeliveries.set(deliveryKey, { status: 'sent', timestamp: Date.now() });
+          }
+          return;
+        } catch (error) {
+          lastError = error;
+          const assessment = assessDeliveryFailure(error);
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          // Only failures that prove the provider did not act are retried;
+          // ambiguous or permanent failures stop immediately.
+          const retriesRemaining =
+            attempt < policy.maxAttempts &&
+            !signal?.aborted &&
+            assessment.kind === "retryable";
+          const stoppedEarly =
+            attempt < policy.maxAttempts && assessment.kind !== "retryable";
+
+          if (retriesRemaining) {
+            recordNotificationDeliveryAttempt(provider, 'retried');
+            const retryIndex = attempt - 1;
+            const backoffDelayMs = computeBackoffDelayMs(policy, retryIndex);
+            logOutcome(userId, provider, eventType, "retried", errorMessage, {
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              backoffDelayMs,
+              nextAttempt: attempt + 1,
+              deliveryId,
+              failureKind: assessment.kind,
+              idempotencyKey: assessment.idempotencyKey,
+            });
+            logger.warn("Notification delivery failed; scheduling backoff retry", {
+              provider,
+              userId,
+              eventType,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              backoffDelayMs,
+              deliveryId,
+              idempotencyKey: assessment.idempotencyKey,
+              error: errorMessage,
+            });
+            await sleep(backoffDelayMs, signal);
+            continue;
+          }
+
+          finalOutcomeLogged = true;
+          const ambiguous = assessment.kind === "ambiguous";
+          recordNotificationDeliveryAttempt(provider, 'failure');
+          recordNotificationDelivery({
+            channel: provider,
+            outcome: 'failure',
+            reason: ambiguous ? 'delivery_unknown' : assessment.reason,
+            eventType,
+            durationSeconds: (Date.now() - startedAt) / 1000,
+          });
+          logOutcome(
+            userId,
+            provider,
+            eventType,
+            ambiguous ? "uncertain" : "failed",
+            errorMessage,
+            {
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              deliveryId,
+              failureKind: assessment.kind,
+              retryable: false,
+              stoppedEarly,
+              idempotencyKey: assessment.idempotencyKey,
+            },
+          );
+          if (deliveryKey) {
+            completedDeliveries.set(deliveryKey, {
+              status: ambiguous ? 'uncertain' : 'failed',
+              timestamp: Date.now(),
+            });
+          }
+          if (ambiguous) {
+            // The provider may already have delivered. Retrying would risk a
+            // duplicate side effect, so this is an explicit stop instead.
+            logger.error(
+              "Notification delivery outcome unknown; retry stopped to avoid duplicate side effects",
+              {
+                provider,
+                userId,
+                eventType,
+                attempt,
+                maxAttempts: policy.maxAttempts,
+                deliveryId,
+                stoppedEarly,
+                idempotencyKey: assessment.idempotencyKey,
+                error: errorMessage,
+              },
+            );
+          } else if (assessment.kind === "permanent") {
+            logger.error("Notification delivery failed permanently; retry stopped", {
+              provider,
+              userId,
+              eventType,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              deliveryId,
+              stoppedEarly,
+              idempotencyKey: assessment.idempotencyKey,
+              error: errorMessage,
+            });
+          } else {
+            logger.error("Notification delivery exhausted retries", {
+              provider,
+              userId,
+              eventType,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              deliveryId,
+              idempotencyKey: assessment.idempotencyKey,
+              error: errorMessage,
+            });
+          }
+          throw error;
+        }
+      }
+
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(String(lastError ?? "Notification delivery failed"));
+    } catch (unhandledError) {
+      // Interrupted work handling: if delivery failed or was cancelled before logging a final status
+      // (e.g. abort signal during backoff, process interruption, unexpected throw), ensure the database
+      // reflects 'failed' so persisted record agrees with external failure outcome.
+      if (!finalOutcomeLogged) {
+        finalOutcomeLogged = true;
+        const msg = unhandledError instanceof Error ? unhandledError.message : String(unhandledError);
+        recordNotificationDeliveryAttempt(provider, 'failure');
+        recordNotificationDelivery({
+          channel: provider,
+          outcome: 'failure',
+          reason: classifyFailureReason(unhandledError),
+          eventType,
+          durationSeconds: (Date.now() - startedAt) / 1000,
+        });
+        logOutcome(userId, provider, eventType, "failed", `Interrupted: ${msg}`, {
+          attempt: currentAttempt,
+          maxAttempts: policy.maxAttempts,
+          deliveryId,
+        });
+        if (deliveryKey) {
+          completedDeliveries.set(deliveryKey, { status: 'failed', timestamp: Date.now() });
+        }
+      }
+      throw unhandledError;
+    } finally {
+      if (deliveryKey) {
+        inFlightDeliveries.delete(deliveryKey);
+      }
+    }
+  };
+
+  const deliveryPromise = runDelivery();
+  if (deliveryKey) {
+    inFlightDeliveries.set(deliveryKey, deliveryPromise);
+  }
+
+  return deliveryPromise;
 }
 
 function logOutcome(
   userId: string,
   provider: NotificationProviderName,
   eventType: string,
-  status: "sent" | "failed" | "retried" | "skipped",
+  status: "sent" | "failed" | "retried" | "skipped" | "uncertain",
   errorMessage: string | undefined,
   metadata: NotificationLogMetadata,
 ): void {
@@ -141,7 +413,7 @@ function logOutcome(
     status,
     errorMessage,
     metadata,
-  )
+  );
 }
 
 /**

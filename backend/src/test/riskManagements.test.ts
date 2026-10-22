@@ -155,6 +155,29 @@ describe('RiskManagementService statistical model', () => {
         expect(Math.abs(risk.ewmaVolatility - expectedEwma)).toBeLessThanOrEqual(tolerance)
     })
 
+    it('uses the configurable EWMA volatility alert threshold instead of a hardcoded value', () => {
+        const service = new RiskManagementService()
+
+        // ±30% daily swings drive EWMA volatility well above the default 15%
+        // and below a raised 50% threshold.
+        const feedSeriesBeforeRaise = () => feedSeries(service, {
+            BTC: buildSeries(100, Array.from({ length: 60 }, (_, i) => (i % 2 === 0 ? 0.3 : -0.3))),
+            USDC: buildSeries(1, Array.from({ length: 60 }, () => 0.0001))
+        })
+
+        // Raised threshold via env: no volatility alert fires
+        vi.stubEnv('CIRCUIT_BREAKER_VOLATILITY_THRESHOLD_PCT', '50')
+        feedSeriesBeforeRaise()
+        expect((service as any).checkVolatility('BTC')).toBeNull()
+
+        // Default 15% (0.15) threshold: alert fires
+        vi.unstubAllEnvs()
+        const alert = (service as any).checkVolatility('BTC')
+        expect(alert).not.toBeNull()
+        expect(alert.type).toBe('volatility')
+        expect(alert.asset).toBe('BTC')
+    })
+
     it('returns safe fallback metrics when fewer than MIN_RETURNS_FOR_STATS points exist', () => {
         const service = new RiskManagementService()
         const smallSampleReturns = Array.from({ length: 20 }, (_, i) => (i % 2 === 0 ? 0.2 : -0.2))
@@ -405,6 +428,27 @@ describe('RiskManagementService.checkCVaRVaRThresholdsAndAutoPause', () => {
         expect(mockNotify).not.toHaveBeenCalled()
     })
 
+    it('does not auto-pause when one asset has sparse points at the evaluation window boundary', async () => {
+        const service = new RiskManagementService()
+
+        const prices = feedSeries(service, {
+            BTC: buildSeries(100, Array.from({ length: 120 }, (_, i) => (i % 2 === 0 ? 0.18 : -0.18))),
+            ETH: buildSeries(60, Array.from({ length: 120 }, (_, i) => (i % 2 === 0 ? 0.17 : -0.17))),
+            // 30 snapshots => 29 returns, forcing sampleSize below MIN_RETURNS_FOR_STATS.
+            USDC: buildSeries(1, Array.from({ length: 30 }, () => 0.0001)),
+        })
+
+        const result = await service.checkCVaRVaRThresholdsAndAutoPause(
+            PORTFOLIO_ID, ALLOCATIONS, prices, USER_ID
+        )
+
+        expect(result.riskMetrics.sampleSize).toBe(29)
+        expect(result.breached).toBe(false)
+        expect(result.paused).toBe(false)
+        expect(mockUpdatePortfolio).not.toHaveBeenCalled()
+        expect(mockNotify).not.toHaveBeenCalled()
+    })
+
     it('respects custom configurable thresholds passed to the constructor', async () => {
         // Very tight custom thresholds: any positive VaR/CVaR will trigger a breach
         const service = new RiskManagementService({ var95: 0.0001, cvar95: 0.0001 })
@@ -471,5 +515,24 @@ describe('RiskManagementService.checkCVaRVaRThresholdsAndAutoPause', () => {
         expect(result.paused).toBe(true)
         // updatePortfolio was NOT called because the portfolio wasn't found
         expect(mockUpdatePortfolio).not.toHaveBeenCalled()
+    })
+
+    it('avoids duplicate persistence and notification when portfolio is already paused', async () => {
+        const service = new RiskManagementService()
+        const prices = buildHighVolSeries(service)
+
+        mockGetPortfolio.mockResolvedValueOnce({
+            id: PORTFOLIO_ID,
+            riskPausedUntil: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        })
+
+        const result = await service.checkCVaRVaRThresholdsAndAutoPause(
+            PORTFOLIO_ID, ALLOCATIONS, prices, USER_ID
+        )
+
+        expect(result.breached).toBe(true)
+        expect(result.paused).toBe(true)
+        expect(mockUpdatePortfolio).not.toHaveBeenCalled()
+        expect(mockNotify).not.toHaveBeenCalled()
     })
 })

@@ -96,7 +96,11 @@
   },
   "languageSelector": {
     "label": "Language",
-    "english": "English"
+    "english": "English",
+    "spanish": "Spanish",
+    "portuguese": "Portuguese",
+    "french": "French",
+    "german": "German"
   },
   "portfolioSetup": {
     "title": "Create Portfolio",
@@ -127,7 +131,7 @@
   },
   "compare": {
     "title": "Compare Portfolios",
-    "subtitle": "Select 2-3 portfolios to compare side-by-side",
+    "subtitle": "Select 2-5 portfolios to compare side-by-side",
     "selectPortfolios": "Select Portfolios",
     "noPortfolios": "No portfolios available to compare",
     "selectAtLeastTwo": "Select at least 2 portfolios to compare",

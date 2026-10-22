@@ -1,4 +1,4 @@
-use soroban_sdk::Env;
+use soroban_sdk::{Env, Symbol};
 
 use crate::types::{DataKey, LegacyPortfolio, Portfolio, CURRENT_STORAGE_SCHEMA_VERSION};
 
@@ -27,12 +27,19 @@ pub fn migrate_storage(env: &Env) {
         return;
     }
 
+    let from_version = version;
+
     if version < 1 {
         migrate_v0_to_v1(env);
         version = 1;
     }
 
     env.storage().instance().set(&DataKey::SchemaVersion, &version);
+
+    env.events().publish(
+        (Symbol::new(env, "storage_migrated"),),
+        (from_version, version),
+    );
 }
 
 /// v0 -> v1: portfolios used to be stored as `LegacyPortfolio` (no strategy

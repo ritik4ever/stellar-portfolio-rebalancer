@@ -6,12 +6,13 @@ import { portfolioStorage } from '../services/portfolioStorage.js'
 
 import { riskManagementService } from '../services/serviceContainer.js'
 import { rebalanceHistoryService } from '../services/serviceContainer.js'
+import { notificationService } from '../services/notificationService.js'
 
 import { idempotencyMiddleware } from '../middleware/idempotency.js'
 import { requireJwt, requireJwtWhenEnabled } from '../middleware/requireJwt.js'
 import { protectedWriteLimiter } from '../middleware/rateLimit.js'
 import { validateRequest, validateQuery } from '../middleware/validate.js'
-import { createPortfolioSchema, clonePortfolioSchema, portfolioExportQuerySchema } from './validation.js'
+import { clonePortfolioSchema } from './validation.js'
 
 import { getAuthConfig } from '../services/authService.js'
 import { getFeatureFlags } from '../config/featureFlags.js'
@@ -20,10 +21,13 @@ import { buildRebalancePlan, buildBatchRebalancePlan } from '../services/rebalan
 
 import { logger } from '../utils/logger.js'
 import { getErrorObject, getErrorMessage } from '../utils/helpers.js'
+import { redactString, redactObject } from '../utils/secretRedactor.js'
 import { ok, fail } from '../utils/apiResponse.js'
 import { ConflictError } from '../types/index.js'
 import { createPortfolioSchema, updatePortfolioSchema, portfolioExportQuerySchema, rebalancePortfolioSchema, portfolioHistoryQuerySchema, portfolioRebalanceHistoryQuerySchema, rebalanceHistoryExportQuerySchema, exportScheduleSchema, createDraftSchema, updateDraftSchema, portfolioSummaryQuerySchema, batchRebalancePlansSchema } from './validation.js'
 import { buildPortfolioSummaries } from '../services/portfolioSummary.js'
+import { getPublicShareView } from '../services/publicShare.js'
+import { OG_IMAGE_CONTENT_TYPE, renderPortfolioOgCard } from '../services/ogImage.js'
 import type { Portfolio } from '../types/index.js'
 
 import type { ExecuteRebalanceOptions } from '../services/stellar.js'
@@ -290,35 +294,55 @@ portfoliosRouter.delete('/portfolio/:id/share', ...protectedWriteLimiter, async 
 
 portfoliosRouter.get('/portfolio/share/:hash', async (req: Request, res: Response) => {
     try {
-        const hash = req.params.hash
-        if (!hash) return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+        const { hash } = req.params
+        if (typeof hash !== 'string' || hash.length === 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+        }
 
-        const share = databaseService.getPublicShareByHash(hash)
-        if (!share) return fail(res, 404, 'NOT_FOUND', 'Share link not found')
+        const lookup = await getPublicShareView(hash)
+        if (lookup.status === 'revoked') return fail(res, 410, 'GONE', 'This share link has been revoked')
+        if (lookup.status === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Share link not found')
 
-        if (!share.active) return fail(res, 410, 'GONE', 'This share link has been revoked')
-
-        const portfolio = await portfolioStorage.getPortfolio(share.portfolioId)
-        if (!portfolio) return fail(res, 404, 'NOT_FOUND', 'Portfolio not found')
-
-        const maskedAddress = share.userAddress.length > 10
-            ? `${share.userAddress.slice(0, 4)}...${share.userAddress.slice(-4)}`
-            : share.userAddress
-
-        return ok(res, {
-            portfolio: {
-                id: share.portfolioId,
-                allocations: portfolio.allocations,
-                totalValue: portfolio.totalValue,
-                threshold: portfolio.threshold,
-                lastRebalance: portfolio.lastRebalance,
-                createdAt: portfolio.createdAt,
-            },
-            owner: { address: maskedAddress },
-            sharedAt: share.createdAt,
-        })
+        return ok(res, lookup.view)
     } catch (error) {
         logger.error('[ERROR] Get public share failed', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * Open Graph card for a shared portfolio. Crawlers fetch this URL directly from
+ * `og:image`, so the image has to exist server-side rather than be painted by
+ * the browser. Renders from the masked share view — same payload, same
+ * revocation rules as the JSON endpoint above.
+ */
+portfoliosRouter.get('/portfolio/share/:hash/og.png', async (req: Request, res: Response) => {
+    try {
+        const { hash } = req.params
+        if (typeof hash !== 'string' || hash.length === 0) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
+        }
+
+        const lookup = await getPublicShareView(hash)
+        if (lookup.status === 'revoked') return fail(res, 410, 'GONE', 'This share link has been revoked')
+        if (lookup.status === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Share link not found')
+
+        const { portfolio, owner } = lookup.view
+        const png = renderPortfolioOgCard({
+            name: portfolio.name,
+            totalValue: portfolio.totalValue,
+            threshold: portfolio.threshold,
+            allocations: portfolio.allocations,
+            ownerAddress: owner.address,
+        })
+
+        res.setHeader('Content-Type', OG_IMAGE_CONTENT_TYPE)
+        res.setHeader('Content-Length', String(png.length))
+        /** Crawlers re-fetch on every share, so cache hard at the edge only. */
+        res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=86400')
+        return res.status(200).send(png)
+    } catch (error) {
+        logger.error('[ERROR] Render public share OG image failed', { error: getErrorObject(error) })
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
@@ -895,37 +919,84 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
 
             logger.info('Rebalance executed', { portfolioId, status: result.status, explanation: result.explanation });
 
-            if (result.status === 'failed') {
-                // Persisted record and HTTP status must agree on failure.
+            logger.info('Rebalance executed', {
+                portfolioId,
+                status: result.status,
+                explanation: result.explanation,
+            });
+
+            const isFailed = result.status === 'failed';
+            const errorReason = isFailed
+                ? (
+                    result.failureReason ||
+                    result.explanation?.failureReason ||
+                    result.error ||
+                    'Rebalance execution failed'
+                )
+                : undefined;
+
+            if (isFailed) {
                 await rebalanceHistoryService.recordRebalanceEvent({
                     portfolioId,
                     trigger: 'Manual Rebalancing',
                     trades: result.trades ?? 0,
                     gasUsed: result.gasUsed ?? '0 XLM',
-                    feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
-                    slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
+                    feePaid: result.feePaid
+                        ?? result.feeEstimate?.totalFeeXlm
+                        ?? result.gasFeeXlm,
+                    slippageBps: result.slippageBps
+                        ?? result.actualSlippageBps
+                        ?? result.estimatedTotalSlippageBps,
                     status: 'failed',
                     isAutomatic: false,
-                    error: result.explanation ?? 'Rebalance execution failed',
+                    error: errorReason,
+                    details: {
+                        actor: 'user',
+                        source: 'api',
+                        explanation: result.explanation,
+                        failureReason: errorReason,
+                    },
                 });
-                return fail(res, 422, 'REBALANCE_FAILED', result.explanation ?? 'Rebalance execution failed', { result });
+
+                return fail(
+                    res,
+                    422,
+                    'REBALANCE_FAILED',
+                    errorReason,
+                    { result },
+                );
             }
 
-            // Persist post-rebalance portfolio state with optimistic CAS.
+            // Persist the successful rebalance using optimistic concurrency control.
             try {
-                await portfolioStorage.updatePortfolio(portfolioId, {
-                    lastRebalance: new Date().toISOString(),
-                    balances: result.newBalances ?? portfolio.balances,
-                    totalValue: result.newTotalValue ?? portfolio.totalValue,
-                }, capturedVersion);
-            } catch (persistErr) {
-                // CAS conflict or DB error — log but don't fail the response; the trade already executed.
-                logger.warn('Portfolio state persistence failed after successful rebalance', {
+                const persisted = await portfolioStorage.updatePortfolio(
                     portfolioId,
-                    error: getErrorMessage(persistErr),
-                    conflictError: persistErr instanceof ConflictError,
-                });
+                    {
+                        lastRebalance: new Date().toISOString(),
+                        balances: result.newBalances ?? portfolio.balances,
+                        totalValue: result.newTotalValue ?? portfolio.totalValue,
+                    },
+                    capturedVersion,
+                );
+
+                if (!persisted) {
+                    logger.warn(
+                        'Portfolio state persistence returned false after successful rebalance',
+                        { portfolioId, capturedVersion },
+                    );
+                }
+            } catch (persistErr) {
+                // The trade has already executed; report persistence failures explicitly.
+                logger.error(
+                    'Portfolio state persistence failed after successful rebalance',
+                    {
+                        portfolioId,
+                        error: getErrorMessage(persistErr),
+                        conflictError: persistErr instanceof ConflictError,
+                    },
+                );
             }
+
 
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
@@ -934,20 +1005,114 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 gasUsed: result.gasUsed ?? '0 XLM',
                 feePaid: result.feePaid ?? result.feeEstimate?.totalFeeXlm ?? result.gasFeeXlm,
                 slippageBps: result.slippageBps ?? result.actualSlippageBps ?? result.estimatedTotalSlippageBps,
-                status: 'completed',
+status: 'completed',
                 isAutomatic: false,
+                error: errorReason,
+                details: {
+                    actor: 'user',
+                    source: 'api',
+                    explanation: result.explanation,
+                    ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
+                },
             });
 
+            const deliveryId = `manual-rebalance-${portfolioId}-${Date.now()}`;
+            try {
+                await notificationService.notify({
+                    userId: portfolio.userAddress,
+                    portfolioId,
+                    eventType: 'rebalance',
+                    title: isFailed ? 'Manual Portfolio Rebalance Failed' : 'Manual Portfolio Rebalance Completed',
+                    message: isFailed
+                        ? `Manual rebalance failed: ${errorReason}`
+                        : `Your portfolio rebalance completed. ${result.trades ?? 0} trades executed with ${result.gasUsed ?? '0 XLM'} gas used.`,
+                    deliveryId,
+                    data: {
+                        portfolioId,
+                        trades: result.trades,
+                        gasUsed: result.gasUsed,
+                        trigger: 'manual',
+                        status: isFailed ? 'failed' : 'completed',
+                        ...(isFailed && errorReason ? { failureReason: errorReason } : {}),
+                    },
+                    timestamp: new Date().toISOString(),
+                });
+            } catch (notifyErr) {
+                logger.error('[REBALANCE] Notification failed (non-fatal)', {
+                    portfolioId,
+                    error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+                });
+            }
+
             return ok(res, { result });
+        } catch (innerError) {
+            // Preserve state consistency during interrupted or failed rebalances:
+            // Persist the failed event so external error result and recorded history agree
+            const failureReason = innerError instanceof ConflictError
+                ? 'Rebalance conflict: execution already in progress'
+                : 'Rebalance execution failed due to an unexpected error';
+            const rawErrorMessage = innerError instanceof Error ? innerError.message : String(innerError);
+            const sanitizedDiagnostics = redactString(rawErrorMessage);
+
+            try {
+                await rebalanceHistoryService.recordRebalanceEvent({
+                    portfolioId,
+                    trigger: 'Manual Rebalancing (Failed)',
+                    trades: 0,
+                    gasUsed: '0 XLM',
+                    status: 'failed',
+                    isAutomatic: false,
+                    error: failureReason,
+                    details: {
+                        actor: 'user',
+                        source: 'api',
+                        outcome: 'failed',
+                        failureReason,
+                        diagnosticContext: sanitizedDiagnostics,
+                    },
+                });
+            } catch (histErr) {
+                logger.error('[ERROR] Failed to record failure rebalance event', {
+                    error: getErrorObject(histErr),
+                    portfolioId,
+                });
+            }
+
+            try {
+                const portfolio = await stellarService.getPortfolio(portfolioId).catch(() => null);
+                if (portfolio?.userAddress) {
+                    await notificationService.notify({
+                        userId: portfolio.userAddress,
+                        portfolioId,
+                        eventType: 'rebalance',
+                        title: 'Manual Portfolio Rebalance Failed',
+                        message: `Manual rebalance failed: ${failureReason}`,
+                        deliveryId: `manual-rebalance-${portfolioId}-${Date.now()}`,
+                        data: {
+                            portfolioId,
+                            trigger: 'manual',
+                            status: 'failed',
+                            failureReason,
+                        },
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            } catch (notifyErr) {
+                logger.error('[REBALANCE] Failure notification failed (non-fatal)', {
+                    portfolioId,
+                    error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+                });
+            }
+
+            throw innerError;
         } finally {
             await releaseWorkerLock(portfolioId);
         }
     } catch (error) {
         if (error instanceof ConflictError) {
-            return fail(res, 409, 'CONFLICT', error.message);
+            return fail(res, 409, 'CONFLICT', 'Rebalance already in progress for this portfolio');
         }
-        // Record a failed event so that exceptions don't leave a silent gap in the audit log.
-        try {
+ try {
             await rebalanceHistoryService.recordRebalanceEvent({
                 portfolioId,
                 trigger: 'Manual Rebalancing',
@@ -958,11 +1123,22 @@ portfoliosRouter.post('/portfolio/:id/rebalance', idempotencyMiddleware, validat
                 error: getErrorMessage(error),
             });
         } catch (histErr) {
-            logger.error('[ERROR] Failed to persist failure history event', { portfolioId, histErr });
+            logger.error('[ERROR] Failed to persist failure history event', {
+                portfolioId,
+                error: getErrorObject(histErr),
+            });
         }
-        console.error('[ERROR] Manual rebalance failed:', error);
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
-    }
+
+        logger.error('[ERROR] Manual rebalance failed', {
+            error: getErrorObject(error),
+        });
+
+        return fail(
+            res,
+            500,
+            'INTERNAL_ERROR',
+            'Rebalance execution failed',
+        );
 
 });
 
@@ -1018,7 +1194,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history', validateQuery(portfolio
         });
     } catch (error) {
         logger.error('[ERROR] Failed to fetch rebalance history', { error: getErrorObject(error) });
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch rebalance history');
     }
 });
 
@@ -1048,7 +1224,7 @@ portfoliosRouter.get('/portfolio/:id/rebalance-history/export', validateQuery(re
         return res.status(200).send(result.body);
     } catch (error) {
         logger.error('[ERROR] Failed to export rebalance history', { error: getErrorObject(error) });
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error));
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to export rebalance history');
     }
 });
 

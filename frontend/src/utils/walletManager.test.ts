@@ -7,8 +7,9 @@ describe('WalletManager', () => {
 
   beforeEach(() => {
     localStorage.clear()
+    delete (window as any).hana
     walletManager = new WalletManager()
-    vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('connects to a supported wallet and persists state', async () => {
@@ -109,5 +110,25 @@ describe('WalletManager', () => {
     walletManager.setAutoReconnect(true)
     expect(walletManager.getAutoReconnect()).toBe(true)
     expect(localStorage.getItem('wallet_auto_reconnect')).toBe('true')
+  })
+
+  it('connects to Hana through the real adapter registry', async () => {
+    const disconnect = vi.fn().mockResolvedValue(undefined)
+    ;(window as any).hana = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GHANA...' }),
+      isConnected: vi.fn().mockResolvedValue(true),
+      signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: 'signed-xdr' }),
+      disconnect,
+    }
+
+    const publicKey = await walletManager.connect('hana')
+
+    expect(publicKey).toBe('GHANA...')
+    expect(localStorage.getItem('wallet_type')).toBe('hana')
+    await expect(walletManager.signTransaction('tx-xdr', 'PUBLIC')).resolves.toBe('signed-xdr')
+    await walletManager.disconnect()
+    expect(disconnect).toHaveBeenCalledOnce()
+
+    delete (window as any).hana
   })
 })

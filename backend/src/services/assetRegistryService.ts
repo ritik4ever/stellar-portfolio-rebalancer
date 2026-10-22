@@ -22,7 +22,7 @@ export interface AssetRecord {
     lastRefreshedAt?: string
     isQuarantined: boolean
     stale: boolean
-    /** Issuer-verification state (#1412). Assets predating the workflow read as 'verified'. */
+   
     verificationStatus: AssetVerificationStatus
     verificationNotes?: string
     submittedBy?: string
@@ -30,7 +30,7 @@ export interface AssetRecord {
     reviewedAt?: string
 }
 
-/** Raised when a verification transition is not allowed from the asset's current state. */
+
 export class AssetVerificationError extends Error {
     constructor(message: string) {
         super(message)
@@ -91,10 +91,7 @@ export const assetRegistryService = {
         return mapped
     },
 
-    /**
-     * Filter, sort, and paginate the asset catalog. Centralises the catalog
-     * browsing logic so routes stay thin and the behaviour is unit-testable.
-     */
+   
     query(options: AssetQueryOptions = {}): AssetQueryResult {
         const {
             enabledOnly = true,
@@ -188,13 +185,7 @@ export const assetRegistryService = {
         })
     },
 
-    // ── issuer-verification workflow (#1412) ──────────────────────────────────
-
-    /**
-     * User submission of an unlisted asset. The asset is created in `pending`
-     * state and disabled, so it is visible for review but cannot be traded until
-     * an admin approves it — unlisted issuers are never silently trusted.
-     */
+    
     async submitForVerification(
         symbol: unknown,
         name: unknown,
@@ -240,10 +231,7 @@ export const assetRegistryService = {
             .map(a => this.checkAndApplyAutoQuarantine(a))
     },
 
-    /**
-     * Approve a pending submission: marks it verified and enables it.
-     * Only pending assets can be approved.
-     */
+    
     approveVerification(symbol: string, reviewedBy: string, notes?: string): AssetRecord {
         const asset = this.requirePending(symbol, 'approved')
         databaseService.setAssetVerification(asset.symbol, 'verified', { reviewedBy, notes })
@@ -251,10 +239,7 @@ export const assetRegistryService = {
         return this.getBySymbol(asset.symbol)!
     },
 
-    /**
-     * Reject a pending submission: marks it rejected and keeps it disabled.
-     * Only pending assets can be rejected.
-     */
+   
     rejectVerification(symbol: string, reviewedBy: string, notes?: string): AssetRecord {
         const asset = this.requirePending(symbol, 'rejected')
         databaseService.setAssetVerification(asset.symbol, 'rejected', { reviewedBy, notes })

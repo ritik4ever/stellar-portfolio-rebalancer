@@ -1,7 +1,15 @@
 use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, Map, String, Vec};
 
 pub const MIN_TRADE_AMOUNT_STROOPS: i128 = 1_000_000;
+/// Denominator used for target allocation percentages (10,000 basis points = 100.00%).
 pub const ALLOCATION_DENOMINATOR: u32 = 10_000;
+/// Minimum allowed target weight for an individual asset in basis points (1 bps = 0.01%).
+/// Target weights equal to 0 bps are rejected with `Error::InvalidAllocation`.
+pub const MIN_TARGET_WEIGHT_BPS: u32 = 1;
+/// Maximum allowed target weight for an individual asset in basis points (10,000 bps = 100.00%).
+pub const MAX_TARGET_WEIGHT_BPS: u32 = ALLOCATION_DENOMINATOR;
+/// Strict sum invariant: all asset target weights must sum to exactly 10,000 basis points (100.00%).
+pub const TARGET_WEIGHT_SUM_BPS: u32 = ALLOCATION_DENOMINATOR;
 pub const REFLECTOR_PRICE_DECIMALS: u32 = 14;
 pub const DEFAULT_ASSET_DECIMALS: u32 = 7;
 pub const MAX_ASSET_DECIMALS: u32 = 18;
@@ -62,6 +70,11 @@ pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
 pub const DEFAULT_ASSET_SLIPPAGE_BPS: u32 = 100; // 1%
 /// Maximum configurable contract-level max execution slippage per asset class (5%).
 pub const MAX_ASSET_SLIPPAGE_BPS: u32 = 500; // 5%
+/// Contract-level upper bound on a portfolio's aggregate (`global_max_slippage_bps`)
+/// slippage cap (10%). `set_global_max_slippage` rejects larger values and the
+/// aggregate check clamps stored values to this bound, so the sum-of-legs
+/// slippage defense can never be disabled by a malformed or malicious request.
+pub const MAX_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 1000; // 10%
 
 /// Rebalancing strategy types, mirroring backend `RebalanceStrategyType`.
 #[contracttype]
@@ -268,8 +281,8 @@ pub enum DataKey {
     LastTimestamp,
     DCAConfig(u64),
     NavHistory(u64),
-    StopLoss(u64, Address),
     CircuitBreakerConfig,
+    StopLoss(u64, Address),
     /// Storage key for portfolios stored with the V2 (strategy-aware) schema.
     PortfolioV2(u64),
     QueuedFeeConfig,
@@ -431,17 +444,21 @@ pub enum Error {
     TemplateNotFound = 34,
     TemplateAlreadyExists = 35,
     TooManyTemplates = 36,
+    InvalidSplitPercentage = 37,
+    CannotMergeSamePortfolio = 38,
+    PortfolioOwnerMismatch = 39,
+    ArithmeticOverflow = 40,
     /// Caller authenticated successfully but is neither the contract admin
     /// nor a registered operator for an operator-eligible entrypoint.
-    Unauthorized = 37,
+    Unauthorized = 41,
     /// `accept_admin` was called while no admin transfer is in flight
     /// (`propose_admin` has never run, or the transfer already completed).
-    NoPendingAdmin = 38,
+    NoPendingAdmin = 42,
     /// A proposed admin is required to differ from the current admin;
     /// re-proposing the incumbent would be a no-op transfer.
-    InvalidAdminProposal = 39,
+    InvalidAdminProposal = 43,
     /// Portfolio creation failed because the user reached the maximum allowed portfolios.
-    TooManyPortfolios = 40,
+    TooManyPortfolios = 44,
 }
 
 #[contracttype]

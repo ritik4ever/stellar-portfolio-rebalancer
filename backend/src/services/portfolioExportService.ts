@@ -252,10 +252,7 @@ export interface ScheduledExportRunResult {
     emailedTo?: string
 }
 
-/**
- * Opt a portfolio into (or out of) a recurring emailed export.
- * Only weekly CSV is supported today; the storage shape leaves room for more.
- */
+
 export function setExportSchedule(input: SetExportScheduleInput): ExportSchedule {
     const schedule = dbUpsertExportSchedule({
         portfolioId: input.portfolioId,
@@ -293,15 +290,7 @@ export function listDueExportSchedules(asOf?: string): ExportSchedule[] {
     return dbListDueExportSchedules(asOf)
 }
 
-/**
- * Generate and email one scheduled export.
- *
- * The CSV is produced by the same `getPortfolioExport` path the on-demand export
- * endpoint uses — no duplicated generation logic — and delivered through the
- * existing notification email provider as an attachment. The schedule's cursor is
- * advanced whether the run succeeded or failed, so one bad run cannot wedge the
- * schedule into retrying forever.
- */
+
 export async function runScheduledExport(
     schedule: ExportSchedule,
 ): Promise<ScheduledExportRunResult> {

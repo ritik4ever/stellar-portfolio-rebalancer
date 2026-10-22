@@ -168,6 +168,46 @@ describe('notification delivery metrics (#1394)', () => {
             ).toBe(before + 1)
         })
 
+        it('labels an unknown delivery outcome separately and does not retry it', async () => {
+            const { deliverWithBackoff, NotificationDeliveryError } = await import(
+                '../services/notificationDelivery.js'
+            )
+            const before = await counterValue(M, {
+                channel: 'email',
+                outcome: 'failure',
+                reason: 'delivery_unknown',
+            })
+            const retriedBefore = await counterValue(M_ATTEMPTS, {
+                channel: 'email',
+                outcome: 'retried',
+            })
+
+            await expect(
+                deliverWithBackoff(
+                    { provider: 'email', userId: 'GUSER', eventType: 'rebalance', policy: FAST_POLICY },
+                    async () => {
+                        throw new NotificationDeliveryError('outcome unknown', {
+                            kind: 'ambiguous',
+                            reason: 'delivery_unknown',
+                            idempotencyKey: '<abc@example.com>',
+                        })
+                    },
+                ),
+            ).rejects.toThrow('outcome unknown')
+
+            expect(
+                await counterValue(M, {
+                    channel: 'email',
+                    outcome: 'failure',
+                    reason: 'delivery_unknown',
+                }),
+            ).toBe(before + 1)
+            // A possibly-delivered message must never be retried.
+            expect(await counterValue(M_ATTEMPTS, { channel: 'email', outcome: 'retried' })).toBe(
+                retriedBefore,
+            )
+        })
+
         it('recovers on a later attempt without recording a failure', async () => {
             const { deliverWithBackoff } = await import('../services/notificationDelivery.js')
             const failBefore = await counterValue(M, { channel: 'email', outcome: 'failure' })

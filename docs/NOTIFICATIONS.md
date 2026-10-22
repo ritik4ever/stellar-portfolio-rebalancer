@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Stellar Portfolio Rebalancer includes a comprehensive notification system that alerts users about important portfolio events via email and webhooks.
+The Stellar Portfolio Rebalancer includes a comprehensive notification system that alerts users about important portfolio events via email, webhooks, Slack, and SMS.
 
 ## Features
 
@@ -12,8 +12,8 @@ The Stellar Portfolio Rebalancer includes a comprehensive notification system th
 - **SMS Notifications**: Send text message alerts via Twilio
 - **Event Filtering**: Subscribe to specific event types
 - **User Preferences**: Per-user notification configuration
-- **Configurable backoff**: Provider-specific retry timing for email and webhooks (max attempts, initial delay, exponential multiplier, cap)
-- **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
+- **Configurable backoff**: Provider-specific retry timing for email, webhooks, Slack, and SMS (max attempts, initial delay, exponential multiplier, cap)
+- **Delivery logs**: Each attempt records status (`sent`, `retried`, `failed`, `uncertain`, `skipped`) with optional `attempt_number` and `backoff_delay_ms`
 - **Non-blocking**: Notification failures don't affect core operations
 
 ## Delivery backoff configuration
@@ -42,6 +42,40 @@ Retry behavior is loaded at startup from environment variables (validated in `st
 | `SMS_BACKOFF_MULTIPLIER` | SMS | `2` | Exponential multiplier per retry |
 
 On each failed attempt (before the final failure), the service logs a `retried` row with the scheduled backoff delay. After all attempts are exhausted, a `failed` row is written and an error is logged with `maxAttempts` and the last error message.
+
+### Safe email recovery (ambiguous delivery)
+
+SMTP has no way to retract a message. When a connection times out (or is dropped) *after* the message body was written but *before* the server's final confirmation arrived, the server may already have delivered the email. Retrying that failure could send the same alert twice, so email failures are classified before retrying (`backend/src/services/emailDeliverySafety.ts`):
+
+| Classification | Examples | Behaviour |
+|----------------|----------|-----------|
+| `retryable` | `ECONNREFUSED`, `ENOTFOUND`, DNS failures, explicit 4xx responses, generic local errors | Retried with the configured backoff, up to `EMAIL_MAX_ATTEMPTS` |
+| `permanent` | SMTP 5xx responses, `EAUTH` credential failures, invalid/missing recipients detected locally | Not retried; logged as `failed` with `failureKind: "permanent"` |
+| `ambiguous` | `ETIMEDOUT`/`ECONNECTION`/`ECONNRESET`/`EPIPE` after a connection was established, with no explicit rejection response | **Not retried**; logged as `uncertain` with `failureKind: "ambiguous"` |
+
+Every email carries a deterministic `Message-ID` derived from the user, portfolio, event type, title and timestamp. The same id is reused for every retry of one notification and is included in the error message, delivery-log metadata (`idempotencyKey`) and logs, so an operator or the receiving provider can correlate a possible duplicate with the original attempt. Look for the structured log line `Notification delivery outcome unknown; retry stopped to avoid duplicate side effects` and the metric label `reason="delivery_unknown"` when triaging.
+
+Because the outcome is genuinely unknown, no automatic resend happens. Confirm delivery with the SMTP provider using the `Message-ID` before re-triggering the notification manually. When a `deliveryId` is in play, the delivery is cached as `uncertain`, so a repeated trigger for the same event is logged as `skipped` (`Delivery outcome unknown for this event; not resending automatically`) instead of sending again.
+
+## State Consistency in Notification Delivery (SPR-2026-168)
+
+To prevent discrepancies between user-visible delivery results and persisted database records, the notification delivery subsystem enforces the following guarantees:
+
+### 1. Exactly-Once Visible Notification under Concurrency
+When concurrent operations trigger notification delivery for the same event (e.g., duplicate webhooks, rebalance queue retries, or concurrent API requests), deliveries are coordinated using a deterministic `deliveryId`:
+- **In-Flight Deduplication**: If a delivery is already in flight for a given `deliveryId`, concurrent requests wait on the in-flight execution rather than dispatching duplicate SMTP messages or webhooks.
+- **Completed Delivery Caching**: Subsequent triggers for an already-completed delivery are skipped with status `skipped` and reason `Duplicate notification: already sent for this event`.
+- **Traceable Attempts**: Every invocation records an entry in `notification_logs` associated with the `delivery_id`. The user receives exactly one notification, while audit logs maintain a full trace of all initiated and deduplicated attempts.
+
+### 2. Interrupted Work & Abort Consistency
+During network partitions, worker restarts, or process termination:
+- If delivery is interrupted or cancelled (e.g. via `AbortSignal` during backoff retry delay), `deliverWithBackoff` catches the interruption and guarantees that a final `failed` outcome is logged to `notification_logs` (`Interrupted: <reason>`).
+- Persisted records never remain stuck in a pending `retried` state when an operation has externally failed or aborted.
+
+### 3. Rebalance Workflow Agreement
+- Both completed and failed rebalances (manual or automated) trigger corresponding notification events and delivery attempts.
+- Rebalance status (`completed` | `failed`) and failure reasons are rendered consistently across templates and recorded in notification logs.
+
 
 ## Event Types
 
@@ -533,6 +567,10 @@ GET /api/notifications/preferences?userId=GXXXXXXX...
     "emailAddress": "user@example.com",
     "webhookEnabled": true,
     "webhookUrl": "https://your-domain.com/webhook",
+    "slackEnabled": true,
+    "slackWebhookUrl": "<your-slack-incoming-webhook-url>",
+    "smsEnabled": true,
+    "smsPhoneNumber": "+15559876543",
     "events": {
       "rebalance": true,
       "circuitBreaker": true,
@@ -579,7 +617,9 @@ X-Signature: <base64_signature_of_message>
   "message": "Test notification sent successfully",
   "sentTo": {
     "email": "user@example.com",
-    "webhook": "https://your-domain.com/webhook"
+    "webhook": "https://your-domain.com/webhook",
+    "slack": "<your-slack-incoming-webhook-url>",
+    "sms": "+15559876543"
   },
   "eventType": "rebalance",
   "timestamp": "2024-02-20T10:30:00.000Z"
@@ -816,6 +856,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 ### Slack Delivery Failures
 
+> **Implementation module:** `backend/src/notifications/slack.ts`
+
 **Problem**: Slack notifications not appearing in channel
 
 **Solutions**:
@@ -841,6 +883,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 
 ### SMS Delivery Failures
 
+> **Implementation module:** `backend/src/notifications/sms.ts`
+
 **Problem**: SMS not being delivered to phone
 
 **Solutions**:
@@ -849,7 +893,8 @@ Set `ENABLE_DEBUG_ROUTES=true` before running these steps locally.
 3. Check that `SMS_ENABLED=true` is set in environment variables
 4. Verify Twilio credentials: confirm `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are correct
 5. Check the Twilio console (https://console.twilio.com) for message logs and error details
-6. Twilio trial accounts can only send to verified numbers — upgrade to a paid account for unrestricted delivery
+6. Check backend logs for `sms` provider entries
+7. Twilio trial accounts can only send to verified numbers — upgrade to a paid account for unrestricted delivery
 
 **Problem**: Twilio returns error `21603` ("A 'From' phone number is required") or `21211` ("Invalid 'To' phone number")
 

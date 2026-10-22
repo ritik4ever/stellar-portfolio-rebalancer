@@ -25,6 +25,8 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Returns:** `Ok(())` on success, `Err(Error::AlreadyInitialized)` if already initialized.
 - **Preconditions:**
   - Contract must not already be initialized.
+  - `admin` must authorize the initialization; the caller cannot select an
+    admin address on someone else’s behalf.
 
 ### `get_admin(env: Env) -> Address`
 
@@ -85,7 +87,11 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `Err(Error::UnsupportedSlippagePolicyVersion)`
 - **Preconditions:**
   - `user.require_auth()` succeeds.
-  - Allocation map passes `portfolio::validate_allocations`.
+  - Allocation map passes `portfolio::validate_allocations`:
+    - Each asset target weight must be within `MIN_TARGET_WEIGHT_BPS..=MAX_TARGET_WEIGHT_BPS` (`1..=10_000` bps). Allocations with 0 bps are rejected.
+    - Total sum across all assets must equal exactly `TARGET_WEIGHT_SUM_BPS` (`10_000` bps / 100.00%) in integer units.
+    - Under-allocation (< 10,000 bps, e.g. 9,999 bps) and over-allocation (> 10,000 bps, e.g. 10,001 bps) return `Err(Error::InvalidAllocation)`.
+    - Preserves stored state and unchanged funds on failure.
   - Asset count is `<= MAX_PORTFOLIO_ASSETS` (`10`).
 
 ### `create_portfolio_with_strategy(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32, strategy: StrategyType, strategy_config: StrategyConfig) -> Result<u64, Error>`
@@ -171,6 +177,27 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 - **Preconditions:**
   - Portfolio must exist; otherwise contract panics on `.unwrap()`.
 
+### `update_allocations(env: Env, portfolio_id: u64, new_allocations: Map<Address, u32>) -> Result<(), Error>`
+
+- **Purpose:** Updates target allocations for an existing portfolio and emits a `("portfolio","alloc_upd")` event.
+- **Parameters:**
+  - `portfolio_id`: ID of the portfolio to update.
+  - `new_allocations`: New target allocations per asset (`Address -> percentage`).
+- **Returns:** `Ok(())` on success, or one of:
+  - `Err(Error::PortfolioNotFound)` — portfolio ID does not exist in storage.
+  - `Err(Error::InvalidAllocation)` — allocations violate the target-weight invariant (`1..=10_000` bps per asset, strictly summing to `10,000` bps).
+  - `Err(Error::AssetNotSupported)` — an asset in `new_allocations` does not exist in the portfolio's registered `asset_decimals`.
+  - `Err(Error::InvariantViolation)` — post-update invariant check fails.
+- **Preconditions / Failure behavior:**
+  - Portfolio owner signature required (`portfolio.user.require_auth()`).
+  - Allocation map passes `portfolio::validate_allocations`.
+  - Target-weight boundary enforcement:
+    - Each asset weight must satisfy `MIN_TARGET_WEIGHT_BPS..=MAX_TARGET_WEIGHT_BPS` (`1..=10_000` bps). Zero weights are rejected.
+    - Weights must sum to exactly `TARGET_WEIGHT_SUM_BPS` (`10_000` bps / 100.00%) in integer units.
+    - Under-allocation (e.g. 9,999 bps) and over-allocation (e.g. 10,001 bps) return `Err(Error::InvalidAllocation)`.
+    - Atomic failure guarantee: stored target allocations, current balances, and contract token funds are preserved on failure, and no `alloc_upd` event is emitted.
+- **Event payload:** `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)`
+
 ### `check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error>`
 
 - **Purpose:** Checks internal consistency and structural invariants of a stored portfolio.
@@ -225,6 +252,11 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `actual_balances`: Actual balances used for slippage checks.
 - **Preconditions / failure behavior:**
   - Portfolio must exist and steward/owner must authorize call.
+- **Contract-level slippage enforcement (independent of the backend):**
+  - Before any balance mutation, every leg is checked against the contract-level per-asset-class limit (`set_asset_slippage`, default 100 bps / 1%, max 500 bps / 5%).
+  - Fail-closed on malformed input: a zero/negative oracle price or a negative reported balance reverts with `Error::InvalidPrice`; a non-zero reported balance for an asset with no expected leg reverts with `Error::SlippageExceeded`.
+  - The sum of per-leg slippage across all legs is capped by the portfolio's `global_max_slippage_bps`, which can never exceed `MAX_GLOBAL_MAX_SLIPPAGE_BPS` (1000 bps / 10%): `set_global_max_slippage` rejects larger values and stored values are clamped at enforcement time.
+  - Exceeding any bound reverts the entire rebalance with `Error::SlippageExceeded` and emits a `("slippage_guard","triggered")` event.
 
 ### `admin_force_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
@@ -345,6 +377,16 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
   - `portfolio_id`: Target portfolio ID.
   - `reason`: `PauseReason` enum value.
 
+### `resume_portfolio(env: Env, portfolio_id: u64) -> ()`
+
+- **Purpose:** Resumes a paused portfolio, clearing the `is_active` flag and resetting the pause reason to `PauseReason::None`. Rebalancing and deposits become available again after a successful resume.
+- **Parameters:**
+  - `portfolio_id`: Target portfolio ID.
+- **Preconditions:**
+  - The caller must be the portfolio owner or a designated steward (`require_auth`).
+- **Events:** Emits `("portfolio", "resumed", (portfolio_id, steward))`.
+- **See also:** [`pause_portfolio`](#pause_portfolioenv-env-portfolio_id-u64-reason-pausereason----)
+
 ### `get_contract_pause_reason(env: Env) -> PauseReason`
 
 - **Purpose:** Returns the current contract-level pause reason.
@@ -391,6 +433,11 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 | `33` | `TooManyTemplates` | The template registry already holds `MAX_TEMPLATES` (50) entries. | There is no delete entrypoint. Repurpose an existing template's allocations via `update_template` instead of creating a new one. |
 | `38` | `NoPendingAdmin` | `accept_admin` was called while no admin transfer is in flight. | Have the current admin call `propose_admin` first, or check `get_pending_admin` before accepting. |
 | `39` | `InvalidAdminProposal` | `propose_admin` was called with the address that is already the current admin. | Propose a different address; re-proposing the incumbent would be a no-op transfer. |
+| `40` | `ArithmeticOverflow` | An arithmetic operation overflowed. | Report this error with the full transaction envelope to the maintainers. |
+| `41` | `Unauthorized` | Caller authenticated successfully but is neither the contract admin nor a registered operator for an operator-eligible entrypoint. | Use an admin or registered operator address. |
+| `42` | `NoPendingAdmin` | `accept_admin` was called while no admin transfer is in flight. | Have the current admin call `propose_admin` first, or check `get_pending_admin` before accepting. |
+| `43` | `InvalidAdminProposal` | `propose_admin` was called with the address that is already the current admin. | Propose a different address; re-proposing the incumbent would be a no-op transfer. |
+| `44` | `TooManyPortfolios` | Portfolio creation failed because the user reached the maximum allowed portfolios. | Close an existing portfolio via `close_portfolio` before creating a new one. |
 
 For common invocation examples and debugging commands, see the [Soroban Cookbook](../docs/soroban-cookbook.md).
 

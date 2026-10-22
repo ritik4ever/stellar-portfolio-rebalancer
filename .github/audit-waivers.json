@@ -1,6 +1,1 @@
-{
-  "$schema": "Dependency audit waivers. Advisories listed here are accepted risks.",
-  "_docs": "See docs/DEPENDENCY_AUDIT.md for the waiver process.",
-  "npm": [],
-  "cargo": []
-}
+{"_comment":"Waiver process: add npm advisory IDs to security/npm-audit-baseline.json; add cargo advisory IDs to security/cargo-audit-baseline.txt. A security reviewer must approve the waiver PR.","npm":[],"cargo":[]}

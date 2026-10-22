@@ -3,6 +3,7 @@ import { getFeatureFlags } from '../config/featureFlags.js'
 import { logger } from '../utils/logger.js'
 import { recordCacheTtl, recordPriceFeedResolution, recordReflectorFallbackUsage, recordReflectorStalePrice, recordCacheOperation, recordCacheExpiration, recordCacheAge, recordCacheHitRatio, recordCacheSize, recordCacheEntries } from '../observability/metrics.js'
 import { assetRegistryService } from './assetRegistryService.js'
+import { CoinGeckoFallbackCache, readCoinGeckoFallbackTtlMs } from './coinGeckoFallbackCache.js'
 import { REDIS_URL } from '../queue/connection.js'
 import { databaseService } from './databaseService.js'
 
@@ -66,6 +67,7 @@ export class ReflectorService {
     private redisCache: Awaited<ReturnType<typeof import('ioredis').default>> | null = null
     private redisAvailable: boolean = false
     private readonly ORACLE_CACHE_KEY = 'oracle:prices'
+    private readonly coinGeckoFallbackCache: CoinGeckoFallbackCache<PriceData>
 
     constructor() {
         this.coinGeckoApiKey = process.env.COINGECKO_API_KEY || ''
@@ -75,6 +77,7 @@ export class ReflectorService {
 
         const rawTtl = Number.parseInt(process.env.ORACLE_CACHE_TTL_SECONDS || '30', 10)
         this.oracleCacheTtlSeconds = Number.isFinite(rawTtl) && rawTtl >= 0 ? rawTtl : 30
+        this.coinGeckoFallbackCache = new CoinGeckoFallbackCache(readCoinGeckoFallbackTtlMs())
 
         // Initialize cache metrics reporting
         this.startCacheMetricsReporting()
@@ -433,6 +436,11 @@ export class ReflectorService {
 
     private async getFreshPrices(assets: string[], coinIds: Record<string, string>): Promise<PricesMap> {
         const now = Date.now()
+        const cachedFallback = this.coinGeckoFallbackCache.getAll(assets, now)
+        if (cachedFallback) {
+            logger.info('[DEBUG] CoinGecko fallback cache hit', { assets })
+            return cachedFallback
+        }
 
         // Rate limiting - don't make requests too frequently
         if (now - this.lastRequestTime < this.MIN_REQUEST_INTERVAL) {
@@ -534,6 +542,7 @@ export class ReflectorService {
 
                     prices[asset] = priceData
 
+                    const cachedAtMs = Date.now()
                     this.priceCache.set(asset, {
                         data: {
                             price: priceData.price,
@@ -542,8 +551,9 @@ export class ReflectorService {
                             source: priceData.source,
                             volume: priceData.volume
                         },
-                        cachedAtMs: Date.now()
+                        cachedAtMs
                     })
+                    this.coinGeckoFallbackCache.put(asset, { ...priceData, servedFromCache: true }, cachedAtMs)
 
                     // Record cache update operation
                     recordCacheOperation('update', asset)
@@ -636,29 +646,46 @@ export class ReflectorService {
 
     async getPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
         try {
-            const coinIds = this.getCoinIdMap()
-            const coinId = coinIds[asset]
-            if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
-
-            const apiKey = this.coinGeckoApiKey
-            const baseUrl = this.getBaseUrl()
-
-            const headers: Record<string, string> = {
-                'Accept': 'application/json',
-                'User-Agent': 'StellarPortfolioRebalancer/1.0'
+            return await this.getMarketPriceHistory(asset, days)
+        } catch (error) {
+            logger.error('Failed to get price history for asset', { asset, error })
+            if (!getFeatureFlags().allowMockPriceHistory) {
+                throw new Error(`Price history unavailable for ${asset} and ALLOW_MOCK_PRICE_HISTORY is disabled`)
             }
+            return this.generateMockHistory(asset, days * 24)
+        }
+    }
 
-            if (apiKey && apiKey.trim()) {
-                headers['x-cg-pro-api-key'] = apiKey.trim()
-            }
+    /**
+     * Real historical prices from CoinGecko `market_chart`. Never falls back to
+     * synthetic data — callers that must not show mock prices (e.g. backtests)
+     * use this instead of getPriceHistory.
+     */
+    async getMarketPriceHistory(asset: string, days: number = 7): Promise<Array<{ timestamp: number, price: number }>> {
+        const coinIds = this.getCoinIdMap()
+        const coinId = coinIds[asset]
+        if (!coinId) throw new Error(`Unsupported asset: ${asset}`)
 
-            let interval = 'daily'
-            if (days <= 1) interval = 'minutely'
-            else if (days <= 7) interval = 'hourly'
+        const apiKey = this.coinGeckoApiKey
+        const baseUrl = this.getBaseUrl()
 
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const headers: Record<string, string> = {
+            'Accept': 'application/json',
+            'User-Agent': 'StellarPortfolioRebalancer/1.0'
+        }
 
+        if (apiKey && apiKey.trim()) {
+            headers['x-cg-pro-api-key'] = apiKey.trim()
+        }
+
+        let interval = 'daily'
+        if (days <= 1) interval = 'minutely'
+        else if (days <= 7) interval = 'hourly'
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+        try {
             const response = await fetch(
                 `${baseUrl}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`,
                 {
@@ -666,8 +693,6 @@ export class ReflectorService {
                     signal: controller.signal
                 }
             )
-
-            clearTimeout(timeoutId)
 
             if (!response.ok) {
                 throw new Error(`CoinGecko history API error: ${response.status}`)
@@ -679,12 +704,8 @@ export class ReflectorService {
                 timestamp: Math.floor(timestamp / 1000),
                 price
             }))
-        } catch (error) {
-            logger.error('Failed to get price history for asset', { asset, error })
-            if (!getFeatureFlags().allowMockPriceHistory) {
-                throw new Error(`Price history unavailable for ${asset} and ALLOW_MOCK_PRICE_HISTORY is disabled`)
-            }
-            return this.generateMockHistory(asset, days * 24)
+        } finally {
+            clearTimeout(timeoutId)
         }
     }
 
@@ -912,6 +933,7 @@ export class ReflectorService {
 
     clearCache(): void {
         this.priceCache.clear()
+        this.coinGeckoFallbackCache.clear()
         logger.info('[DEBUG] Price cache cleared')
     }
 

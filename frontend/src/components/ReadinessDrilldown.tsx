@@ -3,14 +3,7 @@ import { ChevronDown, ChevronUp, CheckCircle, AlertTriangle, MinusCircle, Loader
 import type { ReadinessReport } from '../hooks/useReadinessReport'
 import type { ReadinessHistoryEntry } from '../hooks/useReadinessHistory'
 
-type Props = {
-    report: ReadinessReport | null
-    loading: boolean
-    loadError: boolean
-    history?: ReadinessHistoryEntry[]
-    historyLoading?: boolean
-    historyError?: boolean
-}
+
 
 const CHECK_LABELS: Record<string, string> = {
     database: 'Database',
@@ -27,6 +20,15 @@ function formatTime(ts: string): string {
     } catch {
         return ts
     }
+}
+
+interface Props {
+    report: ReadinessReport | null | undefined
+    loading: boolean
+    loadError: boolean
+    history: ReadinessHistoryEntry[] | null | undefined
+    historyLoading: boolean
+    historyError: boolean
 }
 
 function formatDate(ts: string): string {

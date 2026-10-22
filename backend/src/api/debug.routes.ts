@@ -17,10 +17,7 @@ export const debugRouter = Router()
 
 const reflectorService = new ReflectorService()
 
-/**
- * Debug-only + admin-gated endpoint for sending a single test notification.
- * This keeps test-notification behavior explicit and isolated from production routes.
- */
+
 debugRouter.post('/debug/notifications/test', blockDebugInProduction, requireAdmin, validateRequest(debugTestNotificationSchema), async (req: Request, res: Response) => {
     try {
         const userId = (req.body.userId ?? req.user?.address) as string | undefined
@@ -87,10 +84,10 @@ debugRouter.get('/debug/force-fresh-prices', blockDebugInProduction, requireAdmi
     try {
         logger.info('[DEBUG] Clearing cache and forcing fresh prices...')
 
-        // Clear cache first
+        
         reflectorService.clearCache()
 
-        // Get cache status
+        
         const cacheStatus = reflectorService.getCacheStatus()
 
         const { prices, feedMeta } = await reflectorService.getCurrentPricesWithMeta()

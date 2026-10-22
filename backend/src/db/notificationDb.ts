@@ -6,6 +6,11 @@ export interface NotificationPreferencesRow {
     email_address: string | null
     webhook_enabled: number
     webhook_url: string | null
+    slack_enabled: number
+    slack_webhook_url: string | null
+    sms_enabled: number
+    phone_number: string | null
+    phone_verified: number
     digest_mode: string | null
     price_alert_thresholds: string | null
     event_rebalance: number
@@ -22,6 +27,11 @@ export interface NotificationPreferences {
     emailAddress?: string
     webhookEnabled: boolean
     webhookUrl?: string
+    slackEnabled?: boolean
+    slackWebhookUrl?: string
+    smsEnabled?: boolean
+    phoneNumber?: string
+    phoneVerified?: boolean
     digestMode?: 'immediate' | 'daily' | 'weekly'
     priceAlertThresholds?: Record<string, number>
     events: {
@@ -29,6 +39,7 @@ export interface NotificationPreferences {
         circuitBreaker: boolean
         priceMovement: boolean
         riskChange: boolean
+        correlation_breakdown?: boolean
     }
 }
 
@@ -60,6 +71,11 @@ function ensureNotificationTable() {
             email_address TEXT,
             webhook_enabled INTEGER NOT NULL DEFAULT 0,
             webhook_url TEXT,
+            slack_enabled INTEGER NOT NULL DEFAULT 0,
+            slack_webhook_url TEXT,
+            sms_enabled INTEGER NOT NULL DEFAULT 0,
+            phone_number TEXT,
+            phone_verified INTEGER NOT NULL DEFAULT 0,
             digest_mode TEXT NOT NULL DEFAULT 'immediate',
             event_rebalance INTEGER NOT NULL DEFAULT 1,
             event_circuit_breaker INTEGER NOT NULL DEFAULT 1,
@@ -80,6 +96,14 @@ function ensureNotificationTable() {
         );
 
         CREATE INDEX IF NOT EXISTS idx_notification_logs_user ON notification_logs(user_id);
+
+        CREATE TABLE IF NOT EXISTS sms_verifications (
+            user_id TEXT PRIMARY KEY,
+            phone_number TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
     `)
     migrateNotificationLogColumns(db)
     migrateNotificationPreferenceColumns(db)
@@ -91,6 +115,11 @@ function migrateNotificationPreferenceColumns(db: Database.Database): void {
     if (!names.has('price_alert_thresholds')) {
         db.exec(`ALTER TABLE notification_preferences ADD COLUMN price_alert_thresholds TEXT`)
     }
+    if (!names.has('slack_enabled')) db.exec(`ALTER TABLE notification_preferences ADD COLUMN slack_enabled INTEGER NOT NULL DEFAULT 0`)
+    if (!names.has('slack_webhook_url')) db.exec(`ALTER TABLE notification_preferences ADD COLUMN slack_webhook_url TEXT`)
+    if (!names.has('sms_enabled')) db.exec(`ALTER TABLE notification_preferences ADD COLUMN sms_enabled INTEGER NOT NULL DEFAULT 0`)
+    if (!names.has('phone_number')) db.exec(`ALTER TABLE notification_preferences ADD COLUMN phone_number TEXT`)
+    if (!names.has('phone_verified')) db.exec(`ALTER TABLE notification_preferences ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0`)
 }
 
 function migrateNotificationLogColumns(db: Database.Database): void {
@@ -101,6 +130,9 @@ function migrateNotificationLogColumns(db: Database.Database): void {
     }
     if (!names.has('backoff_delay_ms')) {
         db.exec(`ALTER TABLE notification_logs ADD COLUMN backoff_delay_ms INTEGER`)
+    }
+    if (!names.has('delivery_id')) {
+        db.exec(`ALTER TABLE notification_logs ADD COLUMN delivery_id TEXT`)
     }
 }
 
@@ -124,13 +156,19 @@ function rowToPreferences(r: NotificationPreferencesRow): NotificationPreference
         emailAddress: r.email_address || undefined,
         webhookEnabled: r.webhook_enabled === 1,
         webhookUrl: r.webhook_url || undefined,
+        slackEnabled: r.slack_enabled === 1,
+        slackWebhookUrl: r.slack_webhook_url || undefined,
+        smsEnabled: r.sms_enabled === 1,
+        phoneNumber: r.phone_number || undefined,
+        phoneVerified: r.phone_verified === 1,
         digestMode: r.digest_mode ? (r.digest_mode as 'immediate' | 'daily' | 'weekly') : 'immediate',
         priceAlertThresholds: parsePriceAlertThresholds(r.price_alert_thresholds),
         events: {
             rebalance: r.event_rebalance === 1,
             circuitBreaker: r.event_circuit_breaker === 1,
             priceMovement: r.event_price_movement === 1,
-            riskChange: r.event_risk_change === 1
+            riskChange: r.event_risk_change === 1,
+            correlation_breakdown: true,
         }
     }
 }
@@ -143,16 +181,22 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
 
     db.prepare(`
         INSERT INTO notification_preferences 
-            (user_id, email_enabled, email_address, webhook_enabled, webhook_url, 
+            (user_id, email_enabled, email_address, webhook_enabled, webhook_url,
+             slack_enabled, slack_webhook_url, sms_enabled, phone_number, phone_verified,
              digest_mode, price_alert_thresholds,
              event_rebalance, event_circuit_breaker, event_price_movement, event_risk_change,
              created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (user_id) DO UPDATE SET
             email_enabled = excluded.email_enabled,
             email_address = excluded.email_address,
             webhook_enabled = excluded.webhook_enabled,
             webhook_url = excluded.webhook_url,
+            slack_enabled = excluded.slack_enabled,
+            slack_webhook_url = excluded.slack_webhook_url,
+            sms_enabled = excluded.sms_enabled,
+            phone_number = excluded.phone_number,
+            phone_verified = excluded.phone_verified,
             digest_mode = excluded.digest_mode,
             price_alert_thresholds = excluded.price_alert_thresholds,
             event_rebalance = excluded.event_rebalance,
@@ -166,6 +210,11 @@ export function dbSaveNotificationPreferences(preferences: NotificationPreferenc
         preferences.emailAddress || null,
         preferences.webhookEnabled ? 1 : 0,
         preferences.webhookUrl || null,
+        preferences.slackEnabled ? 1 : 0,
+        preferences.slackWebhookUrl || null,
+        preferences.smsEnabled ? 1 : 0,
+        preferences.phoneNumber || null,
+        preferences.phoneVerified ? 1 : 0,
         preferences.digestMode || 'immediate',
         preferences.priceAlertThresholds && Object.keys(preferences.priceAlertThresholds).length > 0
             ? JSON.stringify(preferences.priceAlertThresholds)
@@ -299,6 +348,42 @@ export function dbDeleteNotificationPreferences(userId: string): boolean {
     return result.changes > 0
 }
 
+export interface SmsVerification {
+    userId: string
+    phoneNumber: string
+    codeHash: string
+    expiresAt: string
+}
+
+export function dbSaveSmsVerification(verification: SmsVerification): void {
+    ensureNotificationTable()
+    getDb().prepare(`
+        INSERT INTO sms_verifications (user_id, phone_number, code_hash, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET phone_number=excluded.phone_number,
+          code_hash=excluded.code_hash, expires_at=excluded.expires_at, created_at=excluded.created_at
+    `).run(verification.userId, verification.phoneNumber, verification.codeHash, verification.expiresAt, new Date().toISOString())
+}
+
+export function dbGetSmsVerification(userId: string): SmsVerification | undefined {
+    ensureNotificationTable()
+    const row = getDb().prepare<[string], { user_id: string, phone_number: string, code_hash: string, expires_at: string }>(
+        'SELECT user_id, phone_number, code_hash, expires_at FROM sms_verifications WHERE user_id = ?'
+    ).get(userId)
+    return row ? { userId: row.user_id, phoneNumber: row.phone_number, codeHash: row.code_hash, expiresAt: row.expires_at } : undefined
+}
+
+export function dbConfirmSmsVerification(userId: string, phoneNumber: string): void {
+    ensureNotificationTable()
+    const db = getDb()
+    const transaction = db.transaction(() => {
+        db.prepare(`UPDATE notification_preferences SET phone_number = ?, phone_verified = 1, sms_enabled = 1, updated_at = ? WHERE user_id = ?`)
+          .run(phoneNumber, new Date().toISOString(), userId)
+        db.prepare('DELETE FROM sms_verifications WHERE user_id = ?').run(userId)
+    })
+    transaction()
+}
+
 /**
  * Represents a log entry for a notification delivery attempt.
  * Used for tracking provider success/failure and troubleshooting.
@@ -308,17 +393,27 @@ export interface NotificationLogMetadata {
     maxAttempts?: number
     backoffDelayMs?: number
     nextAttempt?: number
+    deliveryId?: string
+    /** Retry safety classification of the last failure. */
+    failureKind?: 'retryable' | 'ambiguous' | 'permanent'
+    /** False when the delivery was stopped instead of retried. */
+    retryable?: boolean
+    /** True when a non-retryable failure stopped the attempt sequence early. */
+    stoppedEarly?: boolean
+    /** Stable Message-ID for the logical notification, reused across attempts. */
+    idempotencyKey?: string
 }
 
 export interface NotificationLog {
     id: number
     userId: string
-    provider: 'email' | 'webhook'
+    provider: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram'
     eventType: string
-    status: 'sent' | 'failed' | 'retried' | 'skipped'
+    status: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain'
     errorMessage?: string
     attemptNumber?: number
     backoffDelayMs?: number
+    deliveryId?: string
     createdAt: string
 }
 
@@ -333,9 +428,9 @@ export interface NotificationLog {
  */
 export function dbLogNotificationOutcome(
     userId: string,
-    provider: 'email' | 'webhook',
+    provider: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram',
     eventType: string,
-    status: 'sent' | 'failed' | 'retried' | 'skipped',
+    status: 'sent' | 'failed' | 'retried' | 'skipped' | 'uncertain',
     errorMessage?: string,
     metadata?: NotificationLogMetadata
 ): void {
@@ -345,8 +440,8 @@ export function dbLogNotificationOutcome(
     
     db.prepare(`
         INSERT INTO notification_logs 
-            (user_id, provider, event_type, status, error_message, created_at, attempt_number, backoff_delay_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, provider, event_type, status, error_message, created_at, attempt_number, backoff_delay_ms, delivery_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         userId,
         provider,
@@ -356,6 +451,7 @@ export function dbLogNotificationOutcome(
         now,
         metadata?.attempt ?? null,
         metadata?.backoffDelayMs ?? null,
+        metadata?.deliveryId ?? null,
     )
 
     // Run 30-day retention cleanup. Note: SQLite uses 'now', '-30 days' for datetime math.
@@ -371,17 +467,23 @@ export function dbLogNotificationOutcome(
  * Useful for exposing operational visibility and debugging delivery issues.
  * @param userId - ID of the user to fetch logs for
  * @param limit - Max number of logs to return (default: 50)
+ * @param deliveryId - Optional deliveryId filter for tracing a specific delivery
  */
-export function dbGetNotificationLogs(userId: string, limit: number = 50): NotificationLog[] {
+export function dbGetNotificationLogs(
+    userId: string,
+    limit: number = 50,
+    deliveryId?: string,
+): NotificationLog[] {
     ensureNotificationTable()
     const db = getDb()
 
-    const rows = db.prepare<[string, number], any>(`
-        SELECT * FROM notification_logs 
-        WHERE user_id = ? 
-        ORDER BY created_at DESC 
-        LIMIT ?
-    `).all(userId, limit)
+    const query = deliveryId
+        ? `SELECT * FROM notification_logs WHERE user_id = ? AND delivery_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+        : `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+
+    const rows = deliveryId
+        ? db.prepare<[string, string, number], any>(query).all(userId, deliveryId, limit)
+        : db.prepare<[string, number], any>(query).all(userId, limit)
 
     return rows.map((r: any) => ({
         id: r.id,
@@ -392,8 +494,43 @@ export function dbGetNotificationLogs(userId: string, limit: number = 50): Notif
         errorMessage: r.error_message || undefined,
         attemptNumber: r.attempt_number ?? undefined,
         backoffDelayMs: r.backoff_delay_ms ?? undefined,
+        deliveryId: r.delivery_id ?? undefined,
         createdAt: r.created_at
     }))
+}
+
+/**
+ * Retrieves the most recent delivery log for a given user and optional provider.
+ * Allows callers to verify that persistent records agree with externally visible results.
+ */
+export function dbGetLatestNotificationLog(
+    userId: string,
+    provider?: 'email' | 'webhook' | 'slack' | 'sms' | 'telegram',
+): NotificationLog | undefined {
+    ensureNotificationTable()
+    const db = getDb()
+
+    const query = provider
+        ? `SELECT * FROM notification_logs WHERE user_id = ? AND provider = ? ORDER BY id DESC LIMIT 1`
+        : `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1`
+
+    const row = provider
+        ? db.prepare<[string, string], any>(query).get(userId, provider)
+        : db.prepare<[string], any>(query).get(userId)
+
+    if (!row) return undefined
+    return {
+        id: row.id,
+        userId: row.user_id,
+        provider: row.provider,
+        eventType: row.event_type,
+        status: row.status,
+        errorMessage: row.error_message || undefined,
+        attemptNumber: row.attempt_number ?? undefined,
+        backoffDelayMs: row.backoff_delay_ms ?? undefined,
+        deliveryId: row.delivery_id ?? undefined,
+        createdAt: row.created_at,
+    }
 }
 
 // ── per-portfolio notification preference overrides (#1395) ──────────────────

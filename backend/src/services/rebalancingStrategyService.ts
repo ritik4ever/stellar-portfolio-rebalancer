@@ -21,6 +21,17 @@ export interface CrossCheckConfig {
     alertOnDisagreement: boolean
 }
 
+export interface DcaSchedule {
+    /** Days between scheduled buys (from `dcaIntervalDays` ?? `intervalDays` ?? 7). */
+    intervalDays: number
+    /** Milliseconds between scheduled buys. */
+    intervalMs: number
+    /** Amount to buy each interval in the portfolio's base unit (from `dcaAmount`, default 0). */
+    amount: number
+    /** Timestamp of the next scheduled buy (lastRebalance + intervalMs). */
+    nextBuyAtMs: number
+}
+
 /**
  * Determines if a portfolio should be rebalanced based on its configured strategy.
  */
@@ -108,10 +119,32 @@ function dcaStrategy(
     config: RebalanceStrategyConfig,
     now: number
 ): boolean {
+    const schedule = computeDcaSchedule(portfolio, config, now)
+    // A DCA buy requires a configured amount – nothing to buy otherwise.
+    if (schedule.amount <= 0) return false
+    return now >= schedule.nextBuyAtMs
+}
+
+/**
+ * Computes the scheduled DCA buy amount/interval and the next due timestamp
+ * from a portfolio's strategy config. Mirrors the contract-side DCA capability
+ * (`configure_dca` amount + interval) so the backend scheduler can trigger DCA
+ * executions on their own cadence.
+ */
+export function computeDcaSchedule(
+    portfolio: Portfolio,
+    config: RebalanceStrategyConfig,
+    _now?: number
+): DcaSchedule {
     const intervalDays = config.dcaIntervalDays ?? config.intervalDays ?? 7
-    const lastMs = new Date(portfolio.lastRebalance).getTime()
     const intervalMs = intervalDays * 24 * 60 * 60 * 1000
-    return now - lastMs >= intervalMs
+    const lastMs = new Date(portfolio.lastRebalance).getTime()
+    return {
+        intervalDays,
+        intervalMs,
+        amount: config.dcaAmount ?? 0,
+        nextBuyAtMs: lastMs + intervalMs,
+    }
 }
 
 export const REBALANCE_STRATEGIES: { value: RebalanceStrategyType; label: string; description: string }[] = [

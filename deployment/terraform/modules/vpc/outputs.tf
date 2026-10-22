@@ -9,3 +9,8 @@ output "public_subnet_ids" {
 output "private_subnet_ids" {
   value = aws_subnet.private[*].id
 }
+
+output "azs" {
+  value       = var.azs
+  description = "Availability zones the VPC subnets are spread across."
+}

@@ -1,0 +1,27 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "name": "portfolio-rebalancer-contracts",
+      "version": "0.1.0",
+      "type": "application"
+    },
+    "timestamp": "2026-08-30T23:26:41.096Z"
+  },
+  "components": [
+    {
+      "name": "soroban-sdk",
+      "version": "27.0.2",
+      "type": "library",
+      "purl": "pkg:cargo/soroban-sdk@27.0.2"
+    },
+    {
+      "name": "ed25519-dalek",
+      "version": "2.2.0",
+      "type": "library",
+      "purl": "pkg:cargo/ed25519-dalek@2.2.0"
+    }
+  ]
+}

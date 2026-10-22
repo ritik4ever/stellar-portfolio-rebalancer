@@ -149,7 +149,7 @@ export const WalletSelector: React.FC<WalletSelectorProps> = ({ onConnect, onErr
             <p className="text-sm text-gray-600 dark:text-gray-400" id="wallet-selector-label">
                 Select a wallet to connect
             </p>
-            {availableWallets.map((wallet, index) => (
+            {availableWallets.map((wallet) => (
                 <button
                     key={wallet.type}
                     onClick={() => handleConnect(wallet.type)}

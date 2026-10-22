@@ -167,14 +167,18 @@ export async function processRebalanceJob(
       try {
         await notificationService.notify({
           userId: portfolio.userAddress,
+          portfolioId,
           eventType: "rebalance",
           title: "Portfolio Rebalanced",
           message: `Your portfolio has been automatically rebalanced. ${rebalanceResult.trades ?? 0} trades executed with ${rebalanceResult.gasUsed ?? "0 XLM"} gas used.`,
+          deliveryId: `rebalance-job-${job.id}`,
           data: {
             portfolioId,
             trades: rebalanceResult.trades,
             gasUsed: rebalanceResult.gasUsed,
             trigger: triggeredBy,
+            status: "completed",
+            jobId: job.id,
           },
           timestamp: new Date().toISOString(),
         });
@@ -219,6 +223,33 @@ export async function processRebalanceJob(
       } catch (histErr) {
         logger.error("[WORKER:rebalance] Failed to record failure event", {
           histErr,
+        });
+      }
+
+      try {
+        const portfolio = await stellarService.getPortfolio(portfolioId).catch(() => null);
+        if (portfolio?.userAddress) {
+          await notificationService.notify({
+            userId: portfolio.userAddress,
+            portfolioId,
+            eventType: "rebalance",
+            title: "Portfolio Rebalance Failed",
+            message: `Portfolio rebalance failed: ${errorMessage}`,
+            deliveryId: `rebalance-job-${job.id}-attempt-${job.attemptsMade + 1}`,
+            data: {
+              portfolioId,
+              status: "failed",
+              failureReason: errorMessage,
+              jobId: job.id,
+              attempt: job.attemptsMade + 1,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (notifyErr) {
+        logger.error("[WORKER:rebalance] Failure notification failed (non-fatal)", {
+          portfolioId,
+          error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
         });
       }
 

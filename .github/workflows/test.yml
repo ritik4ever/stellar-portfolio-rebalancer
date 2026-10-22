@@ -20,7 +20,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  NODE_VERSION: "20"
   # Default: quarantined tests are skipped. The nightly job and workflow_dispatch
   # override this to "run" so flaky tests can be checked in isolation.
   QUARANTINE_MODE: ${{ github.event.inputs.quarantine_mode || (github.event_name == 'schedule' && 'run') || 'skip' }}
@@ -63,13 +62,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
         working-directory: backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Run backend tests (shard ${{ matrix.shard }}/${{ matrix.total }})
         working-directory: backend
@@ -104,13 +103,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
         working-directory: backend
-        run: npm ci
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Download all blob reports
         uses: actions/download-artifact@v4
@@ -149,7 +148,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -183,7 +182,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: backend/package-lock.json
 

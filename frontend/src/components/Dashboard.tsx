@@ -5,7 +5,6 @@ import { TrendingUp, AlertCircle, RefreshCw, ArrowLeft, ExternalLink, Trash2, Pl
 import ThemeToggle from './ThemeToggle'
 import LanguageSelector from './LanguageSelector'
 import { useTheme } from '../context/ThemeContext'
-import AssetCard from './AssetCard'
 import AssetList from './AssetList'
 import RebalanceHistory from './RebalanceHistory'
 import PerformanceChart from './PerformanceChart'
@@ -13,24 +12,26 @@ import AllocationHistory from './AllocationHistory'
 import NotificationPreferences from './NotificationPreferences'
 import { StellarWallet } from '../utils/stellar'
 import PriceTracker from './PriceTracker'
+import PriceTicker from './PriceTicker'
+import ExportPDF from './ExportPDF'
 
-import { MarketMovers } from './MarketMovers'
 import { API_CONFIG } from '../config/api'
 import { marketMoversKeys } from '../hooks/queries/useMarketMoversQuery'
-import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, useRebalancePlan, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
+import { useUserPortfolios, usePortfolioDetails, useRebalanceEstimate, usePortfolioCostSummary, portfolioKeys } from '../hooks/queries/usePortfolioQuery'
 import { dashboardCopy } from '../content/uiCopy'
-import { buildPortfolioCloneDraft, savePortfolioCloneDraft, loadPortfolioCloneDraft, clearPortfolioCloneDraft } from '../utils/portfolioCloneDraft'
+import { buildPortfolioCloneDraft, savePortfolioCloneDraft } from '../utils/portfolioCloneDraft'
 import { usePrices, formatPriceFeedSummary, priceKeys } from '../hooks/queries/usePricesQuery'
 import { useExecuteRebalanceMutation } from '../hooks/mutations/usePortfolioMutations'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ENDPOINTS } from '../config/api'
 import { logout as authLogout } from '../services/authService'
-import { getAccessToken } from '../services/authService'
 import RouteErrorState from './RouteErrorState'
 import { downloadCSV, downloadJSON, toCSV } from '../utils/export'
 import { downloadPortfolioExport } from '../config/api'
-import { usePortfolioExport } from '../hooks/usePortfolio'
 import { usePortfolioLiveFeed } from '../hooks/usePortfolioLiveFeed'
+import { DriftGaugeGrid, type DriftGaugeAsset } from './DriftGauge'
+import { trackEvent } from '../analytics'
+import PriceCandlestick, { type RebalanceEvent as CandlestickRebalanceEvent } from './PriceCandlestick'
 
 interface DashboardProps {
     onNavigate: (view: string) => void
@@ -77,12 +78,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     } = usePrices()
     const { data: rebalanceEstimate } = useRebalanceEstimate(latestPortfolioId)
     const { data: costSummary, isLoading: costSummaryLoading } = usePortfolioCostSummary(latestPortfolioId)
-
-    const [showRebalanceConfirm, setShowRebalanceConfirm] = useState(false)
-    const { data: rebalancePlan, isLoading: rebalancePlanLoading, isError: rebalancePlanError } = useRebalancePlan(
-        latestPortfolioId,
-        showRebalanceConfirm,
-    )
 
     const executeRebalanceMutation = useExecuteRebalanceMutation(latestPortfolioId)
 
@@ -336,8 +331,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
     const startClonePortfolio = useCallback(() => {
         if (portfolioData?.id && portfolioData.id !== 'demo') {
             const draft = buildPortfolioCloneDraft(portfolioData)
-            savePortfolioCloneDraft(draft)
-            onNavigate('setup')
+            if (draft) {
+                savePortfolioCloneDraft(draft)
+                onNavigate('setup')
+            }
         }
     }, [portfolioData, onNavigate])
 
@@ -529,6 +526,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors">Export CSV</button>
                                     <button onClick={() => exportFromApi('pdf')}
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors">Export PDF</button>
+                                    <ExportPDF
+                                        portfolioData={portfolioData as any}
+                                        allocationData={allocationData}
+                                        prices={prices}
+                                        performanceData={performanceData}
+                                        publicKey={publicKey}
+                                    />
                                 </>
                             ) : (
                                 <>
@@ -536,6 +540,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50">Export CSV</button>
                                     <button onClick={exportPortfolioJSON} disabled={!portfolioData}
                                         className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50">Export JSON</button>
+                                    <ExportPDF
+                                        portfolioData={portfolioData as any}
+                                        allocationData={allocationData}
+                                        prices={prices}
+                                        performanceData={performanceData}
+                                        publicKey={publicKey}
+                                    />
                                     <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Connect wallet for full export (PDF + history)</span>
                                 </>
                             )}
@@ -725,6 +736,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                     </div>
                 </div>
             )}
+
+            {/* Price Ticker Banner */}
+            <PriceTicker />
 
             <div className="p-6 max-w-7xl mx-auto">
                 {/* Tab Navigation */}
@@ -1050,9 +1064,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
                 )}
 
                 {/* Notifications Tab */}
-                {activeTab === 'notifications' && (
+                {activeTab === 'notifications' && publicKey && (
                     <div className="space-y-6">
-                        <NotificationPreferences publicKey={publicKey} />
+                        <NotificationPreferences userId={publicKey} />
                     </div>
                 )}
             </div>

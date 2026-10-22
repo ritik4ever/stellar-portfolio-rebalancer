@@ -10,6 +10,8 @@ const portfolioStrategyConfigSchema = z.object({
     intervalDays: z.number().min(1).max(365).optional(),
     volatilityThresholdPct: z.number().min(1).max(100).optional(),
     minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
+    dcaAmount: z.number().positive().optional(),
+    dcaIntervalDays: z.number().min(1).max(365).optional(),
 }).strict()
 
 export const portfolioAllocationsSchema = z.record(z.string(), z.number().min(0).max(100)).refine(
@@ -28,7 +30,7 @@ export const portfolioSettingsSchema = z.object({
     allocations: portfolioAllocationsSchema,
     threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
     slippageTolerance: z.number().min(0.1, "Slippage tolerance must be between 0.1% and 5%").max(5, "Slippage tolerance must be between 0.1% and 5%").optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom', 'dca']).optional(),
     strategyConfig: portfolioStrategyConfigSchema.optional(),
     name: z.string().max(256, "name is too long").optional(),
     description: z.string().max(2000, "description is too long").optional(),
@@ -191,14 +193,55 @@ export const consentAuditQuerySchema = z.object({
     user_id: z.string().min(1).optional()
 });
 
+export const consentExportQuerySchema = z.object({
+    userId: z.string().min(1, 'userId is required').optional(),
+    user_id: z.string().min(1).optional()
+});
+
 // ─── Notification schemas ─────────────────────────────────────────────────────
 export { notificationEventsSchema };
 export const notificationSubscribeSchema = notificationPreferencesSchema;
 
 export const notificationQuerySchema = z.object({
-    userId: z.string().min(1, 'userId query parameter is required').optional(),
+    userId: z.string().trim().min(1, 'userId query parameter is required').optional(),
     reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional()
 });
+
+// Dedicated schema for GET /notifications/preferences (#1803).
+// Rejects unknown query keys and malformed userId/reason before any DB access.
+export const notificationPreferencesQuerySchema = z
+    .object({
+        userId: z
+            .string()
+            .trim()
+            .min(1, 'userId query parameter is required')
+            .max(128, 'userId must be 128 characters or fewer')
+            .optional(),
+        reason: z.string().trim().max(280, 'Reason must be 280 characters or fewer').optional(),
+    })
+    .strict();
+
+// Domain constraints from the README Quick Start, reused wherever allocation
+// percentages are accepted so invalid payloads fail with a clean 400.
+export const allocationSumTo100Schema = z
+    .record(z.string().min(1), z.number().min(0).max(100))
+    .refine(
+        (allocations) => {
+            const entries = Object.entries(allocations)
+            if (entries.length === 0 || entries.length > MAX_PORTFOLIO_ASSETS) return false
+            const total = entries.reduce((sum, [, value]) => sum + value, 0)
+            return Math.abs(total - 100) <= 0.01
+        },
+        {
+            message: `Allocations must contain between 1 and ${MAX_PORTFOLIO_ASSETS} assets and sum to 100%`,
+        }
+    )
+
+export const notificationUnsubscribeQuerySchema = notificationQuerySchema.strict();
+export const notificationUnsubscribeBodySchema = z.preprocess(
+    (body) => body ?? {},
+    z.object({}).strict()
+);
 
 export const notificationThresholdsQuerySchema = z.object({
     userId: z.string().min(1, 'userId query parameter is required').optional(),
@@ -287,12 +330,8 @@ export const createDraftSchema = z.object({
     ),
     threshold: z.number().min(1).max(50),
     slippageTolerance: z.number().min(0.1).max(5).optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
-    strategyConfig: z.object({
-        intervalDays: z.number().min(1).max(365).optional(),
-        volatilityThresholdPct: z.number().min(1).max(100).optional(),
-        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
-    }).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom', 'dca']).optional(),
+    strategyConfig: portfolioStrategyConfigSchema.optional(),
 }).strict();
 
 export const updateDraftSchema = z.object({
@@ -306,12 +345,8 @@ export const updateDraftSchema = z.object({
     ).optional(),
     threshold: z.number().min(1).max(50).optional(),
     slippageTolerance: z.number().min(0.1).max(5).optional(),
-    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom']).optional(),
-    strategyConfig: z.object({
-        intervalDays: z.number().min(1).max(365).optional(),
-        volatilityThresholdPct: z.number().min(1).max(100).optional(),
-        minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
-    }).optional(),
+    strategy: z.enum(['threshold', 'periodic', 'volatility', 'custom', 'dca']).optional(),
+    strategyConfig: portfolioStrategyConfigSchema.optional(),
 }).strict();
 
 // ─── Export / query-param schemas ─────────────────────────────────────────────
@@ -377,3 +412,101 @@ export const portfolioHistoryQuerySchema = z.object({
     ),
     sort: z.enum(['asc', 'desc']).default('desc')
 });
+
+// ─── Price feed schemas ───────────────────────────────────────────────────────
+const isoDateString = z.string().refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid ISO date string');
+
+/** Maximum allowed OHLCV query range: 90 days in milliseconds */
+const OHLCV_MAX_RANGE_MS = 90 * 24 * 60 * 60 * 1000;
+
+export const ohlcvQuerySchema = z.object({
+    asset: z.string().min(1, 'asset is required').max(32).toUpperCase(),
+    interval: z.enum(['1h', '4h', '1d']),
+    from: isoDateString,
+    to: isoDateString,
+}).strict()
+    .refine(
+        (data) => Date.parse(data.from) < Date.parse(data.to),
+        { message: 'from must be before to', path: ['from'] }
+    )
+    .refine(
+        (data) => (Date.parse(data.to) - Date.parse(data.from)) <= OHLCV_MAX_RANGE_MS,
+        { message: 'Date range cannot exceed 90 days', path: ['to'] }
+    );
+
+/**
+ * Schema for GET /prices — the route accepts no query parameters.
+ * Any unknown param is rejected with a 400 to prevent confused clients
+ * from assuming filtered results are being returned.
+ */
+export const pricesQuerySchema = z.object({}).strict();
+
+// ─── Analytics schemas (#1430) ────────────────────────────────────────────────
+const notFutureDate = (v: string) => Date.parse(v) <= Date.now()
+
+export const analyticsQuerySchema = z.object({
+    days: z.preprocess(
+        (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+        z.number().int().min(1).optional()
+    ),
+    from: isoDateString.optional(),
+    to: isoDateString.optional(),
+}).strict()
+    .refine((data) => (data.from === undefined) === (data.to === undefined), {
+        message: 'from and to must be provided together',
+    })
+    .refine((data) => !data.from || !data.to || Date.parse(data.from) <= Date.parse(data.to), {
+        message: 'from must not be after to',
+    })
+    .refine((data) => !data.from || notFutureDate(data.from), {
+        message: 'from cannot be in the future',
+    })
+    .refine((data) => !data.to || notFutureDate(data.to), {
+        message: 'to cannot be in the future',
+    });
+
+export const analyticsBenchmarkQuerySchema = z.object({
+    from: isoDateString,
+    to: isoDateString,
+}).strict()
+    .refine((data) => Date.parse(data.from) <= Date.parse(data.to), {
+        message: 'from must not be after to',
+    })
+    .refine((data) => notFutureDate(data.from) && notFutureDate(data.to), {
+        message: 'dates cannot be in the future',
+    });
+
+// ─── User preferences schemas ─────────────────────────────────────────────────
+export const userPreferencesSchema = z.object({
+    default_threshold: z.number().min(1).max(50).optional(),
+    default_cooldown: z.number().min(0).optional(),
+    preferred_currency: z.string().min(1).optional(),
+    timezone: z.string().min(1).optional(),
+    notification_digest_frequency: z.enum(['immediate', 'daily', 'weekly']).optional()
+}).strict();
+
+export const userPreferencesQuerySchema = z.object({
+    userAddress: z.string().min(1, "userAddress is required")
+});
+
+// ─── Rebalance backtest (SPR-2026-151) ───────────────────────────────────────
+export const BACKTEST_MIN_DAYS = 7
+export const BACKTEST_MAX_DAYS = 365
+
+export const backtestRequestSchema = z.object({
+    allocations: portfolioAllocationsSchema,
+    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
+    days: z.number().int()
+        .min(BACKTEST_MIN_DAYS, `days must be between ${BACKTEST_MIN_DAYS} and ${BACKTEST_MAX_DAYS}`)
+        .max(BACKTEST_MAX_DAYS, `days must be between ${BACKTEST_MIN_DAYS} and ${BACKTEST_MAX_DAYS}`)
+        .default(90),
+    initialValue: z.number().positive().max(1_000_000_000).default(10_000),
+    from: isoDateString.optional(),
+    to: isoDateString.optional(),
+}).strict()
+    .refine((data) => (data.from === undefined) === (data.to === undefined), {
+        message: 'from and to must be provided together',
+    })
+    .refine((data) => !data.from || !data.to || Date.parse(data.from) <= Date.parse(data.to), {
+        message: 'from must not be after to',
+    });

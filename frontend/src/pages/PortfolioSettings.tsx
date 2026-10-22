@@ -36,7 +36,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
   onNavigate,
   portfolioId,
 }) => {
-  // Allocation settings
+  
   const [allocationSettings, setAllocationSettings] =
     useState<AllocationSettings>({
       minAllocation: 1,
@@ -48,7 +48,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       maxAllocation: 100,
     });
 
-  // Rebalancing settings
+ 
   const [rebalancingSettings, setRebalancingSettings] =
     useState<RebalancingSettings>({
       threshold: 5,
@@ -62,7 +62,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       autoRebalance: false,
     });
 
-  // Notification settings
+  
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>({
       emailEnabled: false,
@@ -78,7 +78,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
       riskAlerts: true,
     });
 
-  // Risk settings
+ 
   const [riskSettings, setRiskSettings] = useState<RiskSettings>({
     circuitBreakerEnabled: false,
     circuitBreakerThreshold: 20,
@@ -92,14 +92,14 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     stopLossPercentage: 15,
   });
 
-  // Asset freeze state
+ 
   const defaultAssets = ['XLM', 'USDC', 'BTC', 'ETH'];
   const [frozenAssets, setFrozenAssets] = useState<string[]>([]);
   const [savedFrozenAssets, setSavedFrozenAssets] = useState<string[]>([]);
 
   const { showToast } = useToast();
 
-  // Check if any section has unsaved changes
+  
   const hasUnsavedChanges =
     JSON.stringify(allocationSettings) !==
       JSON.stringify(savedAllocationSettings) ||
@@ -110,7 +110,7 @@ const PortfolioSettings: React.FC<PortfolioSettingsProps> = ({
     JSON.stringify(riskSettings) !== JSON.stringify(savedRiskSettings) ||
     JSON.stringify(frozenAssets) !== JSON.stringify(savedFrozenAssets);
 
-  // Warn before browser-level navigation
+  
   useEffect(() => {
     if (!hasUnsavedChanges) return undefined;
     const handler = (e: BeforeUnloadEvent) => {

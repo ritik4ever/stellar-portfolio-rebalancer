@@ -1,8 +1,12 @@
 # Contributing to Stellar Portfolio Rebalancer
 
+_Last verified: 2026-09-29_
+
 Thanks for your interest in contributing!
 
-The full contributor setup guide is at **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
+For a quick overview of the contributing guideline, see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+
+The full contributor setup guide is at **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**
 
 It covers:
 
@@ -10,7 +14,7 @@ It covers:
 - Optional services: PostgreSQL, Redis, SMTP
 - Database migrations (PostgreSQL and SQLite paths)
 - Running backend and frontend tests
-- OpenAPI maintenance (`cd backend && npm run openapi:export` and `npm run api:validate` — see [backend/docs/openapi.md](backend/docs/openapi.md))
+- OpenAPI maintenance (`cd backend && npm run openapi:export` and `npm run api:validate` - see [backend/docs/openapi.md](backend/docs/openapi.md))
 - Queue worker setup and expectations
 - Frontend E2E tests with Playwright
 - Contract build and deploy steps
@@ -55,7 +59,42 @@ We provide templates for common contribution types:
 - **Operations** - Infrastructure or deployment concerns
 - **Security** - Report security vulnerabilities (use private disclosure for critical issues)
 
-[Create an issue →](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/new/choose)
+[Create an issue ←](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/new/choose)
+
+## Secrets Scanning
+
+This repository uses [gitleaks](https://github.com/gitleaks/gitleaks) to prevent secrets from being committed.
+
+GitHub Actions enforces the same `.gitleaks.toml` policy in both the
+`Secret Scan` workflow and the `Pre-commit` workflow. The latter executes the
+entire `.pre-commit-config.yaml` on every pull request and push to `main`, so
+the configuration is a required automated check rather than an optional local
+convention. Lighthouse budgets in `.lighthouserc.json` are enforced by the
+path-scoped `Lighthouse CI` workflow whenever frontend or budget files change.
+
+### Local pre-commit hook
+
+The pre-commit hook (located at `scripts/hooks/pre-commit`) runs
+`gitleaks git --pre-commit --redact --staged` on every commit. To enable it:
+
+1. Install gitleaks (via Homebrew: `brew install gitleaks`, or Go: `go install github.com/gitleaks/gitleaks/v8@latest`)
+2. The hook is automatically installed via [Husky](https://typicode.github.io/husky/) or [pre-commit](https://pre-commit.com/) depending on your setup.
+
+If gitleaks finds a potential secret, the commit will be blocked.
+
+### Bypassing the local hook
+
+For exceptional cases (e.g., a false positive that hasn't been allowlisted yet), you can bypass the local hook with:
+
+```bash
+SKIP_SECRET_SCAN=1 git commit ...
+```
+
+**Note:** Bypassing the local hook does **not** bypass CI. The same scan runs in GitHub Actions, so you must still justify the bypass in your pull request. Do not use this unless absolutely necessary.
+
+### Maintaining the allowlist
+
+The allowlist lives in `.gitleaks.toml`. If a false positive is confirmed, add a rule to the `[allowlist]` section with a clear comment explaining why it is safe. Keep the allowlist as specific as possible to avoid hiding real secrets.
 
 ## For Maintainers
 
@@ -64,7 +103,7 @@ If you're a maintainer, see the [Maintainer Triage Guide](docs/TRIAGE.md) for ho
 
 - `feat(api): add new endpoint` -> Features
 - `fix(auth): resolve token issue` -> Bug Fixes
-- `perf(worker): reduce rebalance polling load` -> Performance
+- `perf: decrease load time` -> Performance
 - `feat(api)!: require signed export requests` or a `BREAKING CHANGE:` footer -> Breaking Changes
 
 **Release workflow**: See [CHANGELOG.md](CHANGELOG.md#release-notes-workflow) for the complete release notes process and maintainer responsibilities.

@@ -3,7 +3,7 @@ import { api, ENDPOINTS } from '../../config/api'
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
-export type CandlestickInterval = '1H' | '4H' | '1D' | '1W'
+export type CandlestickInterval = '1H' | '1D' | '1W'
 
 export interface OHLCVCandle {
     /** Unix timestamp in milliseconds */
@@ -32,11 +32,53 @@ export const candlestickKeys = {
 
 // ── interval → query param ─────────────────────────────────────────────────────
 
-const INTERVAL_PARAMS: Record<CandlestickInterval, string> = {
+export const INTERVAL_PARAMS: Record<CandlestickInterval, string> = {
     '1H': '1h',
-    '4H': '4h',
     '1D': '1d',
     '1W': '1w',
+}
+
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+
+function bucketStart(time: number, interval: CandlestickInterval): number {
+    const date = new Date(time)
+    if (interval === '1H') {
+        date.setUTCMinutes(0, 0, 0)
+        return date.getTime()
+    }
+    if (interval === '1D') {
+        date.setUTCHours(0, 0, 0, 0)
+        return date.getTime()
+    }
+
+    date.setUTCHours(0, 0, 0, 0)
+    const day = date.getUTCDay() || 7
+    return date.getTime() - (day - 1) * DAY_MS
+}
+
+export function aggregateCandles(
+    candles: OHLCVCandle[],
+    interval: CandlestickInterval
+): OHLCVCandle[] {
+    const buckets = new Map<number, OHLCVCandle>()
+
+    for (const candle of candles) {
+        const time = bucketStart(candle.time, interval)
+        const current = buckets.get(time)
+
+        if (!current) {
+            buckets.set(time, { ...candle, time })
+            continue
+        }
+
+        current.high = Math.max(current.high, candle.high)
+        current.low = Math.min(current.low, candle.low)
+        current.close = candle.close
+        current.volume += candle.volume
+    }
+
+    return Array.from(buckets.values()).sort((a, b) => a.time - b.time)
 }
 
 // ── hook ───────────────────────────────────────────────────────────────────────
@@ -64,7 +106,7 @@ export function usePriceCandlestick(
                 }))
                 .filter((c) => Number.isFinite(c.time) && c.high >= c.low)
                 .sort((a, b) => a.time - b.time)
-            return { asset: raw.asset ?? asset!, interval, candles }
+            return { asset: raw.asset ?? asset!, interval, candles: aggregateCandles(candles, interval) }
         },
         enabled: !!asset,
         staleTime: 60_000,

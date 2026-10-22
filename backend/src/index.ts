@@ -39,6 +39,17 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     initializeSentry()
     setupProcessErrorHandlers()
 
+    // ── Proactive credential refresh ────────────────────────────────────────
+    // When AWS Secrets Manager is configured, start a background loop that
+    // proactively re-fetches DB and Redis credentials every 4 minutes.
+    // This ensures the in-process credential cache is refreshed well before
+    // the 5-minute TTL expires, so a rotation event is picked up within a
+    // single refresh interval rather than waiting for a cache miss or an
+    // auth failure.
+    const { credentialManager } = await import('./config/credentialManager.js')
+    credentialManager.startBackgroundRefresh()
+    // ────────────────────────────────────────────────────────────────────────
+
     const redisAvailable = await probeRedis(config)
     const { mountApiRoutes, mountLegacyNonApiRedirects } = await import('./http/mountApiRoutes.js')
     const { initRobustWebSocket } = await import('./services/websocket.service.js')

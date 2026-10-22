@@ -125,6 +125,25 @@ describe('buildReadinessReport', () => {
         expect(report.checks.autoRebalancer.status).toBe('disabled')
     })
 
+    it('reports database startup delay as not_ready with the database error', async () => {
+        mockGetReadiness.mockReturnValue({
+            ready: false,
+            databasePath: '/tmp/test.db',
+            error: 'database is locked'
+        })
+
+        const { buildReadinessReport } = await import('../monitoring/readiness.js')
+        const report = await buildReadinessReport()
+
+        expect(report.status).toBe('not_ready')
+        expect(report.checks.database.status).toBe('not_ready')
+        expect(report.checks.database.details).toMatchObject({
+            databasePath: '/tmp/test.db',
+            error: 'database is locked',
+            degradedReason: 'database is locked'
+        })
+    })
+
     it('returns not_ready when an enabled auto-rebalancer is not initialized', async () => {
         process.env.ENABLE_AUTO_REBALANCER = 'true'
         mockGetAutoRebalancerStatus.mockReturnValue({

@@ -1,6 +1,12 @@
 use crate::types::*;
 use soroban_sdk::{symbol_short, xdr::ToXdr, Address, Env, Map, Symbol, Vec};
 
+/// Validates that target allocations strictly satisfy the target-weight invariant:
+/// 1. The allocations map is non-empty.
+/// 2. Each individual asset allocation satisfies the bounds:
+///    `MIN_TARGET_WEIGHT_BPS` (1 bps / 0.01%) <= weight <= `MAX_TARGET_WEIGHT_BPS` (10,000 bps / 100.00%).
+///    Allocations of 0 bps are rejected with `Error::InvalidAllocation`.
+/// 3. The sum of all asset weights strictly equals `TARGET_WEIGHT_SUM_BPS` (10,000 bps / 100.00%).
 pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
     if allocations.is_empty() {
         return false;
@@ -8,7 +14,7 @@ pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
 
     let mut total = 0u32;
     for (_, percentage) in allocations.iter() {
-        if percentage == 0 {
+        if percentage < MIN_TARGET_WEIGHT_BPS || percentage > MAX_TARGET_WEIGHT_BPS {
             return false;
         }
         total = match total.checked_add(percentage) {
@@ -16,7 +22,7 @@ pub fn validate_allocations(allocations: &Map<Address, u32>) -> bool {
             None => return false,
         };
     }
-    total == ALLOCATION_DENOMINATOR
+    total == TARGET_WEIGHT_SUM_BPS
 }
 
 pub fn balance_to_value(balance: i128, price: i128) -> i128 {
@@ -117,7 +123,7 @@ pub fn build_rebalance_preview(
         if let Some(price_data) =
             crate::oracle::get_validated_price(env, &asset, reflector_client)
         {
-            if price_data.is_stale(current_time, 3600) {
+            if price_data.is_stale(current_time, crate::reflector::REFLECTOR_PRICE_MAX_AGE_SECONDS) {
                 skipped_assets.push_back(asset.clone());
                 skip_reasons.set(asset.clone(), AssetSkipReason::StalePrice);
                 continue;
@@ -313,4 +319,6 @@ pub fn emit_dca_executed(env: &Env, portfolio_id: u64, amount: i128, purchases: 
     );
 }
 
-
+pub fn validate_slippage_policy_version(version: u32) -> bool {
+    version == CURRENT_SLIPPAGE_POLICY_VERSION
+}

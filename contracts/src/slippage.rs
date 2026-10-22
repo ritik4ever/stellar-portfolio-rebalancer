@@ -1,6 +1,9 @@
 use soroban_sdk::{Address, Env, Symbol};
 
-use crate::types::{DataKey, Error, DEFAULT_ASSET_SLIPPAGE_BPS, MAX_ASSET_SLIPPAGE_BPS};
+use crate::types::{
+    DataKey, Error, DEFAULT_ASSET_SLIPPAGE_BPS, MAX_ASSET_SLIPPAGE_BPS,
+    MAX_GLOBAL_MAX_SLIPPAGE_BPS,
+};
 
 /// Set the contract-level max execution slippage limit (in basis points) for a
 /// given asset class.
@@ -79,4 +82,52 @@ pub fn check_execution_slippage(
         return Err(Error::SlippageExceeded);
     }
     Ok(())
+}
+
+/// Fail-closed variant of [`check_execution_slippage`] used for every
+/// trade-related state change (#1856).
+///
+/// Unlike [`check_execution_slippage`], a zero, negative or absurd deviating
+/// `actual_price` can never bypass the guard:
+///
+/// - `actual_price <= 0` (malformed or exploit input) is rejected with
+///   [`Error::InvalidPrice`] instead of computing a division-by-zero or a
+///   "negative" deviation that would pass.
+/// - `actual_price > 10 * expected_price` (> +1000% deviation) is rejected
+///   with [`Error::SlippageExceeded`] before any percentage math, so an
+///   overflowed or inflated price can never wrap into a small `actual_bps`.
+/// - For any other input the standard per-asset limit check applies
+///   (default 1%, admin-configurable up to 5%).
+pub fn check_execution_slippage_guarded(
+    env: &Env,
+    asset: &Address,
+    expected_price: i128,
+    actual_price: i128,
+) -> Result<(), Error> {
+    if expected_price <= 0 || actual_price <= 0 {
+        return Err(Error::InvalidPrice);
+    }
+    // Fail closed on extreme positive deviations (> +1000%) before the
+    // percentage computation: the product `diff_abs * 10000` stays far below
+    // the i128 range for such inputs, but rejecting early also keeps any
+    // future change to the math from reintroducing a wrap-around bypass.
+    if actual_price > expected_price.saturating_mul(10) {
+        return Err(Error::SlippageExceeded);
+    }
+    check_execution_slippage(env, asset, expected_price, actual_price)
+}
+
+/// Clamp `bps` to the contract-level aggregate bound
+/// [`MAX_GLOBAL_MAX_SLIPPAGE_BPS`] (1000 bps / 10%).
+///
+/// Used when a portfolio's `global_max_slippage_bps` is set or written so a
+/// user or admin cannot configure an aggregate slippage cap that exceeds the
+/// contract-level bound, and when the aggregate check runs so values stored
+/// before the bound existed are still enforced at the capped level.
+pub fn cap_global_max_slippage_bps(bps: u32) -> u32 {
+    if bps > MAX_GLOBAL_MAX_SLIPPAGE_BPS {
+        MAX_GLOBAL_MAX_SLIPPAGE_BPS
+    } else {
+        bps
+    }
 }

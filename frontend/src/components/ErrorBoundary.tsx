@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { Sentry } from '../observability'
+import { getAppVersion, sanitizeError, sanitizeObservabilityText, Sentry } from '../observability'
 import { walletManager } from '../utils/walletManager'
 
 interface Props {
@@ -39,12 +39,13 @@ export class ErrorBoundary extends Component<Props, State> {
         } catch {
             // walletManager not available
         }
-        Sentry.captureException(error, {
+        Sentry.captureException(sanitizeError(error), {
             extra: {
-                componentStack: errorInfo.componentStack,
+                componentStack: errorInfo.componentStack ? sanitizeObservabilityText(errorInfo.componentStack) : undefined,
                 route,
                 userId,
-                section: this.props.fallbackTitle,
+                appVersion: getAppVersion(),
+                section: this.props.fallbackTitle ? sanitizeObservabilityText(this.props.fallbackTitle) : undefined,
             },
             tags: {
                 errorBoundary: 'section',

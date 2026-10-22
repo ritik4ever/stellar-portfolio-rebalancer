@@ -92,7 +92,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
   }, [analyticsData])
 
   const exportChartDataCSV = () => {
-    const rows = formatChartData.map((dataPoint) => ({
+    const rows = formatChartData.map((dataPoint: { date: string; value: number; timestamp: any }) => ({
       timestamp: dataPoint.timestamp,
       date: dataPoint.date,
       portfolioValue: dataPoint.value,
@@ -160,7 +160,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
   const chartData = formatChartData
   const metrics = performanceSummary?.metrics
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null
     const data = payload[0].payload
     return (
@@ -399,7 +399,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ portfolioId }) => {
                   <Tooltip 
                     contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '0.5rem' }}
                     itemStyle={{ color: isDark ? '#F9FAFB' : '#111827' }}
-                    formatter={(value: number) => [`${value.toFixed(2)}%`, 'Alpha']}
+                    formatter={(value: any) => [`${Number(value ?? 0).toFixed(2)}%`, 'Alpha']}
                   />
                   <ReferenceDot y={0} stroke="#666" />
                   <Bar dataKey="alpha" radius={[4, 4, 0, 0]}>

@@ -12,13 +12,14 @@ mod events;
 mod nav;
 mod oracle;
 mod portfolio;
+mod portfolio_ops;
 mod reflector;
 mod slippage;
 mod stop_loss;
 mod strategies;
 mod templates;
 mod upgrade;
-#[cfg(all(test, feature = "testutils"))]
+#[cfg(test)]
 mod test;
 #[cfg(all(test, feature = "testutils"))]
 mod property_tests;
@@ -33,11 +34,6 @@ pub use strategies::*;
 
 #[contract]
 pub struct PortfolioRebalancer;
-
-fn validate_slippage_policy_version(version: u32) -> bool {
-    version == CURRENT_SLIPPAGE_POLICY_VERSION
-}
-
 
 fn guard_ledger_timestamp(env: &Env) -> u64 {
     let current = env.ledger().timestamp();
@@ -60,23 +56,18 @@ fn guard_ledger_timestamp(env: &Env) -> u64 {
 
 #[contractimpl]
 impl PortfolioRebalancer {
-    /// Validate that `reflector_address` behaves like a Reflector oracle by
-    /// making a lightweight read-only call (`base()`) and checking the result.
-    ///
-    /// This is a best-effort guard, not a full interface conformance check:
-    /// - A malicious contract could implement `base()` but return wrong data in
-    ///   `lastprice()`. Further operations (rebalance, preview) will detect
-    ///   missing or invalid price data at the point of use.
-    /// - The goal is to fail early when the address is clearly not a Reflector
-    ///   contract (e.g. a typo, an EOA, or a random contract).
+    
     pub fn initialize(env: Env, admin: Address, reflector_address: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
         }
 
-        // Lightweight validation: call base() on the provided address.
-        // If the call fails (host error) or returns an unexpected type, the
-        // address is not a valid Reflector oracle.
+        // The address that becomes the contract admin must authorize the
+        // initialization. Otherwise any caller could choose the admin and the
+        // oracle source that protect all subsequent privileged operations.
+        admin.require_auth();
+
+        
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
         match reflector_client.try_base() {
             Ok(Ok(_asset)) => {}
@@ -91,17 +82,14 @@ impl PortfolioRebalancer {
             .instance()
             .set(&DataKey::EmergencyStop, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
-        // A freshly initialized contract has no legacy storage to migrate,
-        // so it starts on the current schema directly.
+        
         env.storage()
             .instance()
             .set(&DataKey::SchemaVersion, &CURRENT_STORAGE_SCHEMA_VERSION);
         Ok(())
     }
 
-    /// Currently persisted storage schema version (see
-    /// `CURRENT_STORAGE_SCHEMA_VERSION`), advanced automatically by
-    /// `execute_upgrade` via `migrate_storage`.
+    
     pub fn storage_schema_version(env: Env) -> u32 {
         upgrade::current_schema_version(&env)
     }
@@ -110,17 +98,7 @@ impl PortfolioRebalancer {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
-    /// Step 1 of the two-step admin transfer: nominate `new_admin`.
-    ///
-    /// Admin-only. Nomination alone grants `new_admin` nothing — every
-    /// admin-gated entrypoint keeps checking `DataKey::Admin`, which is only
-    /// rewritten once `new_admin` calls [`accept_admin`] itself. This makes
-    /// an admin handover impossible to complete against an address that
-    /// cannot sign (a typo, a contract with no auth path, a lost key).
-    ///
-    /// Calling this again replaces any proposal still in flight, so the
-    /// current admin can retarget or effectively cancel a mistaken nomination
-    /// by proposing a different address.
+    
     pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
@@ -136,15 +114,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// Step 2 of the two-step admin transfer: the pending admin claims the role.
-    ///
     
-    /// authorize this call itself, which is what proves the incoming admin
-    /// controls the key. On success `DataKey::Admin` is rewritten, the
-    /// pending nomination is cleared, and the previous admin loses every
-    /// admin right immediately.
-    ///
-    /// Returns [`Error::NoPendingAdmin`] when no transfer is in flight.
     pub fn accept_admin(env: Env) -> Result<(), Error> {
         let pending_admin: Address = env
             .storage()
@@ -161,8 +131,7 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
-    /// The address nominated by [`propose_admin`] and still awaiting its
-    /// [`accept_admin`] call, or `None` when no transfer is in flight.
+    
     pub fn get_pending_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
@@ -189,10 +158,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Create a portfolio with full strategy configuration.
-    /// `strategy` defaults to [`StrategyType::Threshold`] for callers that
-    /// do not pass explicit strategy parameters (backward compatible with
-    /// the original [`create_portfolio`] signature).
+    
     pub fn create_portfolio_with_strategy(
         env: Env,
         user: Address,
@@ -218,11 +184,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Admin-only: store a new named on-chain allocation template.
-    ///
-    /// Templates are on-chain data (persistent storage), not hardcoded
-    /// constants, so the set of available templates can grow over time
-    /// without a contract upgrade.
+   
     pub fn create_template(
         env: Env,
         name: String,
@@ -369,6 +331,18 @@ impl PortfolioRebalancer {
 
     pub fn get_portfolio(env: Env, portfolio_id: u64) -> Portfolio {
         Self::load_portfolio(&env, portfolio_id).unwrap()
+    }
+
+    /// Move `pct_to_new` percent of every asset into a new portfolio owned by
+    /// the same user. The percentage must be between 1 and 99 (inclusive).
+    pub fn split_portfolio(env: Env, source_id: u64, pct_to_new: u32) -> Result<u64, Error> {
+        portfolio_ops::split_portfolio(&env, source_id, pct_to_new)
+    }
+
+    /// Merge `source_id` into `target_id`, preserving asset balances and
+    /// weighting target allocations by the portfolios' stored values.
+    pub fn merge_portfolios(env: Env, source_id: u64, target_id: u64) -> Result<(), Error> {
+        portfolio_ops::merge_portfolios(&env, source_id, target_id)
     }
 
     pub fn check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error> {
@@ -571,25 +545,21 @@ impl PortfolioRebalancer {
     /// `upgrade`, `set_fee_config` remain Admin-only).
     pub fn add_operator(env: Env, operator: Address) {
         require_admin(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         env.storage()
             .persistent()
             .set(&DataKey::Operator(operator.clone()), &true);
-        env.events().publish(
-            (Symbol::new(&env, "operator_added"),),
-            operator,
-        );
+        events::emit_operator_added(&env, &admin, &operator);
     }
 
     /// Admin-only: revoke a previously registered operator.
     pub fn remove_operator(env: Env, operator: Address) {
         require_admin(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         env.storage()
             .persistent()
             .remove(&DataKey::Operator(operator.clone()));
-        env.events().publish(
-            (Symbol::new(&env, "operator_removed"),),
-            operator,
-        );
+        events::emit_operator_removed(&env, &admin, &operator);
     }
 
     /// Whether `address` is currently a registered operator.
@@ -1170,6 +1140,13 @@ impl PortfolioRebalancer {
         Ok(())
     }
 
+    /// Set a portfolio's aggregate ("global") max slippage cap, applied to the
+    /// sum of per-leg slippage across all assets during a rebalance.
+    ///
+    /// The value is bounded by [`MAX_GLOBAL_MAX_SLIPPAGE_BPS`] (1000 bps / 10%):
+    /// larger values are rejected with [`Error::InvalidSlippageTolerance`] so a
+    /// malformed or malicious request can never disable the contract-level
+    /// aggregate slippage defense (#1856).
     pub fn set_global_max_slippage(
         env: Env,
         portfolio_id: u64,
@@ -1178,7 +1155,11 @@ impl PortfolioRebalancer {
         let mut portfolio = Self::load_portfolio(&env, portfolio_id)?;
         
         portfolio.user.require_auth();
-        
+
+        if global_max_slippage_bps > MAX_GLOBAL_MAX_SLIPPAGE_BPS {
+            return Err(Error::InvalidSlippageTolerance);
+        }
+
         portfolio.global_max_slippage_bps = global_max_slippage_bps;
         
         env.storage()
@@ -1433,39 +1414,59 @@ impl PortfolioRebalancer {
                     } else {
                         -expected_balance
                     };
+
+                    // Contract-level per-asset slippage guard (#962, fail-closed
+                    // per #1856): runs for every leg of a trade-related state
+                    // change, before any balance mutation. Malformed inputs (a
+                    // zero/negative oracle price, or a reported balance that would
+                    // imply a non-positive execution price) are rejected outright.
+                    if price <= 0 || actual_balance < 0 {
+                        return Err(Error::InvalidPrice);
+                    }
                     if expected_abs > 0 {
                         let diff = expected_balance - actual_balance;
                         let diff_abs = if diff >= 0 { diff } else { -diff };
                         let slippage_bps = (diff_abs * 10000) / expected_abs;
-                        
+
                         // Per-asset slippage check (existing behavior)
                         if slippage_bps > portfolio.slippage_tolerance as i128 {
                             return Err(Error::SlippageExceeded);
                         }
-                        
-                        // Contract-level per-asset slippage guard (#962): derive the
-                        // effective DEX execution price from the reported balances and
-                        // enforce the admin-configurable asset-class limit (default 1%,
-                        // max 5%). `actual_price = expected_price * actual_balance /
-                        // expected_balance` keeps the measured deviation identical to the
-                        // balance-based `slippage_bps` above, so the portfolio-level and
-                        // contract-level checks stay consistent.
+
+                        // `actual_price = expected_price * actual_balance /
+                        // expected_balance` keeps the measured deviation identical
+                        // to the balance-based `slippage_bps` above, so the
+                        // portfolio-level and contract-level checks stay consistent.
+                        // The guarded variant fail-closes on `actual_price <= 0` and
+                        // on absurd (> +1000%) positive deviations.
                         let actual_price = (price * actual_balance) / expected_balance;
-                        slippage::check_execution_slippage(env, &asset, price, actual_price)?;
+                        slippage::check_execution_slippage_guarded(env, &asset, price, actual_price)?;
                         // Accumulate for global slippage check
                         total_slippage_bps += slippage_bps;
+                    } else if actual_balance != 0 {
+                        // No expected leg to measure deviation against, yet the
+                        // caller reports a balance: fail closed rather than let a
+                        // malformed request bypass the slippage guard.
+                        return Err(Error::SlippageExceeded);
                     }
                 }
-                
-                // Global slippage cap check across all legs
-                if total_slippage_bps > portfolio.global_max_slippage_bps as i128 {
+
+                // Global slippage cap check across all legs. The stored cap is
+                // clamped to MAX_GLOBAL_MAX_SLIPPAGE_BPS (#1856) so a cap written
+                // before that bound existed cannot disable the aggregate check.
+                let global_cap_bps = slippage::cap_global_max_slippage_bps(portfolio.global_max_slippage_bps);
+                if total_slippage_bps > global_cap_bps as i128 {
                     return Err(Error::SlippageExceeded);
                 }
             }
         }
 
+        if trades.is_empty() && total_value > 0 {
+            return Err(Error::RebalanceNotNeeded);
+        }
 
         let contract_address = env.current_contract_address();
+        let mut total_fee_paid: i128 = 0;
         for (asset, amount) in trades.iter() {
             let abs_amount = amount.abs();
             let fee_amount = if effective_fee_bps > 0 {

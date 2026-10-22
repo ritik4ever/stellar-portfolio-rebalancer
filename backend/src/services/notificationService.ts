@@ -6,6 +6,7 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbGetLatestNotificationLog,
   dbSaveDigestEvent,
   dbGetAndDeleteDigestEventsBefore,
   dbInitDefaultNotificationPreferences,
@@ -13,13 +14,17 @@ import {
   dbSavePortfolioNotificationOverride,
   dbListPortfolioNotificationOverrides,
   dbDeletePortfolioNotificationOverride,
+  dbSaveSmsVerification,
+  dbGetSmsVerification,
+  dbConfirmSmsVerification,
   type PortfolioNotificationOverride,
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import {
   normalizeNotificationPreferences,
+  notificationPreferencesSchema,
   resolvePortfolioNotificationPreferences,
 } from "./notificationPreferences.js";
 import { databaseService } from "./databaseService.js";
@@ -28,13 +33,12 @@ import {
   type NotificationDeliveryConfig,
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
+import { deriveEmailMessageId, toEmailDeliveryError } from "./emailDeliverySafety.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
+import { sendSlackNotification } from '../notifications/slack.js'
+import { createTwilioClient, generateVerificationCode, hashVerificationCode, normalizePhoneNumber, sendSms, verifyCodeHash, type SmsClient } from '../notifications/sms.js'
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
 
-/** Nodemailer-compatible attachment (used by the scheduled CSV export, #1411). */
 export interface EmailAttachment {
   filename: string;
   content: string | Buffer;
@@ -43,18 +47,18 @@ export interface EmailAttachment {
 
 export interface NotificationPayload {
   userId: string;
-  /** When set, portfolio-level preference overrides apply to this delivery (#1395). */
+ 
   portfolioId?: string;
-  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "digest";
+  eventType: "rebalance" | "circuitBreaker" | "priceMovement" | "riskChange" | "correlation_breakdown" | "digest";
   title: string;
   message: string;
   data?: any;
   timestamp: string;
+  deliveryId?: string;
+  signal?: AbortSignal;
 }
 
-// ─────────────────────────────────────────────
-// Provider Interface
-// ─────────────────────────────────────────────
+
 
 interface NotificationProvider {
   send(
@@ -63,9 +67,40 @@ interface NotificationProvider {
   ): Promise<void>;
 }
 
-// ─────────────────────────────────────────────
-// Webhook Provider
-// ─────────────────────────────────────────────
+class SlackProvider implements NotificationProvider {
+  constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}
+  async send(payload: NotificationPayload, preferences: NotificationPreferences): Promise<void> {
+    if (!preferences.slackEnabled || !preferences.slackWebhookUrl) {
+      dbLogNotificationOutcome(payload.userId, 'slack', payload.eventType, 'skipped', 'Slack disabled or missing URL')
+      return
+    }
+    await sendSlackNotification(preferences.slackWebhookUrl, payload, this.deliveryConfig.webhook)
+  }
+}
+
+class SmsProvider implements NotificationProvider {
+  private readonly sentAt = new Map<string, number[]>()
+  constructor(private readonly client: SmsClient | null, private readonly deliveryConfig: NotificationDeliveryConfig) {}
+  async send(payload: NotificationPayload, preferences: NotificationPreferences): Promise<void> {
+    if (!preferences.smsEnabled || !preferences.phoneVerified || !preferences.phoneNumber || !this.client) {
+      dbLogNotificationOutcome(payload.userId, 'sms', payload.eventType, 'skipped', 'SMS disabled, unverified, or missing config')
+      return
+    }
+    const critical = payload.eventType === 'circuitBreaker' || payload.eventType === 'riskChange' || payload.eventType === 'correlation_breakdown'
+    if (!critical) return
+    const cutoff = Date.now() - 60 * 60 * 1000
+    const recent = (this.sentAt.get(payload.userId) ?? []).filter((at) => at > cutoff)
+    if (recent.length >= 5) {
+      dbLogNotificationOutcome(payload.userId, 'sms', payload.eventType, 'skipped', 'Hourly SMS rate limit reached')
+      return
+    }
+    await sendSms(this.client, { userId: payload.userId, phone: preferences.phoneNumber, eventType: payload.eventType, body: `${payload.title}: ${payload.message}` }, { ...this.deliveryConfig.webhook, maxAttempts: 1 })
+    recent.push(Date.now())
+    this.sentAt.set(payload.userId, recent)
+  }
+}
+
+
 
 class WebhookProvider implements NotificationProvider {
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}
@@ -108,6 +143,8 @@ class WebhookProvider implements NotificationProvider {
           userId: payload.userId,
           eventType: payload.eventType,
           policy,
+          deliveryId: payload.deliveryId,
+          signal: payload.signal,
         },
         async () => {
           const controller = new AbortController();
@@ -154,7 +191,7 @@ class WebhookProvider implements NotificationProvider {
 // ─────────────────────────────────────────────
 
 class EmailProvider implements NotificationProvider {
-  private transporter: nodemailer.Transporter | null = null;
+  private transporter: Transporter | null = null;
   private warnLogged = false
 
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {
@@ -252,9 +289,17 @@ class EmailProvider implements NotificationProvider {
       subject: `[Stellar Portfolio] ${payload.title}`,
       text: this.formatTextEmail(payload),
       html: this.formatHtmlEmail(payload),
+      // Stable across retries so a possibly-delivered message can be
+      // correlated instead of silently duplicated (#2091).
+      messageId: deriveEmailMessageId(payload),
     };
 
     const policy = this.deliveryConfig.email;
+    const deliveryId =
+      payload.deliveryId ||
+      (payload.data?.deliveryId as string | undefined) ||
+      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
+      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
 
     await deliverWithBackoff(
       {
@@ -262,16 +307,27 @@ class EmailProvider implements NotificationProvider {
         userId: payload.userId,
         eventType: payload.eventType,
         policy,
+        deliveryId,
+        signal: payload.signal,
       },
       async () => {
-        const info = await this.transporter!.sendMail(mailOptions);
-        logger.info("Email notification sent successfully", {
-          to: recipientEmail,
-          event: payload.eventType,
-          userId: payload.userId,
-          messageId: info.messageId,
-          maxAttempts: policy.maxAttempts,
-        });
+        try {
+          const info = await this.transporter!.sendMail(mailOptions);
+          logger.info("Email notification sent successfully", {
+            to: recipientEmail,
+            event: payload.eventType,
+            userId: payload.userId,
+            messageId: info.messageId,
+            idempotencyKey: mailOptions.messageId,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+          });
+        } catch (error) {
+          // Classify the SMTP failure before the generic backoff logic sees it:
+          // a timeout or dropped connection after the body was accepted may
+          // already have delivered the message, so it must not be retried.
+          throw toEmailDeliveryError(error, mailOptions.messageId);
+        }
       },
     );
   }
@@ -364,6 +420,8 @@ export class NotificationService {
     this.deliveryConfig = deliveryConfig;
     this.providers.push(new WebhookProvider(deliveryConfig));
     this.providers.push(new EmailProvider(deliveryConfig));
+    this.providers.push(new SlackProvider(deliveryConfig));
+    this.providers.push(new SmsProvider(createTwilioClient(), deliveryConfig));
 
     logger.info("Notification service initialized", {
       providerCount: this.providers.length,
@@ -390,13 +448,38 @@ export class NotificationService {
    * Subscribe or update notification preferences
    */
   subscribe(preferences: NotificationPreferences): void {
-    dbSaveNotificationPreferences(normalizeNotificationPreferences(preferences));
+    const parsed = notificationPreferencesSchema.parse(preferences)
+    const normalized = normalizeNotificationPreferences({ ...parsed, userId: preferences.userId })
+    const existing = dbGetNotificationPreferences(preferences.userId)
+    if (existing?.phoneVerified && existing.phoneNumber === normalized.phoneNumber) {
+      normalized.phoneVerified = true
+    }
+    dbSaveNotificationPreferences(normalized);
 
     logger.info("User subscribed to notifications", {
       userId: preferences.userId,
       emailEnabled: preferences.emailEnabled,
       webhookEnabled: preferences.webhookEnabled,
     });
+  }
+
+  async requestSmsVerification(userId: string, phone: string): Promise<void> {
+    const client = createTwilioClient()
+    if (!client) throw new Error('Twilio is not configured')
+    const normalized = normalizePhoneNumber(phone)
+    this.getPreferences(userId)
+    const code = generateVerificationCode()
+    dbSaveSmsVerification({ userId, phoneNumber: normalized, codeHash: hashVerificationCode(userId, normalized, code), expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() })
+    await sendSms(client, { userId, phone: normalized, eventType: 'phone_verification', body: `Your Stellar Portfolio verification code is ${code}` }, { ...this.deliveryConfig.webhook, maxAttempts: 1 })
+  }
+
+  confirmSmsVerification(userId: string, code: string): boolean {
+    const pending = dbGetSmsVerification(userId)
+    if (!pending || Date.parse(pending.expiresAt) < Date.now()) return false
+    const actual = hashVerificationCode(userId, pending.phoneNumber, code)
+    if (!verifyCodeHash(pending.codeHash, actual)) return false
+    dbConfirmSmsVerification(userId, pending.phoneNumber)
+    return true
   }
 
   /**
@@ -527,6 +610,12 @@ export class NotificationService {
     const prefs = this.getPreferences(userId);
     prefs.emailEnabled = false;
     prefs.webhookEnabled = false;
+    prefs.slackEnabled = false;
+    prefs.smsEnabled = false;
+    delete prefs.emailAddress;
+    delete prefs.webhookUrl;
+    delete prefs.slackWebhookUrl;
+    delete prefs.phoneNumber;
     dbSaveNotificationPreferences(prefs);
     logger.info("User unsubscribed from notifications", { userId });
   }
@@ -541,7 +630,7 @@ export class NotificationService {
     );
 
     const eventKey = payload.eventType as keyof typeof preferences.events;
-    if (!preferences.events[eventKey]) {
+    if (preferences.events[eventKey] === false) {
       logger.info("User has disabled notifications for this event type", {
         userId: payload.userId,
         eventType: payload.eventType,
@@ -739,10 +828,92 @@ export class NotificationService {
   }
 
   /**
+   * Get delivery logs for a specific user with limit and optional deliveryId filtering
+   */
+  getDeliveryLogs(userId: string, limit: number = 50, deliveryId?: string): NotificationLog[] {
+    return dbGetNotificationLogs(userId, limit, deliveryId);
+  }
+
+  /**
    * Get delivery logs for a specific user
    */
   getLogs(userId: string): NotificationLog[] {
     return dbGetNotificationLogs(userId);
+  }
+
+  /**
+   * Get delivery status summary for a user, verifying agreement with persisted records
+   */
+  getDeliveryStatus(userId: string): {
+    latestDelivery?: NotificationLog;
+    channelStatus: Record<string, { enabled: boolean; lastStatus?: string }>;
+    totalDeliveries: number;
+  } {
+    const logs = dbGetNotificationLogs(userId, 50);
+    const prefs = this.getPreferences(userId);
+    const latestEmail = dbGetLatestNotificationLog(userId, 'email');
+    const latestWebhook = dbGetLatestNotificationLog(userId, 'webhook');
+    const latestSlack = dbGetLatestNotificationLog(userId, 'slack');
+    const latestSms = dbGetLatestNotificationLog(userId, 'sms');
+
+    return {
+      latestDelivery: logs[0],
+      channelStatus: {
+        email: {
+          enabled: prefs.emailEnabled,
+          lastStatus: latestEmail?.status,
+        },
+        webhook: {
+          enabled: prefs.webhookEnabled,
+          lastStatus: latestWebhook?.status,
+        },
+        slack: {
+          enabled: prefs.slackEnabled ?? false,
+          lastStatus: latestSlack?.status,
+        },
+        sms: {
+          enabled: prefs.smsEnabled ?? false,
+          lastStatus: latestSms?.status,
+        },
+      },
+      totalDeliveries: logs.length,
+    };
+  }
+
+  /**
+   * Send a test notification to verify delivery channels and consistency
+   */
+  async sendTestNotification(userId: string): Promise<{
+    message: string;
+    sentTo: {
+      email: string | null;
+      webhook: string | null;
+      telegram: string | null;
+    };
+    timestamp: string;
+  }> {
+    const prefs = this.getPreferences(userId);
+    const timestamp = new Date().toISOString();
+    const payload: NotificationPayload = {
+      userId,
+      eventType: "rebalance",
+      title: "Test Notification",
+      message: "This is a test notification from Stellar Portfolio Rebalancer.",
+      deliveryId: `test-${userId}-${Date.now()}`,
+      timestamp,
+    };
+
+    await this.notify(payload);
+
+    return {
+      message: "Test notification sent",
+      sentTo: {
+        email: prefs.emailEnabled ? prefs.emailAddress || null : null,
+        webhook: prefs.webhookEnabled ? prefs.webhookUrl || null : null,
+        telegram: null,
+      },
+      timestamp,
+    };
   }
 }
 

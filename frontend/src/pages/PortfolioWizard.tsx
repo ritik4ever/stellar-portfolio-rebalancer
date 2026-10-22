@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Plus, 
-  Trash2, 
-  ArrowLeft, 
-  ArrowRight, 
-  Check, 
+  Plus,
+  Trash2,
+  ArrowLeft,
+  Check,
   CheckCircle2, 
   Wallet, 
   AlertTriangle, 
@@ -41,6 +40,8 @@ interface Template {
   allocations: Allocation[];
   icon: string;
 }
+
+type WizardStrategy = 'threshold' | 'dca';
 
 const TEMPLATES: Template[] = [
   {
@@ -82,61 +83,73 @@ const TEMPLATES: Template[] = [
 const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey }) => {
   const createPortfolioMutation = useCreatePortfolioMutation();
 
-  // Wizard state (steps 1 to 5)
+ 
   const [step, setStep] = useState<number>(1);
 
-  // Form states preserved across steps
+ 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('custom');
+  const [strategy, setStrategy] = useState<WizardStrategy>('threshold');
   const [allocations, setAllocations] = useState<Allocation[]>([
     { asset: 'XLM', percentage: 100 }
   ]);
   const [threshold, setThreshold] = useState<number>(5);
   const [cooldown, setCooldown] = useState<number>(24);
   const [autoRebalance, setAutoRebalance] = useState<boolean>(true);
+  const [dcaAmount, setDcaAmount] = useState<number>(100);
+  const [dcaIntervalDays, setDcaIntervalDays] = useState<number>(7);
+  const [dcaStartDate, setDcaStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
-  // UX states
+  
   const [error, setError] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState<boolean>(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [shareHash, setShareHash] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState<boolean>(false);
 
-  // Draft resume state
+ 
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ReturnType<typeof loadWizardDraft> | null>(null);
 
-  // Check for existing draft on mount
+  
   useEffect(() => {
     const draft = loadWizardDraft();
-    if (draft && draft.step >= 1 && draft.step <= 4) {
+    if (draft && draft.step >= 1 && draft.step <= (draft.strategy === 'dca' ? 5 : 4)) {
       setPendingDraft(draft);
       setShowResumePrompt(true);
     }
   }, []);
 
-  // Save draft on state changes (persist wizard progress)
+  
   useEffect(() => {
-    if (step >= 1 && step <= 4 && !showResumePrompt) {
+    if (step >= 1 && step <= (strategy === 'dca' ? 5 : 4) && !showResumePrompt) {
       saveWizardDraft({
         step,
         selectedTemplateId,
+        strategy,
         allocations,
         threshold,
         cooldown,
         autoRebalance,
+        dcaAmount,
+        dcaIntervalDays,
+        dcaStartDate,
         savedAt: new Date().toISOString(),
       });
     }
-  }, [step, selectedTemplateId, allocations, threshold, cooldown, autoRebalance, showResumePrompt]);
+  }, [step, selectedTemplateId, strategy, allocations, threshold, cooldown, autoRebalance, dcaAmount, dcaIntervalDays, dcaStartDate, showResumePrompt]);
 
   const handleResumeDraft = useCallback(() => {
     if (!pendingDraft) return;
     setStep(pendingDraft.step);
     setSelectedTemplateId(pendingDraft.selectedTemplateId);
+    setStrategy(pendingDraft.strategy ?? 'threshold');
     setAllocations(pendingDraft.allocations);
     setThreshold(pendingDraft.threshold);
     setCooldown(pendingDraft.cooldown);
     setAutoRebalance(pendingDraft.autoRebalance);
+    setDcaAmount(pendingDraft.dcaAmount ?? 100);
+    setDcaIntervalDays(pendingDraft.dcaIntervalDays ?? 7);
+    setDcaStartDate(pendingDraft.dcaStartDate ?? new Date().toISOString().slice(0, 10));
     setShowResumePrompt(false);
     setPendingDraft(null);
   }, [pendingDraft]);
@@ -147,12 +160,15 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setPendingDraft(null);
   }, []);
 
-  // Live sum validation calculations
+ 
   const totalPercentage = allocations.reduce((sum, item) => sum + (item.percentage || 0), 0);
   const remaining = remainingAllocation(allocations);
   const isAllocationValid = Math.abs(totalPercentage - 100) < 0.01 && allocations.every(item => item.percentage > 0);
+  const isDcaScheduleValid = Number.isFinite(dcaAmount) && dcaAmount > 0
+    && Number.isInteger(dcaIntervalDays) && dcaIntervalDays >= 1 && dcaIntervalDays <= 365
+    && Boolean(dcaStartDate) && !Number.isNaN(new Date(`${dcaStartDate}T00:00:00`).getTime());
 
-  // Handle template selection
+  
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (templateId === 'custom') {
@@ -165,15 +181,15 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Add allocation row
+ 
   const handleAddAsset = () => {
-    // Pick first symbol not already in allocations (e.g. XLM, USDC, BTC, ETH)
+   
     const existing = allocations.map(a => a.asset);
     const available = ['XLM', 'USDC', 'BTC', 'ETH'].find(symbol => !existing.includes(symbol)) || 'USDC';
     setAllocations([...allocations, { asset: available, percentage: 0 }]);
   };
 
-  // Update allocation row
+ 
   const handleUpdateAllocation = (index: number, field: 'asset' | 'percentage', value: any) => {
     const next = [...allocations];
     if (field === 'percentage') {
@@ -183,10 +199,10 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
       next[index].asset = value;
     }
     setAllocations(next);
-    setSelectedTemplateId('custom'); // Any manual adjustment makes it custom
+    setSelectedTemplateId('custom'); 
   };
 
-  // Remove allocation row
+ 
   const handleRemoveAsset = (index: number) => {
     if (allocations.length > 1) {
       setAllocations(allocations.filter((_, i) => i !== index));
@@ -194,12 +210,13 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Step validation
+ 
   const canGoForward = () => {
     if (step === 1) return true;
     if (step === 2) return isAllocationValid;
     if (step === 3) return threshold >= 1 && threshold <= 20 && cooldown >= 1;
-    if (step === 4) return publicKey !== null;
+    if (step === 4) return strategy === 'dca' ? isDcaScheduleValid : publicKey !== null;
+    if (step === 5) return publicKey !== null;
     return false;
   };
 
@@ -217,7 +234,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     }
   };
 
-  // Review & Sign
+ 
   const handleSignAndSubmit = async () => {
     if (!publicKey) {
       setError('Please connect your Freighter wallet to sign the transaction.');
@@ -228,8 +245,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     setError(null);
 
     try {
-      // Simulate/Trigger signing via walletManager if needed
-      // Create a mocked transaction or message XDR to sign
+      
       const mockXdr = 'AAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAA';
       try {
         await walletManager.signTransaction(mockXdr);
@@ -237,26 +253,29 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         console.warn('Freighter sign bypassed or failed, proceeding with fallback logic', signErr);
       }
 
-      // Convert allocations array to allocations map expected by API
+      
       const allocationsMap: Record<string, number> = {};
       allocations.forEach(item => {
         allocationsMap[item.asset] = item.percentage;
       });
 
-      // API Submit Portfolio
+     
       const portfolio = await createPortfolioMutation.mutateAsync({
         userAddress: publicKey,
         allocations: allocationsMap,
         threshold,
         cooldownHours: cooldown,
         autoRebalance,
-        strategy: 'threshold'
+        strategy,
+        ...(strategy === 'dca' ? {
+          strategyConfig: { dcaAmount, dcaIntervalDays, dcaStartDate },
+        } : {}),
       });
 
       if (portfolio && portfolio.id) {
         setCreatedId(portfolio.id);
 
-        // Generate public share link
+        
         try {
           const shareRes = await api.post<{ hash: string; active: boolean }>(
             ENDPOINTS.PORTFOLIO_SHARE(portfolio.id)
@@ -271,8 +290,8 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
         // Clear saved draft on successful completion
         clearWizardDraft();
 
-        // Advance to Step 5 (Success)
-        setStep(5);
+        // Advance to the success screen after the review step.
+        setStep(successStep);
       } else {
         throw new Error('Failed to retrieve created portfolio details from server.');
       }
@@ -298,9 +317,12 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
     'Select Template',
     'Set Allocations',
     'Configure Rules',
+    ...(strategy === 'dca' ? ['DCA Schedule'] : []),
     'Review & Sign',
     'Success!'
   ];
+  const reviewStep = strategy === 'dca' ? 5 : 4;
+  const successStep = reviewStep + 1;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
@@ -467,6 +489,19 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                   </span>
                 </button>
               </div>
+
+              <div className="pt-2">
+                <label htmlFor="wizard-strategy" className="block text-sm font-bold mb-2">Rebalancing Strategy</label>
+                <select
+                  id="wizard-strategy"
+                  value={strategy}
+                  onChange={(e) => setStrategy(e.target.value as WizardStrategy)}
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="threshold">Threshold-based</option>
+                  <option value="dca">Dollar Cost Averaging (DCA)</option>
+                </select>
+              </div>
             </div>
           )}
 
@@ -615,11 +650,44 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
             </div>
           )}
 
-          {/* STEP 4: Review & Sign with Freighter */}
-          {step === 4 && (
+          {strategy === 'dca' && step === 4 && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-bold mb-1">Step 4: Review & Sign</h2>
+                <h2 className="text-xl font-bold mb-1">Step 4: Configure DCA Schedule</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Set the amount and timing for each scheduled purchase.</p>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="dca-amount" className="block text-sm font-bold mb-2">DCA Amount</label>
+                  <input id="dca-amount" type="number" min="0.01" step="0.01" value={dcaAmount || ''}
+                    onChange={(e) => setDcaAmount(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Enter a positive amount in your portfolio's funding currency.</p>
+                </div>
+                <div>
+                  <label htmlFor="dca-interval" className="block text-sm font-bold mb-2">Interval (days)</label>
+                  <input id="dca-interval" type="number" min="1" max="365" step="1" value={dcaIntervalDays || ''}
+                    onChange={(e) => setDcaIntervalDays(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label htmlFor="dca-start-date" className="block text-sm font-bold mb-2">Start Date</label>
+                  <input id="dca-start-date" type="date" value={dcaStartDate}
+                    onChange={(e) => setDcaStartDate(e.target.value)}
+                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {!isDcaScheduleValid && (
+                  <p role="alert" className="text-sm font-semibold text-red-600 dark:text-red-400">Enter a positive amount, an interval from 1 to 365 days, and a valid start date to continue.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: Review & Sign with Freighter */}
+          {step === reviewStep && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-xl font-bold mb-1">Step {reviewStep}: Review & Sign</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Confirm all details below and sign using your Freighter wallet.
                 </p>
@@ -637,6 +705,13 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                     ))}
                   </div>
                 </div>
+
+                {strategy === 'dca' && (
+                  <div className="bg-gray-50 dark:bg-gray-900/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-2">
+                    <h3 className="font-bold text-md border-b border-gray-200 dark:border-gray-800 pb-2">DCA Schedule</h3>
+                    <p className="text-sm">{dcaAmount} every {dcaIntervalDays} days starting {dcaStartDate}</p>
+                  </div>
+                )}
 
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-4">
                   <h3 className="font-bold text-md border-b border-gray-200 dark:border-gray-800 pb-2">Automation Rules</h3>
@@ -684,7 +759,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
           )}
 
           {/* STEP 5: Success Screen */}
-          {step === 5 && (
+          {step === successStep && (
             <div className="space-y-6 text-center py-6">
               <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
                 <Check className="w-8 h-8" />
@@ -735,7 +810,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
           )}
 
           {/* Footer Controls */}
-          {step < 5 && (
+          {step < successStep && (
             <div className="flex justify-between items-center gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
               <button
                 onClick={handleBack}
@@ -745,7 +820,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
                 <ArrowLeft className="w-4 h-4" /> Back
               </button>
 
-              {step === 4 ? (
+              {step === reviewStep ? (
                 <button
                   onClick={handleSignAndSubmit}
                   disabled={!canGoForward() || isSigning}
@@ -773,7 +848,7 @@ const PortfolioWizard: React.FC<PortfolioWizardProps> = ({ onNavigate, publicKey
             </div>
           )}
 
-          {step === 5 && (
+          {step === successStep && (
             <div className="flex justify-center mt-6 pt-6 border-t border-gray-100 dark:border-gray-800">
               <button
                 onClick={() => onNavigate('dashboard')}

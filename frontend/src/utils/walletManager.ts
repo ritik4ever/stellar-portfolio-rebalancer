@@ -93,9 +93,13 @@ export class WalletManager {
     }
 
     async disconnect(): Promise<void> {
-        this.currentAdapter = null
-        this.currentPublicKey = null
-        this.clearStorage()
+        try {
+            await this.currentAdapter?.disconnect()
+        } finally {
+            this.currentAdapter = null
+            this.currentPublicKey = null
+            this.clearStorage()
+        }
     }
 
     async signTransaction(xdr: string, network?: string): Promise<string> {

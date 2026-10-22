@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 describe('anomalyTracker', () => {
     beforeEach(async () => {
-        const { resetAnomalyCounts } = await import('../monitoring/anomalyTracker.js')
+        const { resetAnomalyCounts, resetAnomalyThresholds } = await import('../monitoring/anomalyTracker.js')
         resetAnomalyCounts()
+        resetAnomalyThresholds()
     })
 
     it('starts with zero counts', async () => {
@@ -81,4 +82,40 @@ describe('anomalyTracker', () => {
         expect(summary1.total).toBe(0)
         expect(summary2.total).toBe(1)
     })
+
+    it('manages anomaly thresholds (get, set, reset)', async () => {
+        const { getAnomalyThresholds, setAnomalyThresholds, resetAnomalyThresholds, DEFAULT_ANOMALY_THRESHOLDS } = await import('../monitoring/anomalyTracker.js')
+        
+        const initial = getAnomalyThresholds()
+        expect(initial).toEqual(DEFAULT_ANOMALY_THRESHOLDS)
+
+        const updated = setAnomalyThresholds({ rebalanceBlocks: 2, criticalRiskAlerts: 1 })
+        expect(updated.rebalanceBlocks).toBe(2)
+        expect(updated.criticalRiskAlerts).toBe(1)
+        expect(updated.warningRiskAlerts).toBe(DEFAULT_ANOMALY_THRESHOLDS.warningRiskAlerts)
+
+        const reset = resetAnomalyThresholds()
+        expect(reset).toEqual(DEFAULT_ANOMALY_THRESHOLDS)
+    })
+
+    it('detects threshold violations when anomaly counts exceed updated threshold values', async () => {
+        const { recordAnomaly, setAnomalyThresholds, checkAnomalyThresholds, getAnomalySummary } = await import('../monitoring/anomalyTracker.js')
+        
+        setAnomalyThresholds({ rebalanceBlocks: 2, criticalRiskAlerts: 1 })
+
+        expect(checkAnomalyThresholds().isExceeded).toBe(false)
+
+        recordAnomaly('rebalance_block')
+        expect(checkAnomalyThresholds().isExceeded).toBe(false)
+
+        recordAnomaly('rebalance_block')
+        const status = checkAnomalyThresholds()
+        expect(status.isExceeded).toBe(true)
+        expect(status.exceededMetrics).toContain('rebalanceBlocks')
+
+        const summary = getAnomalySummary()
+        expect(summary.exceeded).toBe(true)
+        expect(summary.exceededMetrics).toContain('rebalanceBlocks')
+    })
 })
+

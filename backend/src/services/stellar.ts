@@ -16,6 +16,8 @@ function getHorizonServer(): Horizon.Server {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Soroban RPC endpoint pool with failover and health-based steering
+// #1215 endpoints come from a configured list; failures/retries move to the next
+// endpoint and latency/health tracking steers later calls, so failover is transparent.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SorobanRpcEndpointHealth {
