@@ -21,7 +21,7 @@ All API documentation, the Swagger UI endpoint, and the exported JSON artifact a
 
 At runtime, `swagger-ui-express` imports `spec.ts` directly, so the live `/api-docs` endpoint is **always in sync** with the source file. No generated artifact is needed to serve docs.
 
-- **Interactive docs (Swagger UI):** `http://localhost:3001/api-docs` (backend port from `PORT`, default `3001`)
+- **Interactive docs (Swagger UI): ** `http://localhost:3001/api-docs` (backend port from `PORT`, default `3001`)
 - **Raw JSON (canonical URLs, same payload):** `http://localhost:3001/api-docs.json` or `http://localhost:3001/api-docs/openapi.json`
 
 ## Adding or Changing an Endpoint
@@ -39,6 +39,18 @@ At runtime, `swagger-ui-express` imports `spec.ts` directly, so the live `/api-d
    ```bash
    npm run api:validate
    ```
+
+## Pagination Contract (Portfolio API)
+
+The Portfolio API uses cursor-based pagination. The following behavior is part of the public contract and is covered by focused tests in `backend/src/__tests__/portfolio.pagination.test.ts`:
+
+- **Stable cursor:** the cursor returned for a given page is deterministic and can be replayed to retrieve the same page while the underlying data is unchanged.
+- **Reported count:** the `total` count is stable across pages for a given query and is not affected by the page size.
+-- **First and final page:** the first page returns the oldest items and the final page returns the newest items with no overlap. An empty result set returns an empty `items` array, ``total: 0`, and a `null` next cursor.
+- **Items changing during pagination:** when items are inserted or deleted between page requests, the cursor prevents duplicate or missed rows for items that existed at the time the cursor was issued.
+- **No duplicate side effects:** pagination is read-only; repeating a request with the same cursor must not create, mutate, or duplicate portfolio records.
+
+These edge cases are exercised with isolated DB and RPC doubles so the coverage is deterministic and independent of external services.
 
 ## CI Validation
 
