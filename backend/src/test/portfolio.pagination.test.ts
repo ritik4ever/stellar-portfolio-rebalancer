@@ -1,9 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import express from 'express'
 import request from 'supertest'
 import { PortfolioStorage } from '../services/portfolioStorage.js'
 import { portfoliosRouter } from '../api/portfolios.routes.js'
-import { encodePortfolioCursor } from '../utils/portfolioPagination.js'
+import {
+    encodePortfolioCursor,
+    decodePortfolioCursor,
+    diagnosePaginationChange,
+    sanitizePaginationContext,
+    recordPaginationSignal,
+} from '../utils/portfolioPagination.js'
+import * as metrics from '../observability/metrics.js'
+import { logger } from '../utils/logger.js'
 import type { Portfolio } from '../types/index.js'
 
 function buildPortfolio(id: string, createdAt: string, overrides: Partial<Portfolio> = {}): Portfolio {
@@ -223,6 +231,182 @@ describe('Portfolio API pagination boundary handling (SPR-2026-181)', () => {
             const resMax = await request(app).get('/api/portfolios?limit=999')
             expect(resMax.status).toBe(200)
             expect(resMax.body.data.limit).toBe(100)
+        })
+    })
+})
+
+describe('Portfolio API pagination observability outcomes (SPR-2026-184)', () => {
+    describe('Operators can distinguish success, delay, and blocked work', () => {
+        it('records success outcome with state: success for valid page requests', () => {
+            const recordOutcomeSpy = vi.spyOn(metrics, 'recordPortfolioPaginationOutcome')
+            const infoSpy = vi.spyOn(logger, 'info')
+
+            recordPaginationSignal({
+                source: 'api',
+                outcome: 'success',
+                state: 'success',
+                context: { limit: 20, count: 5, total: 5 },
+                durationSeconds: 0.015,
+            })
+
+            expect(recordOutcomeSpy).toHaveBeenCalledWith({
+                source: 'api',
+                outcome: 'success',
+                state: 'success',
+                durationSeconds: 0.015,
+            })
+            expect(infoSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    source: 'api',
+                    outcome: 'success',
+                    state: 'success',
+                }),
+                'Portfolio pagination success',
+            )
+
+            recordOutcomeSpy.mockRestore()
+            infoSpy.mockRestore()
+        })
+
+        it('records blocked outcome with state: blocked on invalid cursor or permanent errors', () => {
+            const recordOutcomeSpy = vi.spyOn(metrics, 'recordPortfolioPaginationOutcome')
+            const warnSpy = vi.spyOn(logger, 'warn')
+
+            recordPaginationSignal({
+                source: 'api',
+                outcome: 'invalid_cursor',
+                state: 'blocked',
+                context: { rawCursor: 'bad_token', reason: 'malformed_cursor' },
+                durationSeconds: 0.002,
+            })
+
+            expect(recordOutcomeSpy).toHaveBeenCalledWith({
+                source: 'api',
+                outcome: 'invalid_cursor',
+                state: 'blocked',
+                durationSeconds: 0.002,
+            })
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    source: 'api',
+                    outcome: 'invalid_cursor',
+                    state: 'blocked',
+                }),
+                'Portfolio pagination blocked',
+            )
+
+            recordOutcomeSpy.mockRestore()
+            warnSpy.mockRestore()
+        })
+
+        it('records delayed outcome with state: delayed when transient database retry or lock occurs', () => {
+            const recordOutcomeSpy = vi.spyOn(metrics, 'recordPortfolioPaginationOutcome')
+            const warnSpy = vi.spyOn(logger, 'warn')
+
+            recordPaginationSignal({
+                source: 'api',
+                outcome: 'timeout_delayed',
+                state: 'delayed',
+                context: { error: 'Database connection timeout' },
+                durationSeconds: 1.5,
+            })
+
+            expect(recordOutcomeSpy).toHaveBeenCalledWith({
+                source: 'api',
+                outcome: 'timeout_delayed',
+                state: 'delayed',
+                durationSeconds: 1.5,
+            })
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    source: 'api',
+                    outcome: 'timeout_delayed',
+                    state: 'delayed',
+                }),
+                'Portfolio pagination delayed',
+            )
+
+            recordOutcomeSpy.mockRestore()
+            warnSpy.mockRestore()
+        })
+    })
+
+    describe('Diagnosing items changing during pagination', () => {
+        it('diagnoses items_inserted when underlying total grows between page requests', () => {
+            const diagnosis = diagnosePaginationChange({
+                currentTotal: 12,
+                cursor: { createdAt: '2026-01-01T00:00:00.000Z', id: 'p1', total: 10 },
+            })
+
+            expect(diagnosis.itemsChanged).toBe(true)
+            expect(diagnosis.changeKind).toBe('items_inserted')
+        })
+
+        it('diagnoses items_deleted when underlying total shrinks between page requests', () => {
+            const diagnosis = diagnosePaginationChange({
+                currentTotal: 8,
+                cursor: { createdAt: '2026-01-01T00:00:00.000Z', id: 'p1', total: 10 },
+            })
+
+            expect(diagnosis.itemsChanged).toBe(true)
+            expect(diagnosis.changeKind).toBe('items_deleted')
+        })
+
+        it('emits items_changed metric when mutations are diagnosed', () => {
+            const itemsChangedSpy = vi.spyOn(metrics, 'recordPortfolioPaginationItemsChanged')
+
+            recordPaginationSignal({
+                source: 'rebalancer',
+                outcome: 'items_changed',
+                state: 'success',
+                context: {
+                    limit: 10,
+                    changeKind: 'items_inserted',
+                    total: 15,
+                    previousTotal: 10,
+                },
+            })
+
+            expect(itemsChangedSpy).toHaveBeenCalledWith({
+                source: 'rebalancer',
+                changeKind: 'items_inserted',
+            })
+
+            itemsChangedSpy.mockRestore()
+        })
+
+        it('diagnoses no changes when total matches cursor', () => {
+            const diagnosis = diagnosePaginationChange({
+                currentTotal: 10,
+                cursor: { createdAt: '2026-01-01T00:00:00.000Z', id: 'p1', total: 10 },
+            })
+
+            expect(diagnosis.itemsChanged).toBe(false)
+            expect(diagnosis.changeKind).toBe('none')
+        })
+    })
+
+    describe('Context diagnosis without exposing secrets', () => {
+        it('redacts sensitive keys and secret tokens from pagination diagnostics', () => {
+            const rawContext = {
+                source: 'api',
+                limit: 20,
+                total: 50,
+                secretKey: 'SB7W4WKVYGYG5ZYYX2G2I32D6Y6L7J5B7W4WKVYGYG5ZYYX2G2I32D6Y6L7J',
+                apiKey: 'cg-1234567890abcdef',
+                token: 'Bearer sensitive-token-here',
+                password: 'super_secret_db_password',
+            }
+
+            const sanitized = sanitizePaginationContext(rawContext)
+
+            expect(sanitized.source).toBe('api')
+            expect(sanitized.limit).toBe(20)
+            expect(sanitized.total).toBe(50)
+            expect((sanitized as Record<string, unknown>).secretKey).toBe('[REDACTED]')
+            expect((sanitized as Record<string, unknown>).apiKey).toBe('[REDACTED]')
+            expect((sanitized as Record<string, unknown>).token).toBe('[REDACTED]')
+            expect((sanitized as Record<string, unknown>).password).toBe('[REDACTED]')
         })
     })
 })
