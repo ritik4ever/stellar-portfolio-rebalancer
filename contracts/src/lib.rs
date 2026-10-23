@@ -727,6 +727,15 @@ impl PortfolioRebalancer {
             })
     }
 
+    /// Updates target allocations for an existing portfolio and emits `("portfolio", "alloc_upd")`.
+    ///
+    /// # Target-weight invariant & event alignment (SPR-2026-194):
+    /// - Validates that asset weights satisfy `MIN_TARGET_WEIGHT_BPS..=MAX_TARGET_WEIGHT_BPS` (`1..=10,000` bps)
+    ///   and sum strictly to `TARGET_WEIGHT_SUM_BPS` (`10,000` bps / 100.00%).
+    /// - Rejection (under-allocation, over-allocation, zero weight, or unauthorized caller) fails atomically
+    ///   before storage mutation, emitting NO `alloc_upd` event and preserving stored weights and funds.
+    /// - On success, writes the updated portfolio to storage and emits `("portfolio", "alloc_upd")` once
+    ///   with `(portfolio_id, old_allocations, new_allocations)`.
     pub fn update_allocations(
         env: Env,
         portfolio_id: u64,
@@ -754,13 +763,7 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
 
-        env.events().publish(
-            (
-                symbol_short!("portfolio"),
-                Symbol::new(&env, "alloc_upd"),
-            ),
-            (portfolio_id, old_allocations, new_allocations),
-        );
+        portfolio::emit_allocation_updated(&env, portfolio_id, old_allocations, new_allocations);
 
         Ok(())
     }
