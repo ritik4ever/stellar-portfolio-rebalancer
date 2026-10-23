@@ -2451,6 +2451,9 @@ fn test_oracle_deviation_bound_beyond_uses_conservative_price() {
     );
 
     // The deviation is reported, and the conservative price is the one kept.
+    env.ledger().with_mut(|li| {
+        li.timestamp = 10000 + REBALANCE_COOLDOWN_SECONDS + 1;
+    });
     let _ = client.execute_rebalance(&pid, &Map::new(&env));
     assert!(
         has_host_event(&env, "oracle_dev_warn"),
@@ -4684,9 +4687,9 @@ fn test_set_pf_circuit_breaker_rejects_invalid_spike_threshold() {
     
     // Valid values should work
     let result = client.try_set_pf_circuit_breaker(&pid, &1, &3600);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
     let result = client.try_set_pf_circuit_breaker(&pid, &10000, &3600);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
 }
 
 #[test]
@@ -4716,13 +4719,13 @@ fn test_set_pf_circuit_breaker_rejects_invalid_window_seconds() {
     
     // Valid boundary values should work
     let result = client.try_set_pf_circuit_breaker(&pid, &100, &MIN_CIRCUIT_BREAKER_WINDOW_SECONDS);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
     let result = client.try_set_pf_circuit_breaker(&pid, &100, &MAX_CIRCUIT_BREAKER_WINDOW_SECONDS);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
     
     // Valid middle value should work
     let result = client.try_set_pf_circuit_breaker(&pid, &100, &3600);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
 }
 
 #[test]
@@ -5997,6 +6000,7 @@ mod slippage_test {
     #[test]
     fn test_slippage_guard_accepts_no_deviation() {
         let env = Env::default();
+        env.mock_all_auths();
         let (cid, _client, _admin, _user) = init_contract(&env);
         let asset = Address::generate(&env);
 
@@ -7034,6 +7038,7 @@ fn count_alloc_upd_events(env: &Env) -> usize {
 #[test]
 fn test_target_weight_invariant_accepts_exact_100_percent() {
     let env = Env::default();
+    env.mock_all_auths();
     let contract_id = env.register_contract(None, PortfolioRebalancer);
     let client = PortfolioRebalancerClient::new(&env, &contract_id);
     let reflector_id = env.register_contract(None, reflector_contract::MockReflector);
@@ -7234,7 +7239,15 @@ fn test_target_weight_update_requires_owner_signature() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let stranger = Address::generate(&env);
-    client.initialize(&admin, &reflector_id);
+    client.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin, &reflector_id).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).initialize(&admin, &reflector_id);
 
     let asset1 = Address::generate(&env);
     let asset2 = Address::generate(&env);
@@ -7653,8 +7666,8 @@ fn test_target_weight_bounds_create_portfolio_boundaries() {
         &CURRENT_SLIPPAGE_POLICY_VERSION,
     );
     assert!(res_exact.is_ok());
-    assert_eq!(client.get_user_portfolio_count(&user), 1);
     assert_eq!(count_portfolio_created_events(&env), 1);
+    assert_eq!(client.get_user_portfolio_count(&user), 1);
 }
 
 #[test]

@@ -1,4 +1,6 @@
 import { RiskManagementService } from './riskManagements.js'
+import { databaseService } from './databaseService.js'
+import { isDbConfigured } from '../db/client.js'
 import {
   dbInsertRebalanceEvent,
   dbGetRebalanceHistoryByPortfolio,
@@ -185,6 +187,7 @@ export class RebalanceHistoryService {
             ...(details as Record<string, unknown>),
             feePaid,
             slippageBps,
+            ...(eventData.details ?? {}),
         } as Record<string, unknown>
 
         const insertedTimestamp =
@@ -281,11 +284,13 @@ export class RebalanceHistoryService {
         options: RebalanceHistoryQueryOptions = {},
         offset: number = 0
     ): Promise<RebalanceEvent[]> {
-        // Always use databaseService (SQLite)
-        if (portfolioId) {
-          return dbGetRebalanceHistoryByPortfolio(portfolioId, limit, offset)
+        if (isDbConfigured()) {
+            if (portfolioId) {
+                return dbGetRebalanceHistoryByPortfolio(portfolioId, limit, offset)
+            }
+            return dbGetRebalanceHistoryAll(limit, offset)
         }
-        return dbGetRebalanceHistoryAll(limit, offset)
+        return databaseService.getRebalanceHistory(portfolioId, limit, options)
     }
 
     /**
@@ -297,7 +302,9 @@ export class RebalanceHistoryService {
         filters: { from?: string; to?: string } = {},
         limit: number = 10_000
     ): Promise<RebalanceEvent[]> {
-        const events = await dbGetRebalanceHistoryByPortfolio(portfolioId, limit, 0)
+        const events = isDbConfigured()
+            ? await dbGetRebalanceHistoryByPortfolio(portfolioId, limit, 0)
+            : databaseService.getRebalanceHistory(portfolioId, limit)
         const fromMs = filters.from ? Date.parse(filters.from) : NaN
         const toMs = filters.to ? Date.parse(filters.to) : NaN
         if (Number.isNaN(fromMs) && Number.isNaN(toMs)) {
@@ -313,8 +320,10 @@ export class RebalanceHistoryService {
 
     async getRecentAutoRebalances(portfolioId: string, limit: number = 10): Promise<RebalanceEvent[]> {
         try {
-            // Always use databaseService (SQLite)
-            return dbGetRecentAutoRebalances(portfolioId, limit)
+            if (isDbConfigured()) {
+                return dbGetRecentAutoRebalances(portfolioId, limit)
+            }
+            return databaseService.getRecentAutoRebalances(portfolioId, limit)
         } catch (error) {
             logger.error('Error getting recent auto-rebalances', { error })
             return []
@@ -323,8 +332,10 @@ export class RebalanceHistoryService {
 
     async getAutoRebalancesSince(portfolioId: string, since: Date): Promise<RebalanceEvent[]> {
         try {
-            // Always use databaseService (SQLite)
-            return dbGetAutoRebalancesSince(portfolioId, since)
+            if (isDbConfigured()) {
+                return dbGetAutoRebalancesSince(portfolioId, since)
+            }
+            return databaseService.getAutoRebalancesSince(portfolioId, since)
         } catch (error) {
             logger.error('Error getting auto-rebalances since date', { error })
             return []
@@ -333,8 +344,10 @@ export class RebalanceHistoryService {
 
     async getAllAutoRebalances(limit: number = 1000): Promise<RebalanceEvent[]> {
         try {
-            // Always use databaseService (SQLite)
-            return dbGetAllAutoRebalances()
+            if (isDbConfigured()) {
+                return dbGetAllAutoRebalances()
+            }
+            return databaseService.getAllAutoRebalances()
         } catch (error) {
             logger.error('Error getting all auto-rebalances', { error })
             return []
@@ -417,15 +430,33 @@ export class RebalanceHistoryService {
     }
 
     async getHistoryStats(): Promise<{ totalEvents: number; portfolios: number; recentActivity: number; autoRebalances: number }> {
-        return dbGetHistoryStats()
+        if (isDbConfigured()) {
+            return dbGetHistoryStats()
+        }
+        return databaseService.getHistoryStats()
     }
 
     async getRebalanceHistoryCount(portfolioId: string): Promise<number> {
-        return dbGetRebalanceHistoryCountByPortfolio(portfolioId)
+        if (isDbConfigured()) {
+            return dbGetRebalanceHistoryCountByPortfolio(portfolioId)
+        }
+        return databaseService.getRebalanceHistoryCount(portfolioId)
     }
 
     async getCostSummary(portfolioId: string): Promise<RebalanceCostSummary> {
-        return dbGetRebalanceCostSummary(portfolioId)
+        if (isDbConfigured()) {
+            return dbGetRebalanceCostSummary(portfolioId)
+        }
+        const history = databaseService.getRebalanceHistory(portfolioId, 1000)
+        const totalFees = history.reduce((sum, e) => sum + (e.feePaid ?? 0), 0)
+        const slippages = history.map(e => e.slippageBps).filter((s): s is number => typeof s === 'number')
+        const avgSlippage = slippages.length > 0 ? slippages.reduce((a, b) => a + b, 0) / slippages.length : 0
+        return {
+            total_fees_paid: totalFees,
+            avg_slippage_bps: avgSlippage,
+            cost_per_rebalance: history.length > 0 ? totalFees / history.length : 0,
+            total_rebalances: history.length
+        }
     }
 
     private deriveFeePaid(
