@@ -26,7 +26,19 @@ export class PortfolioStorage {
 
     private async cacheGet(id: string): Promise<Portfolio | undefined> {
         if (useCache && this.portfolios.has(id)) return this.portfolios.get(id)
-        if (!isDbConfigured()) return this.portfolios.get(id)
+        if (!isDbConfigured()) {
+            const mem = this.portfolios.get(id)
+            if (mem) return mem
+            try {
+                const { databaseService } = await import('./databaseService.js')
+                const fromSqlite = databaseService.getPortfolio(id)
+                if (fromSqlite) {
+                    this.portfolios.set(id, fromSqlite)
+                    return fromSqlite
+                }
+            } catch {}
+            return undefined
+        }
         const p = await portfolioDb.dbGetPortfolio(id)
         if (p && useCache) this.portfolios.set(id, p)
         return p
@@ -63,6 +75,11 @@ export class PortfolioStorage {
         }
         if (isDbConfigured()) {
             await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0, 1, 'threshold', {}, name, description)
+        } else {
+            try {
+                const { databaseService } = await import('./databaseService.js')
+                databaseService.createPortfolio(userAddress, allocations, threshold, 1, 'threshold', {}, name, description, id)
+            } catch {}
         }
         this.cacheSet(portfolio)
         return id
@@ -107,6 +124,22 @@ export class PortfolioStorage {
                 name,
                 description
             )
+        } else {
+            try {
+                const { databaseService } = await import('./databaseService.js')
+                databaseService.createPortfolioWithBalances(
+                    userAddress,
+                    allocations,
+                    threshold,
+                    currentBalances,
+                    portfolio.slippageTolerance ?? 1,
+                    'threshold',
+                    {},
+                    name,
+                    description,
+                    id
+                )
+            } catch {}
         }
         this.cacheSet(portfolio)
         return id

@@ -238,6 +238,33 @@ export const metricsMiddleware = (
 };
 
 export async function getMetricsPayload(): Promise<string> {
+  if (!observabilityConfig.metrics.enabled) {
+    return '# metrics disabled\n';
+  }
+
+  try {
+    const { buildReadinessReport } = await import('../monitoring/readiness.js');
+    const readiness = await buildReadinessReport();
+    readinessGauge.set((readiness as any).status === 'ready' ? 1 : 0);
+  } catch (err) {
+    readinessGauge.set(0);
+  }
+
+  try {
+    const { getQueueMetrics, QUEUE_METRIC_NAMES, QUEUE_METRIC_STATES } = await import('../queue/queueMetrics.js');
+    const queueMetrics = await getQueueMetrics();
+    if (queueMetrics && queueMetrics.queues) {
+      for (const queue of QUEUE_METRIC_NAMES) {
+        const stats = queueMetrics.queues[queue];
+        for (const state of QUEUE_METRIC_STATES) {
+          queueDepthGauge.set({ queue, state }, stats?.[state] ?? 0);
+        }
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
   return await register.metrics();
 }
 
@@ -581,7 +608,7 @@ export function recordWorkerLockAcquisition(input: {
 // This enables analysis of execution quality across different trading pairs and
 // portfolios without blocking trade execution on metric emission failure.
 
-const tradeSlippageBps = new Histogram({
+export const tradeSlippageBps = new Histogram({
     name: `${observabilityConfig.metrics.prefix}trade_slippage_bps`,
     help: 'Slippage in basis points for each executed trade',
     labelNames: ['portfolio_bucket', 'asset_pair'] as const,
@@ -589,7 +616,7 @@ const tradeSlippageBps = new Histogram({
     registers: [register],
 })
 
-const tradeExecutionPrice = new Histogram({
+export const tradeExecutionPrice = new Histogram({
     name: `${observabilityConfig.metrics.prefix}trade_execution_price`,
     help: 'Execution price for each trade (normalized to USD equivalent)',
     labelNames: ['portfolio_bucket', 'asset_pair'] as const,
@@ -636,14 +663,14 @@ export function recordTradeSlippage(input: {
 // or when Horizon is unavailable (503). This helps operators see submission pressure
 // and identify when Horizon is rejecting requests.
 
-const horizonSubmissionRetriesTotal = new Counter({
+export const horizonSubmissionRetriesTotal = new Counter({
     name: `${observabilityConfig.metrics.prefix}horizon_submission_retries_total`,
     help: 'Total Horizon transaction submission retry attempts by status code',
     labelNames: ['status_code'] as const,
     registers: [register],
 })
 
-const horizonSubmissionRetryDuration = new Histogram({
+export const horizonSubmissionRetryDuration = new Histogram({
     name: `${observabilityConfig.metrics.prefix}horizon_submission_retry_duration_seconds`,
     help: 'Duration of Horizon submission retry attempts (including backoff delays)',
     labelNames: ['status_code', 'outcome'] as const,
@@ -666,7 +693,7 @@ export function recordHorizonSubmissionRetry(input: {
             input.durationSeconds,
         )
     } catch (error) {
-        console.error('[METRICS] Failed to record Horizon retry:', error)
+        console.error('[METRICS]', 'Failed to record Horizon retry:', error)
     }
 }
 

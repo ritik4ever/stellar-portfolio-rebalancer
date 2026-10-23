@@ -51,6 +51,9 @@ jobs:
           restore-keys: |
             wasm-size-${{ runner.os }}-
 
+      - name: Ensure wasm32 target sysroot is present
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Build contract (release WASM)
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release

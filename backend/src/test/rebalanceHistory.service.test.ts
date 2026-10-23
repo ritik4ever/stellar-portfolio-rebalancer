@@ -22,6 +22,10 @@ vi.mock('../services/riskManagements.js', () => ({
     },
 }))
 
+vi.mock('../db/client.js', () => ({
+    isDbConfigured: vi.fn(() => true),
+}))
+
 vi.mock('../db/rebalanceHistoryDb.js', () => ({
     dbInsertRebalanceEvent: recordMock,
     dbGetRebalanceHistoryByPortfolio: getHistoryMock,

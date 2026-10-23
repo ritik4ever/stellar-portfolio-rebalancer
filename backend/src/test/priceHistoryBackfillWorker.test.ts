@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../../services/priceHistory.js', () => ({
+vi.mock('../services/priceHistory.js', () => ({
     backfillPriceHistory: vi.fn(),
 }))
 
-vi.mock('../connection.js', () => ({
+vi.mock('../queue/connection.js', () => ({
     isRedisAvailable: vi.fn(),
     getConnectionOptions: vi.fn(() => ({ url: 'redis://localhost:6379' })),
 }))
 
-vi.mock('../queues.js', () => ({
+vi.mock('../queue/queues.js', () => ({
     getPriceHistoryBackfillQueue: vi.fn(),
 }))
 
@@ -17,10 +17,10 @@ import { Job } from 'bullmq'
 import {
     processPriceHistoryBackfillJob,
     schedulePriceHistoryBackfill,
-} from '../workers/priceHistoryWorker.js'
-import { backfillPriceHistory } from '../../services/priceHistory.js'
-import { isRedisAvailable } from '../connection.js'
-import { getPriceHistoryBackfillQueue } from '../queues.js'
+} from '../queue/workers/priceHistoryWorker.js'
+import { backfillPriceHistory } from '../services/priceHistory.js'
+import { isRedisAvailable } from '../queue/connection.js'
+import { getPriceHistoryBackfillQueue } from '../queue/queues.js'
 
 const backfillMock = backfillPriceHistory as unknown as ReturnType<typeof vi.fn>
 const redisMock = isRedisAvailable as unknown as ReturnType<typeof vi.fn>

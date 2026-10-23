@@ -25,13 +25,8 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 
 describe('rateLimitMonitor', () => {
     beforeEach(() => {
+        rateLimitMonitor.resetMetrics()
         vi.clearAllMocks()
-        // Reset metrics by calling getMetrics to see current state, then manually reset
-        const metrics = rateLimitMonitor.getMetrics()
-        if (metrics.throttledRequests > 0 || metrics.totalRequests > 0) {
-            // The resetMetrics is private, but we can work around by accessing the internal state
-            // Since we can't directly call private methods, we'll create a new instance via hack
-        }
     })
 
     afterEach(() => {
@@ -101,6 +96,7 @@ describe('rateLimitMonitor', () => {
 
     describe('getMetrics', () => {
         it('returns throttleRate as percentage', () => {
+            rateLimitMonitor.recordRequest()
             rateLimitMonitor.recordRequest()
             rateLimitMonitor.recordRequest()
             const req = makeReq()

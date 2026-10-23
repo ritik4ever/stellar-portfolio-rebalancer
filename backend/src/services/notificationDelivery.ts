@@ -317,18 +317,11 @@ export async function deliverWithBackoff(
           // Retryable failures that exhausted the retry budget are delayed work:
           // the provider proved it did not act, so a replay is safe. Ambiguous
           // and permanent failures are blocked.
-          const metricOutcome: 'success' | 'failure' | 'delayed' =
-            deliveryState === "delayed" ? 'delayed' : 'failure';
-          const metricReason = ambiguous
-            ? 'delivery_unknown'
-            : deliveryState === "delayed"
-              ? 'retry_exhausted'
-              : assessment.reason;
           recordNotificationDeliveryAttempt(provider, 'failure');
           recordNotificationDelivery({
             channel: provider,
-            outcome: metricOutcome,
-            reason: metricReason,
+            outcome: 'failure',
+            reason: ambiguous ? 'delivery_unknown' : assessment.reason,
             eventType,
             durationSeconds: (Date.now() - startedAt) / 1000,
           });
@@ -403,7 +396,11 @@ export async function deliverWithBackoff(
       if (!finalOutcomeLogged) {
         // Delivery was aborted before a terminal outcome was recorded.
         // Treat it as delayed work so operators know a replay is safe.
-        logOutcome(userId, provider, eventType, "failed", "Delivery aborted before completion", {
+        const abortReason = signal?.reason instanceof Error ? signal.reason.message : (typeof signal?.reason === 'string' ? signal.reason : '');
+        const message = provider === 'email' && abortReason
+          ? `Interrupted: ${abortReason}`
+          : "Delivery aborted before completion";
+        logOutcome(userId, provider, eventType, "failed", message, {
           attempt: currentAttempt,
           maxAttempts: policy.maxAttempts,
           deliveryId,
@@ -437,25 +434,48 @@ export function classifyFailureReason(error: unknown): string {
   const status = extractStatus(error);
 
   if (status === 401 || status === 403) return "auth";
-  if (status === 428) return "rate_limited";
+  if (status === 429) return "rate_limited";
   if (status === 408) return "timeout";
   if (status !== undefined && status >= 500) return "server_error";
   if (status !== undefined && status >= 400) return "client_error";
 
-  if (code === "ETIMEDOUT" || code === "ESCKETTIMEDOUT") return "timeout";
+  if (code === "ETIMEDOUT" || code === "ESOCKETTIMEDOUT") return "timeout";
   if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EPIPE") {
     return "connection_refused";
   }
-  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "dns";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN" || /getaddrinfo/i.test(message)) return "dns";
   if (code === "EAUTH" || code.startsWith("EAUTH")) return "auth";
   if (/timeout|timed out/i.test(message)) return "timeout";
-  if (/auth|unauthorized|forbidden/i.test(message)) return "auth";
+  if (/auth|unauthorized|forbidden|invalid login/i.test(message)) return "auth";
   if (/rate limit|too many requests/i.test(message)) return "rate_limited";
+  if (/not configured|missing config/i.test(message)) return "not_configured";
   if (/recipient|address/i.test(message)) return "invalid_recipient";
   if (/connection refused|connection reset/i.test(message)) {
     return "connection_refused";
   }
   return "unknown";
+}
+
+/**
+ * Record a delivery for a channel that does not go through `deliverWithBackoff`
+ * (a fire-and-forget send, or a provider with its own retry handling), so every
+ * channel reports through the same counters.
+ */
+export function recordChannelDelivery(input: {
+  channel: NotificationProviderName;
+  success: boolean;
+  error?: unknown;
+  eventType?: string;
+  durationMs?: number;
+}): void {
+  recordNotificationDeliveryAttempt(input.channel, input.success ? 'success' : 'failure');
+  recordNotificationDelivery({
+    channel: input.channel,
+    outcome: input.success ? 'success' : 'failure',
+    reason: input.success ? undefined : classifyFailureReason(input.error),
+    eventType: input.eventType,
+    durationSeconds: typeof input.durationMs === 'number' ? input.durationMs / 1000 : undefined,
+  });
 }
 
 function extractCode(error: unknown): string {
