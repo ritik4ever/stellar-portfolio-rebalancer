@@ -306,16 +306,20 @@ export function dbInitDefaultNotificationPreferences(userId: string): Notificati
         userId,
         emailEnabled: false,
         webhookEnabled: false,
+        slackEnabled: false,
+        smsEnabled: false,
+        phoneVerified: false,
         digestMode: 'immediate',
         events: {
             rebalance: true,
             circuitBreaker: true,
             priceMovement: true,
             riskChange: true,
+            correlation_breakdown: true,
         },
     }
     dbSaveNotificationPreferences(defaults)
-    return defaults
+    return dbGetNotificationPreferences(userId) ?? defaults
 }
 
 export function dbGetNotificationPreferences(userId: string): NotificationPreferences | undefined {

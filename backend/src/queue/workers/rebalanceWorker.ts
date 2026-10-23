@@ -91,7 +91,7 @@ export async function processRebalanceJob(
     markRebalanceActive(portfolioId, { trigger: triggeredBy });
 
     const stellarService = new StellarService();
-    const retryAvailable = job.attemptsMade + 1 < (job.opts.attempts ?? 1);
+    const retryAvailable = (job.attemptsMade ?? 0) + 1 < (job.opts?.attempts ?? 1);
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
       const rebalanceResult =

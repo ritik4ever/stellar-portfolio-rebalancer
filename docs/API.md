@@ -125,3 +125,17 @@ Rely strictly on verified historical market data without falling back to synthet
 That is the same `503` as step 3, and the `dependencies` object from `curl` is what tells you whether it was Redis, the database, Horizon, or the oracle.
 
 On a fresh start with no Redis, `/ready` and `/readiness` legitimately return `503` with `"status": "not_ready"` — they are the same handler, and they aggregate the database, Redis/queues, queue backlog, workers, the contract event indexer, and the auto-rebalancer. That is the warning in step 5, not a failure.
+
+## Backtest endpoints
+
+Historical price window evaluation and state persistence for portfolio rebalancing:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/backtest` | Run historical backtest across a date window or days lookback. |
+| `GET` | `/api/v1/backtest/:id` | Fetch persisted backtest record by ID with verified state consistency. |
+| `GET` | `/api/v1/backtest` | List persisted backtests with filters (`portfolioId`, `status`, `limit`, `offset`). |
+| `POST` | `/api/portfolio/:id/backtest` | Run backtest using portfolio's target allocations and threshold. |
+| `GET` | `/api/portfolio/:id/backtests` | List backtest history for a specific portfolio. |
+
+For calendar window mechanics, leap-year boundary handling, and concurrency guarantees, see **[BACKTEST.md](BACKTEST.md)**.

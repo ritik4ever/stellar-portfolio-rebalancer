@@ -1594,9 +1594,72 @@ const spec: Record<string, any> = {
                         },
                     },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Concurrency conflict — backtest already in progress for this portfolio', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '422': { description: 'Unprocessable entity / schema validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '503': { description: 'Historical price data unavailable from provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal simulation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            get: {
+                tags: ['Portfolio'],
+                summary: 'List historical backtest simulation records',
+                description: 'Retrieves historical backtest records with state consistency information, filtering by portfolio or status.',
+                parameters: [
+                    { name: 'portfolioId', in: 'query', schema: { type: 'string' }, description: 'Filter records by portfolio ID' },
+                    { name: 'status', in: 'query', schema: { type: 'string', enum: ['completed', 'failed', 'running'] }, description: 'Filter by backtest status' },
+                    { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 }, description: 'Maximum records to return' },
+                    { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 }, description: 'Pagination offset' },
+                ],
+                responses: {
+                    '200': {
+                        description: 'List of persisted backtest records',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                records: { type: 'array', items: { $ref: '#/components/schemas/BacktestRecord' } },
+                                                count: { type: 'integer' },
+                                                limit: { type: 'integer' },
+                                                offset: { type: 'integer' },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/api/v1/backtest/{id}': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get backtest price window record by ID',
+                description: 'Retrieves the persisted backtest record to verify state consistency with simulation results or failure states.',
+                parameters: [
+                    { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Backtest record ID' },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Persisted backtest record',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestRecord' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '404': { description: 'Backtest record not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1630,8 +1693,36 @@ const spec: Record<string, any> = {
                         },
                     },
                     '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Concurrency conflict', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '503': { description: 'Historical price data unavailable from provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/backtest/{id}': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get backtest price window record by ID (legacy path)',
+                deprecated: true,
+                parameters: [
+                    { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Persisted backtest record',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestRecord' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '404': { description: 'Backtest record not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
         },
@@ -1783,19 +1874,23 @@ const spec: Record<string, any> = {
             },
             BacktestRequest: {
                 type: 'object',
-                required: ['allocations', 'threshold'],
                 properties: {
+                    portfolioId: {
+                        type: 'string',
+                        description: 'Optional portfolio ID to evaluate using its saved allocations and threshold.',
+                        example: 'port-12345',
+                    },
                     allocations: {
                         type: 'object',
                         additionalProperties: { type: 'number' },
-                        description: 'Target allocation weights summing to 100%.',
+                        description: 'Target allocation weights summing to 100%. Required when portfolioId is not provided.',
                         example: { XLM: 50, USDC: 50 },
                     },
                     threshold: {
                         type: 'number',
                         minimum: 1,
                         maximum: 50,
-                        description: 'Rebalance drift trigger threshold in percentage points (1-50).',
+                        description: 'Rebalance drift trigger threshold in percentage points (1-50). Required when portfolioId is not provided.',
                         example: 5,
                     },
                     days: {
@@ -1825,6 +1920,10 @@ const spec: Record<string, any> = {
             BacktestResult: {
                 type: 'object',
                 properties: {
+                    id: { type: 'string', example: 'bt_5dc8ced3-d819-43ac-a3ed-e858ade7db59' },
+                    status: { type: 'string', enum: ['completed', 'failed', 'running'], example: 'completed' },
+                    hasLeapDay: { type: 'boolean', example: true },
+                    leapDayIncluded: { type: 'boolean', example: true },
                     threshold: { type: 'number', example: 5 },
                     allocations: { type: 'object', example: { XLM: 50, USDC: 50 } },
                     startTimestamp: { type: 'integer', example: 1709078400 },
@@ -1962,6 +2061,49 @@ const spec: Record<string, any> = {
                     portfolio: {
                         $ref: '#/components/schemas/Portfolio',
                     },
+                },
+            },
+            BacktestRecord: {
+                type: 'object',
+                description: 'Persisted backtest price window execution record guaranteeing state consistency.',
+                properties: {
+                    id: { type: 'string', example: 'bt_5dc8ced3-d819-43ac-a3ed-e858ade7db59' },
+                    portfolioId: { type: 'string', example: 'port-12345' },
+                    allocations: { type: 'object', example: { XLM: 50, USDC: 50 } },
+                    threshold: { type: 'number', example: 5 },
+                    initialValue: { type: 'number', example: 10000 },
+                    days: { type: 'integer', example: 30 },
+                    from: { type: 'string', format: 'date-time' },
+                    to: { type: 'string', format: 'date-time' },
+                    startDate: { type: 'string', example: '2024-02-28' },
+                    endDate: { type: 'string', example: '2024-03-01' },
+                    startTimestamp: { type: 'integer', example: 1709078400 },
+                    endTimestamp: { type: 'integer', example: 1709251200 },
+                    status: { type: 'string', enum: ['completed', 'failed', 'running'], example: 'completed' },
+                    hasLeapDay: { type: 'boolean', example: true },
+                    leapDayIncluded: { type: 'boolean', example: true },
+                    includedDays: { type: 'array', items: { type: 'string' } },
+                    absentDayReasons: { type: 'object', additionalProperties: { type: 'string' } },
+                    absentDays: { type: 'array', items: { type: 'object' } },
+                    decision: { type: 'object' },
+                    events: { type: 'array', items: { type: 'object' } },
+                    result: {
+                        type: 'object',
+                        properties: {
+                            days: { type: 'integer' },
+                            initialValue: { type: 'number' },
+                            finalValue: { type: 'number' },
+                            totalReturnPct: { type: 'number' },
+                            buyAndHoldFinalValue: { type: 'number' },
+                            buyAndHoldReturnPct: { type: 'number' },
+                            rebalanceCount: { type: 'integer' },
+                            maxDrawdownPct: { type: 'number' },
+                            maxDriftObservedPct: { type: 'number' },
+                        },
+                    },
+                    error: { type: 'string', nullable: true },
+                    createdAt: { type: 'string', format: 'date-time' },
+                    updatedAt: { type: 'string', format: 'date-time' },
                 },
             },
         },
