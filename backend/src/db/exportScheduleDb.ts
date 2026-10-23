@@ -8,6 +8,7 @@
  */
 
 import Database from 'better-sqlite3'
+import { openSqliteDatabase, resolveSqliteDbPath } from './sqliteBootstrap.js'
 
 export type ExportScheduleFrequency = 'weekly'
 export type ExportScheduleFormat = 'csv'
@@ -48,8 +49,7 @@ let scheduleDb: Database.Database | null = null
 
 function getDb(): Database.Database {
     if (!scheduleDb) {
-        const dbPath = process.env.DB_PATH || './data/portfolio.db'
-        scheduleDb = new Database(dbPath)
+        scheduleDb = openSqliteDatabase(resolveSqliteDbPath())
     }
     return scheduleDb
 }

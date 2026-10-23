@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "fs";
 import { dirname, join } from "path";
+import { openSqliteDatabase, resolveSqliteDbPath } from "../db/sqliteBootstrap.js";
 import { randomUUID, createHash } from "node:crypto";
 
 import type { RebalanceEvent } from "./rebalanceHistory.js";
@@ -699,9 +700,10 @@ export class DatabaseService {
   private db: Database.Database;
 
   constructor() {
-    const dbPath = process.env.DB_PATH || "./data/portfolio.db";
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
+    // openSqliteDatabase resolves DB_PATH, creates the parent directory on a
+    // clean checkout and turns low-level failures into actionable setup errors.
+    const dbPath = resolveSqliteDbPath();
+    this.db = openSqliteDatabase(dbPath);
     this.db.exec(SCHEMA_SQL);
     this._migrateSchema();
 
@@ -738,8 +740,12 @@ export class DatabaseService {
       try {
         const row = this.db
           .prepare(`PRAGMA ${pragma.name}`)
-          .get() as { [key: string]: string };
-        const current = row[pragma.name];
+          .get() as { [key: string]: string | number };
+        // Numeric pragmas (foreign_keys, synchronous, cache_size) are returned
+        // as numbers by better-sqlite3; calling toLowerCase() on them threw and
+        // made a healthy clean start look broken.
+        const rawValue = row[pragma.name];
+        const current = rawValue === undefined ? 'unknown' : String(rawValue);
         const expected = pragma.expected;
         const status = expected ? (current.toLowerCase() === expected.toLowerCase() ? "ok" : "warning") : "info";
 
@@ -2749,14 +2755,14 @@ getConsent(userId: string): ConsentRecord | undefined {
         logger.info(`[DB] Restored from backup: ${backupPath}`);
 
         // Reopen the database connection
-        this.db = new Database(dbPath);
+        this.db = openSqliteDatabase(dbPath);
         this.db.exec(SCHEMA_SQL);
         this._migrateSchema();
         this._seedDefaultAssets();
       } catch (copyErr) {
         // If copy failed, try to reopen original DB if possible
         try {
-          this.db = new Database(dbPath);
+          this.db = openSqliteDatabase(dbPath);
           this.db.exec(SCHEMA_SQL);
           this._migrateSchema();
           this._seedDefaultAssets();

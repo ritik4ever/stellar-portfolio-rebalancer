@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { openSqliteDatabase, resolveSqliteDbPath } from './sqliteBootstrap.js'
 
 export interface NotificationPreferencesRow {
     user_id: string
@@ -55,8 +56,7 @@ export function closeNotificationDb(): void {
 
 function getDb(): Database.Database {
     if (!notificationDb) {
-        const dbPath = process.env.DB_PATH || './data/portfolio.db'
-        notificationDb = new Database(dbPath)
+        notificationDb = openSqliteDatabase(resolveSqliteDbPath())
     }
     return notificationDb
 }
