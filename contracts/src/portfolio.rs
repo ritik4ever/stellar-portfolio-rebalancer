@@ -304,6 +304,21 @@ pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
     );
 }
 
+/// Emit a complete post-commit rebalance record for indexers and clients.
+pub fn emit_rebalance_committed(
+    env: &Env,
+    portfolio_id: u64,
+    timestamp: u64,
+    trades: &Map<Address, i128>,
+    resulting_balances: &Map<Address, i128>,
+    fee_paid: i128,
+) {
+    env.events().publish(
+        (symbol_short!("portfolio"), Symbol::new(env, "rebalance_committed")),
+        (portfolio_id, timestamp, trades.clone(), resulting_balances.clone(), fee_paid),
+    );
+}
+
 pub fn emit_cooldown_override(env: &Env, portfolio_id: u64, admin: Address, timestamp: u64) {
     env.events().publish(
         (

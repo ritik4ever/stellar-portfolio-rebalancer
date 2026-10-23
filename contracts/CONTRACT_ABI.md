@@ -247,6 +247,8 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 ### `execute_rebalance(env: Env, portfolio_id: u64, actual_balances: Map<Address, i128>) -> Result<(), Error>`
 
 - **Purpose:** Validates post-trade balances against slippage tolerance (per `slippage_policy_version` on the portfolio), updates `last_rebalance`, and emits `("portfolio","rebalanced")`.
+- **Committed event:** After all token legs and portfolio state succeed, emits one `("portfolio","rebalance_committed")` event with `(portfolio_id, timestamp, trades, resulting_balances, total_fee_paid)`. `resulting_balances` is a complete post-commit map. Failed invocations emit no committed event and roll back the full invocation.
+- **Persistent lifetime:** Portfolio entries renew below 17,280 ledgers remaining, extending to 518,400 ledgers (one-day threshold and thirty-day extension at five seconds per ledger). An already expired entry cannot be recovered.
 - **Parameters:**
   - `portfolio_id`: Portfolio to rebalance.
   - `actual_balances`: Actual balances used for slippage checks.

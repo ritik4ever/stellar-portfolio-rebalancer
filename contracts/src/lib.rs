@@ -1261,13 +1261,24 @@ impl PortfolioRebalancer {
 
     fn load_portfolio(env: &Env, portfolio_id: u64) -> Result<Portfolio, Error> {
         // Try V2 (strategy-aware) first.
-        if let Some(p) = env.storage().persistent().get(&DataKey::PortfolioV2(portfolio_id)) {
+        let v2_key = DataKey::PortfolioV2(portfolio_id);
+        if let Some(p) = env.storage().persistent().get(&v2_key) {
+            env.storage().persistent().extend_ttl(
+                &v2_key,
+                PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS,
+                PORTFOLIO_TTL_EXTEND_TO_LEDGERS,
+            );
             return Ok(p);
         }
         // Fall back: attempt migration from legacy (pre-strategy) storage.
         if let Some(legacy) =
             env.storage().persistent().get::<DataKey, LegacyPortfolio>(&DataKey::Portfolio(portfolio_id))
         {
+            env.storage().persistent().extend_ttl(
+                &DataKey::Portfolio(portfolio_id),
+                PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS,
+                PORTFOLIO_TTL_EXTEND_TO_LEDGERS,
+            );
             let portfolio: Portfolio = legacy.into();
             env.storage()
                 .persistent()
@@ -1519,6 +1530,11 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
+        env.storage().persistent().extend_ttl(
+            &DataKey::PortfolioV2(portfolio_id),
+            PORTFOLIO_TTL_RENEWAL_THRESHOLD_LEDGERS,
+            PORTFOLIO_TTL_EXTEND_TO_LEDGERS,
+        );
 
         let record = RebalanceRecord {
             timestamp: current_time,
@@ -1537,14 +1553,22 @@ impl PortfolioRebalancer {
         if let Some(admin) = override_admin {
             portfolio::emit_cooldown_override(env, portfolio_id, admin, current_time);
         }
-        portfolio::emit_portfolio_rebalanced(env, portfolio_id, current_time);
-
         let snapshot = NavSnapshot {
             usd_nav: total_value,
             sequence: env.ledger().sequence(),
             timestamp: current_time,
         };
         nav::save_nav_snapshot(env, portfolio_id, &snapshot)?;
+
+        portfolio::emit_portfolio_rebalanced(env, portfolio_id, current_time);
+        portfolio::emit_rebalance_committed(
+            env,
+            portfolio_id,
+            current_time,
+            &trades,
+            &portfolio.current_balances,
+            total_fee_paid,
+        );
 
         Ok(())
     }
