@@ -8,6 +8,7 @@ import { rebalanceHistoryService } from "../../services/serviceContainer.js";
 import { notificationService } from "../../services/notificationService.js";
 import { getConnectionOptions } from "../connection.js";
 import type { RebalanceJobData } from "../queues.js";
+import { ConflictError } from "../../types/index.js";
 import {
   createWorkerRuntimeStatus,
   markWorkerFailed,
@@ -119,6 +120,7 @@ export async function processRebalanceJob(
 
       const executionFailed = rebalanceResult.status === "failed";
 
+<<<<<<< HEAD
       await rebalanceHistoryService.recordRebalanceEvent({
         portfolioId,
         trigger:
@@ -141,7 +143,27 @@ export async function processRebalanceJob(
         },
       });
 
+=======
+>>>>>>> 8ea814a (update made)
       if (executionFailed) {
+        await rebalanceHistoryService.recordRebalanceEvent({
+          portfolioId,
+          trigger:
+            triggeredBy === "auto"
+              ? "Automatic Rebalancing"
+              : "Manual Rebalancing",
+          trades: rebalanceResult.trades ?? 0,
+          gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+          feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+          slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
+          status: "failed",
+          isAutomatic: triggeredBy === "auto",
+          error: rebalanceResult.explanation ?? "Rebalance execution failed",
+          details: {
+            stateTransition: "unknown",
+          },
+        });
+
         logger.warn("[WORKER:rebalance] Rebalance returned failed status", {
           portfolioId,
           explanation: rebalanceResult.explanation,
@@ -159,21 +181,48 @@ export async function processRebalanceJob(
       }
 
       // Persist post-rebalance portfolio state with optimistic CAS.
+      let persistenceSucceeded = false;
       if (portfolio) {
         try {
           const { portfolioStorage } = await import("../../services/portfolioStorage.js");
-          await portfolioStorage.updatePortfolio(portfolioId, {
+          const result = await portfolioStorage.updatePortfolio(portfolioId, {
             lastRebalance: new Date().toISOString(),
             balances: rebalanceResult.newBalances ?? portfolio.balances,
             totalValue: rebalanceResult.newTotalValue ?? portfolio.totalValue,
           }, capturedVersion);
+          persistenceSucceeded = result === true;
         } catch (persistErr) {
-          logger.warn("[WORKER:rebalance] Portfolio state persistence failed after successful rebalance (non-fatal)", {
-            portfolioId,
-            error: persistErr instanceof Error ? persistErr.message : String(persistErr),
-          });
+          if (persistErr instanceof ConflictError) {
+            logger.warn("[WORKER:rebalance] Portfolio state persistence failed due to version conflict", {
+              portfolioId,
+              error: persistErr.message,
+            });
+          } else {
+            logger.warn("[WORKER:rebalance] Portfolio state persistence failed after successful rebalance (non-fatal)", {
+              portfolioId,
+              error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+            });
+          }
+          persistenceSucceeded = false;
         }
       }
+
+      await rebalanceHistoryService.recordRebalanceEvent({
+        portfolioId,
+        trigger:
+          triggeredBy === "auto"
+            ? "Automatic Rebalancing"
+            : "Manual Rebalancing",
+        trades: rebalanceResult.trades ?? 0,
+        gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+        slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
+        status: "completed",
+        isAutomatic: triggeredBy === "auto",
+        details: {
+          stateTransition: persistenceSucceeded ? "committed" : "unknown",
+        },
+      });
 
       try {
         await notificationService.notify({
@@ -232,9 +281,13 @@ export async function processRebalanceJob(
           status: "failed",
           isAutomatic: triggeredBy === "auto",
           error: errorMessage,
+<<<<<<< HEAD
           persistenceContext: {
             source: "worker",
             retryAvailable,
+=======
+          details: {
+>>>>>>> 8ea814a (update made)
             stateTransition: "unknown",
           },
         });

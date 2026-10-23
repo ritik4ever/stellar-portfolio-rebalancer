@@ -207,6 +207,7 @@ export interface RebalanceEvent {
         gasPerTradeXlm?: number
         gasWarning?: boolean
         gasBreakdown?: Array<{ tradeId: string, fromAsset?: string, toAsset?: string, feeXlm: number }>
+        stateTransition?: 'committed' | 'unknown'
     }
 }
 
