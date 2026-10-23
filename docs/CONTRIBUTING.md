@@ -535,7 +535,7 @@ Replay checkpoints are persisted to the database key-value store. The integrity 
 
 ```bash
 cd contracts
-cargo test
+cargo test --features testutils
 ```
 
 ### Rust dependency audit

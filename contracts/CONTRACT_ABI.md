@@ -69,7 +69,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 
 ### `create_portfolio(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32) -> Result<u64, Error>`
 
-- **Purpose:** Creates a new user portfolio (with default `StrategyType::Threshold` strategy) and emits a `("portfolio","created")` event.
+- **Purpose:** Creates a new user portfolio (with default `StrategyType::Threshold` strategy) and emits one `("portfolio","created")` event after storage is committed. Its payload is `(portfolio_id: u64, user: Address, rebalance_threshold: u32)`.
 - **Parameters:**
   - `user`: Portfolio owner; must authorize this call.
   - `target_allocations`: Target allocations per asset (`Address -> percentage`).
@@ -96,7 +96,7 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
 
 ### `create_portfolio_with_strategy(env: Env, user: Address, target_allocations: Map<Address, u32>, asset_decimals: Map<Address, u32>, rebalance_threshold: u32, slippage_tolerance: u32, slippage_policy_version: u32, strategy: StrategyType, strategy_config: StrategyConfig) -> Result<u64, Error>`
 
-- **Purpose:** Creates a new user portfolio with an explicit rebalancing strategy and emits a `("portfolio","created")` event.
+- **Purpose:** Creates a new user portfolio with an explicit rebalancing strategy and emits one `("portfolio","created")` event after storage is committed. Its payload is `(portfolio_id: u64, user: Address, rebalance_threshold: u32)`.
 - **Parameters:**
   - Same as `create_portfolio` plus:
   - `strategy`: `StrategyType` enum — `Threshold (0)`, `Periodic (1)`, `Volatility (2)`, or `Custom (3)`.
@@ -196,7 +196,12 @@ For main domain terms used in this contract, see [docs/GLOSSARY.md](../docs/GLOS
     - Weights must sum to exactly `TARGET_WEIGHT_SUM_BPS` (`10_000` bps / 100.00%) in integer units.
     - Under-allocation (e.g. 9,999 bps) and over-allocation (e.g. 10,001 bps) return `Err(Error::InvalidAllocation)`.
     - Atomic failure guarantee: stored target allocations, current balances, and contract token funds are preserved on failure, and no `alloc_upd` event is emitted.
-- **Event payload:** `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)`
+- **Event specification & state alignment (SPR-2026-194):**
+  - **Topics:** `(symbol_short!("portfolio"), Symbol::new(env, "alloc_upd"))`
+  - **Payload:** `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)`
+  - **Ordering:** Emitted strictly once, immediately following committed persistence to storage (`DataKey::PortfolioV2(portfolio_id)`).
+  - **Unchanged funds on failure:** When an update fails (e.g. invalid target weights, unauthorized signer, or unsupported asset) after committed calls (such as deposits or earlier allocation updates), no event is emitted for the rejected call. Previously committed events retain their exact ordering and single-emission guarantee.
+  - **Consumer state reconstruction:** Off-chain listeners and indexers can decode `old_allocations` and `new_allocations` to reconstruct both prior and updated stored weights and verify invariant consistency across committed state transitions without encountering phantom events from rejected attempts.
 
 ### `check_invariants(env: Env, portfolio_id: u64) -> Result<(), Error>`
 

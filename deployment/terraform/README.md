@@ -122,6 +122,77 @@ azs = ["us-east-1a", "us-east-1b"]
 
 Full detail — including what clients observe during a switchover and how to run a failover drill — is in [`modules/elasticache/README.md`](modules/elasticache/README.md).
 
+## Recovering a worker after secret rotation
+
+The deployment smoke check compares the active, previous, and notification-worker
+credentials without printing their values:
+
+```bash
+node deployment/rotation-smoke.mjs
+```
+
+Provide `ROTATION_ACTIVE_KEY` and `ROTATION_WORKER_KEY`, and optionally
+`ROTATION_PREVIOUS_KEY` and `ROTATION_ACTIVE_VERSION`, from an approved secure
+environment. Do not put credential literals in shell history, CI output, or
+incident tickets. A `stale-worker` result exits with code `1`, reports only
+short SHA-256 fingerprints, and recommends restarting the worker. Exit code `2`
+means the check inputs are invalid; resolve that before taking recovery action.
+
+A credential refresh updates the backend's credential cache, but it does not
+replace the Redis connection already held by a running BullMQ worker. Restart
+the ECS service so a new task loads the current Secrets Manager version and
+creates fresh worker connections:
+
+1. Select the affected Terraform workspace and capture the current service
+   deployment state before changing anything:
+   ```bash
+   terraform -chdir=deployment/terraform workspace select <environment>
+   CLUSTER=$(terraform -chdir=deployment/terraform output -raw ecs_cluster_name)
+   SERVICE=$(terraform -chdir=deployment/terraform output -raw ecs_service_name)
+   TASK_DEF_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+     --query 'services[0].taskDefinition' --output text)
+   aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+     --query 'services[0].{controller:deploymentController.type,taskDefinition:taskDefinition,desired:desiredCount,running:runningCount}'
+   ```
+2. Confirm the rotated secret is `AWSCURRENT` and the Redis replication group
+   is `available` before restarting the worker. Do not retrieve or print the
+   secret value:
+   ```bash
+   SECRET_ARN=$(terraform -chdir=deployment/terraform output -raw redis_secret_arn)
+   aws secretsmanager describe-secret --secret-id "$SECRET_ARN" \
+     --query 'VersionIdsToStages'
+   REDIS_GROUP=$(terraform -chdir=deployment/terraform output -raw redis_replication_group_id)
+   aws elasticache describe-replication-groups --replication-group-id "$REDIS_GROUP" \
+     --query 'ReplicationGroups[0].Status'
+   ```
+3. Restart according to the service deployment controller:
+   - For the `ECS` controller (staging), run
+     `aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --force-new-deployment`
+     and wait with `aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"`.
+   - For the `CODE_DEPLOY` controller (production), start a CodeDeploy
+     deployment using `$TASK_DEF_ARN` (the currently serving revision), with
+     the procedure in [`BLUE_GREEN_DEPLOYMENTS.md`](BLUE_GREEN_DEPLOYMENTS.md#via-aws-cli).
+     Do not substitute the latest registered task revision for this
+     credential-only restart. This preserves the blue/green traffic-shift and
+     automatic-rollback behavior.
+4. Verify the ECS service is stable with `runningCount == desiredCount`,
+   `curl -fsS "http://$(terraform -chdir=deployment/terraform output -raw backend_url)/api/v1/health"`
+   returns HTTP 200, `/api/ops/queue/health` reports `redisConnected: true`,
+   and `/api/ops/workers/health` lists the notification worker as
+   ready/healthy. Re-run the smoke check using the replacement worker's
+   credential source; require `status: "ok"` (exit code `0`) before closing
+   the incident.
+
+**Rollback boundary:** If the replacement task or worker does not become
+healthy, stop further deployments and use the ECS deployment circuit breaker
+or CodeDeploy automatic rollback to return traffic to the last healthy task
+revision. This rollback affects the compute revision only; it does not undo a
+Secrets Manager rotation or restore a previous Redis AUTH token. Do not move
+`AWSCURRENT` backwards or reapply an old AUTH token as part of an ECS rollback.
+Keep the failed rotation state intact and resolve it with the secret-rotation
+owner before attempting another rotation. Pending queue jobs remain in Redis;
+do not purge or replay them as a credential-recovery step.
+
 ## Rollout Recovery from a Partial Apply
 
 A Terraform apply is not atomic. When a plan applies some resources and then errors on others,
@@ -222,6 +293,36 @@ remain unaffected.
 
 See `modules/ecs/rollout_recovery.tf` for the full in-code procedure and the
 `tests/ecs_rollout_recovery.tftest.hcl` test suite.
+
+### Validating Terraform Rollout from a Clean Environment (SPR-2026-271)
+
+To validate state consistency, plan reproducibility, and safe rollback boundaries without relying on undocumented local state:
+
+1. **Clean checkout verification**:
+   No local `.tfstate` files or undocumented machine variables are required. Remote state backend configuration in `providers.tf` is fully declared with S3 and DynamoDB locking.
+   ```bash
+   cd deployment/terraform
+   terraform init -input=false
+   terraform validate
+   ```
+
+2. **Reproducing a plan with no infrastructure changes**:
+   Select the target workspace and execute a detailed plan check:
+   ```bash
+   terraform workspace select staging
+   terraform plan -detailed-exitcode -var-file=staging.tfvars -no-color
+   ```
+   Exit code 0 confirms exact state consistency and zero infrastructure drift between the repository and AWS.
+
+3. **Isolated service execution**:
+   To test or roll out an isolated service (e.g. ECS service only):
+   ```bash
+   terraform plan -target=module.ecs.aws_ecs_service.main -var-file=staging.tfvars
+   ```
+
+4. **Rollback steps without undocumented local state**:
+   If an apply is interrupted or results in `ecs_rollout_status == "blocked"`, execute the targeted rollback command or re-run with the previous task revision ARN from state outputs. Never delete or bypass remote state locks.
+
 
 ## Modules
 

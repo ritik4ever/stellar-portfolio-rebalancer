@@ -22,7 +22,7 @@ pub const CURRENT_SLIPPAGE_POLICY_VERSION: u32 = SLIPPAGE_POLICY_VERSION_V1;
 /// stored under `DataKey::Portfolio(u64)` are migrated on read.
 pub const CONTRACT_VERSION: u32 = 2;
 /// Contract event schema version matching backend expected schema version.
-pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 1;
+pub const CONTRACT_EVENT_SCHEMA_VERSION: u32 = 2;
 /// Persistent storage schema version. Tracked separately from
 /// `CONTRACT_EVENT_SCHEMA_VERSION` (which only versions emitted event
 /// shapes): this one versions the on-chain storage layout itself and is
@@ -63,6 +63,12 @@ pub const MAX_BATCH_REBALANCE_PORTFOLIOS: u32 = 10;
 
 pub const DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS: u32 = 100; // 1%
 pub const DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 3600; // 1 hour
+/// Minimum window_seconds for circuit breaker config (60 seconds / 1 minute).
+/// Below this, TWAP records would be zero causing divide-by-zero in check_volatility.
+pub const MIN_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 60;
+/// Maximum window_seconds for circuit breaker config (~365 days).
+/// Prevents unreasonably large windows that could cause overflow or excessive storage reads.
+pub const MAX_CIRCUIT_BREAKER_WINDOW_SECONDS: u64 = 31_536_000; // 365 days
 pub const DEFAULT_GLOBAL_MAX_SLIPPAGE_BPS: u32 = 300; // 3%
 pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
 

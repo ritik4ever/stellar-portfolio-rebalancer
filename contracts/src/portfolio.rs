@@ -271,10 +271,15 @@ pub fn validate_portfolio_storage_footprint(
     Ok(estimate)
 }
 
-pub fn emit_portfolio_created(env: &Env, portfolio_id: u64, user: Address) {
+pub fn emit_portfolio_created(
+    env: &Env,
+    portfolio_id: u64,
+    user: Address,
+    rebalance_threshold: u32,
+) {
     env.events().publish(
         (symbol_short!("portfolio"), symbol_short!("created")),
-        (portfolio_id, user),
+        (portfolio_id, user, rebalance_threshold),
     );
 }
 
@@ -296,6 +301,30 @@ pub fn emit_portfolio_rebalanced(env: &Env, portfolio_id: u64, timestamp: u64) {
     env.events().publish(
         (symbol_short!("portfolio"), Symbol::new(env, "rebalanced")),
         (portfolio_id, timestamp),
+    );
+}
+
+/// Emits a `("portfolio", "alloc_upd")` event when target allocations are updated.
+///
+/// Emitted data:
+/// - Topic[0]: `symbol_short!("portfolio")`
+/// - Topic[1]: `Symbol::new(env, "alloc_upd")`
+/// - Data: `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)`
+///
+/// Ordering & atomicity guarantees:
+/// - Emitted strictly once, immediately following committed persistence to storage (`DataKey::PortfolioV2`).
+/// - If validation of the target-weight invariant fails (sum != 10,000 bps, asset weight outside 1..=10,000 bps)
+///   or authorization fails, no event is emitted, and stored weights, balances, and contract funds remain unchanged.
+/// - Allows off-chain consumers to reconstruct both prior and new target allocations unambiguously.
+pub fn emit_allocation_updated(
+    env: &Env,
+    portfolio_id: u64,
+    old_allocations: Map<Address, u32>,
+    new_allocations: Map<Address, u32>,
+) {
+    env.events().publish(
+        (symbol_short!("portfolio"), Symbol::new(env, "alloc_upd")),
+        (portfolio_id, old_allocations, new_allocations),
     );
 }
 

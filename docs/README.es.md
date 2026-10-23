@@ -321,7 +321,7 @@ cd frontend && npm test
 cd backend && npm test
 
 # Smart contracts
-cd contracts && cargo test
+cd contracts && cargo test --features testutils
 
 # Benchmarks de gas de smart contracts
 cd contracts && make bench

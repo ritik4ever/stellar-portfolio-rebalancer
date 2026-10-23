@@ -33,6 +33,11 @@ import {
   type NotificationDeliveryConfig,
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
+import {
+  redactWebhookEndpoint,
+  reportWebhookDeliveryAttemptStarted,
+  reportWebhookDeliveryOutcome,
+} from "./webhookDeliveryOutcome.js";
 import { deriveEmailMessageId, toEmailDeliveryError } from "./emailDeliverySafety.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 import { sendSlackNotification } from '../notifications/slack.js'
@@ -102,6 +107,23 @@ class SmsProvider implements NotificationProvider {
 
 
 
+/**
+ * Attach the receiver's HTTP status to a delivery error without changing how
+ * the generic retry layer classifies throwables (it treats plain errors as
+ * retryable, and the webhook retry policy stays as it was).
+ */
+function webhookResponseError(status: number): Error {
+  const error = new Error(`Webhook responded with status ${status}`) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
+function webhookStatusOf(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}
+
 class WebhookProvider implements NotificationProvider {
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}
 
@@ -135,6 +157,9 @@ class WebhookProvider implements NotificationProvider {
     };
 
     const webhookUrl = preferences.webhookUrl;
+    // Redacted destination, safe for logs/metrics: the URL path usually holds
+    // the receiver's capability token.
+    const source = redactWebhookEndpoint(webhookUrl);
 
     try {
       await deliverWithBackoff(
@@ -146,7 +171,20 @@ class WebhookProvider implements NotificationProvider {
           deliveryId: payload.deliveryId,
           signal: payload.signal,
         },
-        async () => {
+        async (attempt) => {
+          const startedAt = Date.now();
+
+          // Recorded before the request so a worker restart between send and
+          // acknowledgement is diagnosable (start without a terminal record).
+          reportWebhookDeliveryAttemptStarted({
+            source,
+            eventType: payload.eventType,
+            deliveryId: payload.deliveryId,
+            userId: payload.userId,
+            attempt,
+            maxAttempts: policy.maxAttempts,
+          });
+
           const controller = new AbortController();
           const timeout = policy.requestTimeoutMs || 5000;
           const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -163,8 +201,36 @@ class WebhookProvider implements NotificationProvider {
             });
 
             if (!response.ok) {
-              throw new Error(`Webhook responded with status ${response.status}`);
+              // Keep the delivery retry policy unchanged (the generic layer
+              // still classifies this as retryable) but carry the status on the
+              // error so the operator outcome can tell a 503 delay apart from a
+              // 400 that will never succeed.
+              throw webhookResponseError(response.status);
             }
+
+            reportWebhookDeliveryOutcome({
+              source,
+              eventType: payload.eventType,
+              deliveryId: payload.deliveryId,
+              userId: payload.userId,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              statusCode: response.status,
+              elapsedMs: Date.now() - startedAt,
+            });
+          } catch (error) {
+            reportWebhookDeliveryOutcome({
+              source,
+              eventType: payload.eventType,
+              deliveryId: payload.deliveryId,
+              userId: payload.userId,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              statusCode: webhookStatusOf(error),
+              error,
+              elapsedMs: Date.now() - startedAt,
+            });
+            throw error;
           } finally {
             clearTimeout(timeoutId);
           }
@@ -283,6 +349,12 @@ class EmailProvider implements NotificationProvider {
       return;
     }
 
+    const deliveryId =
+      payload.deliveryId ||
+      (payload.data?.deliveryId as string | undefined) ||
+      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
+      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
+
     const mailOptions = {
       from: process.env.SMTP_FROM || "noreply@stellarportfolio.com",
       to: recipientEmail,
@@ -291,15 +363,10 @@ class EmailProvider implements NotificationProvider {
       html: this.formatHtmlEmail(payload),
       // Stable across retries so a possibly-delivered message can be
       // correlated instead of silently duplicated (#2091).
-      messageId: deriveEmailMessageId(payload),
+      messageId: deriveEmailMessageId({ ...payload, deliveryId }),
     };
 
     const policy = this.deliveryConfig.email;
-    const deliveryId =
-      payload.deliveryId ||
-      (payload.data?.deliveryId as string | undefined) ||
-      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
-      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
 
     await deliverWithBackoff(
       {
