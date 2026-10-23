@@ -307,12 +307,15 @@ export async function buildReadinessReport() {
       indexerStatus as unknown as Record<string, unknown>,
     );
   } else if (!indexerStatus.contractEventSchemaOk) {
+    const reason = indexerStatus.lastError || "Contract event schema version does not match this backend";
     indexerCheck = buildCheck(
       "not_ready",
       true,
-      indexerStatus.lastError ||
-        "Contract event schema version does not match this backend",
-      indexerStatus as unknown as Record<string, unknown>,
+      reason,
+      {
+        ...(indexerStatus as unknown as Record<string, unknown>),
+        degradedReason: reason,
+      },
     );
   } else if (
     indexerStatus.running &&
@@ -326,18 +329,26 @@ export async function buildReadinessReport() {
       indexerStatus as unknown as Record<string, unknown>,
     );
   } else if (indexerStatus.consecutiveFailures > 0 && indexerStatus.lastSuccessfulRunAt) {
+    const reason = `Contract event indexer degraded (${indexerStatus.consecutiveFailures} consecutive failures)`;
     indexerCheck = buildCheck(
       "not_ready",
       true,
-      `Contract event indexer degraded (${indexerStatus.consecutiveFailures} consecutive failures)`,
-      indexerStatus as unknown as Record<string, unknown>,
+      reason,
+      {
+        ...(indexerStatus as unknown as Record<string, unknown>),
+        degradedReason: reason,
+      },
     );
   } else {
+    const reason = "Contract event indexer has not completed a successful startup sync";
     indexerCheck = buildCheck(
       "not_ready",
       true,
-      "Contract event indexer has not completed a successful startup sync",
-      indexerStatus as unknown as Record<string, unknown>,
+      reason,
+      {
+        ...(indexerStatus as unknown as Record<string, unknown>),
+        degradedReason: reason,
+      },
     );
   }
 
@@ -352,7 +363,7 @@ export async function buildReadinessReport() {
         "Auto-rebalancer is disabled for this environment",
         autoRebalancerStatus as unknown as Record<string, unknown>,
       )
-    : autoRebalancerStatus.isRunning && autoRebalancerStatus.initialized
+  : autoRebalancerStatus.isRunning && autoRebalancerStatus.initialized
       ? buildCheck(
           "ready",
           true,
@@ -363,7 +374,10 @@ export async function buildReadinessReport() {
           "not_ready",
           true,
           "Auto-rebalancer is enabled but not initialized",
-          autoRebalancerStatus as unknown as Record<string, unknown>,
+          {
+            ...(autoRebalancerStatus as unknown as Record<string, unknown>),
+            degradedReason: "Auto-rebalancer is enabled but not initialized",
+          },
         );
 
   const queueBacklogCheck = !redisConnected

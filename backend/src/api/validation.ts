@@ -12,6 +12,7 @@ const portfolioStrategyConfigSchema = z.object({
     minDaysBetweenRebalance: z.number().min(0).max(365).optional(),
     dcaAmount: z.number().positive().optional(),
     dcaIntervalDays: z.number().min(1).max(365).optional(),
+    dryRun: z.boolean().optional(),
 }).strict()
 
 export const portfolioAllocationsSchema = z.record(z.string(), z.number().min(0).max(100)).refine(
@@ -67,8 +68,15 @@ export const updateAllocationsSchema = z.object({
 
 // Schema for POST /portfolio/:id/clone
 export const clonePortfolioSchema = z.object({
-    name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name cannot exceed 100 characters').optional()
-}).strict();
+    name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name cannot exceed 100 characters').optional(),
+    userAddress: z.string().optional(),
+    threshold: z.number().optional(),
+    description: z.string().optional(),
+    allocations: portfolioAllocationsSchema.optional(),
+    slippageTolerance: z.number().optional(),
+    strategy: z.string().optional(),
+    strategyConfig: z.record(z.string(), z.any()).optional()
+}).passthrough();
 // Schema for GET /portfolios/summary
 export const portfolioSummaryQuerySchema = z.object({
     userAddress: z.string().min(1, "userAddress is required"),
@@ -269,6 +277,11 @@ export const adminAddAssetSchema = z.object({
     contractAddress: z.string().optional(),
     issuerAccount: z.string().optional(),
     coingeckoId: z.string().optional()
+}).strict();
+
+// ─── Stellar account balance sync schema ───────────────────────────────────────
+export const syncBalanceSchema = z.object({
+    address: z.string().min(1, 'Stellar address is required').regex(/^[G][A-Z0-9]{55,56}$/, 'Invalid Stellar public key format')
 }).strict();
 
 // Recurring emailed portfolio export schedule (#1411).
@@ -500,19 +513,35 @@ export const BACKTEST_MIN_DAYS = 7
 export const BACKTEST_MAX_DAYS = 365
 
 export const backtestRequestSchema = z.object({
-    allocations: portfolioAllocationsSchema,
-    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%"),
+    portfolioId: z.string().min(1).optional(),
+    allocations: portfolioAllocationsSchema.optional(),
+    threshold: z.number().min(1, "Threshold must be between 1% and 50%").max(50, "Threshold must be between 1% and 50%").optional(),
     days: z.number().int()
         .min(BACKTEST_MIN_DAYS, `days must be between ${BACKTEST_MIN_DAYS} and ${BACKTEST_MAX_DAYS}`)
         .max(BACKTEST_MAX_DAYS, `days must be between ${BACKTEST_MIN_DAYS} and ${BACKTEST_MAX_DAYS}`)
         .default(90),
     initialValue: z.number().positive().max(1_000_000_000).default(10_000),
-    from: isoDateString.optional(),
-    to: isoDateString.optional(),
+    from: z.string().datetime({ offset: true, message: 'Invalid ISO date string' }).optional(),
+    to: z.string().datetime({ offset: true, message: 'Invalid ISO date string' }).optional(),
 }).strict()
+    .refine((data) => data.portfolioId !== undefined || data.allocations !== undefined, {
+        message: 'Either allocations or portfolioId must be provided',
+        path: ['allocations'],
+    })
+    .refine((data) => data.portfolioId !== undefined || data.threshold !== undefined, {
+        message: 'threshold is required when allocations are provided',
+        path: ['threshold'],
+    })
     .refine((data) => (data.from === undefined) === (data.to === undefined), {
         message: 'from and to must be provided together',
     })
     .refine((data) => !data.from || !data.to || Date.parse(data.from) <= Date.parse(data.to), {
         message: 'from must not be after to',
     });
+
+export const listBacktestsQuerySchema = z.object({
+    portfolioId: z.string().optional(),
+    status: z.enum(['completed', 'failed', 'running']).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+}).optional();

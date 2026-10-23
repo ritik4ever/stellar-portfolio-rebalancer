@@ -37,7 +37,7 @@ const router = Router()
  * Body: { address: string }
  * Response: { challenge: string }  — sign this exact string (UTF-8) with the wallet
  */
-router.post('/challenge', validateRequest(challengeSchema), async (req: Request, res: Response) => {
+router.post('/challenge', validateRequest(challengeSchema, 400), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -63,7 +63,7 @@ router.post('/challenge', validateRequest(challengeSchema), async (req: Request,
  *   signature — base64-encoded Ed25519 signature over the challenge string
  *               returned by POST /api/auth/challenge
  */
-router.post('/login', validateRequest(loginSchema), async (req: Request, res: Response) => {
+router.post('/login', validateRequest(loginSchema, 400), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -98,7 +98,7 @@ router.post('/login', validateRequest(loginSchema), async (req: Request, res: Re
     }
 })
 
-router.post('/refresh', validateRequest(refreshTokenSchema), async (req: Request, res: Response) => {
+router.post('/refresh', validateRequest(refreshTokenSchema, 400), async (req: Request, res: Response) => {
     try {
         const config = getAuthConfig()
         if (!config.enabled) {
@@ -195,6 +195,34 @@ router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
         if (error instanceof InvalidSignatureError) {
             return fail(res, 401, 'UNAUTHORIZED', error.message)
         }
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+router.delete('/sessions/:tokenId', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.address
+        const { tokenId } = req.params
+        const result = await revokeDeviceSession(userId, tokenId)
+        if (!result.success) {
+            if (result.reason === 'not_found') return fail(res, 404, 'NOT_FOUND', 'Session not found')
+            return fail(res, 403, 'FORBIDDEN', 'Session belongs to a different user')
+        }
+        return ok(res, { message: 'Session revoked' })
+    } catch (error) {
+        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+    }
+})
+
+/**
+ * Return a compact view of recent auth events: sign-ins, refreshes, and revocations.
+ * GET /api/auth/audit
+ */
+router.get('/audit', requireJwt, async (req: Request, res: Response) => {
+    try {
+        const events = getRecentAuthAuditEvents()
+        return ok(res, { events })
+    } catch (error) {
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })

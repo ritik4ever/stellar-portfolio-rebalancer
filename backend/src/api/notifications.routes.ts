@@ -545,4 +545,3 @@ notificationsRouter.post('/notifications/webhook/callback', async (req: Request,
         return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
     }
 })
-

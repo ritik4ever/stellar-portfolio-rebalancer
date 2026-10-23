@@ -5,6 +5,7 @@ import { runWithRequestContext } from "../utils/requestContext.js";
 import { logger, logAudit } from "../utils/logger.js";
 import { portfolioStorage } from "../services/portfolioStorage.js";
 import { ReflectorService } from "../services/reflector.js";
+import { StellarService } from "../services/stellar.js";
 import { buildRebalancePlan } from "../services/rebalancePlan.js";
 import {
   rebalanceHistoryService,
@@ -56,6 +57,117 @@ function isAutoRebalanceEnabled(p: Portfolio): boolean {
   return true;
 }
 
+export type AutoRebalanceDryRunSource = "portfolio" | "environment" | "disabled";
+
+export function resolveAutoRebalanceDryRun(
+  portfolio: Portfolio,
+  env: NodeJS.ProcessEnv = process.env,
+): { enabled: boolean; source: AutoRebalanceDryRunSource } {
+  const portfolioSetting = portfolio.strategyConfig?.dryRun;
+  if (typeof portfolioSetting === "boolean") {
+    return { enabled: portfolioSetting, source: "portfolio" };
+  }
+
+  const environmentSetting = env.AUTO_REBALANCE_DRY_RUN?.trim().toLowerCase();
+  if (environmentSetting === "true") {
+    return { enabled: true, source: "environment" };
+  }
+
+  return { enabled: false, source: "disabled" };
+}
+
+export interface AutoRebalanceBackoffConfig {
+  baseBackoffMs?: number;
+  backoffMultiplier?: number;
+  maxBackoffMs?: number;
+  minCooldownHours?: number;
+}
+
+export const DEFAULT_BACKOFF_CONFIG = {
+  baseBackoffMs: 5 * 60 * 1000,
+  backoffMultiplier: 2,
+  maxBackoffMs: 60 * 60 * 1000,
+  minCooldownHours: 1,
+};
+
+export function calculateBackoffDelay(failures: number, config?: AutoRebalanceBackoffConfig): number {
+  if (failures <= 0) return 0;
+  const cfg = { ...DEFAULT_BACKOFF_CONFIG, ...config };
+  const delay = cfg.baseBackoffMs * Math.pow(cfg.backoffMultiplier, failures - 1);
+  return Math.min(delay, cfg.maxBackoffMs);
+}
+
+export interface PortfolioBackoffState {
+  portfolioId: string;
+  consecutiveFailures: number;
+  currentBackoffMs: number;
+  lastFailureReason?: string;
+  nextAllowedAttemptAt?: string;
+  lastSuccessAt?: string;
+}
+
+const backoffStates = new Map<string, PortfolioBackoffState>();
+
+export function resetAllBackoffStates(): void {
+  backoffStates.clear();
+}
+
+export function getAllBackoffStates(): PortfolioBackoffState[] {
+  return Array.from(backoffStates.values());
+}
+
+export function getPortfolioBackoffState(portfolioId: string): PortfolioBackoffState | undefined {
+  return backoffStates.get(portfolioId);
+}
+
+export function recordAutoRebalanceFailure(
+  portfolioId: string,
+  reason: string | Error,
+  config?: AutoRebalanceBackoffConfig
+): PortfolioBackoffState {
+  const reasonStr = reason instanceof Error ? reason.message : String(reason);
+  const current = backoffStates.get(portfolioId);
+  const consecutiveFailures = (current?.consecutiveFailures ?? 0) + 1;
+  const currentBackoffMs = calculateBackoffDelay(consecutiveFailures, config);
+  const nextAllowedAttemptAt = new Date(Date.now() + currentBackoffMs).toISOString();
+
+  const state: PortfolioBackoffState = {
+    portfolioId,
+    consecutiveFailures,
+    currentBackoffMs,
+    lastFailureReason: reasonStr,
+    nextAllowedAttemptAt,
+    lastSuccessAt: current?.lastSuccessAt,
+  };
+  backoffStates.set(portfolioId, state);
+  return state;
+}
+
+export function recordAutoRebalanceSuccess(portfolioId: string): void {
+  const current = backoffStates.get(portfolioId);
+  backoffStates.set(portfolioId, {
+    portfolioId,
+    consecutiveFailures: 0,
+    currentBackoffMs: 0,
+    nextAllowedAttemptAt: undefined,
+    lastSuccessAt: new Date().toISOString(),
+  });
+}
+
+export function isPortfolioInBackoff(portfolioId: string): { inBackoff: boolean; consecutiveFailures: number; remainingMs: number } {
+  const state = backoffStates.get(portfolioId);
+  if (!state || state.consecutiveFailures <= 0 || !state.nextAllowedAttemptAt) {
+    return { inBackoff: false, consecutiveFailures: 0, remainingMs: 0 };
+  }
+  const nextAttemptTime = new Date(state.nextAllowedAttemptAt).getTime();
+  const remainingMs = Math.max(0, nextAttemptTime - Date.now());
+  return {
+    inBackoff: remainingMs > 0,
+    consecutiveFailures: state.consecutiveFailures,
+    remainingMs,
+  };
+}
+
 /**
  * Returns true when the portfolio is currently auto-paused by the CVaR/VaR
  * risk guardrail (`riskPausedUntil` is set in the future).
@@ -99,6 +211,7 @@ function computeDrift(
 /** Evaluate eligible portfolios and either simulate or enqueue their rebalance plans. */
 export async function processAutoRebalanceJob(
   job: Job<AutoRebalanceCheckJobData>,
+  backoffConfig?: AutoRebalanceBackoffConfig,
 ): Promise<AutoRebalanceSummary> {
   const { triggeredBy, correlationId } = job.data;
   const requestId = correlationId ?? randomUUID();
@@ -128,8 +241,18 @@ export async function processAutoRebalanceJob(
       return summary;
     }
 
+    const stellarService = new StellarService();
     const reflector = new ReflectorService();
-    const { prices, feedMeta } = await reflector.getCurrentPricesWithMeta();
+    let prices: PricesMap;
+    let feedMeta: any;
+    if (typeof (reflector as any).getCurrentPricesWithMeta === "function") {
+      const res = await (reflector as any).getCurrentPricesWithMeta();
+      prices = res.prices;
+      feedMeta = res.feedMeta;
+    } else {
+      prices = await reflector.getCurrentPrices();
+      feedMeta = { isStale: false, staleOrLimited: false };
+    }
 
     const marketCheck = CircuitBreakers.checkMarketConditions(prices);
     if (!marketCheck.safe) {
@@ -151,6 +274,17 @@ export async function processAutoRebalanceJob(
       summary.portfoliosChecked++;
 
       try {
+        const backoffStatus = isPortfolioInBackoff(portfolio.id);
+        if (backoffStatus.inBackoff) {
+          skipCounts["backoff"] = (skipCounts["backoff"] ?? 0) + 1;
+          logger.debug("[WORKER:auto-rebalance] Portfolio skipped — backoff active", {
+            portfolioId: portfolio.id,
+            consecutiveFailures: backoffStatus.consecutiveFailures,
+            remainingMs: backoffStatus.remainingMs,
+          });
+          continue;
+        }
+
         // CVaR/VaR auto-pause: a portfolio with a future riskPausedUntil is skipped.
         if (isRiskPaused(portfolio)) {
           skipCounts["risk_paused"] = (skipCounts["risk_paused"] ?? 0) + 1;
@@ -279,6 +413,64 @@ export async function processAutoRebalanceJob(
           }
         }
 
+        const dryRun = resolveAutoRebalanceDryRun(portfolio);
+        if (dryRun.enabled) {
+          const plan = buildRebalancePlan(portfolio, prices, feedMeta);
+          const estimatedTrades = plan.estimatedFees.tradeCount;
+
+          logger.info("[WORKER:auto-rebalance] Dry-run plan computed — no transaction submitted", {
+            portfolioId: portfolio.id,
+            dryRunSource: dryRun.source,
+            plan,
+          });
+
+          await rebalanceHistoryService.recordRebalanceEvent({
+            portfolioId: portfolio.id,
+            trigger: "Automatic Rebalancing (Dry Run Simulation)",
+            trades: estimatedTrades,
+            gasUsed: "0 XLM",
+            status: "completed",
+            isAutomatic: true,
+            actor: "scheduler",
+            source: "auto_rebalance",
+            eventSource: "simulated",
+            isSimulated: true,
+            triggerMetadata: {
+              dryRun: true,
+              simulated: true,
+              dryRunSource: dryRun.source,
+              plan,
+            },
+            estimatedSlippageBps: plan.estimatedSlippageBps,
+          });
+
+          try {
+            await notificationService.notify({
+              userId: portfolio.userAddress,
+              portfolioId: portfolio.id,
+              eventType: "rebalance",
+              title: "Rebalance Simulation (Dry Run)",
+              message: `Simulation only — no on-chain transaction was submitted. The scheduled plan contains ${estimatedTrades} estimated trade${estimatedTrades === 1 ? "" : "s"}.`,
+              data: {
+                portfolioId: portfolio.id,
+                dryRun: true,
+                isSimulated: true,
+                plan,
+              },
+              timestamp: new Date().toISOString(),
+            });
+          } catch (notifyErr) {
+            logger.error("[WORKER:auto-rebalance] Dry-run notification failed (non-fatal)", {
+              portfolioId: portfolio.id,
+              error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+            });
+          }
+
+          recordAutoRebalanceSuccess(portfolio.id);
+          summary.portfoliosSimulated++;
+          continue;
+        }
+
         await rebalanceQueue.add(
           `rebalance-${portfolio.id}`,
           {
@@ -289,6 +481,7 @@ export async function processAutoRebalanceJob(
           { removeOnComplete: true },
         );
 
+        recordAutoRebalanceSuccess(portfolio.id);
         summary.portfoliosTriggered++;
         logger.info("[WORKER:auto-rebalance] Rebalance enqueued", {
           portfolioId: portfolio.id,
@@ -297,6 +490,7 @@ export async function processAutoRebalanceJob(
           reason: triggerReason,
         });
       } catch (err) {
+        recordAutoRebalanceFailure(portfolio.id, err instanceof Error ? err : String(err), backoffConfig);
         const msg = err instanceof Error ? err.message : String(err);
         summary.errors.push(`Portfolio ${portfolio.id}: ${msg}`);
         logger.error("[WORKER:auto-rebalance] Error checking portfolio", {
