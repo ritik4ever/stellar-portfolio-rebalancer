@@ -11,6 +11,10 @@ const CG_API_KEY_REGEX = /c?g-[a-zA-Z0-9_-]{10,}/g;
 const QUERY_PARAM_KEY_REGEX = /([?&](?:api_key|apikey|x_cg_pro_api_key|x_cg_demo_api_key)=)[^&]+/gi;
 // Matches Bearer tokens in Authorization header values
 const BEARER_TOKEN_REGEX = /\bBearer\s+\S+/gi;
+// Matches database/URI credentials, e.g. postgres://user:password@host
+const URI_CREDENTIALS_REGEX = /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^/\\@\s:]+):([^/\\@\s]+)@/g;
+// Matches password/credential assignments or messages like password "...", password=..., password authentication failed for user "secret_admin"
+const CREDENTIALS_KV_REGEX = /(password\s+authentication\s+failed\s+for\s+user\s+)(?:"[^"]*"|'[^']*'|\S+)|(\b(?:password|passwd|pwd)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|\S+)/gi;
 
 const REDACTED_HINT = '[REDACTED]';
 
@@ -63,7 +67,11 @@ export function redactString(str: string): string {
         // Redact keys in URLs
         .replace(QUERY_PARAM_KEY_REGEX, `$1${REDACTED_HINT}`)
         // Redact Bearer tokens
-        .replace(BEARER_TOKEN_REGEX, `Bearer ${REDACTED_HINT}`);
+        .replace(BEARER_TOKEN_REGEX, `Bearer ${REDACTED_HINT}`)
+        // Redact URI credentials (e.g. postgres://user:password@host -> postgres://[REDACTED]@[host])
+        .replace(URI_CREDENTIALS_REGEX, `$1${REDACTED_HINT}@`)
+        // Redact password and credential key-value patterns
+        .replace(CREDENTIALS_KV_REGEX, (_match, p1, p2) => `${p1 || p2}${REDACTED_HINT}`);
 
     return redacted;
 }

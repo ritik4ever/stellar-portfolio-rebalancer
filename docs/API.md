@@ -115,6 +115,27 @@ A warning does not gate a deploy. A `✗` on a required check does — this run 
   ✗ api-health  /api/health   FAIL — expected HTTP 200, got 503
 ```
 
+The Backtest service simulates portfolio threshold rebalancing over historical price windows. It replays real daily closing prices and applies the same drift-based rebalancing trigger used by the live threshold strategy:
+
+Rebalance back to target weights whenever any asset's drift exceeds the configured percentage-point threshold.
+Compare simulation results against a baseline buy-and-hold strategy across the exact same historical timeline.
+Rely strictly on verified historical market data without falling back to synthetic/mock prices.
+
+
 That is the same `503` as step 3, and the `dependencies` object from `curl` is what tells you whether it was Redis, the database, Horizon, or the oracle.
 
 On a fresh start with no Redis, `/ready` and `/readiness` legitimately return `503` with `"status": "not_ready"` — they are the same handler, and they aggregate the database, Redis/queues, queue backlog, workers, the contract event indexer, and the auto-rebalancer. That is the warning in step 5, not a failure.
+
+## Backtest endpoints
+
+Historical price window evaluation and state persistence for portfolio rebalancing:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/backtest` | Run historical backtest across a date window or days lookback. |
+| `GET` | `/api/v1/backtest/:id` | Fetch persisted backtest record by ID with verified state consistency. |
+| `GET` | `/api/v1/backtest` | List persisted backtests with filters (`portfolioId`, `status`, `limit`, `offset`). |
+| `POST` | `/api/portfolio/:id/backtest` | Run backtest using portfolio's target allocations and threshold. |
+| `GET` | `/api/portfolio/:id/backtests` | List backtest history for a specific portfolio. |
+
+For calendar window mechanics, leap-year boundary handling, and concurrency guarantees, see **[BACKTEST.md](BACKTEST.md)**.

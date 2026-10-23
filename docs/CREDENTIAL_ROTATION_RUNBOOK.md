@@ -138,7 +138,7 @@ Set `ROTATION_OVERLAP_OPEN=false` once the previous key is no longer accepted. T
 | `transient_delay` | The worker still holds the previous key while the overlap window is open. | `wait_for_worker_credential_refresh` - wait for the background refresh or call `POST /api/ops/credentials/refresh`. |
 | `blocked` | The worker holds the previous key after the overlap closed, an unknown key, or the inputs are invalid. | `restart_notification_worker`, or `fix_rotation_inputs` for invalid input. |
 
-Exit codes: `0` success, `1` stale worker (transient delay or blocked), `2` invalid input. A `blocked` outcome means the worker will fail once the old key is revoked; restart it before continuing the rotation.
+Exit codes: `0` success, `1` stale worker (transient delay or blocked), `2` invalid input. If `ownerAction` is `restart_notification_worker`, restart the notification worker and re-run this check. If `ownerAction` is `fix_rotation_inputs`, correct the reported inputs and re-run this check. Do not revoke the previous key until the check returns `outcome: success`.
 
 ---
 

@@ -6,6 +6,7 @@ import {
   dbGetAllNotificationPreferences,
   dbLogNotificationOutcome,
   dbGetNotificationLogs,
+  dbGetLatestNotificationLog,
   dbSaveDigestEvent,
   dbGetAndDeleteDigestEventsBefore,
   dbInitDefaultNotificationPreferences,
@@ -20,7 +21,7 @@ import {
   type NotificationPreferences,
   type NotificationLog,
 } from "../db/notificationDb.js";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import {
   normalizeNotificationPreferences,
   notificationPreferencesSchema,
@@ -32,6 +33,12 @@ import {
   type NotificationDeliveryConfig,
 } from "../config/notificationDeliveryConfig.js";
 import { deliverWithBackoff } from "./notificationDelivery.js";
+import {
+  redactWebhookEndpoint,
+  reportWebhookDeliveryAttemptStarted,
+  reportWebhookDeliveryOutcome,
+} from "./webhookDeliveryOutcome.js";
+import { deriveEmailMessageId, toEmailDeliveryError } from "./emailDeliverySafety.js";
 import { webhookDeadLetterQueue, type DeadLetterItem } from "./webhookDeadLetter.js";
 import { sendSlackNotification } from '../notifications/slack.js'
 import { createTwilioClient, generateVerificationCode, hashVerificationCode, normalizePhoneNumber, sendSms, verifyCodeHash, type SmsClient } from '../notifications/sms.js'
@@ -52,6 +59,8 @@ export interface NotificationPayload {
   message: string;
   data?: any;
   timestamp: string;
+  deliveryId?: string;
+  signal?: AbortSignal;
 }
 
 
@@ -98,6 +107,23 @@ class SmsProvider implements NotificationProvider {
 
 
 
+/**
+ * Attach the receiver's HTTP status to a delivery error without changing how
+ * the generic retry layer classifies throwables (it treats plain errors as
+ * retryable, and the webhook retry policy stays as it was).
+ */
+function webhookResponseError(status: number): Error {
+  const error = new Error(`Webhook responded with status ${status}`) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
+function webhookStatusOf(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}
+
 class WebhookProvider implements NotificationProvider {
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {}
 
@@ -131,6 +157,9 @@ class WebhookProvider implements NotificationProvider {
     };
 
     const webhookUrl = preferences.webhookUrl;
+    // Redacted destination, safe for logs/metrics: the URL path usually holds
+    // the receiver's capability token.
+    const source = redactWebhookEndpoint(webhookUrl);
 
     try {
       await deliverWithBackoff(
@@ -139,8 +168,23 @@ class WebhookProvider implements NotificationProvider {
           userId: payload.userId,
           eventType: payload.eventType,
           policy,
+          deliveryId: payload.deliveryId,
+          signal: payload.signal,
         },
-        async () => {
+        async (attempt) => {
+          const startedAt = Date.now();
+
+          // Recorded before the request so a worker restart between send and
+          // acknowledgement is diagnosable (start without a terminal record).
+          reportWebhookDeliveryAttemptStarted({
+            source,
+            eventType: payload.eventType,
+            deliveryId: payload.deliveryId,
+            userId: payload.userId,
+            attempt,
+            maxAttempts: policy.maxAttempts,
+          });
+
           const controller = new AbortController();
           const timeout = policy.requestTimeoutMs || 5000;
           const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -157,8 +201,36 @@ class WebhookProvider implements NotificationProvider {
             });
 
             if (!response.ok) {
-              throw new Error(`Webhook responded with status ${response.status}`);
+              // Keep the delivery retry policy unchanged (the generic layer
+              // still classifies this as retryable) but carry the status on the
+              // error so the operator outcome can tell a 503 delay apart from a
+              // 400 that will never succeed.
+              throw webhookResponseError(response.status);
             }
+
+            reportWebhookDeliveryOutcome({
+              source,
+              eventType: payload.eventType,
+              deliveryId: payload.deliveryId,
+              userId: payload.userId,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              statusCode: response.status,
+              elapsedMs: Date.now() - startedAt,
+            });
+          } catch (error) {
+            reportWebhookDeliveryOutcome({
+              source,
+              eventType: payload.eventType,
+              deliveryId: payload.deliveryId,
+              userId: payload.userId,
+              attempt,
+              maxAttempts: policy.maxAttempts,
+              statusCode: webhookStatusOf(error),
+              error,
+              elapsedMs: Date.now() - startedAt,
+            });
+            throw error;
           } finally {
             clearTimeout(timeoutId);
           }
@@ -185,7 +257,7 @@ class WebhookProvider implements NotificationProvider {
 // ─────────────────────────────────────────────
 
 class EmailProvider implements NotificationProvider {
-  private transporter: nodemailer.Transporter | null = null;
+  private transporter: Transporter | null = null;
   private warnLogged = false
 
   constructor(private readonly deliveryConfig: NotificationDeliveryConfig) {
@@ -277,12 +349,21 @@ class EmailProvider implements NotificationProvider {
       return;
     }
 
+    const deliveryId =
+      payload.deliveryId ||
+      (payload.data?.deliveryId as string | undefined) ||
+      (payload.data?.jobId ? `rebalance-job-${payload.data.jobId}` : undefined) ||
+      (payload.data?.rebalanceId ? `rebalance-${payload.data.rebalanceId}` : undefined);
+
     const mailOptions = {
       from: process.env.SMTP_FROM || "noreply@stellarportfolio.com",
       to: recipientEmail,
       subject: `[Stellar Portfolio] ${payload.title}`,
       text: this.formatTextEmail(payload),
       html: this.formatHtmlEmail(payload),
+      // Stable across retries so a possibly-delivered message can be
+      // correlated instead of silently duplicated (#2091).
+      messageId: deriveEmailMessageId({ ...payload, deliveryId }),
     };
 
     const policy = this.deliveryConfig.email;
@@ -293,16 +374,27 @@ class EmailProvider implements NotificationProvider {
         userId: payload.userId,
         eventType: payload.eventType,
         policy,
+        deliveryId,
+        signal: payload.signal,
       },
       async () => {
-        const info = await this.transporter!.sendMail(mailOptions);
-        logger.info("Email notification sent successfully", {
-          to: recipientEmail,
-          event: payload.eventType,
-          userId: payload.userId,
-          messageId: info.messageId,
-          maxAttempts: policy.maxAttempts,
-        });
+        try {
+          const info = await this.transporter!.sendMail(mailOptions);
+          logger.info("Email notification sent successfully", {
+            to: recipientEmail,
+            event: payload.eventType,
+            userId: payload.userId,
+            messageId: info.messageId,
+            idempotencyKey: mailOptions.messageId,
+            maxAttempts: policy.maxAttempts,
+            deliveryId,
+          });
+        } catch (error) {
+          // Classify the SMTP failure before the generic backoff logic sees it:
+          // a timeout or dropped connection after the body was accepted may
+          // already have delivered the message, so it must not be retried.
+          throw toEmailDeliveryError(error, mailOptions.messageId);
+        }
       },
     );
   }
@@ -587,6 +679,10 @@ export class NotificationService {
     prefs.webhookEnabled = false;
     prefs.slackEnabled = false;
     prefs.smsEnabled = false;
+    delete prefs.emailAddress;
+    delete prefs.webhookUrl;
+    delete prefs.slackWebhookUrl;
+    delete prefs.phoneNumber;
     dbSaveNotificationPreferences(prefs);
     logger.info("User unsubscribed from notifications", { userId });
   }
@@ -799,10 +895,92 @@ export class NotificationService {
   }
 
   /**
+   * Get delivery logs for a specific user with limit and optional deliveryId filtering
+   */
+  getDeliveryLogs(userId: string, limit: number = 50, deliveryId?: string): NotificationLog[] {
+    return dbGetNotificationLogs(userId, limit, deliveryId);
+  }
+
+  /**
    * Get delivery logs for a specific user
    */
   getLogs(userId: string): NotificationLog[] {
     return dbGetNotificationLogs(userId);
+  }
+
+  /**
+   * Get delivery status summary for a user, verifying agreement with persisted records
+   */
+  getDeliveryStatus(userId: string): {
+    latestDelivery?: NotificationLog;
+    channelStatus: Record<string, { enabled: boolean; lastStatus?: string }>;
+    totalDeliveries: number;
+  } {
+    const logs = dbGetNotificationLogs(userId, 50);
+    const prefs = this.getPreferences(userId);
+    const latestEmail = dbGetLatestNotificationLog(userId, 'email');
+    const latestWebhook = dbGetLatestNotificationLog(userId, 'webhook');
+    const latestSlack = dbGetLatestNotificationLog(userId, 'slack');
+    const latestSms = dbGetLatestNotificationLog(userId, 'sms');
+
+    return {
+      latestDelivery: logs[0],
+      channelStatus: {
+        email: {
+          enabled: prefs.emailEnabled,
+          lastStatus: latestEmail?.status,
+        },
+        webhook: {
+          enabled: prefs.webhookEnabled,
+          lastStatus: latestWebhook?.status,
+        },
+        slack: {
+          enabled: prefs.slackEnabled ?? false,
+          lastStatus: latestSlack?.status,
+        },
+        sms: {
+          enabled: prefs.smsEnabled ?? false,
+          lastStatus: latestSms?.status,
+        },
+      },
+      totalDeliveries: logs.length,
+    };
+  }
+
+  /**
+   * Send a test notification to verify delivery channels and consistency
+   */
+  async sendTestNotification(userId: string): Promise<{
+    message: string;
+    sentTo: {
+      email: string | null;
+      webhook: string | null;
+      telegram: string | null;
+    };
+    timestamp: string;
+  }> {
+    const prefs = this.getPreferences(userId);
+    const timestamp = new Date().toISOString();
+    const payload: NotificationPayload = {
+      userId,
+      eventType: "rebalance",
+      title: "Test Notification",
+      message: "This is a test notification from Stellar Portfolio Rebalancer.",
+      deliveryId: `test-${userId}-${Date.now()}`,
+      timestamp,
+    };
+
+    await this.notify(payload);
+
+    return {
+      message: "Test notification sent",
+      sentTo: {
+        email: prefs.emailEnabled ? prefs.emailAddress || null : null,
+        webhook: prefs.webhookEnabled ? prefs.webhookUrl || null : null,
+        telegram: null,
+      },
+      timestamp,
+    };
   }
 }
 

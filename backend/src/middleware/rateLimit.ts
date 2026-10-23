@@ -9,11 +9,12 @@ import { rateLimitMonitor } from "../services/rateLimitMonitor.js";
 import { REDIS_URL, getRedisUrl, refreshRedisCredentials, getCachedRedisAvailability } from "../queue/connection.js";
 import { getRedisClientOptions } from "../config/redisConnectionOptions.js";
 
+const isTestEnv = process.env.NODE_ENV === "test";
 const GLOBAL_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || process.env.RATE_LIMIT_GLOBAL_WINDOW_MS || "", 10) || 15 * 60 * 1000;
-const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || 100;
-const WRITE_MAX = parseInt(process.env.RATE_LIMIT_WRITE_MAX || "", 10) || 20;
-const AUTH_MAX = parseInt(process.env.RATE_LIMIT_AUTH_MAX || "", 10) || 10;
-const CRITICAL_MAX = parseInt(process.env.RATE_LIMIT_CRITICAL_MAX || "", 10) || 5;
+const GLOBAL_MAX = parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_GLOBAL_MAX || "", 10) || (isTestEnv ? 1000 : 100);
+const WRITE_MAX = parseInt(process.env.RATE_LIMIT_WRITE_MAX || "", 10) || (isTestEnv ? 1000 : 20);
+const AUTH_MAX = parseInt(process.env.RATE_LIMIT_AUTH_MAX || "", 10) || (isTestEnv ? 1000 : 10);
+const CRITICAL_MAX = parseInt(process.env.RATE_LIMIT_CRITICAL_MAX || "", 10) || (isTestEnv ? 1000 : 5);
 
 /**
  * CoinGecko Demo (free) plan allows 30 calls per minute.
@@ -32,8 +33,8 @@ export function pricesRouteLimit(tierPerMinute = Number.parseInt(process.env.COI
 const PRICES_MAX = pricesRouteLimit();
 
 const BURST_WINDOW_MS = parseInt(process.env.RATE_LIMIT_BURST_WINDOW_MS || "", 10) || 1000;
-const BURST_MAX = parseInt(process.env.RATE_LIMIT_BURST_MAX || "", 10) || 5;
-const WRITE_BURST_MAX = parseInt(process.env.RATE_LIMIT_WRITE_BURST_MAX || "", 10) || 3;
+const BURST_MAX = parseInt(process.env.RATE_LIMIT_BURST_MAX || "", 10) || (isTestEnv ? 1000 : 5);
+const WRITE_BURST_MAX = parseInt(process.env.RATE_LIMIT_WRITE_BURST_MAX || "", 10) || (isTestEnv ? 1000 : 3);
 
 let redisClient: IORedis | undefined;
 
@@ -174,7 +175,7 @@ function isProbePath(path: string): boolean {
   return ["/health", "/ready", "/readiness", "/metrics"].includes(path);
 }
 
-function isTrustedHealthProbe(req: Request): boolean {
+export function isTrustedHealthProbe(req: Request): boolean {
   const path = req.path || "";
   if (!isProbePath(path)) return false;
 

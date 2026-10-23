@@ -20,6 +20,7 @@ vi.mock('../services/authService.js', () => ({
     logout: vi.fn(),
     issueChallenge: vi.fn(),
     verifyWalletSignature: vi.fn(),
+    authenticateWalletSignature: vi.fn(),
     verifyAccessToken: verifyAccessTokenMock,
 }))
 

@@ -93,6 +93,47 @@ export interface BacktestResult {
     decision: BacktestWindowDecision
 }
 
+export type BacktestStatus = 'completed' | 'failed' | 'running'
+
+export interface BacktestMetricsSummary {
+    days: number
+    initialValue: number
+    finalValue: number
+    totalReturnPct: number
+    buyAndHoldFinalValue: number
+    buyAndHoldReturnPct: number
+    rebalanceCount: number
+    maxDrawdownPct: number
+    maxDriftObservedPct: number
+}
+
+export interface BacktestRecord {
+    id: string
+    portfolioId?: string
+    allocations: Record<string, number>
+    threshold: number
+    initialValue: number
+    days: number
+    from?: string
+    to?: string
+    startDate?: string
+    endDate?: string
+    startTimestamp?: number
+    endTimestamp?: number
+    status: BacktestStatus
+    hasLeapDay: boolean
+    leapDayIncluded: boolean
+    includedDays: string[]
+    absentDayReasons: Record<string, string>
+    absentDays: AbsentDayDetail[]
+    decision?: BacktestWindowDecision
+    events?: BacktestRebalanceEvent[]
+    result?: BacktestMetricsSummary
+    error?: string
+    createdAt: string
+    updatedAt: string
+}
+
 export class BacktestDataError extends Error {}
 
 /**

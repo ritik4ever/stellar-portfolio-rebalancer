@@ -9,7 +9,7 @@ For the frontend-facing view of supported methods, expected arguments, and grace
 * **Code constant:** `BACKEND_CONTRACT_EVENT_SCHEMA_VERSION` in `backend/src/config/contractEventSchema.ts`.
 * **Environment:** `CONTRACT_EVENT_SCHEMA_VERSION` (optional). If set, it **must** equal the code constant or every `syncOnce` call becomes a no-op and `lastError` describes the mismatch. Readiness treats an enabled indexer with a failed schema check as **not ready**.
 
-Bump the constant when you change topic strings or tuple layouts expected below, and document the migration for deployers.
+Bump the contract and backend constants when you change topic strings or tuple layouts expected below, and document the migration for deployers. Schema version 2 adds the stored rebalance threshold to `portfolio.created`.
 
 ## Correlation-ID module decision
 
@@ -39,7 +39,7 @@ Starting from `CONTRACT_VERSION = 2`, newly created portfolios include `strategy
 
 Legacy portfolios (created before the schema bump) are migrated on first read: the old XDR is deserialized as `LegacyPortfolio`, converted with `StrategyType::Threshold` + default `StrategyConfig`, and re-written under `DataKey::PortfolioV2`. Old entries under `DataKey::Portfolio(u64)` are removed after migration.
 
-Event topics and payload shapes remain unchanged — the strategy fields are storage-only and do not alter event payloads. Backend indexers that decode `Portfolio` from events (e.g. `portfolio.created`) will see the new fields automatically once old portfolios are migrated.
+The strategy fields are storage-only and do not alter event payloads. Backend indexers that decode `Portfolio` from events (e.g. `portfolio.created`) will see the new fields automatically once old portfolios are migrated.
 
 ## Expected event topics and payloads
 
@@ -47,7 +47,7 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
 | Topic[0]    | Topic[1]            | Payload shape (Rust tuple)                                        | Indexed as                           |
 | ----------- | ------------------- | ----------------------------------------------------------------- | ------------------------------------ |
-| `portfolio` | `created`           | `(portfolio_id, user)`                                            | `portfolio_created`                  |
+| `portfolio` | `created`           | `(portfolio_id, user, rebalance_threshold)`                       | `portfolio_created`                  |
 | `portfolio` | `deposit`           | `(portfolio_id, asset, amount)`                                   | `deposit`                            |
 | `portfolio` | `withdraw`          | `(portfolio_id, asset, amount)`                                   | `withdraw`                           |
 | `portfolio` | `rebalanced`        | `(portfolio_id, timestamp)`                                       | `rebalance_executed`                 |
@@ -56,7 +56,7 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 
 | Topic[0]    | Topic[1]            | Payload shape (Rust)                                              | Indexed as                           |
 | ----------  | ----------          | ----------------------                                            | ------------                         |
-| `portfolio` | `created`           | `(portfolio_id: u64, user: Address)`                              | `portfolio_created`                  |
+| `portfolio` | `created`           | `(portfolio_id: u64, user: Address, rebalance_threshold: u32)`    | `portfolio_created`                 |
 | `portfolio` | `deposit`           | `(portfolio_id: u64, asset: Address, amount: i128, memo: String)` | `deposit`                            |
 | `portfolio` | `withdraw`          | `(portfolio_id: u64, asset: Address, amount: i128)`               | `withdraw`                           |
 | `portfolio` | `rebalanced`        | `(portfolio_id: u64, current_time: u64)`                          | `rebalance_executed`                 |
@@ -66,6 +66,19 @@ Aligned with `contracts/src/lib.rs` and `contracts/src/portfolio.rs`.
 | `portfolio` | `alloc_upd`         | `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` | `allocation_updated` |
 
 **Synonyms:** the indexer accepts `rebalance_executed` or `executed` as the second topic for the rebalance event (same payload rules).
+
+`portfolio.created` is emitted once after the new portfolio and its user count are
+stored. Its `rebalance_threshold` is the committed configuration value in the
+`1..=50` percent range. A rejected creation emits no `portfolio.created` event
+and does not consume a portfolio ID. The backend indexer continues to read the
+first two payload fields; consumers that need to reconstruct the threshold can
+read the third field.
+
+`portfolio.alloc_upd` is emitted strictly once after updated target allocations
+are validated against the target-weight invariant (each asset in `1..=10_000` bps,
+strictly summing to `10_000` bps / 100.00%) and committed to persistent storage.
+A rejected allocation update emits no event, preserving stored weights, current
+balances, and contract token funds completely unchanged on failure after committed calls.
 
 ### Governance: two-step admin transfer
 
@@ -101,7 +114,7 @@ Emitted by the `update_allocations` entrypoint when a user changes a portfolio's
 
 **Contract entrypoint:** `update_allocations(portfolio_id: u64, new_allocations: Map<Address, u32>)` — see [`contracts/src/lib.rs`](../contracts/src/lib.rs) and the [Contract Capability Matrix](CONTRACT_CAPABILITY_MATRIX.md) (`update_allocations` row).
 
-**Emit source:** `contracts/src/events.rs` (`emit_allocation_updated`) and inline in `contracts/src/lib.rs`.
+**Emit source:** `contracts/src/portfolio.rs` (`emit_allocation_updated`) called from `contracts/src/lib.rs`.
 
 **Sample event payload:**
 
@@ -112,20 +125,24 @@ Emitted by the `update_allocations` entrypoint when a user changes a portfolio's
   "data": {
     "portfolio_id": 1,
     "old_allocations": {
-      "CDLZFC...XLM": 40,
-      "CDMLFK...USDC": 35,
-      "CBKTPM...BTC": 25
+      "CDLZFC...XLM": 4000,
+      "CDMLFK...USDC": 3500,
+      "CBKTPM...BTC": 2500
     },
     "new_allocations": {
-      "CDLZFC...XLM": 50,
-      "CDMLFK...USDC": 30,
-      "CBKTPM...BTC": 20
+      "CDLZFC...XLM": 5000,
+      "CDMLFK...USDC": 3000,
+      "CBKTPM...BTC": 2000
     }
   }
 }
 ```
 
-> **Note:** `events.rs`'s unused `emit_allocation_updated` correlation-ID helper has been removed (see "Correlation-ID module decision" above). The `alloc_upd` event is emitted only via the inline call in `lib.rs`, with topics `(portfolio, alloc_upd)` and payload `(portfolio_id, old_allocations, new_allocations)`.
+#### Emitted data, ordering, and failure atomicity (SPR-2026-194):
+- **Emitted data:** The event payload is a 3-tuple `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` published under topics `(symbol_short!("portfolio"), Symbol::new(env, "alloc_upd"))`.
+- **Emission ordering:** The event is emitted strictly once per successful call, immediately after the new portfolio state is written to persistent storage (`DataKey::PortfolioV2(portfolio_id)`).
+- **Failure atomicity & unchanged funds:** If an update violates the target-weight invariant (under-allocation, over-allocation, zero bps asset weight) or fails authorization, the call returns `Err` and emits NO event. Any earlier committed calls (such as deposits or previous allocation updates) retain their committed events once and in original chronological order. Stored weights, current balances, and contract token funds remain unchanged.
+- **Consumer state reconstruction:** An off-chain listener or indexer decoding `old_allocations` and `new_allocations` can reconstruct both previous and committed target weights without ambiguity, verify exact 10,000 bps invariant compliance, and maintain a verifiable state history. Safe recovery after a rejected update produces a clean subsequent `alloc_upd` event referencing the preserved `old_allocations`.
 
 ## Reusable test fixtures
 
@@ -136,7 +153,7 @@ The contract test suite emits canonical event sequences that backend integration
 1. Run the contract tests to generate snapshot files:
 
    ```bash
-   cd contracts && cargo test
+   cd contracts && cargo test --features testutils
    ```
 
 2. Snapshot JSON files are written to `contracts/test_snapshots/test/`. Each file captures the full Soroban test environment after a test completes, including all emitted events.

@@ -12,6 +12,7 @@ vi.mock('../services/databaseService.js', () => ({
         setIndexerState: vi.fn(),
         ensurePortfolioExists: vi.fn(),
         recordRebalanceEvent: vi.fn(),
+        recordRebalanceEventOnce: vi.fn(() => ({ event: { id: 'mock-event' }, inserted: true })),
         getRebalanceHistory: vi.fn(),
         getReplayStatus: vi.fn(),
         getReplayIntegrityHash: vi.fn(),
@@ -94,8 +95,8 @@ describe('contractEventIndexer', () => {
 
         // Assert
         expect(result.ingested).toBe(1)
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(1)
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledWith(expect.objectContaining({
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(1)
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledWith(expect.objectContaining({
             portfolioId: portfolioIdStr,
             onChainEventType: 'rebalance_executed',
             onChainTxHash: '0x123',
@@ -139,7 +140,7 @@ describe('contractEventIndexer', () => {
         const result = await contractEventIndexerService.syncOnce()
 
         // Assert
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(1) // Should only be 1
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(1) // Should only be 1
         expect(result.ingested).toBe(1)
 
         safeScValToNativeSpy.mockRestore()
@@ -189,7 +190,7 @@ describe('contractEventIndexer', () => {
 
         // Assert
         expect(result.ingested).toBe(1)
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(1)
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(1)
         
         safeScValToNativeSpy.mockRestore()
     })
@@ -283,10 +284,11 @@ describe('contractEventIndexer', () => {
             pagingToken: 'token-1'
         } as unknown as SorobanRpc.Api.EventResponse
 
-        rpcServerMock.getEvents.mockResolvedValue({
-            events: [mockEvent],
-            latestLedger: 1000
-        })
+        // Each replay reaches an empty terminal page; endlessly returning the
+        // same page is now an explicit cursor-stall failure (#2101).
+        rpcServerMock.getEvents
+            .mockResolvedValueOnce({ events: [mockEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
 
         safeScValToNativeSpy.mockImplementation((val) => {
             if (val === 'topic1') return 'portfolio'
@@ -324,10 +326,11 @@ describe('contractEventIndexer', () => {
             pagingToken: 'token-1'
         } as unknown as SorobanRpc.Api.EventResponse
 
-        rpcServerMock.getEvents.mockResolvedValue({
-            events: [mockEvent],
-            latestLedger: 1000
-        })
+        rpcServerMock.getEvents
+            .mockResolvedValueOnce({ events: [mockEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [mockEvent], latestLedger: 1000 })
+            .mockResolvedValueOnce({ events: [], latestLedger: 1000 })
 
         safeScValToNativeSpy.mockImplementation((val) => {
             if (val === 'topic1') return 'portfolio'
@@ -340,15 +343,13 @@ describe('contractEventIndexer', () => {
         const result1 = await contractEventIndexerService.syncOnce()
 
         // Act - Second Run (simulating script re-run without clearing memory)
-        // Note: For a true script re-run, memory is cleared, but database deduplication 
-        // would handle it. Since we only have in-memory dedup for this implementation,
-        // this test proves the service logic idempotency.
+        // Persistent deduplication after restart is covered by databaseService.test.ts.
         const result2 = await contractEventIndexerService.syncOnce()
 
         // Assert
         expect(result1.ingested).toBe(1)
         expect(result2.ingested).toBe(0) // Idempotent output
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalledTimes(1) // Only called once total
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalledTimes(1) // Only called once total
 
         safeScValToNativeSpy.mockRestore()
     })
@@ -440,7 +441,7 @@ describe('contractEventIndexer', () => {
         expect(result.fromLedger).toBe(950)
         expect(result.toLedger).toBe(1000)
         expect(result.ingested).toBeGreaterThanOrEqual(1)
-        expect(databaseService.recordRebalanceEvent).toHaveBeenCalled()
+        expect(databaseService.recordRebalanceEventOnce).toHaveBeenCalled()
         const latestLedgerCall = dbMock.setIndexerState.mock.calls.find(
             (c: [string, string]) => c[0] === LATEST_LEDGER_KEY
         )

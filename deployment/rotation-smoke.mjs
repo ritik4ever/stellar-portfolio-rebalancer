@@ -68,11 +68,14 @@ export function evaluateRotation(env = process.env) {
     return invalidReport(`missing ${missing.join(', ')}`);
   }
 
-  const rawOverlapFlag = env.ROTATION_OVERLAP_OPEN?.trim().toLowerCase();
-  if (rawOverlapFlag && rawOverlapFlag !== 'true' && rawOverlapFlag !== 'false') {
-    return invalidReport('ROTATION_OVERLAP_OPEN must be "true" or "false"');
+  let overlapOpen = true;
+  if (env.ROTATION_OVERLAP_OPEN !== undefined) {
+    const rawOverlapFlag = env.ROTATION_OVERLAP_OPEN.trim().toLowerCase();
+    if (rawOverlapFlag !== 'true' && rawOverlapFlag !== 'false') {
+      return invalidReport('ROTATION_OVERLAP_OPEN must be "true" or "false"');
+    }
+    overlapOpen = rawOverlapFlag === 'true';
   }
-  const overlapOpen = rawOverlapFlag !== 'false';
 
   if (previous && previous === active) {
     return invalidReport(
@@ -110,6 +113,7 @@ export function evaluateRotation(env = process.env) {
         reason: 'worker holds previous key',
         outcome: OUTCOMES.TRANSIENT_DELAY,
         ownerAction: OWNER_ACTIONS.WAIT_FOR_WORKER_REFRESH,
+        recommendedAction: 'restart-worker-with-current-secret',
         detail:
           'Notification worker still holds the previous key while the rotation overlap window is open. ' +
           'Wait for the background credential refresh (about 4 minutes) or call ' +
@@ -128,6 +132,7 @@ export function evaluateRotation(env = process.env) {
         reason: 'worker holds previous key after overlap closed',
         outcome: OUTCOMES.BLOCKED,
         ownerAction: OWNER_ACTIONS.RESTART_WORKER,
+        recommendedAction: 'restart-worker-with-current-secret',
         detail:
           'Notification worker still holds the previous key after the overlap window closed. ' +
           'Restart the notification worker so it reloads the active key, then re-run this check.',
@@ -144,6 +149,7 @@ export function evaluateRotation(env = process.env) {
       reason: 'worker holds unknown key',
       outcome: OUTCOMES.BLOCKED,
       ownerAction: OWNER_ACTIONS.RESTART_WORKER,
+      recommendedAction: 'restart-worker-with-current-secret',
       detail:
         'Notification worker holds a key that matches neither the active nor the previous version. ' +
         'Restart the notification worker so it reloads the active key, then re-run this check.',

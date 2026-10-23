@@ -115,6 +115,68 @@ describe("NotificationService", () => {
       );
     });
 
+    it("stops after an ambiguous SMTP timeout instead of risking a duplicate email", async () => {
+      process.env.EMAIL_MAX_ATTEMPTS = "3";
+      process.env.EMAIL_INITIAL_BACKOFF_MS = "500";
+
+      getPrefsSpy.mockReturnValue(emailPrefs);
+      mockNodemailerTransporter.sendMail.mockRejectedValue(
+        Object.assign(new Error("Timeout while waiting for response"), { code: "ETIMEDOUT" }),
+      );
+
+      const service = new NotificationService();
+      await expect(service.notify({ ...basePayload })).resolves.toBeUndefined();
+      await vi.runAllTimersAsync();
+
+      expect(mockNodemailerTransporter.sendMail).toHaveBeenCalledTimes(1);
+      expect(logOutcomeSpy).toHaveBeenCalledWith(
+        "test-user",
+        "email",
+        "rebalance",
+        "uncertain",
+        expect.stringContaining("Message-ID"),
+        expect.objectContaining({
+          attempt: 1,
+          maxAttempts: 3,
+          failureKind: "ambiguous",
+          retryable: false,
+          stoppedEarly: true,
+          idempotencyKey: expect.stringMatching(/^<[a-f0-9]{32}@test\.com>$/),
+        }),
+      );
+      expect(logOutcomeSpy).not.toHaveBeenCalledWith(
+        "test-user",
+        "email",
+        "rebalance",
+        "retried",
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it("reuses the same Message-ID across retries so a duplicate is traceable", async () => {
+      process.env.EMAIL_MAX_ATTEMPTS = "2";
+      process.env.EMAIL_INITIAL_BACKOFF_MS = "500";
+
+      getPrefsSpy.mockReturnValue(emailPrefs);
+      mockNodemailerTransporter.sendMail
+        .mockRejectedValueOnce(
+          Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:587"), { code: "ECONNREFUSED" }),
+        )
+        .mockResolvedValueOnce({ messageId: "assigned-by-smtp" });
+
+      const service = new NotificationService();
+      const notifyPromise = service.notify({ ...basePayload });
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(notifyPromise).resolves.toBeUndefined();
+
+      expect(mockNodemailerTransporter.sendMail).toHaveBeenCalledTimes(2);
+      const [firstAttempt, secondAttempt] =
+        mockNodemailerTransporter.sendMail.mock.calls;
+      expect(firstAttempt[0].messageId).toMatch(/^<[a-f0-9]{32}@test\.com>$/);
+      expect(secondAttempt[0].messageId).toBe(firstAttempt[0].messageId);
+    });
+
     it("logs skipped status when email is disabled", async () => {
       getPrefsSpy.mockReturnValue({ ...emailPrefs, emailEnabled: false });
 

@@ -218,7 +218,7 @@ Sentry DSNs are project-scoped and do not grant account access, but they can be 
 | `SOROBAN_EVENT_INDEXER_LIMIT` | No | `100` | Maximum events fetched per RPC page. | `100` | |
 | `SOROBAN_EVENT_INDEXER_BOOTSTRAP_WINDOW` | No | `500` | Ledger lookback window used on first sync when no cursor exists. | `500` | |
 | `SOROBAN_EVENT_INDEXER_MAX_PAGES` | No | `10` | Maximum RPC pages consumed per sync cycle. | `10` | |
-| `CONTRACT_EVENT_SCHEMA_VERSION` | No | `1` | Expected contract event schema version. Mismatches block indexing at startup. | `1` | |
+| `CONTRACT_EVENT_SCHEMA_VERSION` | No | `2` | Expected contract event schema version. Mismatches block indexing at startup. | `2` | |
 
 ### Price Feed
 
@@ -527,4 +527,3 @@ Validation emits three distinct signals:
 
 ### Repeatability Smoke Check (SPR-2026-300)
 A maintainer can run `scripts/environment-reference.test.mjs` or `runEnvironmentSmokeCheck()` repeatedly without environment leakage or side effects.
-
