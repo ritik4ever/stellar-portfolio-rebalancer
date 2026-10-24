@@ -90,6 +90,9 @@ describe('Rebalance Job Queue – Integration Tests', () => {
     const cleanClient = new IORedis(process.env.REDIS_URL!);
     await cleanClient.flushall();
     await cleanClient.quit();
+    // Ensure a fresh queue/worker state for each test so no state leaks between cases
+    await stopRebalanceWorker();
+    await closeAllQueues();
 
     // Initialize queues and worker
     queue = getRebalanceQueue();
