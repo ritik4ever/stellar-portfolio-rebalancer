@@ -8,6 +8,7 @@ import { rebalanceHistoryService } from "../../services/serviceContainer.js";
 import { notificationService } from "../../services/notificationService.js";
 import { getConnectionOptions } from "../connection.js";
 import type { RebalanceJobData } from "../queues.js";
+import { ConflictError } from "../../types/index.js";
 import {
   createWorkerRuntimeStatus,
   markWorkerFailed,
@@ -94,8 +95,117 @@ export async function processRebalanceJob(
     const retryAvailable = (job.attemptsMade ?? 0) + 1 < (job.opts?.attempts ?? 1);
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
+
+      // Record a pending event before execution so interrupted jobs leave an audit trail.
+      await rebalanceHistoryService.recordRebalanceEvent({
+        portfolioId,
+        trigger:
+          triggeredBy === "auto"
+            ? "Automatic Rebalancing"
+            : "Manual Rebalancing",
+        trades: 0,
+        gasUsed: "0 XLM",
+        status: "pending",
+        isAutomatic: triggeredBy === "auto",
+      }).catch((pendingErr) => {
+        logger.warn("[WORKER:rebalance] Failed to record pending event (non-fatal)", {
+          portfolioId,
+          error: pendingErr instanceof Error ? pendingErr.message : String(pendingErr),
+        });
+      });
+
+      const capturedVersion = portfolio?.version;
       const rebalanceResult =
         await stellarService.executeRebalance(portfolioId);
+
+      const executionFailed = rebalanceResult.status === "failed";
+
+<<<<<<< HEAD
+      await rebalanceHistoryService.recordRebalanceEvent({
+        portfolioId,
+        trigger:
+          triggeredBy === "auto"
+            ? "Automatic Rebalancing"
+            : "Manual Rebalancing",
+        trades: rebalanceResult.trades ?? 0,
+        gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+        feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+        slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
+        status: executionFailed ? "failed" : "completed",
+        isAutomatic: triggeredBy === "auto",
+        error: executionFailed
+          ? (rebalanceResult.explanation ?? "Rebalance execution failed")
+          : undefined,
+        persistenceContext: {
+          source: "worker",
+          retryAvailable,
+          stateTransition: executionFailed ? "unknown" : "committed",
+        },
+      });
+
+=======
+>>>>>>> 8ea814a (update made)
+      if (executionFailed) {
+        await rebalanceHistoryService.recordRebalanceEvent({
+          portfolioId,
+          trigger:
+            triggeredBy === "auto"
+              ? "Automatic Rebalancing"
+              : "Manual Rebalancing",
+          trades: rebalanceResult.trades ?? 0,
+          gasUsed: rebalanceResult.gasUsed ?? "0 XLM",
+          feePaid: rebalanceResult.feePaid ?? rebalanceResult.feeEstimate?.totalFeeXlm ?? rebalanceResult.gasFeeXlm,
+          slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
+          status: "failed",
+          isAutomatic: triggeredBy === "auto",
+          error: rebalanceResult.explanation ?? "Rebalance execution failed",
+          details: {
+            stateTransition: "unknown",
+          },
+        });
+
+        logger.warn("[WORKER:rebalance] Rebalance returned failed status", {
+          portfolioId,
+          explanation: rebalanceResult.explanation,
+        });
+        broadcastJobFailure(job.id || "unknown", portfolioId, triggeredBy, rebalanceResult.explanation ?? "Rebalance execution failed", job.attemptsMade);
+        if (triggeredBy === "auto") {
+          logAudit("auto_rebalance_failed", {
+            portfolioId,
+            jobId: job.id,
+            status: "failed",
+            explanation: rebalanceResult.explanation,
+          });
+        }
+        return;
+      }
+
+      // Persist post-rebalance portfolio state with optimistic CAS.
+      let persistenceSucceeded = false;
+      if (portfolio) {
+        try {
+          const { portfolioStorage } = await import("../../services/portfolioStorage.js");
+          const result = await portfolioStorage.updatePortfolio(portfolioId, {
+            lastRebalance: new Date().toISOString(),
+            balances: rebalanceResult.newBalances ?? portfolio.balances,
+            totalValue: rebalanceResult.newTotalValue ?? portfolio.totalValue,
+          }, capturedVersion);
+          persistenceSucceeded = result === true;
+        } catch (persistErr) {
+          if (persistErr instanceof ConflictError) {
+            logger.warn("[WORKER:rebalance] Portfolio state persistence failed due to version conflict", {
+              portfolioId,
+              error: persistErr.message,
+            });
+          } else {
+            logger.warn("[WORKER:rebalance] Portfolio state persistence failed after successful rebalance (non-fatal)", {
+              portfolioId,
+              error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+            });
+          }
+          persistenceSucceeded = false;
+        }
+      }
 
       await rebalanceHistoryService.recordRebalanceEvent({
         portfolioId,
@@ -109,10 +219,8 @@ export async function processRebalanceJob(
         slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
-        persistenceContext: {
-          source: "worker",
-          retryAvailable,
-          stateTransition: "committed",
+        details: {
+          stateTransition: persistenceSucceeded ? "committed" : "unknown",
         },
       });
 
@@ -173,9 +281,13 @@ export async function processRebalanceJob(
           status: "failed",
           isAutomatic: triggeredBy === "auto",
           error: errorMessage,
+<<<<<<< HEAD
           persistenceContext: {
             source: "worker",
             retryAvailable,
+=======
+          details: {
+>>>>>>> 8ea814a (update made)
             stateTransition: "unknown",
           },
         });
