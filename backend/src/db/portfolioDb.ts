@@ -19,6 +19,27 @@ export interface PortfolioRow {
     archived_at?: Date
 }
 
+export interface PortfolioPageCursor {
+    createdAt: string
+    id: string
+}
+
+export interface PortfolioPage {
+    portfolios: ReturnType<typeof rowToPortfolio>[]
+    nextCursor: PortfolioPageCursor | null
+    count: number
+    total?: number
+}
+
+export interface PortfolioPaginationResult<T = ReturnType<typeof rowToPortfolio>> {
+    portfolios: T[]
+    limit: number
+    cursor: string | null
+    nextCursor: string | null
+    count: number
+    total: number
+}
+
 function rowToPortfolio(r: PortfolioRow) {
     return {
         id: r.id,
@@ -51,7 +72,8 @@ export async function dbCreatePortfolio(
     strategyConfig: Record<string, unknown> = {},
     name?: string,
     description?: string
-) {
+)
+{
     await query(
         `INSERT INTO portfolios (id, user_address, allocations, threshold, slippage_tolerance, balances, total_value, created_at, last_rebalance, version, strategy, strategy_config, name, description)
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), 1, $8, $9, $10, $11)`,
@@ -127,6 +149,20 @@ export async function dbUpdatePortfolio(
     },
     expectedVersion?: number
 ) {
+    if (updates.allocations !== undefined) {
+        const { isRebalanceActive } = await import('../services/portfolioPersistenceBoundary.js')
+        if (await isRebalanceActive(id)) {
+            const current = await query<{ version: number }>('SELECT version FROM portfolios WHERE id = $1', [id])
+            const { ConflictError } = await import('../types/index.js')
+            throw new ConflictError(
+                current.rows[0]?.version ?? -1,
+                `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+                'rebalancing',
+                'conflict_rebalancing'
+            )
+        }
+    }
+
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1
@@ -257,4 +293,77 @@ export async function dbCountPortfolios(searchQuery: string, includeArchived = f
         [searchQuery]
     )
     return Number(result.rows[0]?.count ?? 0)
+}
+
+/**
+ * Keyset (cursor) pagination for portfolios.
+ *
+ * Ordering is stable and totally ordered by `(created_at, id)` in ascending
+ * order. The cursor encodes the last row of the previous page so that
+ * concurrent inserts/deletes during pagination never cause duplicates or
+ * skipped rows (unlike LIMIT/OFFSET). The reported `count` is the number of
+ * rows returned in this page, not the total matching rows.
+ */
+export async function dbGetPortfolioPage(options: {
+    search?: string
+    userAddress?: string
+    limit: number
+    cursor?: PortfolioPageCursor | null
+    includeArchived?: boolean
+}): Promise<PortfolioPage & { total: number }> {
+    const { search, userAddress, limit, cursor, includeArchived = false } = options
+
+    if (!Number.isInteger(limit) || limit <= 0) {
+        throw new Error('limit must be a positive integer')
+    }
+
+    const baseConditions: string[] = []
+    const baseValues: unknown[] = []
+    let i = 1
+
+    if (userAddress !== undefined) {
+        baseConditions.push(`user_address = $${i++}`)
+        baseValues.push(userAddress)
+    }
+    if (!includeArchived) {
+        baseConditions.push('archived_at IS NULL')
+    }
+    if (search && search.trim().length > 0) {
+        baseConditions.push(`(name ILIKE $${i} OR description ILIKE $${i++})`)
+        baseValues.push(`%${search.trim()}%`)
+    }
+
+    const baseWhere = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : ''
+    const countResult = await query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM portfolios ${baseWhere}`,
+        baseValues
+    )
+    const total = parseInt(countResult.rows[0]?.count ?? '0', 10)
+
+    const pagedConditions = [...baseConditions]
+    const pagedValues = [...baseValues]
+    if (cursor) {
+        pagedConditions.push(`(created_at, id) > ($${i++}::timestamptz, $${i++})`)
+        pagedValues.push(cursor.createdAt, cursor.id)
+    }
+
+    const pagedWhere = pagedConditions.length > 0 ? `WHERE ${pagedConditions.join(' AND ')}` : ''
+    pagedValues.push(limit + 1)
+    const result = await query<PortfolioRow>(
+        `SELECT * FROM portfolios ${pagedWhere} ORDER BY created_at ASC, id ASC LIMIT $${i}`,
+        pagedValues
+    )
+
+    const hasMore = result.rows.length > limit
+    const pageRows = hasMore ? result.rows.slice(0, limit) : result.rows
+    const last = pageRows[pageRows.length - 1]
+
+    return {
+        portfolios: pageRows.map(rowToPortfolio),
+        nextCursor: hasMore && last
+            ? { createdAt: last.created_at.toISOString(), id: last.id, total }
+            : null,
+        count: pageRows.length,
+        total,
+    }
 }

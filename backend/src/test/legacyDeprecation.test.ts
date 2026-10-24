@@ -29,6 +29,9 @@ beforeAll(async () => {
     process.env.RATE_LIMIT_WRITE_BURST_MAX = '200'
     process.env.RATE_LIMIT_BURST_MAX = '200'
 
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-03-01T00:00:00Z'))
+
     const express = (await import('express')).default
     const cors = (await import('cors')).default
     const { apiErrorHandler } = await import('../middleware/apiErrorHandler.js')
@@ -51,6 +54,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(() => {
+    vi.useRealTimers()
     process.env = envBackup
     if (testDbPath) {
         const dir = join(testDbPath, '..')
@@ -294,6 +298,12 @@ describe('Legacy API Deprecation Headers', () => {
         })
 
         it('should include deprecation info in redirects', async () => {
+            const redirectApp = express()
+            redirectApp.use(express.json())
+            redirectApp.use('/api', legacyApiDeprecation)
+            redirectApp.get('/api/v1/portfolios', (_req, res) => {
+                res.status(200).json({ ok: true })
+            })
             const res = await request(redirectApp).get('/api/portfolios')
             expect(res.status).toBe(301)
             expect(res.headers['deprecation']).toBe('true')
@@ -340,7 +350,7 @@ describe('legacyApiDeprecation redirect compatibility', () => {
     redirectApp.post('/api/v1/portfolios', (req, res) => {
         res.status(200).json({ body: req.body })
     })
-    redirectApp.use('/api/*', (_req, res) => {
+    redirectApp.use('/api', (_req, res) => {
         res.status(404).json({ code: 'NOT_FOUND' })
     })
 

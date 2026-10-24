@@ -40,5 +40,34 @@ to its webhook URL with an `X-Webhook-Replay: true` header.
 Batch replay applies the same rule per entry and reports
 `{ total, succeeded, failed, failedIds }`.
 
-Both paths share `postDeadLetterPayload()` in `services/webhookDeadLetter.ts`, so
-there is one definition of what a replay request is.
+Both paths share `postDeadLetterPayload()` in `services/webhookDeadLetter.ts`, so there is one definition of what a replay request is.
+
+## Retry boundary handling
+
+When a replay is attempted while the target is still within its retry window, the
+service boundary rejects the replay with HTTP **429 Too Many Requests** and a
+`Retry-After` header in seconds. This is the canonical boundary contract for
+webhook delivery retry.
+
+Every 429 response is stable and deterministic for the same inputs:
+
+| Field | Location | Meaning |
+| --- | --- | --- |
+| `deliveryId` | body | Identifies the delivery being deferred |
+| `nextAttemptAt` | body | ISO-8601 timestamp of the next attempt |
+| `deduplicated` | body | `true` when the request matched an already-scheduled attempt |
+| `Retry-After` | header | Seconds until the next attempt is allowed |
+
+Example response:
+
+```json
+{
+  "deliveryId": "dl_123",
+  "nextAttemptAt": "2026-01-01T00:00:30Z",
+  "deduplicated": false
+}
+```
+
+Repeated requests for the same delivery within the retry window return the same
+`deliveryId` and `nextAttemptAt`, with `deduplicated: true`, so clients can retry
+safely without creating duplicate deliveries.

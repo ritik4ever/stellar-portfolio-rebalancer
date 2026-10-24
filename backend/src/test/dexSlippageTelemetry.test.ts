@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { recordTradeSlippage } from '../observability/metrics.js'
+import { recordTradeSlippage, tradeSlippageBps, tradeExecutionPrice } from '../observability/metrics.js'
 
 describe('Per-trade slippage telemetry (#1178)', () => {
     beforeEach(() => {
@@ -7,8 +7,8 @@ describe('Per-trade slippage telemetry (#1178)', () => {
     })
 
     it('emits slippage metric with portfolio bucket and asset pair labels', () => {
-        const observeSpy = vi.spyOn(require('../observability/metrics.js').tradeSlippageBps, 'observe')
-        const priceSpy = vi.spyOn(require('../observability/metrics.js').tradeExecutionPrice, 'observe')
+        const observeSpy = vi.spyOn(tradeSlippageBps, 'observe')
+        const priceSpy = vi.spyOn(tradeExecutionPrice, 'observe')
 
         recordTradeSlippage({
             portfolioId: 'portfolio-123',
@@ -29,7 +29,7 @@ describe('Per-trade slippage telemetry (#1178)', () => {
     })
 
     it('handles missing portfolioId gracefully', () => {
-        const observeSpy = vi.spyOn(require('../observability/metrics.js').tradeSlippageBps, 'observe')
+        const observeSpy = vi.spyOn(tradeSlippageBps, 'observe')
 
         recordTradeSlippage({
             portfolioId: 'unknown',
@@ -43,7 +43,7 @@ describe('Per-trade slippage telemetry (#1178)', () => {
     })
 
     it('does not block trade execution on metric emission failure', () => {
-        const observeSpy = vi.spyOn(require('../observability/metrics.js').tradeSlippageBps, 'observe').mockImplementation(() => {
+        const observeSpy = vi.spyOn(tradeSlippageBps, 'observe').mockImplementation(() => {
             throw new Error('Metrics system unavailable')
         })
 
@@ -61,8 +61,7 @@ describe('Per-trade slippage telemetry (#1178)', () => {
         }).not.toThrow()
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-            '[METRICS]',
-            'Failed to record trade slippage:',
+            '[METRICS] Failed to record trade slippage:',
             expect.any(Error)
         )
 
@@ -70,7 +69,7 @@ describe('Per-trade slippage telemetry (#1178)', () => {
     })
 
     it('clamps negative slippage to zero', () => {
-        const observeSpy = vi.spyOn(require('../observability/metrics.js').tradeSlippageBps, 'observe')
+        const observeSpy = vi.spyOn(tradeSlippageBps, 'observe')
 
         recordTradeSlippage({
             portfolioId: 'portfolio-123',
@@ -87,7 +86,7 @@ describe('Per-trade slippage telemetry (#1178)', () => {
     })
 
     it('skips execution price metric when price is zero or negative', () => {
-        const priceSpy = vi.spyOn(require('../observability/metrics.js').tradeExecutionPrice, 'observe')
+        const priceSpy = vi.spyOn(tradeExecutionPrice, 'observe')
 
         recordTradeSlippage({
             portfolioId: 'portfolio-123',

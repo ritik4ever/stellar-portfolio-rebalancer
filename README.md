@@ -27,7 +27,7 @@ It helps users maintain optimal asset allocation through automated rebalancing t
 ## Features
 
 * **Smart Rebalancing** – Automatic maintenance of target allocations based on threshold triggers.
-* **Target-Weight Invariants & Bounds** – Portfolio allocations are strictly bounded (1..=10,000 bps per asset) and verified to sum to exactly 100% (10,000 bps) in integer units; under-allocation, over-allocation, or unauthorized submissions are rejected atomically, preserving stored weights, current balances, and contract funds unchanged.
+* **Target-Weight Invariants & Bounds** – Portfolio allocations are strictly bounded (1..=10,000 bps per asset) and verified to sum to exactly 100% (10,000 bps) in integer units; under-allocation, over-allocation, or unauthorized submissions are rejected atomically, preserving stored weights, current balances, and contract funds unchanged while emitting events only for committed state transitions to allow unambiguous off-chain state reconstruction.
 * **Bounded Drift Thresholds** – Portfolio thresholds are constrained to 1%–50%; an out-of-range threshold is rejected atomically, so no portfolio, balance or configuration is changed.
 * **Admin-Gated Price Source** – Only the contract admin can change the oracle price source or its deviation bound; a rejected caller leaves the authorized oracle, balances and last accepted price unchanged.
 * **Bounded Quote Freshness** – Oracle quotes are accepted up to 1 hour old; an older quote is stale, its asset is skipped, and the rebalance is blocked with `StaleOraclePrice`.
@@ -298,7 +298,7 @@ cd frontend && npm test
 # Backend tests
 cd backend && npm test
 
-# Smart contract tests (unit + property suites, incl. threshold-bounds, oracle-authorization, stale-quote, and target-weight regressions)
+# Smart contract tests (unit + property suites, incl. threshold-bounds, oracle-authorization, stale-quote, and target-weight event/regression suites)
 cd contracts && cargo test --features testutils
 
 # Smart contract gas benchmarks

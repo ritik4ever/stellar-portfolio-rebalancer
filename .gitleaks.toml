@@ -18,6 +18,10 @@ useDefault = true
     '''(?:a11y|e2e|zap)-ci-jwt-secret-at-least-32-characters-long''',
     # RFC 6455 sample nonce used by the Blackbox WebSocket handshake probe.
     '''x3JJHMbDL1EzLkh9GBhXDw==''',
+    # Test-only sample tokens and seed strings used in scripts unit tests
+    '''ghp_ABC1234567890''',
+    '''ghp_secretToken123456''',
+    '''SB3VABCDEFGHIJ123456789012345678901234567890123456789012''',
   ]
 
   # Generated dependency/build trees are not source inputs and can be very large.

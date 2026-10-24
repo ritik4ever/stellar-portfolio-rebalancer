@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-2107-spr-2026-183-data-preserve-state-consistency-in",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-2107-spr-2026-183-data-preserve-state-consistency-in": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-2107-spr-2026-183-data-preserve-state-consistency-in",
+    "origin"
+  ]
+}

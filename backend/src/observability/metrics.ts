@@ -238,6 +238,33 @@ export const metricsMiddleware = (
 };
 
 export async function getMetricsPayload(): Promise<string> {
+  if (!observabilityConfig.metrics.enabled) {
+    return '# metrics disabled\n';
+  }
+
+  try {
+    const { buildReadinessReport } = await import('../monitoring/readiness.js');
+    const readiness = await buildReadinessReport();
+    readinessGauge.set((readiness as any).status === 'ready' ? 1 : 0);
+  } catch (err) {
+    readinessGauge.set(0);
+  }
+
+  try {
+    const { getQueueMetrics, QUEUE_METRIC_NAMES, QUEUE_METRIC_STATES } = await import('../queue/queueMetrics.js');
+    const queueMetrics = await getQueueMetrics();
+    if (queueMetrics && queueMetrics.queues) {
+      for (const queue of QUEUE_METRIC_NAMES) {
+        const stats = queueMetrics.queues[queue];
+        for (const state of QUEUE_METRIC_STATES) {
+          queueDepthGauge.set({ queue, state }, stats?.[state] ?? 0);
+        }
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
   return await register.metrics();
 }
 
@@ -339,7 +366,46 @@ const notificationDeliveryDuration = new Histogram({
     registers: [register],
 })
 
-export type NotificationDeliveryOutcome = 'success' | 'failure'
+const notificationDeliveryStalledTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}notification_delivery_stalled_total`,
+    help: 'Total notification deliveries that were accepted but not confirmed within the timeout window',
+    labelNames: ['channel', 'reason', 'event_type'] as const,
+    registers: [register],
+})
+
+export type NotificationDeliveryOutcome = 'success' | 'failure' | 'delayed'
+
+/**
+ * Terminal outcome of one webhook delivery attempt, in the operator vocabulary
+ * used by the delivery records: `success`, `delayed` (retry still scheduled) or
+ * `blocked` (needs an operator). See `services/webhookDeliveryOutcome.ts`.
+ */
+export type WebhookDeliveryOutcomeLabel = 'success' | 'delayed' | 'blocked'
+
+const webhookDeliveryOutcomeTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}webhook_delivery_outcome_total`,
+    help: 'Webhook delivery attempts by actionable outcome (success, delayed, blocked)',
+    labelNames: ['outcome', 'reason', 'event_type'] as const,
+    registers: [register],
+})
+
+/**
+ * Record the actionable outcome of a webhook delivery attempt. `reason` is a
+ * bounded classification, never the raw provider message, so the label set
+ * stays finite; the destination is deliberately not a label (it contains a
+ * capability token and would explode cardinality).
+ */
+export function recordWebhookDeliveryOutcome(input: {
+    outcome: WebhookDeliveryOutcomeLabel
+    reason: string
+    eventType?: string
+}): void {
+    webhookDeliveryOutcomeTotal.inc({
+        outcome: input.outcome,
+        reason: input.reason,
+        event_type: input.eventType ?? 'unknown',
+    })
+}
 
 /** Terminal outcome of a delivery (after any retries). */
 export function recordNotificationDelivery(input: {
@@ -371,6 +437,25 @@ export function recordNotificationDeliveryAttempt(
     outcome: 'success' | 'failure' | 'retried',
 ): void {
     notificationDeliveryAttemptsTotal.inc({ channel, outcome })
+}
+
+/**
+ * Record a delivery that the provider accepted but never confirmed (e.g. the
+ * provider timed out after accepting the message). This is distinct from a
+ * hard failure: the message may still be delivered, so operators need to see
+ * it as "delay/unknown" rather than "blocked". `reason` must be a coarse,
+ * bounded classification — never the raw provider error string.
+ */
+export function recordNotificationDeliveryStalled(input: {
+    channel: string
+    reason: string
+    eventType?: string
+}): void {
+    notificationDeliveryStalledTotal.inc({
+        channel: input.channel,
+        reason: input.reason,
+        event_type: input.eventType ?? 'unknown',
+    })
 }
 
 const idempotencyCleanupRunsTotal = new Counter({
@@ -523,7 +608,7 @@ export function recordWorkerLockAcquisition(input: {
 // This enables analysis of execution quality across different trading pairs and
 // portfolios without blocking trade execution on metric emission failure.
 
-const tradeSlippageBps = new Histogram({
+export const tradeSlippageBps = new Histogram({
     name: `${observabilityConfig.metrics.prefix}trade_slippage_bps`,
     help: 'Slippage in basis points for each executed trade',
     labelNames: ['portfolio_bucket', 'asset_pair'] as const,
@@ -531,7 +616,7 @@ const tradeSlippageBps = new Histogram({
     registers: [register],
 })
 
-const tradeExecutionPrice = new Histogram({
+export const tradeExecutionPrice = new Histogram({
     name: `${observabilityConfig.metrics.prefix}trade_execution_price`,
     help: 'Execution price for each trade (normalized to USD equivalent)',
     labelNames: ['portfolio_bucket', 'asset_pair'] as const,
@@ -578,14 +663,14 @@ export function recordTradeSlippage(input: {
 // or when Horizon is unavailable (503). This helps operators see submission pressure
 // and identify when Horizon is rejecting requests.
 
-const horizonSubmissionRetriesTotal = new Counter({
+export const horizonSubmissionRetriesTotal = new Counter({
     name: `${observabilityConfig.metrics.prefix}horizon_submission_retries_total`,
     help: 'Total Horizon transaction submission retry attempts by status code',
     labelNames: ['status_code'] as const,
     registers: [register],
 })
 
-const horizonSubmissionRetryDuration = new Histogram({
+export const horizonSubmissionRetryDuration = new Histogram({
     name: `${observabilityConfig.metrics.prefix}horizon_submission_retry_duration_seconds`,
     help: 'Duration of Horizon submission retry attempts (including backoff delays)',
     labelNames: ['status_code', 'outcome'] as const,
@@ -608,6 +693,113 @@ export function recordHorizonSubmissionRetry(input: {
             input.durationSeconds,
         )
     } catch (error) {
-        console.error('[METRICS] Failed to record Horizon retry:', error)
+        console.error('[METRICS]', 'Failed to record Horizon retry:', error)
+    }
+}
+
+// ── Portfolio API pagination metrics (SPR-2026-184) ───────────────────────────
+//
+// Tracks pagination outcomes, durations, and dataset shifts across requests.
+// Distinct 'state' label allows operators to separate success, delay, and blocked work.
+
+export type PaginationState = 'success' | 'delayed' | 'blocked'
+
+const portfolioPaginationRequestsTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}portfolio_pagination_requests_total`,
+    help: 'Total portfolio pagination requests partitioned by source, outcome, and delivery/work state',
+    labelNames: ['source', 'outcome', 'state'] as const,
+    registers: [register],
+})
+
+const portfolioPaginationItemsChangedTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}portfolio_pagination_items_changed_total`,
+    help: 'Total portfolio pagination queries where items changing during pagination were diagnosed',
+    labelNames: ['source', 'change_kind'] as const,
+    registers: [register],
+})
+
+const portfolioPaginationDurationSeconds = new Histogram({
+    name: `${observabilityConfig.metrics.prefix}portfolio_pagination_duration_seconds`,
+    help: 'Duration of portfolio pagination queries in seconds',
+    labelNames: ['source', 'outcome', 'state'] as const,
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+    registers: [register],
+})
+
+/**
+ * Record a portfolio pagination request outcome and execution state.
+ */
+export function recordPortfolioPaginationOutcome(input: {
+    source: string
+    outcome: string
+    state: PaginationState
+    durationSeconds?: number
+}): void {
+    try {
+        portfolioPaginationRequestsTotal.inc({
+            source: input.source,
+            outcome: input.outcome,
+            state: input.state,
+        })
+        if (typeof input.durationSeconds === 'number' && input.durationSeconds >= 0) {
+            portfolioPaginationDurationSeconds.observe(
+                {
+                    source: input.source,
+                    outcome: input.outcome,
+                    state: input.state,
+                },
+                input.durationSeconds,
+            )
+        }
+    } catch (error) {
+        console.error('[METRICS] Failed to record portfolio pagination outcome:', error)
+    }
+}
+
+/**
+ * Record when dataset items changing during pagination are diagnosed.
+ */
+export function recordPortfolioPaginationItemsChanged(input: {
+    source: string
+    changeKind: 'items_inserted' | 'items_deleted' | 'count_drift'
+}): void {
+    try {
+        portfolioPaginationItemsChangedTotal.inc({
+            source: input.source,
+            change_kind: input.changeKind,
+        })
+    } catch (error) {
+        console.error('[METRICS] Failed to record portfolio pagination items changed:', error)
+    }
+}
+
+// ── Portfolio persistence outcomes (#2083) ──────────────────────────────────
+
+export type PortfolioPersistenceSource = 'api' | 'worker' | 'other'
+export type PortfolioPersistenceOutcome = 'success' | 'delayed' | 'blocked'
+export type PortfolioPersistenceTransition = 'committed' | 'not_committed' | 'unknown'
+
+const portfolioPersistenceOutcomesTotal = new Counter({
+    name: `${observabilityConfig.metrics.prefix}portfolio_persistence_outcomes_total`,
+    help: 'Portfolio persistence write outcomes by source, retry state, event status, and state transition',
+    labelNames: ['source', 'outcome', 'event_status', 'state_transition'] as const,
+    registers: [register],
+})
+
+export function recordPortfolioPersistenceOutcome(input: {
+    source: PortfolioPersistenceSource
+    outcome: PortfolioPersistenceOutcome
+    eventStatus: 'completed' | 'failed' | 'pending'
+    stateTransition: PortfolioPersistenceTransition
+}): void {
+    try {
+        portfolioPersistenceOutcomesTotal.inc({
+            source: input.source,
+            outcome: input.outcome,
+            event_status: input.eventStatus,
+            state_transition: input.stateTransition,
+        })
+    } catch (error) {
+        console.error('[METRICS] Failed to record portfolio persistence outcome:', error)
     }
 }

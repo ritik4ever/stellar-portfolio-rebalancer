@@ -130,7 +130,7 @@ function createPathRecord(options: {
       : {
           asset_type: "credit_alphanum4",
           asset_code: hop.code,
-          asset_issuer: hop.issuer ?? "GAXLV64VNE4LBFCVEOZ6PZW2653SNHTU3QKJ63QO7VVL7YV2T3OTRDYD",
+          asset_issuer: hop.issuer ?? TEST_ASSETS.USDC.getIssuer(),
         },
   );
 
@@ -603,11 +603,9 @@ describe("StellarDEXService", () => {
       setupOrderbookMock(50, 5000);
       vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
       vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
-      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
-        id: MOCK_KEYPAIR.publicKey(),
-        sequence: "1",
-        incrementSequenceNumber: () => {},
-      } as any);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue(
+        new Account(MOCK_KEYPAIR.publicKey(), "1") as any,
+      );
       vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({ hash: "abc123" } as any);
       vi.spyOn(service["server"], "offers").mockReturnValue({
         forAccount: () => ({ limit: () => ({ call: vi.fn().mockResolvedValue({ records: [] }) }) }),
@@ -965,22 +963,21 @@ describe("StellarDEXService", () => {
 
       vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
       vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
-      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
-        id: MOCK_KEYPAIR.publicKey(),
-        sequence: "1",
-        incrementSequenceNumber: () => {},
-      } as any);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue(
+        new Account(MOCK_KEYPAIR.publicKey(), "1") as any,
+      );
       vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({
         hash: "tx-partial",
       } as any);
+      const callMock = vi
+        .fn()
+        .mockResolvedValueOnce({ records: [] })
+        .mockResolvedValueOnce({ records: leftoverOffer ? [leftoverOffer] : [] })
+        .mockResolvedValue({ records: [] });
       vi.spyOn(service["server"], "offers").mockReturnValue({
         forAccount: () => ({
           limit: () => ({
-            call: vi
-              .fn()
-              .mockResolvedValueOnce({ records: [] })
-              .mockResolvedValueOnce({ records: leftoverOffer ? [leftoverOffer] : [] })
-              .mockResolvedValue({ records: [] }),
+            call: callMock,
           }),
         }),
       } as any);
@@ -1098,11 +1095,9 @@ describe("StellarDEXService", () => {
       } as any);
       vi.spyOn(service["server"], "fetchBaseFee").mockResolvedValue(100);
       vi.spyOn(service as any, "resolveSigner").mockReturnValue(MOCK_KEYPAIR);
-      vi.spyOn(service["server"], "loadAccount").mockResolvedValue({
-        id: MOCK_KEYPAIR.publicKey(),
-        sequence: "1",
-        incrementSequenceNumber: () => {},
-      } as any);
+      vi.spyOn(service["server"], "loadAccount").mockResolvedValue(
+        new Account(MOCK_KEYPAIR.publicKey(), "1") as any,
+      );
       vi.spyOn(service["server"], "submitTransaction").mockResolvedValue({
         hash: "tx-slip",
       } as any);
@@ -1296,7 +1291,6 @@ describe("StellarDEXService", () => {
         ],
         { rollbackOnFailure: false },
       );
-
       expect(result.status).toBe("success");
       const trade = result.executedTrades[0];
       expect(trade.status).toBe("executed");

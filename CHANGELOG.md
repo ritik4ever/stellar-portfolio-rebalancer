@@ -122,6 +122,11 @@ Release changelog entries are generated into these sections:
 
 ## [Unreleased]
 
+- Preserve state consistency and audit trail in Backtest price window ([#2077](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/2077))
+  - Persist backtest records (`running`, `completed`, `failed`) guaranteeing strict agreement between stored audit state and externally visible results (`includedDays`, `absentDayReasons`, `decision`, and `result`).
+  - Added per-portfolio concurrency mutex to block conflicting overlapping backtests with HTTP 409 while maintaining strict isolation for independent runs.
+  - Expose `GET /api/v1/backtest/:id`, `GET /api/v1/backtest`, `POST /api/portfolio/:id/backtest`, and `GET /api/portfolio/:id/backtests` endpoints documented in OpenAPI spec.
+
 - DELETE `/api/v1/notifications/unsubscribe` rejects unknown query fields and non-empty request bodies with HTTP 400 before changing notification preferences ([#1808](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1808)).
 
 - Configurable analytics snapshot retention policy and admin management endpoints ([#1397](https://github.com/ritik4ever/stellar-portfolio-rebalancer/issues/1397))

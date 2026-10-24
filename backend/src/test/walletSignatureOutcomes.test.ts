@@ -50,7 +50,12 @@ describe('legacy wallet signature outcomes', () => {
             expect(logged).not.toContain(secret)
         }
         expect(verifyWalletSignature(address, signature)).toBe(false)
-        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'missing_challenge' })
+        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'reused_challenge', retryable: false })
+        expect(events().at(-1)).toMatchObject({
+            walletId: events()[0].walletId,
+            challengeId: events()[0].challengeId,
+            expectedNetwork: events()[0].expectedNetwork,
+        })
     })
 
     it.each([
@@ -87,6 +92,27 @@ describe('legacy wallet signature outcomes', () => {
         expect(verifyWalletSignature(address, sign(keypair, message))).toBe(false)
         expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'expired_challenge', retryable: false })
         expect(doubles.recordAuthSecurityEvent).toHaveBeenCalledWith('expired_challenge')
+    })
+
+    it('keeps the bound account, nonce, and network on replays after expiry', () => {
+        const message = issueChallenge(address)
+        const signature = sign(keypair, message)
+        vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+        expect(verifyWalletSignature(address, signature)).toBe(false)
+        const expired = events().at(-1)
+        expect(expired).toMatchObject({ outcome: 'blocked', reason: 'expired_challenge', retryable: false })
+        expect(verifyWalletSignature(address, signature)).toBe(false)
+        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'expired_challenge', retryable: false })
+        expect(events().at(-1)).toEqual(expired)
+    })
+
+    it('falls back to missing_challenge once the replay window passes', () => {
+        const message = issueChallenge(address)
+        expect(verifyWalletSignature(address, sign(keypair, message))).toBe(true)
+        vi.advanceTimersByTime(15 * 60 * 1000 + 1)
+        expect(verifyWalletSignature(address, sign(keypair, message))).toBe(false)
+        expect(events().at(-1)).toMatchObject({ outcome: 'blocked', reason: 'missing_challenge' })
+        expect(events().at(-1)).not.toHaveProperty('challengeId')
     })
 
     it('fails closed for invalid public keys', () => {

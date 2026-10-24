@@ -11,11 +11,28 @@ function makeTempDbPath(): string {
 
 describe('buildDependencyHealthSummary', () => {
     let dbPath: string
+    const origFetch = global.fetch
 
     beforeEach(() => {
         dbPath = makeTempDbPath()
         process.env.DB_PATH = dbPath
         vi.resetModules()
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ jsonrpc: '2.0', id: 1, result: { status: 'healthy' } })
+        }) as any
+        vi.doMock('../services/reflector.js', () => {
+            class MockReflectorService {
+                async testApiConnectivity() {
+                    return { success: true, latency: 15 }
+                }
+            }
+            return {
+                ReflectorService: MockReflectorService,
+                reflectorService: new MockReflectorService()
+            }
+        })
         vi.doMock('../queue/connection.js', () => ({
             REDIS_URL: 'redis://localhost:1',
             redisProbe: { isAvailable: vi.fn().mockResolvedValue(false) },
@@ -24,6 +41,7 @@ describe('buildDependencyHealthSummary', () => {
     })
 
     afterEach(async () => {
+        global.fetch = origFetch
         if (existsSync(dbPath)) rmSync(dbPath, { force: true, recursive: true })
         delete process.env.DB_PATH
     })

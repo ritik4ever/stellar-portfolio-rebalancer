@@ -41,9 +41,8 @@ describe('AnalyticsPage', () => {
 
     expect(screen.getByText('Portfolio Analytics')).toBeTruthy()
     expect(screen.getByTestId('performance-chart')).toBeTruthy()
-    expect(mockPerformanceChart).toHaveBeenCalledWith(
+    expect(mockPerformanceChart.mock.calls[0][0]).toEqual(
       expect.objectContaining({ portfolioId: 'portfolio-1' }),
-      expect.anything(),
     )
   })
 
@@ -53,9 +52,8 @@ describe('AnalyticsPage', () => {
     const select = screen.getByRole('combobox')
     fireEvent.change(select, { target: { value: 'portfolio-2' } })
 
-    expect(mockPerformanceChart).toHaveBeenLastCalledWith(
+    expect(mockPerformanceChart.mock.lastCall?.[0]).toEqual(
       expect.objectContaining({ portfolioId: 'portfolio-2' }),
-      expect.anything(),
     )
   })
 

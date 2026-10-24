@@ -276,15 +276,30 @@ describe('ReflectorService cache metrics and tuning', () => {
         vi.stubEnv('REFLECTOR_API_URL', 'https://reflector.example')
         vi.stubEnv('PRICE_DATA_MAX_AGE', '600')
 
-        const fetchMock = vi.fn().mockResolvedValueOnce(response({
-            prices: {
-                XLM: {
-                    price: '3540000',
-                    decimals: 7,
-                    timestamp: nowSec - 10
+        const fetchMock = vi.fn()
+            // First call: Reflector returns fresh data (hits cache for i=0,1)
+            .mockResolvedValueOnce(response({
+                prices: {
+                    XLM: {
+                        price: '3540000',
+                        decimals: 7,
+                        timestamp: nowSec - 10
+                    }
                 }
-            }
-        }))
+            }))
+            // Third iteration: cache expired (400s advance), Reflector stale → CoinGecko fallback
+            .mockResolvedValueOnce(response({
+                prices: {
+                    XLM: {
+                        price: '3540000',
+                        decimals: 7,
+                        timestamp: nowSec - 650
+                    }
+                }
+            }))
+            .mockResolvedValueOnce(response({
+                stellar: { usd: 0.354, usd_24h_change: 0.1, last_updated_at: nowSec }
+            }))
 
         vi.stubGlobal('fetch', fetchMock)
 

@@ -173,9 +173,12 @@ class IncrementalCsvParser {
   }
 
   private *endRow(): Generator<string[]> {
-    // A genuinely blank line (no delimiters, no content) is skipped rather
+    // A genuinely blank line (no delimiters, no content or only whitespace) is skipped rather
     // than emitted as a row -- matches CRLF/LF and trailing-empty-line handling.
-    if (!this.rowHasContent && this.field === '' && this.row.length === 0) {
+    if (this.row.length === 0 && this.field.trim() === '') {
+      this.row = []
+      this.field = ''
+      this.rowHasContent = false
       return
     }
     this.row.push(this.field.trim())
@@ -306,6 +309,7 @@ export async function* parseCsvStream(
       return
     }
     if (headerErrored) return
+    if (cols.every(c => c.trim() === '')) return
 
     dataRowCount++
     const rowNum = dataRowCount + 1

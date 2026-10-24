@@ -9,12 +9,12 @@ The email provider resolves it in this order (existing precedence is preserved):
 3. `rebalance-job-${payload.data.jobId}`
 4. `rebalance-${payload.data.rebalanceId}`
 
-Producers should use a non-empty string ID unique to a logical notification for
-that user and event type. Separate notifications (for example an intentional
+Producers should use a non-empty string ID unique to a logical notification for that
+user and event type. Separate notifications (for example an intentional
 failure alert and a later completion alert) need separate IDs. Changing the title
 or reconstruction timestamp does not change the SMTP Message-ID when the delivery
 identity is unchanged. The Message-ID and duplicate tracking both identify the
-notification by user, event type and delivery ID; the configured sender supplies
+notification by user, event type and delivery ID{; the configured sender supplies
 the Message-ID domain.
 
 ## Two events for one rebalance
@@ -38,6 +38,23 @@ result; the original `sent`, `failed`, or `uncertain` record remains in the trac
 `notify` retains its best-effort `Promise<void>` contract: it logs provider errors
 and does not return an SMTP success acknowledgement. `getDeliveryStatus` reports
 the latest log entry, which can therefore be `skipped` after a duplicate.
+
+## Success, delay, and blocked work
+
+Every terminal delivery record carries a `deliveryState` field so operators can
+tell the three outcomes apart without parsing the error string:
+
+- `success` — the provider confirmed acceptance.
+- `delayed` — the provider proved it did not act, but the retry budget is
+  exhausted (or the delivery was aborted). The work is still pending and a replay is
+  safe.
+- `blocked` — the outcome is unknown (ambiguous) or the provider rejected the
+  message permanently. Automatic replay would risk a duplicate or just fail again.
+
+The adjacent `deliveryState` and `failureKind` fields on a log row agree: a
+ `retryable` failure is `delayed`, while `ambiguous` and `permanent` failures are
+`blocked`. The metric counters use the same vocabulary (see
+Notification delivery metrics](notification-delivery-metrics.md)).
 
 ## Limits and compatibility
 

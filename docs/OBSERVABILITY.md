@@ -71,7 +71,24 @@ The backend publishes:
 - in-flight request gauge
 - readiness status gauge
 - BullMQ queue depth metrics
+- portfolio persistence outcomes (`stellar_portfolio_portfolio_persistence_outcomes_total`)
 - structured JSON logs for Loki ingestion
+
+`portfolio_persistence_outcomes_total` distinguishes `success`, `delayed`, and
+`blocked` rebalance-history writes. It is partitioned by bounded `source`,
+`event_status`, and `state_transition` labels. For example, this query shows
+blocked writes over the last hour:
+
+```promql
+sum by (source, event_status, state_transition) (
+  increase(stellar_portfolio_portfolio_persistence_outcomes_total{outcome="blocked"}[1h])
+)
+```
+
+Write-failure logs include the operation, retry availability, duration,
+portfolio bucket, and safe database error code, without emitting raw portfolio
+IDs or database error messages. See [Portfolio Persistence](./PORTFOLIO_PERSISTENCE.md)
+for outcome definitions and retry semantics.
 
 ### Queue Metrics Cardinality
 
@@ -544,4 +561,3 @@ the new policy to take effect.
    `336h` to `168h`) and wait one compaction cycle.
 5. If disk is critically full, stop new ingestion by scaling Promtail to 0 replicas
    while you resolve the root cause.
-
