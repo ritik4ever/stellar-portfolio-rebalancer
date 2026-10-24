@@ -11,7 +11,7 @@ import { Keypair } from '@stellar/stellar-sdk'
 import { randomBytes } from 'node:crypto'
 import { issueTokens } from './authService.js'
 import { logger } from '../utils/logger.js'
-import { authorizationContext, detectOtherNetwork, recordWalletAuthorization } from './walletAuthorization.js'
+import { authorizationContext, classifyChallengeReplay, detectOtherNetwork, recordChallengeDisposition, recordWalletAuthorization } from './walletAuthorization.js'
 import type { WalletAuthorizationContext } from './walletAuthorization.js'
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000  // 5 minutes
@@ -34,7 +34,10 @@ const challenges = new Map<string, ChallengeEntry>()
 setInterval(() => {
     const now = Date.now()
     for (const [addr, entry] of challenges) {
-        if (entry.expiresAt <= now) challenges.delete(addr)
+        if (entry.expiresAt <= now) {
+            recordChallengeDisposition('stellar_challenge', 'expired', entry.context)
+            challenges.delete(addr)
+        }
     }
 }, CHALLENGE_CLEANUP_INTERVAL_MS)
 
@@ -69,11 +72,14 @@ export async function verifyChallenge(
 
     const entry = challenges.get(address)
     if (!entry) {
-        recordWalletAuthorization('stellar_challenge', authorizationContext(address), 'blocked', 'missing_challenge', { retryable: false })
+        const replay = classifyChallengeReplay('stellar_challenge', address)
+        recordWalletAuthorization('stellar_challenge', replay?.context ?? authorizationContext(address),
+            'blocked', replay?.reason ?? 'missing_challenge', { retryable: false })
         throw new InvalidSignatureError('No active challenge for this address')
     }
     if (entry.expiresAt <= Date.now()) {
         challenges.delete(address)
+        recordChallengeDisposition('stellar_challenge', 'expired', entry.context)
         recordWalletAuthorization('stellar_challenge', entry.context, 'blocked', 'expired_challenge', { retryable: false })
         throw new InvalidSignatureError('Challenge expired')
     }
@@ -116,6 +122,7 @@ export async function verifyChallenge(
 
     // Consume the challenge — one-time use
     challenges.delete(address)
+    recordChallengeDisposition('stellar_challenge', 'consumed', entry.context)
 
     recordWalletAuthorization('stellar_challenge', entry.context, 'pending', 'issuing_tokens')
     try {

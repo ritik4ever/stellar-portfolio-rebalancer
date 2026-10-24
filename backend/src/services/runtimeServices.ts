@@ -13,4 +13,6 @@ export const autoRebalancer = {
 	forceCheck: () => getAutoRebalancerInstance().forceCheck(),
 	getStatus: () => getAutoRebalancerInstance().getStatus(),
 	getStatistics: () => getAutoRebalancerInstance().getStatistics(),
+	dryRunPortfolioRebalance: (portfolioId: string, options?: any) => getAutoRebalancerInstance().dryRunPortfolioRebalance(portfolioId, options),
+	shadowCheck: () => getAutoRebalancerInstance().shadowCheck(),
 }

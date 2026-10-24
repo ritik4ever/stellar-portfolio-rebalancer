@@ -98,7 +98,8 @@ async function loginWithWallet(keypair: Keypair) {
     expect(challenge.startsWith('stellar-rebalancer:auth:')).toBe(true)
 
     // 2. Sign challenge and login
-    const sig = keypair.sign(Buffer.from(challenge, 'utf8')).toString('base64')
+    // Stellar SDK signatures are Uint8Array values; wrap before base64 encoding.
+    const sig = Buffer.from(keypair.sign(Buffer.from(challenge, 'utf8'))).toString('base64')
     const loginRes = await request(app)
         .post('/api/auth/login')
         .send({ address, signature: sig })

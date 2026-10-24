@@ -149,8 +149,9 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 org_description: 'Stellar test network asset',
                 org_url: 'https://stellar.org'
             }
+            const currentMetadataService = (await import('../services/issuerMetadataService.js')).issuerMetadataService
             const getMetadataSpy = vi
-                .spyOn(issuerMetadataService, 'getMetadata')
+                .spyOn(currentMetadataService, 'getMetadata')
                 .mockResolvedValue(mockMetadata)
 
             const symbol = 'META'
@@ -244,7 +245,7 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 .set(makeAdminHeaders(adminKp))
                 .send({})
             expect(res.status).toBe(400)
-            expect(res.body.error).toBe('VALIDATION_ERROR')
+            expect(res.body.error?.code ?? res.body.error).toBe('VALIDATION_ERROR')
         })
 
         it('returns 400 for invalid queryId', async () => {
@@ -253,7 +254,7 @@ describe('Admin routes – unauthenticated, non-admin, and admin access', () => 
                 .set(makeAdminHeaders(adminKp))
                 .send({ queryId: 'invalid_query' })
             expect(res.status).toBe(400)
-            expect(res.body.error).toBe('VALIDATION_ERROR')
+            expect(res.body.error?.code ?? res.body.error).toBe('VALIDATION_ERROR')
         })
 
         it('returns 200 with explain plan for valid admin and queryId', async () => {

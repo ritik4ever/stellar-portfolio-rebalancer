@@ -16,6 +16,35 @@ vi.mock('../utils/logger.js', () => ({
     }
 }))
 
+vi.mock('../db/rebalanceHistoryDb.js', () => ({
+    dbInsertRebalanceEvent: vi.fn(async (event: any) => ({
+        id: event.id || 'mock-rebalance-event-id',
+        portfolioId: event.portfolioId,
+        timestamp: (event.timestamp || new Date()).toISOString(),
+        trigger: event.trigger,
+        trades: event.trades,
+        gasUsed: event.gasUsed,
+        feePaid: event.feePaid ?? 0,
+        slippageBps: event.slippageBps ?? 0,
+        status: event.status,
+        isAutomatic: event.isAutomatic ?? false,
+        riskAlerts: event.riskAlerts ?? [],
+        error: event.error,
+        details: event.details ?? {},
+        eventSource: event.eventSource ?? 'offchain',
+        actor: event.actor ?? 'user',
+        source: event.source ?? 'dashboard',
+    })),
+    dbGetRebalanceHistoryByPortfolio: vi.fn().mockResolvedValue([]),
+    dbGetRebalanceHistoryAll: vi.fn().mockResolvedValue([]),
+    dbGetRecentAutoRebalances: vi.fn().mockResolvedValue([]),
+    dbGetAutoRebalancesSince: vi.fn().mockResolvedValue([]),
+    dbGetAllAutoRebalances: vi.fn().mockResolvedValue([]),
+    dbGetHistoryStats: vi.fn().mockResolvedValue({ totalEvents: 0, portfolios: 0, recentActivity: 0, autoRebalances: 0 }),
+    dbGetRebalanceHistoryCountByPortfolio: vi.fn().mockResolvedValue(0),
+    dbGetRebalanceCostSummary: vi.fn().mockResolvedValue({ total_fees_paid: 0, avg_slippage_bps: 0, cost_per_rebalance: 0, total_rebalances: 0 }),
+}))
+
 const JWT_SECRET = 'test-jwt-secret-for-rebalancing-tests-min-32!!'
 const ADMIN_SECRET = 'test-admin-secret-for-rebalancing-tests-32!'
 
@@ -59,6 +88,12 @@ describe('Rebalancing API Integration Tests', () => {
         mkdirSync(testDir, { recursive: true })
         testDbPath = join(testDir, 'test.db')
         process.env.DB_PATH = testDbPath
+
+        const { databaseService } = await import('../services/databaseService.js')
+        databaseService.db.prepare(`
+            INSERT OR IGNORE INTO portfolios (id, user_address, name, threshold, allocations, balances, created_at, last_rebalance)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        `).run('test-portfolio-001', 'GUSER123', 'Test Portfolio', 5, JSON.stringify({ XLM: 50, USDC: 50 }), JSON.stringify({ XLM: 1000, USDC: 500 }))
 
         app = await createApp()
     })

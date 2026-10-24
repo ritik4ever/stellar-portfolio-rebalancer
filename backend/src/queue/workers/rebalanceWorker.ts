@@ -23,6 +23,7 @@ import {
   type WorkerRuntimeStatus,
 } from "./workerRuntime.js";
 import { broadcastPortfolioEvent } from "../../services/websocket.service.js";
+import { markRebalanceActive, markRebalanceInactive } from "../../services/portfolioPersistenceBoundary.js";
 
 let worker: Worker | null = null;
 const runtimeStatus = createWorkerRuntimeStatus("rebalance", 3);
@@ -87,7 +88,10 @@ export async function processRebalanceJob(
       return;
     }
 
+    markRebalanceActive(portfolioId, { trigger: triggeredBy });
+
     const stellarService = new StellarService();
+    const retryAvailable = (job.attemptsMade ?? 0) + 1 < (job.opts?.attempts ?? 1);
     try {
       const portfolio = await stellarService.getPortfolio(portfolioId);
       const rebalanceResult =
@@ -105,6 +109,11 @@ export async function processRebalanceJob(
         slippageBps: rebalanceResult.slippageBps ?? rebalanceResult.actualSlippageBps ?? rebalanceResult.estimatedTotalSlippageBps,
         status: "completed",
         isAutomatic: triggeredBy === "auto",
+        persistenceContext: {
+          source: "worker",
+          retryAvailable,
+          stateTransition: "committed",
+        },
       });
 
       try {
@@ -133,6 +142,7 @@ export async function processRebalanceJob(
         });
       }
 
+      markRebalanceInactive(portfolioId, { status: "completed" });
       logger.info("[WORKER:rebalance] Rebalance completed", {
         portfolioId,
         trades: rebalanceResult.trades,
@@ -151,6 +161,7 @@ export async function processRebalanceJob(
         });
       }
     } catch (err) {
+      markRebalanceInactive(portfolioId, { status: "failed" });
       const errorMessage = err instanceof Error ? err.message : String(err);
 
       try {
@@ -162,6 +173,11 @@ export async function processRebalanceJob(
           status: "failed",
           isAutomatic: triggeredBy === "auto",
           error: errorMessage,
+          persistenceContext: {
+            source: "worker",
+            retryAvailable,
+            stateTransition: "unknown",
+          },
         });
       } catch (histErr) {
         logger.error("[WORKER:rebalance] Failed to record failure event", {
@@ -213,6 +229,7 @@ export async function processRebalanceJob(
 
       throw err;
     } finally {
+      markRebalanceInactive(portfolioId);
       await releaseWorkerLock(portfolioId);
     }
   });
