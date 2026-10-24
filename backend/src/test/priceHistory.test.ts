@@ -6,15 +6,19 @@ vi.mock('../db/priceHistoryDb.js', () => ({
     pruneOldPriceSnapshots: vi.fn().mockResolvedValue(7),
 }))
 
+const { mockGetCurrentPrices } = vi.hoisted(() => ({
+    mockGetCurrentPrices: vi.fn().mockResolvedValue({
+        XLM: 0.12,
+        BTC: 65000,
+        ETH: 3200,
+        USDC: 1.0,
+    })
+}))
+
 // Mock the reflector (oracle) price feed
 vi.mock('../services/reflector.js', () => ({
     ReflectorService: vi.fn().mockImplementation(function(this: any) {
-        this.getCurrentPrices = vi.fn().mockResolvedValue({
-            XLM: 0.12,
-            BTC: 65000,
-            ETH: 3200,
-            USDC: 1.0,
-        })
+        this.getCurrentPrices = mockGetCurrentPrices
         return this
     }),
 }))
@@ -25,6 +29,12 @@ import { insertPriceSnapshot, pruneOldPriceSnapshots } from '../db/priceHistoryD
 describe('priceHistory service (#885)', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mockGetCurrentPrices.mockResolvedValue({
+            XLM: 0.12,
+            BTC: 65000,
+            ETH: 3200,
+            USDC: 1.0,
+        })
     })
 
     it('snapshotPrices inserts a snapshot for each tracked asset', async () => {
@@ -38,9 +48,7 @@ describe('priceHistory service (#885)', () => {
     })
 
     it('snapshotPrices skips assets with missing prices', async () => {
-        const { ReflectorService } = await import('../services/reflector.js')
-        const mockInstance = (ReflectorService as ReturnType<typeof vi.fn>).mock.results[0].value
-        mockInstance.getCurrentPrices.mockResolvedValueOnce({ XLM: 0.12 }) // only XLM
+        mockGetCurrentPrices.mockResolvedValueOnce({ XLM: 0.12 }) // only XLM
 
         await snapshotPrices()
 
@@ -49,9 +57,7 @@ describe('priceHistory service (#885)', () => {
     })
 
     it('snapshotPrices does not throw when price fetch fails', async () => {
-        const { ReflectorService } = await import('../services/reflector.js')
-        const mockInstance = (ReflectorService as ReturnType<typeof vi.fn>).mock.results[0].value
-        mockInstance.getCurrentPrices.mockRejectedValueOnce(new Error('oracle down'))
+        mockGetCurrentPrices.mockRejectedValueOnce(new Error('oracle down'))
 
         await expect(snapshotPrices()).resolves.not.toThrow()
         expect(insertPriceSnapshot).not.toHaveBeenCalled()

@@ -272,7 +272,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await expect(processRebalanceJob(job)).rejects.toThrow()
 
             // Lock should be released even on failure, allowing retry
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+            expect(releaseWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
 
         it('records failed attempt with attempt count in history', async () => {
@@ -315,7 +315,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await expect(processRebalanceJob(job)).rejects.toThrow()
 
             // Even on the last attempt, lock must be released
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith(portfolioId)
+            expect(releaseWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
     })
 
@@ -331,7 +331,7 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
             await expect(processRebalanceJob(job)).rejects.toThrow()
 
             // Lock must still be released
-            expect(rebalanceLockService.releaseLock).toHaveBeenCalledWith('invalid-id')
+            expect(releaseWorkerLock).toHaveBeenCalledWith('invalid-id')
         })
 
         it('does not record duplicate history events on retry', async () => {

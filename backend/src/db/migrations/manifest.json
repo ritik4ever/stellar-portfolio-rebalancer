@@ -1,11 +1,11 @@
 [
   {
     "file": "001_initial_schema.down.sql",
-    "sha256": "aaba39fd1f233325a420060d35dddc76759bd9cd3e390edba4e27a562d68a7ba"
+    "sha256": "afc4fe1e5f23fac77ebf028251b9ecf5cb297975e1f28275258575058224c38e"
   },
   {
     "file": "001_initial_schema.up.sql",
-    "sha256": "f245a8a1e5c72fe55f8dd24369d625023bd0c3d7a6fbaaba3b507d9e72adbcca"
+    "sha256": "a5e280a9af18e1d9cda622040ceb1c3e317c0b317926303739ea6f9b9cefc5fb"
   },
   {
     "file": "002_seed_demo_data.down.sql",

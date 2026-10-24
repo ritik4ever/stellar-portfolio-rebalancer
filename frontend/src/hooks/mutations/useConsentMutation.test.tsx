@@ -63,7 +63,10 @@ describe('useRecordConsentMutation', () => {
             wrapper: withClient(qc),
         })
 
-
+        // Trigger the mutation so onMutate fires and sets the optimistic state
+        act(() => {
+            result.current.mutate()
+        })
 
         // onMutate is async (awaits cancelQueries) so wait for optimistic data to appear
         await waitFor(() => {

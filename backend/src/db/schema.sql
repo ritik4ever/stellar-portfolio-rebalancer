@@ -113,3 +113,34 @@ CREATE TABLE IF NOT EXISTS portfolio_drafts (
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_user ON portfolio_drafts(user_address, expires_at DESC);
 CREATE INDEX IF NOT EXISTS idx_portfolio_drafts_expires ON portfolio_drafts(expires_at);
+
+CREATE TABLE IF NOT EXISTS backtest_records (
+    id VARCHAR(64) PRIMARY KEY,
+    portfolio_id VARCHAR(64) REFERENCES portfolios(id) ON DELETE SET NULL,
+    allocations JSONB NOT NULL DEFAULT '{}',
+    threshold NUMERIC NOT NULL,
+    initial_value NUMERIC NOT NULL,
+    days INTEGER NOT NULL,
+    from_date TIMESTAMPTZ,
+    to_date TIMESTAMPTZ,
+    start_date VARCHAR(32),
+    end_date VARCHAR(32),
+    start_timestamp BIGINT,
+    end_timestamp BIGINT,
+    status VARCHAR(32) NOT NULL CHECK (status IN ('completed', 'failed', 'running')),
+    has_leap_day BOOLEAN NOT NULL DEFAULT FALSE,
+    leap_day_included BOOLEAN NOT NULL DEFAULT FALSE,
+    included_days JSONB NOT NULL DEFAULT '[]',
+    absent_day_reasons JSONB NOT NULL DEFAULT '{}',
+    absent_days JSONB NOT NULL DEFAULT '[]',
+    decision JSONB,
+    events JSONB NOT NULL DEFAULT '[]',
+    result JSONB,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_records_portfolio ON backtest_records(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_records_status ON backtest_records(status);
+CREATE INDEX IF NOT EXISTS idx_backtest_records_created_at ON backtest_records(created_at DESC);

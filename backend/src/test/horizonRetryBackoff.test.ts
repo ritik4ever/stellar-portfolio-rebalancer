@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { recordHorizonSubmissionRetry } from '../observability/metrics.js'
+import {
+    recordHorizonSubmissionRetry,
+    horizonSubmissionRetriesTotal,
+    horizonSubmissionRetryDuration,
+} from '../observability/metrics.js'
 
 describe('Horizon submission retry backoff (#1177)', () => {
     beforeEach(() => {
@@ -7,8 +11,8 @@ describe('Horizon submission retry backoff (#1177)', () => {
     })
 
     it('records retry metrics with status code and outcome', () => {
-        const counterSpy = vi.spyOn(require('../observability/metrics.js').horizonSubmissionRetriesTotal, 'inc')
-        const histogramSpy = vi.spyOn(require('../observability/metrics.js').horizonSubmissionRetryDuration, 'observe')
+        const counterSpy = vi.spyOn(horizonSubmissionRetriesTotal, 'inc')
+        const histogramSpy = vi.spyOn(horizonSubmissionRetryDuration, 'observe')
 
         recordHorizonSubmissionRetry({
             statusCode: 429,
@@ -24,7 +28,7 @@ describe('Horizon submission retry backoff (#1177)', () => {
     })
 
     it('handles metric emission failure gracefully', () => {
-        const counterSpy = vi.spyOn(require('../observability/metrics.js').horizonSubmissionRetriesTotal, 'inc').mockImplementation(() => {
+        const counterSpy = vi.spyOn(horizonSubmissionRetriesTotal, 'inc').mockImplementation(() => {
             throw new Error('Metrics system unavailable')
         })
 
@@ -48,7 +52,7 @@ describe('Horizon submission retry backoff (#1177)', () => {
     })
 
     it('records both success and failure outcomes', () => {
-        const counterSpy = vi.spyOn(require('../observability/metrics.js').horizonSubmissionRetriesTotal, 'inc')
+        const counterSpy = vi.spyOn(horizonSubmissionRetriesTotal, 'inc')
 
         recordHorizonSubmissionRetry({
             statusCode: 429,

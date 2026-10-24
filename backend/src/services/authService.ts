@@ -4,4 +4,4 @@ export {
 } from './tokenService.js';
 export type { TokenPayload, AuthTokens, AuthAuditAction, AuthAuditEvent } from './tokenService.js';
 export { refreshTokens } from './refreshTokenService.js';
-export { issueChallenge, verifyWalletSignature, getFailedSigAttempts } from './walletSignatureService.js';
+export { issueChallenge, verifyWalletSignature, authenticateWalletSignature, getFailedSigAttempts } from './walletSignatureService.js';

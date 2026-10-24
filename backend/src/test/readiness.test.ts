@@ -5,9 +5,11 @@ const mockIsRedisAvailable = vi.fn()
 const mockGetPortfolioCheckQueue = vi.fn()
 const mockGetRebalanceQueue = vi.fn()
 const mockGetAnalyticsSnapshotQueue = vi.fn()
+const mockGetAnalyticsCompactionQueue = vi.fn()
 const mockGetPortfolioCheckWorkerStatus = vi.fn()
 const mockGetRebalanceWorkerStatus = vi.fn()
 const mockGetAnalyticsSnapshotWorkerStatus = vi.fn()
+const mockGetAnalyticsCompactionWorkerStatus = vi.fn()
 const mockGetIndexerStatus = vi.fn()
 const mockGetAutoRebalancerStatus = vi.fn()
 
@@ -26,10 +28,12 @@ vi.mock('../queue/queues.js', () => ({
         PORTFOLIO_CHECK: 'portfolio-check',
         REBALANCE: 'rebalance',
         ANALYTICS_SNAPSHOT: 'analytics-snapshot',
+        ANALYTICS_COMPACTION: 'analytics-compaction',
     },
     getPortfolioCheckQueue: mockGetPortfolioCheckQueue,
     getRebalanceQueue: mockGetRebalanceQueue,
     getAnalyticsSnapshotQueue: mockGetAnalyticsSnapshotQueue,
+    getAnalyticsCompactionQueue: mockGetAnalyticsCompactionQueue,
 }))
 
 vi.mock('../queue/workers/portfolioCheckWorker.js', () => ({
@@ -42,6 +46,10 @@ vi.mock('../queue/workers/rebalanceWorker.js', () => ({
 
 vi.mock('../queue/workers/analyticsSnapshotWorker.js', () => ({
     getAnalyticsSnapshotWorkerStatus: mockGetAnalyticsSnapshotWorkerStatus
+}))
+
+vi.mock('../queue/workers/analyticsCompactionWorker.js', () => ({
+    getAnalyticsCompactionWorkerStatus: mockGetAnalyticsCompactionWorkerStatus
 }))
 
 vi.mock('../services/contractEventIndexer.js', () => ({
@@ -58,7 +66,8 @@ vi.mock('../services/runtimeServices.js', () => ({
 
 function readyQueue() {
     return {
-        waitUntilReady: vi.fn().mockResolvedValue(undefined)
+        waitUntilReady: vi.fn().mockResolvedValue(undefined),
+        getJobCounts: vi.fn().mockResolvedValue({ waiting: 0, delayed: 0 }),
     }
 }
 
@@ -87,9 +96,11 @@ describe('buildReadinessReport', () => {
         mockGetPortfolioCheckQueue.mockReturnValue(readyQueue())
         mockGetRebalanceQueue.mockReturnValue(readyQueue())
         mockGetAnalyticsSnapshotQueue.mockReturnValue(readyQueue())
+        mockGetAnalyticsCompactionQueue.mockReturnValue(readyQueue())
         mockGetPortfolioCheckWorkerStatus.mockReturnValue(readyWorker('portfolio-check'))
         mockGetRebalanceWorkerStatus.mockReturnValue(readyWorker('rebalance'))
         mockGetAnalyticsSnapshotWorkerStatus.mockReturnValue(readyWorker('analytics-snapshot'))
+        mockGetAnalyticsCompactionWorkerStatus.mockReturnValue(readyWorker('analytics-compaction'))
         mockGetIndexerStatus.mockReturnValue({
             enabled: false,
             running: false,

@@ -41,18 +41,20 @@ const feedSeries = (
     dataset: Record<string, Array<{ price: number, change: number, timestamp: number }>>
 ): PricesMap => {
     const assets = Object.keys(dataset)
-    const length = dataset[assets[0]].length
+    const length = Math.max(...assets.map(asset => dataset[asset].length))
     let latest: PricesMap = {}
 
     for (let i = 0; i < length; i++) {
         const prices: PricesMap = {}
         assets.forEach(asset => {
             const point = dataset[asset][i]
-            prices[asset] = {
-                price: point.price,
-                change: point.change,
-                timestamp: point.timestamp,
-                source: 'external'
+            if (point) {
+                prices[asset] = {
+                    price: point.price,
+                    change: point.change,
+                    timestamp: point.timestamp,
+                    source: 'external'
+                }
             }
         })
         latest = prices

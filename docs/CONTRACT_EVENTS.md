@@ -74,6 +74,12 @@ and does not consume a portfolio ID. The backend indexer continues to read the
 first two payload fields; consumers that need to reconstruct the threshold can
 read the third field.
 
+`portfolio.alloc_upd` is emitted strictly once after updated target allocations
+are validated against the target-weight invariant (each asset in `1..=10_000` bps,
+strictly summing to `10_000` bps / 100.00%) and committed to persistent storage.
+A rejected allocation update emits no event, preserving stored weights, current
+balances, and contract token funds completely unchanged on failure after committed calls.
+
 ### Governance: two-step admin transfer
 
 Admin handover does not use the `portfolio` topic domain — both events are topic-indexed by the **admin address acting at that step**, so a watcher can filter on the outgoing admin:
@@ -108,7 +114,7 @@ Emitted by the `update_allocations` entrypoint when a user changes a portfolio's
 
 **Contract entrypoint:** `update_allocations(portfolio_id: u64, new_allocations: Map<Address, u32>)` — see [`contracts/src/lib.rs`](../contracts/src/lib.rs) and the [Contract Capability Matrix](CONTRACT_CAPABILITY_MATRIX.md) (`update_allocations` row).
 
-**Emit source:** `contracts/src/events.rs` (`emit_allocation_updated`) and inline in `contracts/src/lib.rs`.
+**Emit source:** `contracts/src/portfolio.rs` (`emit_allocation_updated`) called from `contracts/src/lib.rs`.
 
 **Sample event payload:**
 
@@ -119,20 +125,24 @@ Emitted by the `update_allocations` entrypoint when a user changes a portfolio's
   "data": {
     "portfolio_id": 1,
     "old_allocations": {
-      "CDLZFC...XLM": 40,
-      "CDMLFK...USDC": 35,
-      "CBKTPM...BTC": 25
+      "CDLZFC...XLM": 4000,
+      "CDMLFK...USDC": 3500,
+      "CBKTPM...BTC": 2500
     },
     "new_allocations": {
-      "CDLZFC...XLM": 50,
-      "CDMLFK...USDC": 30,
-      "CBKTPM...BTC": 20
+      "CDLZFC...XLM": 5000,
+      "CDMLFK...USDC": 3000,
+      "CBKTPM...BTC": 2000
     }
   }
 }
 ```
 
-> **Note:** `events.rs`'s unused `emit_allocation_updated` correlation-ID helper has been removed (see "Correlation-ID module decision" above). The `alloc_upd` event is emitted only via the inline call in `lib.rs`, with topics `(portfolio, alloc_upd)` and payload `(portfolio_id, old_allocations, new_allocations)`.
+#### Emitted data, ordering, and failure atomicity (SPR-2026-194):
+- **Emitted data:** The event payload is a 3-tuple `(portfolio_id: u64, old_allocations: Map<Address, u32>, new_allocations: Map<Address, u32>)` published under topics `(symbol_short!("portfolio"), Symbol::new(env, "alloc_upd"))`.
+- **Emission ordering:** The event is emitted strictly once per successful call, immediately after the new portfolio state is written to persistent storage (`DataKey::PortfolioV2(portfolio_id)`).
+- **Failure atomicity & unchanged funds:** If an update violates the target-weight invariant (under-allocation, over-allocation, zero bps asset weight) or fails authorization, the call returns `Err` and emits NO event. Any earlier committed calls (such as deposits or previous allocation updates) retain their committed events once and in original chronological order. Stored weights, current balances, and contract token funds remain unchanged.
+- **Consumer state reconstruction:** An off-chain listener or indexer decoding `old_allocations` and `new_allocations` can reconstruct both previous and committed target weights without ambiguity, verify exact 10,000 bps invariant compliance, and maintain a verifiable state history. Safe recovery after a rejected update produces a clean subsequent `alloc_upd` event referencing the preserved `old_allocations`.
 
 ## Reusable test fixtures
 

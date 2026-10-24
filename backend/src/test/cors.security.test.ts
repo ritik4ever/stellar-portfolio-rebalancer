@@ -9,7 +9,7 @@ function createCorsApp(corsOrigins: string[], nodeEnv?: string) {
     const corsOptions = buildCorsOptions(corsOrigins, nodeEnv)
     app.use(enforceCorsOriginAllowlist(corsOrigins))
     app.use(cors(corsOptions))
-    app.options('*', cors(corsOptions))
+    app.options(/.*/, cors(corsOptions))
     app.get('/secure', (_req, res) => {
         res.status(200).json({ ok: true })
     })

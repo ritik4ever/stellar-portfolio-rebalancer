@@ -88,12 +88,15 @@ analyticsRouter.get('/portfolio/:id/analytics', validateQuery(analyticsQuerySche
             return ok(res, {
                 portfolioId,
                 dailyValues: [],
+                data: [],
                 metrics: {
                     totalReturnPercent: 0,
                     maxDrawdownPercent: 0,
                     sharpeRatio: 0
                 },
                 dataPoints: 0
+            }, {
+                meta: { count: 0 }
             })
         }
 
@@ -108,12 +111,15 @@ analyticsRouter.get('/portfolio/:id/analytics', validateQuery(analyticsQuerySche
         return ok(res, {
             portfolioId,
             dailyValues,
+            data: dailyValues,
             metrics: {
                 totalReturnPercent: Math.round(metrics.totalReturn * 100) / 100,
                 maxDrawdownPercent: Math.round(metrics.maxDrawdown * 100) / 100,
                 sharpeRatio: Math.round(metrics.sharpeRatio * 1000) / 1000
             },
             dataPoints: snapshots.length
+        }, {
+            meta: { count: snapshots.length }
         })
     } catch (error) {
         logger.error('Failed to fetch analytics', { error: getErrorObject(error), portfolioId: req.params.id })
