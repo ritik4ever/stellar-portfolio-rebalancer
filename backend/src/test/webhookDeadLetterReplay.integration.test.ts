@@ -184,4 +184,48 @@ describe('admin webhook dead-letter replay (integration)', () => {
         expect(remaining[0].id).toBe('bad-item')
         expect(remaining[0].attemptsExhausted).toBe(2)
     })
-})
+
+    it('lists queued items with their delivery id and pagination metadata', async () => {
+        await webhookDeadLetterQueue.push(makeItem({ id: 'listed-1', deliveryId: 'whk_listed_1' }))
+        await webhookDeadLetterQueue.push(makeItem({ id: 'listed-2', deliveryId: 'whk_listed_2' }))
+
+        const res = await request(app)
+            .get('/api/v1/admin/notifications/dead-letter')
+            .query({ page: 1, pageSize: 1 })
+            .expect(200)
+
+        expect(res.body.data.items).toHaveLength(1)
+        expect(res.body.data.items[0].deliveryId).toBe('whk_listed_1')
+        expect(res.body.data.pagination).toMatchObject({ page: 1, pageSize: 1, total: 2, hasMore: true })
+    })
+
+    it('filters the listing by user and event type', async () => {
+        await webhookDeadLetterQueue.push(makeItem({ id: 'mine' }))
+        await webhookDeadLetterQueue.push(makeItem({ id: 'theirs', userId: 'user-2' }))
+
+        const res = await request(app)
+            .get('/api/v1/admin/notifications/dead-letter')
+            .query({ userId: 'user-2' })
+            .expect(200)
+
+        expect(res.body.data.items.map((item: { id: string }) => item.id)).toEqual(['theirs'])
+        expect(res.body.data.pagination.total).toBe(1)
+    })
+
+    it('deletes a single dead-letter item and reports missing ones', async () => {
+        const item = makeItem()
+        await webhookDeadLetterQueue.push(item)
+
+        await request(app)
+            .delete(`/api/v1/admin/notifications/dead-letter/${item.id}`)
+            .expect(200)
+
+        expect(await webhookDeadLetterQueue.list()).toEqual([])
+
+        const res = await request(app)
+            .delete(`/api/v1/admin/notifications/dead-letter/${item.id}`)
+            .expect(404)
+
+        expect(res.body.error.code).toBe('NOT_FOUND')
+    })
+    })

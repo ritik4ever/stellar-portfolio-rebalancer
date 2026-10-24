@@ -276,8 +276,9 @@ Email and webhook providers use explicit backoff policies from `backend/src/conf
 - **Logs:** `notification_logs` rows include `attempt_number` and `backoff_delay_ms` when a retry is scheduled or a delivery completes.
 - **Tuning:** Increase `EMAIL_MAX_ATTEMPTS` or `WEBHOOK_RETRY_COUNT` for flaky SMTP or webhook endpoints; raise `*_MAX_BACKOFF_MS` to spread retries during outages.
 - **Failure triage:** Search logs for `Notification delivery failed; scheduling backoff retry` or `Notification delivery exhausted retries`. Query recent rows: `SELECT * FROM notification_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`.
+- **Webhook unknown outcomes:** A webhook that times out after the request was dispatched is logged as `uncertain` (`reason="delivery_unknown"`) and is deliberately **not** queued for replay. Confirm the `X-Webhook-Delivery-Id` with the endpoint owner before re-triggering, and use the admin dead-letter endpoints (`GET/POST replay/DELETE /api/v1/admin/notifications/dead-letter`) for entries that are known to have failed.
 
-See [NOTIFICATIONS.md](./NOTIFICATIONS.md) for the full environment variable table.
+See [NOTIFICATIONS.md](./NOTIFICATIONS.md) for the full environment variable table and the webhook state-consistency guarantees.
 
 ## Health vs readiness
 
