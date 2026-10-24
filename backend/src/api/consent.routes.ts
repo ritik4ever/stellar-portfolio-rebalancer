@@ -30,7 +30,7 @@ function resolveConsentUserId(req: Request, candidate?: string): string | undefi
 }
 
 
-consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema), (req: Request, res: Response) => {
+consentRouter.get('/consent/status', validateQuery(consentStatusQuerySchema, 400), (req: Request, res: Response) => {
     try {
         const userId = (req.query.userId ?? req.query.user_id) as string
         const consent = databaseService.getConsent(userId)
@@ -122,7 +122,7 @@ consentRouter.get('/consent/audit', requireJwtWhenEnabled, validateQuery(consent
 })
 
 /** Record user acceptance of ToS, Privacy Policy, Cookie Policy. */
-consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordConsentSchema), (req: Request, res: Response) => {
+consentRouter.post('/consent', idempotencyMiddleware, validateRequest(recordConsentSchema, 400), (req: Request, res: Response) => {
     try {
         const { userId, terms, privacy, cookies, analytics, marketing, documentText } = req.body
         databaseService.recordConsent(userId, { terms, privacy, cookies, analytics, marketing, documentText, ...consentRequestMeta(req) })

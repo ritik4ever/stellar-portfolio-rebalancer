@@ -17,7 +17,8 @@ export interface QueueStats {
 }
 
 export interface AllQueueMetrics {
-
+  redisConnected: boolean;
+  queues: Record<string, QueueStats>;
 }
 
 export interface FailedJobInfo {
@@ -35,12 +36,44 @@ export interface FailedJobsResult {
   countsByQueue: Record<string, number>;
 }
 
+export const QUEUE_METRIC_NAMES = [
+  QUEUE_NAMES.PORTFOLIO_CHECK,
+  QUEUE_NAMES.REBALANCE,
+  QUEUE_NAMES.ANALYTICS_SNAPSHOT,
+] as const;
+
+export const QUEUE_METRIC_STATES = ['waiting', 'active', 'completed', 'failed', 'delayed'] as const satisfies readonly (keyof QueueStats)[];
+
+export type QueueMetricName = typeof QUEUE_METRIC_NAMES[number];
+export type QueueMetricState = typeof QUEUE_METRIC_STATES[number];
+
+const EMPTY_STATS: QueueStats = { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 };
+
+async function statsFor(queue: Queue<any> | null, queueName?: string): Promise<QueueStats> {
+  if (!queue) {
+    if (queueName) logger.warn('[queueMetrics] Queue unavailable while collecting metrics', { queue: queueName });
+    return EMPTY_STATS;
+  }
+  try {
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getCompletedCount(),
+      queue.getFailedCount(),
+      queue.getDelayedCount(),
+    ]);
+    return { waiting, active, completed, failed, delayed };
+  } catch (err) {
+    if (queueName) logger.warn('[queueMetrics] Failed to collect queue metrics', { queue: queueName, error: String(err) });
+    return EMPTY_STATS;
+  }
+}
 
 /**
  * Returns queue depth metrics for all three queues.
  */
 export async function getQueueMetrics(): Promise<AllQueueMetrics> {
-
+  const redisConnected = await isRedisAvailable();
 
   if (!redisConnected) {
     return {
@@ -55,9 +88,9 @@ export async function getQueueMetrics(): Promise<AllQueueMetrics> {
 
   const [portfolioCheckStats, rebalanceStats, analyticsStats] =
     await Promise.all([
-      statsFor(getPortfolioCheckQueue()),
-      statsFor(getRebalanceQueue()),
-      statsFor(getAnalyticsSnapshotQueue()),
+      statsFor(getPortfolioCheckQueue(), QUEUE_NAMES.PORTFOLIO_CHECK),
+      statsFor(getRebalanceQueue(), QUEUE_NAMES.REBALANCE),
+      statsFor(getAnalyticsSnapshotQueue(), QUEUE_NAMES.ANALYTICS_SNAPSHOT),
     ]);
 
   return {

@@ -83,7 +83,7 @@ const MAX_PAGE_SIZE = 200
 const MAX_TRACKED_IDENTIFIERS = 10_000
 const ATTENTION_LIST_LIMIT = 25
 
-class RateLimitMonitor {
+export class RateLimitMonitor {
     private metrics: RateLimitMetrics = {
         totalRequests: 0,
         throttledRequests: 0,
@@ -401,7 +401,7 @@ class RateLimitMonitor {
     /**
      * Reset all metrics
      */
-    private resetMetrics(): void {
+    resetMetrics(): void {
         logger.info('[RATE-LIMIT-MONITOR] Resetting daily metrics', {
             previousMetrics: this.getMetrics()
         })

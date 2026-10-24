@@ -1,83 +1,181 @@
+import { randomUUID } from 'node:crypto'
 import { query } from './client.js'
+import type { RebalanceEvent } from '../services/rebalanceHistory.js'
 
 export interface RebalanceEventRow {
     id: string
     portfolio_id: string
-    timestamp: Date
+    timestamp: Date | string
     trigger: string
     trades: number
     gas_used: string
-    fee_paid: string
-    slippage_bps: string
+    fee_paid: string | number | null
+    slippage_bps: string | number | null
     status: string
     is_automatic: boolean
+    event_source: string | null
+    on_chain_confirmed: boolean | null
+    on_chain_event_type: string | null
+    on_chain_tx_hash: string | null
+    on_chain_ledger: string | number | null
+    on_chain_contract_id: string | null
+    on_chain_paging_token: string | null
+    is_simulated: boolean | null
     risk_alerts: unknown
     error: string | null
     details: unknown
 }
 
-function rowToEvent(r: RebalanceEventRow) {
-    const details = r.details as Record<string, unknown> | undefined
-    return {
-        id: r.id,
-        portfolioId: r.portfolio_id,
-        timestamp: r.timestamp.toISOString(),
-        trigger: r.trigger,
-        trades: r.trades,
-        gasUsed: r.gas_used,
-        feePaid: Number(r.fee_paid ?? 0),
-        slippageBps: Number(r.slippage_bps ?? 0),
-        status: r.status as 'completed' | 'failed' | 'pending',
-        isAutomatic: r.is_automatic,
-        riskAlerts: (r.risk_alerts as any[]) ?? [],
-        error: r.error ?? undefined,
-        actor: details?.actor as 'user' | 'system' | 'admin' | 'scheduler' | undefined,
-        source: details?.source as 'dashboard' | 'api' | 'contract' | 'scheduler' | 'auto_rebalance' | undefined,
-        triggerMetadata: details?.triggerMetadata as Record<string, unknown> | undefined,
-        details: details ?? undefined
-    }
-}
-
-export async function dbInsertRebalanceEvent(event: {
-    id: string
+export interface InsertRebalanceEventInput {
+    id?: string
     portfolioId: string
     trigger: string
     trades: number
     gasUsed: string
     feePaid?: number
     slippageBps?: number
-    status: string
+    status: 'completed' | 'failed' | 'pending'
     isAutomatic: boolean
     riskAlerts?: unknown[]
     error?: string
-    details?: unknown
+    details?: Record<string, unknown>
     timestamp?: Date
-}): Promise<{ id: string }> {
-    await query(
-        `INSERT INTO rebalance_events (id, portfolio_id, trigger, trades, gas_used, fee_paid, slippage_bps, status, is_automatic, risk_alerts, error, details, timestamp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()))`,
+    eventSource?: RebalanceEvent['eventSource']
+    actor?: RebalanceEvent['actor']
+    source?: RebalanceEvent['source']
+    triggerMetadata?: Record<string, unknown>
+    onChainConfirmed?: boolean
+    onChainEventType?: string
+    onChainTxHash?: string
+    onChainLedger?: number
+    onChainContractId?: string
+    onChainPagingToken?: string
+    isSimulated?: boolean
+}
+
+/**
+ * Single source of truth for the externally visible event shape.
+ *
+ * The record returned by `dbInsertRebalanceEvent` and every history query must
+ * be produced by this function, otherwise the POST response and subsequent GET
+ * reads can disagree about the persisted state.
+ */
+export function rowToEvent(r: RebalanceEventRow): RebalanceEvent {
+    const details = (typeof r.details === 'object' && r.details !== null
+        ? r.details
+        : undefined) as Record<string, unknown> | undefined
+    return {
+        id: r.id,
+        portfolioId: r.portfolio_id,
+        timestamp: (r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp as any)).toISOString(),
+        trigger: r.trigger,
+        trades: Number(r.trades ?? 0),
+        gasUsed: r.gas_used,
+        feePaid: Number(r.fee_paid ?? 0),
+        slippageBps: Number(r.slippage_bps ?? 0),
+        status: r.status as RebalanceEvent['status'],
+        isAutomatic: Boolean(r.is_automatic),
+        riskAlerts: ((r.risk_alerts as any[]) ?? []) as RebalanceEvent['riskAlerts'],
+        error: r.error ?? undefined,
+        actor: details?.actor as RebalanceEvent['actor'],
+        source: details?.source as RebalanceEvent['source'],
+        triggerMetadata: details?.triggerMetadata as RebalanceEvent['triggerMetadata'],
+        eventSource: (r.event_source as RebalanceEvent['eventSource']) ?? undefined,
+        onChainConfirmed: r.on_chain_confirmed == null ? undefined : Boolean(r.on_chain_confirmed),
+        onChainEventType: r.on_chain_event_type ?? undefined,
+        onChainTxHash: r.on_chain_tx_hash ?? undefined,
+        onChainLedger: r.on_chain_ledger == null ? undefined : Number(r.on_chain_ledger),
+        onChainContractId: r.on_chain_contract_id ?? undefined,
+        onChainPagingToken: r.on_chain_paging_token ?? undefined,
+        isSimulated: r.is_simulated == null ? undefined : Boolean(r.is_simulated),
+        details: details as RebalanceEvent['details'],
+    }
+}
+
+async function selectRebalanceEventRowByIdentity(
+    id: string,
+    onChainPagingToken?: string | null
+): Promise<RebalanceEventRow | null> {
+    if (onChainPagingToken) {
+        const byToken = await query<RebalanceEventRow>(
+            `SELECT * FROM rebalance_events WHERE on_chain_paging_token = $1`,
+            [onChainPagingToken]
+        )
+        if (byToken.rows[0]) return byToken.rows[0]
+    }
+    const byId = await query<RebalanceEventRow>(
+        `SELECT * FROM rebalance_events WHERE id = $1`,
+        [id]
+    )
+    return byId.rows[0] ?? null
+}
+
+export async function dbInsertRebalanceEvent(
+    event: InsertRebalanceEventInput
+): Promise<RebalanceEvent> {
+    const id = event.id ?? randomUUID()
+    const timestamp = event.timestamp ?? new Date()
+    const feePaid = event.feePaid ?? 0
+    const slippageBps = event.slippageBps ?? 0
+    const details = {
+        ...(event.details ?? {}),
+        ...(event.actor !== undefined && { actor: event.actor }),
+        ...(event.source !== undefined && { source: event.source }),
+        ...(event.triggerMetadata !== undefined && { triggerMetadata: event.triggerMetadata }),
+        feePaid,
+        slippageBps,
+    }
+
+    const result = await query<RebalanceEventRow>(
+        `INSERT INTO rebalance_events (
+            id, portfolio_id, timestamp, trigger, trades, gas_used, fee_paid, slippage_bps,
+            status, is_automatic, event_source, on_chain_confirmed, on_chain_event_type,
+            on_chain_tx_hash, on_chain_ledger, on_chain_contract_id, on_chain_paging_token,
+            is_simulated, risk_alerts, error, details
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
         [
-            event.id,
+            id,
             event.portfolioId,
+            timestamp,
             event.trigger,
             event.trades,
             event.gasUsed,
-            event.feePaid ?? 0,
-            event.slippageBps ?? 0,
+            feePaid,
+            slippageBps,
             event.status,
             event.isAutomatic,
+            event.eventSource ?? 'offchain',
+            event.onChainConfirmed ?? false,
+            event.onChainEventType ?? null,
+            event.onChainTxHash ?? null,
+            event.onChainLedger ?? null,
+            event.onChainContractId ?? null,
+            event.onChainPagingToken ?? null,
+            event.isSimulated ?? false,
             event.riskAlerts ? JSON.stringify(event.riskAlerts) : null,
             event.error ?? null,
-            event.details ? JSON.stringify(event.details) : null,
-            event.timestamp ?? null
+            JSON.stringify(details),
         ]
     )
-    return { id: event.id }
+
+    if (result.rows[0]) return rowToEvent(result.rows[0])
+
+    // A concurrent writer (or an interrupted retry) already persisted this
+    // event. Return the stored record so callers observe the same state
+    // instead of appending a duplicate.
+    const existing = await selectRebalanceEventRowByIdentity(id, event.onChainPagingToken)
+    if (!existing) {
+        throw new Error(`Replayed rebalance event could not be retrieved: ${id}`)
+    }
+    return rowToEvent(existing)
 }
 
 export async function dbGetRebalanceHistoryByPortfolio(portfolioId: string, limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3`,
+        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 ORDER BY timestamp DESC, id DESC LIMIT $2 OFFSET $3`,
         [portfolioId, limit, offset]
     )
     return result.rows.map(rowToEvent)
@@ -126,7 +224,7 @@ export async function dbGetRebalanceCostSummary(portfolioId: string): Promise<Re
 
 export async function dbGetRebalanceHistoryAll(limit: number, offset = 0) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events ORDER BY timestamp DESC LIMIT $1 OFFSET $2`,
+        `SELECT * FROM rebalance_events ORDER BY timestamp DESC, id DESC LIMIT $1 OFFSET $2`,
         [limit, offset]
     )
     return result.rows.map(rowToEvent)
@@ -134,7 +232,7 @@ export async function dbGetRebalanceHistoryAll(limit: number, offset = 0) {
 
 export async function dbGetRecentAutoRebalances(portfolioId: string, limit: number) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 AND is_automatic = true ORDER BY timestamp DESC LIMIT $2`,
+        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 AND is_automatic = true ORDER BY timestamp DESC, id DESC LIMIT $2`,
         [portfolioId, limit]
     )
     return result.rows.map(rowToEvent)
@@ -142,7 +240,7 @@ export async function dbGetRecentAutoRebalances(portfolioId: string, limit: numb
 
 export async function dbGetAutoRebalancesSince(portfolioId: string, since: Date) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 AND is_automatic = true AND timestamp >= $2 ORDER BY timestamp DESC`,
+        `SELECT * FROM rebalance_events WHERE portfolio_id = $1 AND is_automatic = true AND timestamp >= $2 ORDER BY timestamp DESC, id DESC`,
         [portfolioId, since]
     )
     return result.rows.map(rowToEvent)
@@ -150,7 +248,7 @@ export async function dbGetAutoRebalancesSince(portfolioId: string, since: Date)
 
 export async function dbGetAllAutoRebalances(limit: number = 1000) {
     const result = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE is_automatic = true ORDER BY timestamp DESC LIMIT $1`,
+        `SELECT * FROM rebalance_events WHERE is_automatic = true ORDER BY timestamp DESC, id DESC LIMIT $1`,
         [limit]
     )
     return result.rows.map(rowToEvent)
@@ -307,7 +405,7 @@ export async function dbGetPortfolioRebalanceHistory(
     // Data page
     params.push(filter.limit, filter.offset)
     const dataResult = await query<RebalanceEventRow>(
-        `SELECT * FROM rebalance_events WHERE ${where} ORDER BY timestamp ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        `SELECT * FROM rebalance_events WHERE ${where} ORDER BY timestamp ${order}, id ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
     )
 

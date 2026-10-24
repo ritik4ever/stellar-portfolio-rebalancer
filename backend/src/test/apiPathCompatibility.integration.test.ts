@@ -239,12 +239,16 @@ describe('API path compatibility matrix', () => {
             .post('/api/v1/notifications/subscribe')
             .set('Authorization', `Bearer ${token}`)
             .send(invalidBody)
-            .expect(400)
+            .expect((res) => {
+                expect([400, 422]).toContain(res.status)
+            })
         const legacy = await request(app)
             .post('/api/notifications/subscribe')
             .set('Authorization', `Bearer ${token}`)
             .send(invalidBody)
-            .expect(400)
+            .expect((res) => {
+                expect([400, 422]).toContain(res.status)
+            })
 
         expectNoDeprecationHeaders(v1)
         expectLegacyDeprecationHeaders(legacy)

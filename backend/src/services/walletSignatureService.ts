@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Keypair } from '@stellar/stellar-sdk';
 import { logger, logAudit } from '../utils/logger.js';
 import { recordAuthSecurityEvent } from '../observability/metrics.js';
-import { authorizationContext, detectOtherNetwork, recordWalletAuthorization } from './walletAuthorization.js';
+import { authorizationContext, classifyChallengeReplay, detectOtherNetwork, recordChallengeDisposition, recordWalletAuthorization } from './walletAuthorization.js';
 import type { WalletAuthorizationContext } from './walletAuthorization.js';
 
 // ── Issue #171: wallet-signed challenge authentication ────────────────────
@@ -76,26 +76,32 @@ export function issueChallenge(address: string): string {
   return message;
 }
 
-export function verifyWalletSignature(
+function consumeVerifiedWalletSignature(
   address: string,
   signatureB64: string,
-): boolean {
+): WalletAuthorizationContext | undefined {
   const entry = challengeStore.get(address);
   if (!entry) {
-    recordWalletAuthorization('wallet_signature', authorizationContext(address), 'blocked', 'missing_challenge', { retryable: false });
+    const replay = classifyChallengeReplay('wallet_signature', address);
+    recordWalletAuthorization('wallet_signature', replay?.context ?? authorizationContext(address),
+      'blocked', replay?.reason ?? 'missing_challenge', { retryable: false });
     recordAuthSecurityEvent("expired_challenge");
     logAudit("auth_expired_challenge", { address });
     logger.warn("Auth attempt with no active challenge", { address });
-    return false;
+    return undefined;
   }
   if (Date.now() > entry.expiresAt) {
     challengeStore.delete(address);
+    recordChallengeDisposition('wallet_signature', 'expired', entry.context);
     recordWalletAuthorization('wallet_signature', entry.context, 'blocked', 'expired_challenge', { retryable: false });
     recordAuthSecurityEvent("expired_challenge");
     logAudit("auth_expired_challenge", { address });
     logger.warn("Auth attempt with expired challenge", { address });
-    return false;
+    return undefined;
   }
+
+  // Consume synchronously before any caller can await token persistence. This is
+  // the single-use boundary for parallel login attempts in this process.
   challengeStore.delete(address);
   try {
     const keypair = Keypair.fromPublicKey(address);
@@ -111,15 +117,55 @@ export function verifyWalletSignature(
       recordAuthSecurityEvent("failed_signature");
       logAudit("auth_failed_signature", { address });
       recordFailedSignature(address);
-    } else {
-      recordWalletAuthorization('wallet_signature', entry.context, 'success', 'authorized');
+      return undefined;
     }
-    return valid;
+
+    recordChallengeDisposition('wallet_signature', 'consumed', entry.context);
+    return entry.context;
   } catch {
     recordWalletAuthorization('wallet_signature', entry.context, 'blocked', 'invalid_signature', { retryable: false });
     recordAuthSecurityEvent("failed_signature");
     logAudit("auth_failed_signature", { address });
     recordFailedSignature(address);
-    return false;
+    return undefined;
+  }
+}
+
+/**
+ * Verify a signed challenge without issuing tokens. Kept for the existing
+ * service-level helper contract; the mounted login route uses
+ * authenticateWalletSignature so success is not recorded before persistence.
+ */
+export function verifyWalletSignature(
+  address: string,
+  signatureB64: string,
+): boolean {
+  const context = consumeVerifiedWalletSignature(address, signatureB64);
+  if (!context) return false;
+  recordWalletAuthorization('wallet_signature', context, 'success', 'authorized');
+  return true;
+}
+
+/**
+ * Complete the wallet login as one observable operation: a valid signature is
+ * consumed synchronously, token issuance is marked pending, and a terminal
+ * outcome is recorded only after persistence succeeds or fails.
+ */
+export async function authenticateWalletSignature<T>(
+  address: string,
+  signatureB64: string,
+  issueTokens: () => Promise<T>,
+): Promise<T | null> {
+  const context = consumeVerifiedWalletSignature(address, signatureB64);
+  if (!context) return null;
+
+  recordWalletAuthorization('wallet_signature', context, 'pending', 'issuing_tokens');
+  try {
+    const tokens = await issueTokens();
+    recordWalletAuthorization('wallet_signature', context, 'success', 'authorized');
+    return tokens;
+  } catch (error) {
+    recordWalletAuthorization('wallet_signature', context, 'blocked', 'token_issuance_failed', { retryable: false });
+    throw error;
   }
 }

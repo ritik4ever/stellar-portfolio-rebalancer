@@ -1,7 +1,11 @@
 # Historical Rebalancing Backtest & Window Boundary Handling
 
-> **Issue reference:** SPR-2026-151 (`#2075`)  
-> **API endpoint:** `POST /api/v1/backtest` (legacy alias: `POST /api/backtest`)
+> **Issue references:** SPR-2026-151 (`#2075`), SPR-2026-153 (`#2077`)  
+> **API endpoints:**
+> - `POST /api/v1/backtest` (legacy alias: `POST /api/backtest`)
+> - `GET /api/v1/backtest/:id` (legacy alias: `GET /api/backtest/:id`)
+> - `GET /api/v1/backtest` (legacy alias: `GET /api/backtest`)
+> - `POST /api/v1/portfolio/:id/backtest` & `GET /api/v1/portfolio/:id/backtests`
 
 ## Overview
 
@@ -144,10 +148,59 @@ In leap years (e.g., 2024, 2028), February 29 is a valid calendar day. The servi
 
 ---
 
+## State Consistency & Persistence (SPR-2026-153)
+
+The backtest service guarantees state consistency across execution success, failure, and concurrent work:
+
+### 1. Agreement After Success
+- When a backtest price window simulation succeeds, a record is persisted with `status: 'completed'`.
+- The persisted record's fields (`includedDays`, `absentDayReasons`, `absentDays`, `decision`, `events`, and performance metrics) agree 100% with the externally visible API response.
+- Persisted records can be retrieved anytime via `GET /api/v1/backtest/:id` or listed via `GET /api/v1/backtest?status=completed`.
+
+### 2. Agreement After Failure & Interrupted Work
+- If market history collection fails (e.g., provider HTTP 503/429), or an unhandled error interrupts execution, the record is immediately saved with `status: 'failed'` and the exact sanitized error message returned to the caller (`error.message`).
+- Failure records retain empty `includedDays` and `absentDayReasons` (as the simulation window could not complete), while `status`, `error`, and `updatedAt` are updated.
+- The external caller receives the failure envelope containing `recordId`, enabling immediate correlation and diagnosis.
+
+### 3. Concurrent Work Handling
+- **Portfolio-Level Locking:** When running a backtest with a specific `portfolioId` (via `/api/v1/backtest` or `/api/portfolio/:id/backtest`), the service acquires a concurrency lock. Concurrent requests on the same portfolio receive `409 CONFLICT` (`Backtest already in progress for this portfolio`), preventing race conditions and corrupted records. The lock is safely released in a `finally` block on success or failure.
+- **Isolated Execution State:** Independent backtests running in parallel maintain isolated `includedDays` and `absentDayReasons` arrays and maps, persisting independent records without cross-contamination.
+
+---
+
 ## Error Handling
 
 | Status | Code | Reason |
 |--------|------|--------|
+| `404`  | `NOT_FOUND` | Specified portfolio not found for backtest run (no record created). |
+| `409`  | `CONFLICT` | Concurrent backtest already in progress for the specified portfolio. |
 | `422`  | `VALIDATION_ERROR` | Allocations do not sum to 100%, threshold < 1% or > 50%, or invalid date range. |
-| `503`  | `HISTORICAL_DATA_UNAVAILABLE` | External market price history provider is down or rate-limited. Synthetic fallbacks are prohibited. |
-| `500`  | `INTERNAL_ERROR` | Unexpected simulation failure. |
+| `503`  | `HISTORICAL_DATA_UNAVAILABLE` | External market price history provider is down or rate-limited. Record persisted as `failed`. |
+| `500`  | `INTERNAL_ERROR` | Unexpected simulation failure (record persisted as `failed`), or portfolio retrieval error before run initialization (no record created). |
+
+## Known feed gaps and related follow-up issues
+
+The current fetch boundary excludes the open UTC day and filters the requested
+range, but does not require a complete daily series. The simulator skips missing
+days, reports them through `absentDayReasons`, and can return `completed` when at
+least two overlapping days remain. Requested dates outside the returned history
+can also be clipped from the evaluated window. Operators should inspect the
+returned date range and absent-day details before treating a result as covering
+the entire requested window.
+
+- #2076 (SPR-2026-152): define bounded retry or explicit stop behavior for
+  incomplete market history before simulation.
+- #2078 (SPR-2026-154): add structured source and outcome diagnostics that
+  distinguish complete history from blocked or delayed work without logging
+  provider credentials.
+- #2073 (SPR-2026-149): add equivalent diagnostics for the volatility pause.
+  The current circuit breaker checks the configured 24h-change threshold, then
+  price freshness (10 minutes), then correlation. A latest-value snapshot alone
+  cannot identify every missed feed interval.
+
+Existing coverage includes the backtest calendar/leap-day tests in
+`backend/src/test/backtest.test.ts` (SPR-2026-151 / #2075), plus circuit-breaker
+and shared volatility-threshold tests. Those tests do not establish complete
+requested-window validation or structured missing-interval outcomes. This note
+records the gaps; it does not implement the linked issues.
+

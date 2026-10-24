@@ -56,30 +56,81 @@ vi.mock('../db/client.js', () => {
                 return { rowCount: initialLen - pgState.length }
             }
             if (text.includes('INSERT INTO rebalance_events')) {
-                const [id, portfolio_id, trigger, trades, gas_used, status, is_automatic, risk_alerts, error, details, timestamp] = params!
-                historyState.push({
+                const [
+                    id,
+                    portfolio_id,
+                    timestamp,
+                    trigger,
+                    trades,
+                    gas_used,
+                    fee_paid,
+                    slippage_bps,
+                    status,
+                    is_automatic,
+                    event_source,
+                    on_chain_confirmed,
+                    on_chain_event_type,
+                    on_chain_tx_hash,
+                    on_chain_ledger,
+                    on_chain_contract_id,
+                    on_chain_paging_token,
+                    is_simulated,
+                    risk_alerts,
+                    error,
+                    details,
+                ] = params!
+                if (on_chain_paging_token && historyState.some(h => h.on_chain_paging_token === on_chain_paging_token)) {
+                    return { rowCount: 0, rows: [] }
+                }
+                const row = {
                     id,
                     portfolio_id,
                     timestamp: timestamp || new Date(),
                     trigger,
                     trades,
                     gas_used,
+                    fee_paid: fee_paid ?? 0,
+                    slippage_bps: slippage_bps ?? 0,
                     status,
                     is_automatic,
+                    event_source: event_source ?? 'offchain',
+                    on_chain_confirmed: on_chain_confirmed ?? false,
+                    on_chain_event_type: on_chain_event_type ?? null,
+                    on_chain_tx_hash: on_chain_tx_hash ?? null,
+                    on_chain_ledger: on_chain_ledger ?? null,
+                    on_chain_contract_id: on_chain_contract_id ?? null,
+                    on_chain_paging_token: on_chain_paging_token ?? null,
+                    is_simulated: is_simulated ?? false,
                     risk_alerts: risk_alerts ? JSON.parse(risk_alerts) : null,
                     error,
                     details: details ? JSON.parse(details) : null
-                })
-                return { rowCount: 1 }
+                }
+                historyState.push(row)
+                return { rowCount: 1, rows: [row] }
             }
             if (text.includes('SELECT * FROM rebalance_events')) {
+                if (text.includes('WHERE on_chain_paging_token = $1')) {
+                    const row = historyState.find(h => h.on_chain_paging_token === params![0])
+                    return { rows: row ? [row] : [] }
+                }
+                if (text.includes('WHERE id = $1')) {
+                    const row = historyState.find(h => h.id === params![0])
+                    return { rows: row ? [row] : [] }
+                }
                 let filtered = [...historyState]
                 if (text.includes('portfolio_id = $1')) {
                     filtered = filtered.filter(h => h.portfolio_id === params![0])
                 }
-                filtered.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-                const limit = params![1]
-                return { rows: filtered.slice(0, limit) }
+                filtered.sort((a, b) => {
+                    const ta = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime()
+                    const tb = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime()
+                    if (tb !== ta) return tb - ta
+                    if (b.id !== a.id) return b.id.localeCompare(a.id)
+                    return 0
+                })
+                const limit = params!.find(p => typeof p === 'number' && p > 0 && params!.indexOf(p) > 0)
+                const limitVal = typeof limit === 'number' ? limit : params![1]
+                return { rows: filtered.slice(0, typeof limitVal === 'number' ? limitVal : 50) }
             }
             if (text.includes('SELECT COUNT(*)')) {
                 return { rows: [{ count: pgState.length.toString() }] }

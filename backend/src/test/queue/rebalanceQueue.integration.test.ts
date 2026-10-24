@@ -61,17 +61,27 @@ describe('Rebalance Job Queue – Integration Tests', () => {
   let worker: any;
 
   beforeAll(async () => {
-    // Start in-memory Redis server
-    redisServer = await RedisMemoryServer.create();
-    const host = await redisServer.getHost();
-    const port = await redisServer.getPort();
-    process.env.REDIS_URL = `redis://${host}:${port}`;
-  }, 30000); // 30s timeout for redis-memory-server startup
+    // Start in-memory Redis server with generous timeout for CI binary download
+    try {
+      redisServer = await RedisMemoryServer.create();
+      const host = await redisServer.getHost();
+      const port = await redisServer.getPort();
+      process.env.REDIS_URL = `redis://${host}:${port}`;
+    } catch (err) {
+      if (!process.env.REDIS_URL) {
+        process.env.REDIS_URL = 'redis://127.0.0.1:6379';
+      }
+    }
+  }, 120000);
 
   afterAll(async () => {
     // Stop in-memory Redis server
-    await redisServer.stop();
-  });
+    if (redisServer) {
+      try {
+        await redisServer.stop();
+      } catch {}
+    }
+  }, 30000);
 
   beforeEach(async () => {
     vi.clearAllMocks();

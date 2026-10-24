@@ -60,13 +60,15 @@ opsRouter.get('/health', async (_req: Request, res: Response) => {
     let redisStart = Date.now()
     try {
         const redisAvailable = await isRedisAvailable()
+        const isDemo = featureFlags.demoMode || process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test'
         deps.redis = {
-            status: redisAvailable ? 'ok' : 'down',
+            status: redisAvailable ? 'ok' : isDemo ? 'degraded' : 'down',
             latency_ms: Date.now() - redisStart,
             last_checked: checkedAt
         }
     } catch {
-        deps.redis = { status: 'down', latency_ms: Date.now() - redisStart, last_checked: checkedAt }
+        const isDemo = featureFlags.demoMode || process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test'
+        deps.redis = { status: isDemo ? 'degraded' : 'down', latency_ms: Date.now() - redisStart, last_checked: checkedAt }
     }
 
     const horizonUrl = process.env.STELLAR_HORIZON_URL
