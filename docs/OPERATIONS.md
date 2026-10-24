@@ -773,7 +773,7 @@ action, so outcomes are distinguishable without re-running the procedure.
 
 ### Smoke check: key overlap and stale notification worker credentials
 
-`deployment/rotation-smoke.mjs` confirms the active key version and detects a notification worker that still holds a stale key, printing only 12-character SHA-256 fingerprints (never key values).
+`deployment/rotation-smoke.mjs` confirms the active key version and detects a notification worker that still holds a stale key, printing only 12-character SHA-256 fingerprints (never key values). It also reports a small result signal (`outcome` plus `ownerAction`) so success, a transient delay, and blocked work are distinguishable without re-running the procedure.
 
 ```bash
 ROTATION_ACTIVE_KEY="$NEW_KEY" ROTATION_PREVIOUS_KEY="$OLD_KEY" \
@@ -781,4 +781,15 @@ ROTATION_WORKER_KEY="$WORKER_KEY" ROTATION_ACTIVE_VERSION=v2 \
   node deployment/rotation-smoke.mjs
 ```
 
-Exit codes: `0` worker uses the active key (overlap reported via `"overlap": true`); `1` worker holds the previous/unknown key (restart or reload it); `2` missing or invalid input. Tests: `node --test deployment/deploy.test.mjs`.
+If the previous key is no longer accepted (the overlap window has closed), also set `ROTATION_OVERLAP_OPEN=false`.
+
+| Outcome | Worker credential state | Exit code | Meaning and owner action |
+|---------|-------------------------|-----------|--------------------------|
+| `success` | `current` | `0` | The notification worker uses the active key. No action required. |
+| `transient_delay` | `previous` | `1` | The worker still holds the previous key while the overlap window is open. Owner action: `wait_for_worker_credential_refresh` - wait for the background refresh (about 4 minutes) or call `POST /api/ops/credentials/refresh` before the previous key is revoked. |
+| `blocked` | `previous` or `unknown` | `1` | The worker holds the previous key after the overlap closed, or a key that matches neither version. Owner action: `restart_notification_worker` - restart the worker so it reloads the active key, then re-run the check. |
+| `blocked` | n/a | `2` | Missing or invalid input (for example a missing key, identical active/previous keys, or a malformed `ROTATION_OVERLAP_OPEN`). Owner action: `fix_rotation_inputs`. |
+
+For `restart_notification_worker`, restart the worker and re-run the check. For `fix_rotation_inputs`, correct the reported inputs and re-run the check. Do not revoke the previous key until the check reports `success`.
+
+The same signals are available programmatically from `evaluateRotation()` (`outcome`, `ownerAction`, `workerCredentialState`, `detail`). Tests: `node --test deployment/deploy.test.mjs`.
