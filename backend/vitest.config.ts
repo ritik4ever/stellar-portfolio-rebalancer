@@ -21,6 +21,7 @@ export default defineConfig({
             include: [
                 'src/utils/apiResponse.ts',
                 'src/utils/apiErrors.ts',
+                'src/utils/errorSanitizer.ts',
                 'src/middleware/apiErrorHandler.ts',
                 'src/middleware/auth.ts',
                 'src/middleware/debugGate.ts',

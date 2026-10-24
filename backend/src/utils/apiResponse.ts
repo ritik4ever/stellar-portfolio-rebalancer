@@ -1,5 +1,6 @@
 import type { Response } from 'express'
 import { getRequestId, getCorrelationId, getTraceId } from './requestContext.js'
+import { sanitizeErrorDetails, sanitizeErrorMessage } from './errorSanitizer.js'
 
 export interface ApiErrorBody {
     code: string
@@ -49,13 +50,18 @@ export function fail(
     const requestId = getRequestId()
     const correlationId = getCorrelationId()
     const traceId = getTraceId()
+    // Upstream failures carry credentials in their message (connection strings,
+    // API keys, bearer tokens). They are redacted before serialization, and
+    // server errors never expose their `details` payload at all.
+    const safeMessage = sanitizeErrorMessage(message)
+    const safeDetails = status >= 500 ? undefined : sanitizeErrorDetails(details)
     const payload: ApiResponseEnvelope<null> = {
         success: false,
         data: null,
         error: {
             code,
-            message,
-            ...(details === undefined ? {} : { details })
+            message: safeMessage,
+            ...(safeDetails === undefined ? {} : { details: safeDetails })
         },
         timestamp: nowIso(),
         ...(options.meta ? { meta: options.meta } : {})
