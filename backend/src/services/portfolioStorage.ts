@@ -2,6 +2,13 @@ import { isDbConfigured } from '../db/client.js'
 import * as portfolioDb from '../db/portfolioDb.js'
 import { randomUUID } from 'node:crypto'
 import type { Portfolio } from '../types/index.js'
+import {
+    encodePortfolioCursor,
+    decodePortfolioCursor,
+    diagnosePaginationChange,
+    type PortfolioPageCursor,
+    type PortfolioPaginationResult,
+} from '../utils/portfolioPagination.js'
 
 const SLIPPAGE_MIN = 0.5
 const SLIPPAGE_MAX = 5
@@ -19,7 +26,19 @@ export class PortfolioStorage {
 
     private async cacheGet(id: string): Promise<Portfolio | undefined> {
         if (useCache && this.portfolios.has(id)) return this.portfolios.get(id)
-        if (!isDbConfigured()) return this.portfolios.get(id)
+        if (!isDbConfigured()) {
+            const mem = this.portfolios.get(id)
+            if (mem) return mem
+            try {
+                const { databaseService } = await import('./databaseService.js')
+                const fromSqlite = databaseService.getPortfolio(id)
+                if (fromSqlite) {
+                    this.portfolios.set(id, fromSqlite)
+                    return fromSqlite
+                }
+            } catch {}
+            return undefined
+        }
         const p = await portfolioDb.dbGetPortfolio(id)
         if (p && useCache) this.portfolios.set(id, p)
         return p
@@ -56,6 +75,11 @@ export class PortfolioStorage {
         }
         if (isDbConfigured()) {
             await portfolioDb.dbCreatePortfolio(id, userAddress, allocations, threshold, {}, 0, 1, 'threshold', {}, name, description)
+        } else {
+            try {
+                const { databaseService } = await import('./databaseService.js')
+                databaseService.createPortfolio(userAddress, allocations, threshold, 1, 'threshold', {}, name, description, id)
+            } catch {}
         }
         this.cacheSet(portfolio)
         return id
@@ -100,6 +124,22 @@ export class PortfolioStorage {
                 name,
                 description
             )
+        } else {
+            try {
+                const { databaseService } = await import('./databaseService.js')
+                databaseService.createPortfolioWithBalances(
+                    userAddress,
+                    allocations,
+                    threshold,
+                    currentBalances,
+                    portfolio.slippageTolerance ?? 1,
+                    'threshold',
+                    {},
+                    name,
+                    description,
+                    id
+                )
+            } catch {}
         }
         this.cacheSet(portfolio)
         return id
@@ -123,6 +163,20 @@ export class PortfolioStorage {
     async updatePortfolio(id: string, updates: Partial<Portfolio>, expectedVersion?: number): Promise<boolean> {
         const portfolio = await this.getPortfolio(id)
         if (!portfolio) return false
+
+        // Check active rebalance boundary guard if allocations are being updated
+        if (updates.allocations !== undefined) {
+            const { isRebalanceActive } = await import('./portfolioPersistenceBoundary.js')
+            if (await isRebalanceActive(id)) {
+                const { ConflictError } = await import('../types/index.js')
+                throw new ConflictError(
+                    portfolio.version ?? -1,
+                    `Cannot edit allocations while portfolio ${id} is actively rebalancing`,
+                    'rebalancing',
+                    'conflict_rebalancing'
+                )
+            }
+        }
 
         if (expectedVersion !== undefined && portfolio.version !== expectedVersion) {
             const { ConflictError } = await import('../types/index.js')
@@ -148,6 +202,24 @@ export class PortfolioStorage {
         return true
     }
 
+    /**
+     * Edit allocations at the service boundary, documenting committed version,
+     * execution state, and a stable result.
+     */
+    async editAllocations(
+        id: string,
+        allocations: Record<string, number>,
+        expectedVersion?: number
+    ): Promise<import('../types/index.js').AllocationEditDecision> {
+        const { applyAllocationEdit } = await import('./portfolioPersistenceBoundary.js')
+        return applyAllocationEdit({
+            portfolioId: id,
+            allocations,
+            expectedVersion,
+            storage: this
+        })
+    }
+
     async searchPortfolios(searchQuery: string, limit: number, offset: number, includeArchived = false): Promise<Portfolio[]> {
         if (isDbConfigured()) {
             const list = await portfolioDb.dbSearchPortfolios(searchQuery, limit, offset, includeArchived)
@@ -168,6 +240,109 @@ export class PortfolioStorage {
         }
         all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         return all.slice(offset, offset + limit)
+    }
+
+    async searchPortfoliosPage(options: {
+        search?: string
+        address?: string
+        includeArchived?: boolean
+        limit?: number
+        cursor?: string | PortfolioPageCursor | null
+    }): Promise<PortfolioPaginationResult<Portfolio>> {
+        const { search = '', address, includeArchived = false, limit = 20, cursor } = options
+
+        let parsedCursor: PortfolioPageCursor | null = null
+        let cursorStr: string | null = null
+        if (typeof cursor === 'string' && cursor.trim().length > 0) {
+            cursorStr = cursor.trim()
+            parsedCursor = decodePortfolioCursor(cursorStr)
+        } else if (cursor && typeof cursor === 'object' && 'createdAt' in cursor && 'id' in cursor) {
+            parsedCursor = cursor
+            cursorStr = encodePortfolioCursor(cursor)
+        }
+
+        if (isDbConfigured()) {
+            const page = await portfolioDb.dbGetPortfolioPage({
+                search,
+                userAddress: address,
+                limit,
+                cursor: parsedCursor,
+                includeArchived,
+            })
+            const total = page.total ?? page.count
+            const { itemsChanged, changeKind } = diagnosePaginationChange({
+                currentTotal: total,
+                cursor: parsedCursor,
+            })
+            return {
+                portfolios: page.portfolios as Portfolio[],
+                limit,
+                cursor: cursorStr,
+                nextCursor: page.nextCursor ? encodePortfolioCursor({ ...page.nextCursor, total }) : null,
+                count: page.count,
+                total,
+                itemsChanged,
+                changeKind,
+            }
+        }
+
+        let all = Array.from(this.portfolios.values())
+        if (!includeArchived) {
+            all = all.filter(p => !p.archivedAt)
+        }
+        if (address) {
+            all = all.filter(p => p.userAddress === address)
+        }
+        if (search) {
+            const q = search.toLowerCase()
+            all = all.filter(p =>
+                (p.name && p.name.toLowerCase().includes(q)) ||
+                (p.description && p.description.toLowerCase().includes(q))
+            )
+        }
+
+        const total = all.length
+        const { itemsChanged, changeKind } = diagnosePaginationChange({
+            currentTotal: total,
+            cursor: parsedCursor,
+        })
+
+        // Ascending ordering: oldest items first by (created_at ASC, id ASC)
+        all.sort((a, b) => {
+            const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            if (diff !== 0) return diff
+            return a.id.localeCompare(b.id)
+        })
+
+        let paged = all
+        if (parsedCursor) {
+            const cursorTime = new Date(parsedCursor.createdAt).getTime()
+            const cursorId = parsedCursor.id
+            paged = all.filter(p => {
+                const itemTime = new Date(p.createdAt).getTime()
+                if (itemTime > cursorTime) return true
+                if (itemTime === cursorTime) return p.id.localeCompare(cursorId) > 0
+                return false
+            })
+        }
+
+        const hasMore = paged.length > limit
+        const pageItems = hasMore ? paged.slice(0, limit) : paged
+        const last = pageItems[pageItems.length - 1]
+        const nextCursor = hasMore && last
+            ? encodePortfolioCursor({ createdAt: last.createdAt, id: last.id, total })
+            : null
+
+        return {
+            portfolios: pageItems,
+            limit,
+            cursor: cursorStr,
+            nextCursor,
+            count: pageItems.length,
+            total,
+            itemsChanged,
+            changeKind,
+        }
     }
 
     async getAllPortfolios(includeArchived = false): Promise<Portfolio[]> {

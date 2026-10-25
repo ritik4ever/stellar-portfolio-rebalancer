@@ -89,7 +89,7 @@ rebalancingRouter.get('/rebalance/history', validateQuery(rebalanceHistoryQueryS
 
     } catch (error) {
         logger.error('[ERROR] Rebalance history failed', { error: getErrorObject(error) })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch rebalance history')
     }
 })
 
@@ -108,7 +108,7 @@ rebalancingRouter.post('/rebalance/history', idempotencyMiddleware, validateRequ
         return ok(res, { event })
     } catch (error) {
         logger.error('[ERROR] Failed to record rebalance event', { error: getErrorObject(error) })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to record rebalance event')
     }
 })
 
@@ -120,7 +120,8 @@ rebalancingRouter.post('/rebalance/history/sync-onchain', requireAdmin, async (r
             indexer: contractEventIndexerService.getStatus()
         })
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to sync onchain rebalance history', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to sync on-chain rebalance events')
     }
 })
 
@@ -166,13 +167,21 @@ rebalancingRouter.get('/rebalance/summary/:portfolioId', async (req: Request, re
         const targetAllocations = portfolio.allocations || {}
         let maxDrift = 0
 
-        if (portfolioDetails?.allocations) {
+        if (Array.isArray(portfolioDetails?.allocations)) {
             portfolioDetails.allocations.forEach((alloc: any) => {
                 currentAllocations[alloc.asset] = alloc.current
                 const target = targetAllocations[alloc.asset] || 0
                 const drift = Math.abs(alloc.current - target)
                 maxDrift = Math.max(maxDrift, drift)
             })
+        } else if (portfolioDetails?.allocations && typeof portfolioDetails.allocations === 'object') {
+            for (const [asset, current] of Object.entries(portfolioDetails.allocations)) {
+                const currentVal = typeof current === 'number' ? current : (current as any)?.current ?? 0
+                currentAllocations[asset] = currentVal
+                const target = targetAllocations[asset] || 0
+                const drift = Math.abs(currentVal - target)
+                maxDrift = Math.max(maxDrift, drift)
+            }
         }
 
         // Slippage analysis
@@ -277,7 +286,7 @@ rebalancingRouter.get('/rebalance/summary/:portfolioId', async (req: Request, re
             error: getErrorObject(error),
             portfolioId: req.params.portfolioId 
         })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch rebalance summary')
     }
 })
 
@@ -298,7 +307,8 @@ rebalancingRouter.get('/auto-rebalancer/status', async (req: Request, res: Respo
 
         return ok(res, { status, statistics })
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to fetch auto-rebalancer status', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch auto-rebalancer status')
     }
 })
 
@@ -315,7 +325,8 @@ rebalancingRouter.post('/auto-rebalancer/start', requireAdmin, async (req: Reque
             status: autoRebalancer.getStatus()
         })
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to start auto-rebalancer', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to start auto-rebalancer')
     }
 })
 
@@ -332,7 +343,8 @@ rebalancingRouter.post('/auto-rebalancer/stop', requireAdmin, (req: Request, res
             status: autoRebalancer.getStatus()
         })
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to stop auto-rebalancer', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to stop auto-rebalancer')
     }
 })
 
@@ -346,7 +358,8 @@ rebalancingRouter.post('/auto-rebalancer/force-check', requireAdmin, async (req:
 
         return ok(res, { message: 'Force check completed' })
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to force rebalance check', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to trigger rebalance check')
     }
 })
 
@@ -360,7 +373,7 @@ rebalancingRouter.post('/auto-rebalancer/shadow-check', requireAdmin, async (req
         return ok(res, { result })
     } catch (error) {
         logger.error('[ERROR] Auto-rebalancer shadow check failed', { error: getErrorObject(error) })
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer shadow check failed')
     }
 })
 
@@ -414,6 +427,7 @@ rebalancingRouter.get('/auto-rebalancer/history', requireAdmin, async (req: Requ
             { meta: { count: history.length } }
         )
     } catch (error) {
-        return fail(res, 500, 'INTERNAL_ERROR', getErrorMessage(error))
+        logger.error('[ERROR] Failed to fetch auto-rebalance history', { error: getErrorObject(error) })
+        return fail(res, 500, 'INTERNAL_ERROR', 'Failed to fetch auto-rebalance history')
     }
 })

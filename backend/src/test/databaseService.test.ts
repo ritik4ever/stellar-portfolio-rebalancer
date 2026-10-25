@@ -161,7 +161,7 @@ describe("DatabaseService", () => {
 
   it("stores on-chain rebalance metadata and treats paging tokens idempotently", async () => {
     const { DatabaseService } = await import("../services/databaseService.js");
-    const db = new DatabaseService();
+    let db = new DatabaseService();
     try {
       db.ensurePortfolioExists("chain-portfolio", "GCHAIN");
       const first = db.recordRebalanceEvent({
@@ -179,6 +179,9 @@ describe("DatabaseService", () => {
         onChainPagingToken: "token-abc",
         isSimulated: false,
       });
+      // A process restart loses the indexer's in-memory deduplication set.
+      db.close();
+      db = new DatabaseService();
       const replay = db.recordRebalanceEvent({
         portfolioId: "chain-portfolio",
         trigger: "On-chain Rebalance Executed",

@@ -442,11 +442,26 @@ export class RiskManagementService {
             pausedUntil
         })
 
+        let alreadyPaused = false
+
         // 1. Persist the pause flag on the portfolio
         try {
             const portfolio = await portfolioStorage.getPortfolio(portfolioId)
             if (portfolio) {
-                await portfolioStorage.updatePortfolio(portfolioId, { riskPausedUntil: pausedUntil })
+                const existingPauseTs = portfolio.riskPausedUntil
+                    ? new Date(portfolio.riskPausedUntil).getTime()
+                    : Number.NaN
+
+                if (Number.isFinite(existingPauseTs) && existingPauseTs > Date.now()) {
+                    alreadyPaused = true
+                    logger.info('[RISK] Portfolio already auto-paused; skipping duplicate side effects', {
+                        portfolioId,
+                        existingRiskPausedUntil: portfolio.riskPausedUntil,
+                        requestedPausedUntil: pausedUntil
+                    })
+                } else {
+                    await portfolioStorage.updatePortfolio(portfolioId, { riskPausedUntil: pausedUntil })
+                }
             } else {
                 logger.warn('[RISK] Portfolio not found for auto-pause', { portfolioId })
             }
@@ -458,42 +473,44 @@ export class RiskManagementService {
         }
 
         // 2. Send a notification explaining the pause
-        try {
-            const metricLabel = breachType === 'VAR_BREACH' ? 'VaR(95)' : 'CVaR(95)'
-            const measuredPct = `${(measuredValue! * 100).toFixed(2)}%`
-            const thresholdPct = `${(threshold! * 100).toFixed(2)}%`
+        if (!alreadyPaused) {
+            try {
+                const metricLabel = breachType === 'VAR_BREACH' ? 'VaR(95)' : 'CVaR(95)'
+                const measuredPct = `${(measuredValue! * 100).toFixed(2)}%`
+                const thresholdPct = `${(threshold! * 100).toFixed(2)}%`
 
-            const payload = buildNotificationPayload(userId, {
-                eventType: 'riskChange',
-                data: {
-                    portfolioId,
-                    oldLevel: riskMetrics.overallRiskLevel,
-                    newLevel: 'critical',
-                    autoPause: {
-                        reason: breachType,
-                        measuredValue: measuredPct,
-                        threshold: thresholdPct,
-                        pausedUntil
+                const payload = buildNotificationPayload(userId, {
+                    eventType: 'riskChange',
+                    data: {
+                        portfolioId,
+                        oldLevel: riskMetrics.overallRiskLevel,
+                        newLevel: 'critical',
+                        autoPause: {
+                            reason: breachType,
+                            measuredValue: measuredPct,
+                            threshold: thresholdPct,
+                            pausedUntil
+                        }
                     }
-                }
-            })
+                })
 
-            await notificationService.notify(payload)
+                await notificationService.notify(payload)
 
-            logger.info('[RISK] Auto-pause notification sent', {
-                portfolioId,
-                userId,
-                metricLabel,
-                measuredValue: measuredPct,
-                threshold: thresholdPct
-            })
-        } catch (err) {
-            // Notification failure must never prevent the pause from being recorded
-            logger.error('[RISK] Failed to send auto-pause notification', {
-                portfolioId,
-                userId,
-                error: err instanceof Error ? err.message : String(err)
-            })
+                logger.info('[RISK] Auto-pause notification sent', {
+                    portfolioId,
+                    userId,
+                    metricLabel,
+                    measuredValue: measuredPct,
+                    threshold: thresholdPct
+                })
+            } catch (err) {
+                // Notification failure must never prevent the pause from being recorded
+                logger.error('[RISK] Failed to send auto-pause notification', {
+                    portfolioId,
+                    userId,
+                    error: err instanceof Error ? err.message : String(err)
+                })
+            }
         }
 
         return {

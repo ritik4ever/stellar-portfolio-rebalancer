@@ -58,7 +58,7 @@ network, or transaction details you do not recognise.
 ### "Network mismatch"
 
 **Symptom:** The application reports that the wallet network is different from
-the network it expects.
+the network it expects, or authorization fails with a signature verification error.
 
 **Fix:** Select the same network in the wallet and the application, then retry
 the connection. Testnet and mainnet accounts, balances, and assets are separate.
@@ -66,6 +66,12 @@ the connection. Testnet and mainnet accounts, balances, and assets are separate.
 The application detects a mismatch before connecting in
 [`WalletSelector.tsx`](../frontend/src/components/WalletSelector.tsx). Its
 `NetworkMismatchBanner` reports the configured and detected networks.
+
+On the backend, wallet authorization challenges enforce a bounded retry limit
+(3 attempts). If a wallet signs a challenge scoped to a different network or uses an
+incorrect passphrase, verification fails without duplicating side effects (such as
+refresh tokens or sessions). Once the bounded retry limit is reached, the challenge
+is explicitly purged and stops further retries until a fresh challenge is requested.
 
 ## Wallet-Specific Guides
 

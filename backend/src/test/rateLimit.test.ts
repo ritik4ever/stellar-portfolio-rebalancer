@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import express from 'express'
 import request from 'supertest'
 
@@ -8,6 +8,9 @@ vi.mock('../utils/apiResponse.js', async () => {
 })
 
 describe('rateLimit middleware', () => {
+    afterEach(() => {
+        vi.unstubAllEnvs()
+    })
     it('sets X-RateLimit-Limit on v1 responses and decrements remaining', async () => {
         vi.stubEnv('RATE_LIMIT_WINDOW_MS', '60000')
         vi.stubEnv('RATE_LIMIT_WRITE_MAX', '2')

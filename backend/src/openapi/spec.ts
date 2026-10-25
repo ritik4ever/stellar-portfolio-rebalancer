@@ -397,16 +397,152 @@ const spec: Record<string, any> = {
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
+            put: {
+                tags: ['Portfolio'],
+                summary: 'Update portfolio',
+                description: 'Update portfolio metadata and allocations with optimistic concurrency control and persistence boundary handling.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['version'],
+                                properties: {
+                                    version: { type: 'integer', description: 'Expected portfolio version for optimistic locking', example: 1 },
+                                    allocations: { type: 'object', additionalProperties: { type: 'number' }, example: { XLM: 60, USDC: 40 } },
+                                    threshold: { type: 'number', minimum: 0.1, maximum: 50, example: 5 },
+                                    name: { type: 'string', nullable: true, example: 'Core rebalance holdings' },
+                                    description: { type: 'string', nullable: true, example: 'Updated targets' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Portfolio updated successfully',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolio: { $ref: '#/components/schemas/Portfolio' },
+                                                committedVersion: { type: 'integer', example: 2 },
+                                                executionState: { type: 'string', enum: ['idle', 'rebalancing', 'completed', 'failed'], example: 'idle' },
+                                                result: { type: 'string', enum: ['committed', 'conflict_rebalancing', 'conflict_version', 'not_found', 'validation_error'], example: 'committed' },
+                                                decision: { $ref: '#/components/schemas/AllocationEditDecision' },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Version conflict or active rebalance in flight', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/portfolio/{id}/allocations': {
+            put: {
+                tags: ['Portfolio'],
+                summary: 'Update portfolio allocations at service boundary',
+                description: 'Specify and implement an allocation edit during rebalance at the service boundary. Documents committed portfolio version and execution state with a stable result code.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/UpdateAllocationsRequest',
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Allocations updated successfully',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                portfolio: { $ref: '#/components/schemas/Portfolio' },
+                                                decision: { $ref: '#/components/schemas/AllocationEditDecision' },
+                                                committedVersion: { type: 'integer', example: 2 },
+                                                executionState: { type: 'string', enum: ['idle', 'rebalancing', 'completed', 'failed'], example: 'idle' },
+                                                result: { type: 'string', enum: ['committed', 'conflict_rebalancing', 'conflict_version', 'not_found', 'validation_error'], example: 'committed' },
+                                            },
+                                        },
+                                        error: { type: 'object', nullable: true },
+                                        timestamp: { type: 'string', format: 'date-time' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '404': { description: 'Portfolio not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Conflict: active rebalance in flight or stale expectedVersion', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Schema validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            patch: {
+                tags: ['Portfolio'],
+                summary: 'Patch portfolio allocations at service boundary',
+                description: 'Alias for PUT /api/portfolio/{id}/allocations with boundary handling.',
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/UpdateAllocationsRequest',
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Allocations updated successfully' },
+                    '400': { description: 'Validation error' },
+                    '404': { description: 'Portfolio not found' },
+                    '409': { description: 'Conflict' },
+                    '422': { description: 'Schema validation error' },
+                    '500': { description: 'Internal error' },
+                },
+            },
         },
         '/api/portfolios': {
             get: {
                 tags: ['Portfolio'],
                 summary: 'List all portfolios',
                 description: 'Get all portfolios, optionally filtered by user address query parameter.',
-                parameters: [{ name: 'userAddress', in: 'query', required: false, schema: { type: 'string' } }],
+                parameters: [
+                    { name: 'userAddress', in: 'query', required: false, schema: { type: 'string' } },
+                    { name: 'address', in: 'query', required: false, schema: { type: 'string' } },
+                    { name: 'search', in: 'query', required: false, schema: { type: 'string' } },
+                    { name: 'cursor', in: 'query', required: false, schema: { type: 'string' }, description: 'Opaque pagination cursor from previous nextCursor' },
+                    { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 20 } },
+                    { name: 'include_archived', in: 'query', required: false, schema: { type: 'boolean', default: false } },
+                ],
                 responses: {
                     '200': {
-                        description: 'List of portfolios',
+                        description: 'Paginated list of portfolios',
                         content: {
                             'application/json': {
                                 schema: {
@@ -420,6 +556,11 @@ const spec: Record<string, any> = {
                                                     type: 'array',
                                                     items: { $ref: '#/components/schemas/Portfolio' },
                                                 },
+                                                limit: { type: 'integer' },
+                                                cursor: { type: 'string', nullable: true },
+                                                nextCursor: { type: 'string', nullable: true },
+                                                count: { type: 'integer' },
+                                                total: { type: 'integer' },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
@@ -429,6 +570,7 @@ const spec: Record<string, any> = {
                             },
                         },
                     },
+                    '400': { description: 'Validation or cursor error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                     '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
                 },
             },
@@ -1423,6 +1565,167 @@ const spec: Record<string, any> = {
                 },
             },
         },
+        '/api/v1/backtest': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Run historical portfolio rebalance simulation',
+                description: 'Simulates portfolio performance against buy-and-hold across a historical daily price window with leap day boundary handling, documenting included days and absent-day reasons.',
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: { $ref: '#/components/schemas/BacktestRequest' },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Backtest simulation results with boundary and leap day documentation',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestResult' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Concurrency conflict — backtest already in progress for this portfolio', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '422': { description: 'Unprocessable entity / schema validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Historical price data unavailable from provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal simulation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+            get: {
+                tags: ['Portfolio'],
+                summary: 'List historical backtest simulation records',
+                description: 'Retrieves historical backtest records with state consistency information, filtering by portfolio or status.',
+                parameters: [
+                    { name: 'portfolioId', in: 'query', schema: { type: 'string' }, description: 'Filter records by portfolio ID' },
+                    { name: 'status', in: 'query', schema: { type: 'string', enum: ['completed', 'failed', 'running'] }, description: 'Filter by backtest status' },
+                    { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 }, description: 'Maximum records to return' },
+                    { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 }, description: 'Pagination offset' },
+                ],
+                responses: {
+                    '200': {
+                        description: 'List of persisted backtest records',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                records: { type: 'array', items: { $ref: '#/components/schemas/BacktestRecord' } },
+                                                count: { type: 'integer' },
+                                                limit: { type: 'integer' },
+                                                offset: { type: 'integer' },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/api/v1/backtest/{id}': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get backtest price window record by ID',
+                description: 'Retrieves the persisted backtest record to verify state consistency with simulation results or failure states.',
+                parameters: [
+                    { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Backtest record ID' },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Persisted backtest record',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestRecord' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '404': { description: 'Backtest record not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/backtest': {
+            post: {
+                tags: ['Portfolio'],
+                summary: 'Run historical portfolio rebalance simulation (legacy path)',
+                description: 'Legacy path for historical portfolio rebalancing simulation.',
+                deprecated: true,
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: { $ref: '#/components/schemas/BacktestRequest' },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'Backtest simulation results',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestResult' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '409': { description: 'Concurrency conflict', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '503': { description: 'Historical price data unavailable from provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                    '500': { description: 'Internal error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
+        '/api/backtest/{id}': {
+            get: {
+                tags: ['Portfolio'],
+                summary: 'Get backtest price window record by ID (legacy path)',
+                deprecated: true,
+                parameters: [
+                    { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                ],
+                responses: {
+                    '200': {
+                        description: 'Persisted backtest record',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', example: true },
+                                        data: { $ref: '#/components/schemas/BacktestRecord' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    '404': { description: 'Backtest record not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+                },
+            },
+        },
     },
     components: {
         securitySchemes: {
@@ -1567,6 +1870,240 @@ const spec: Record<string, any> = {
                     events: { $ref: '#/components/schemas/NotificationEventsInput' },
                     digestMode: { type: 'string', enum: ['immediate','daily','weekly'], description: 'Delivery mode for notifications: immediate (per-event), daily digest, or weekly digest.' },
                     priceAlertThresholds: { type: 'object', additionalProperties: { type: 'number', minimum: 1 }, description: 'Per-asset price alert threshold overrides keyed by asset code (e.g. XLM).', example: { XLM: 7, BTC: 3 } },
+                },
+            },
+            BacktestRequest: {
+                type: 'object',
+                properties: {
+                    portfolioId: {
+                        type: 'string',
+                        description: 'Optional portfolio ID to evaluate using its saved allocations and threshold.',
+                        example: 'port-12345',
+                    },
+                    allocations: {
+                        type: 'object',
+                        additionalProperties: { type: 'number' },
+                        description: 'Target allocation weights summing to 100%. Required when portfolioId is not provided.',
+                        example: { XLM: 50, USDC: 50 },
+                    },
+                    threshold: {
+                        type: 'number',
+                        minimum: 1,
+                        maximum: 50,
+                        description: 'Rebalance drift trigger threshold in percentage points (1-50). Required when portfolioId is not provided.',
+                        example: 5,
+                    },
+                    days: {
+                        type: 'integer',
+                        minimum: 7,
+                        maximum: 365,
+                        default: 90,
+                        description: 'Historical lookback period in days (7-365).',
+                    },
+                    initialValue: {
+                        type: 'number',
+                        default: 10000,
+                        description: 'Starting portfolio value in USD.',
+                    },
+                    from: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Optional start ISO date-time of the historical window.',
+                    },
+                    to: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Optional end ISO date-time of the historical window.',
+                    },
+                },
+            },
+            BacktestResult: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string', example: 'bt_5dc8ced3-d819-43ac-a3ed-e858ade7db59' },
+                    status: { type: 'string', enum: ['completed', 'failed', 'running'], example: 'completed' },
+                    hasLeapDay: { type: 'boolean', example: true },
+                    leapDayIncluded: { type: 'boolean', example: true },
+                    threshold: { type: 'number', example: 5 },
+                    allocations: { type: 'object', example: { XLM: 50, USDC: 50 } },
+                    startTimestamp: { type: 'integer', example: 1709078400 },
+                    endTimestamp: { type: 'integer', example: 1709251200 },
+                    startDate: { type: 'string', example: '2024-02-28' },
+                    endDate: { type: 'string', example: '2024-03-01' },
+                    days: { type: 'integer', example: 3 },
+                    initialValue: { type: 'number', example: 10000 },
+                    finalValue: { type: 'number', example: 10520.45 },
+                    totalReturnPct: { type: 'number', example: 5.2 },
+                    buyAndHoldFinalValue: { type: 'number', example: 10210.10 },
+                    buyAndHoldReturnPct: { type: 'number', example: 2.1 },
+                    rebalanceCount: { type: 'integer', example: 1 },
+                    maxDrawdownPct: { type: 'number', example: 3.4 },
+                    maxDriftObservedPct: { type: 'number', example: 8.5 },
+                    events: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                timestamp: { type: 'integer' },
+                                date: { type: 'string' },
+                                maxDriftPct: { type: 'number' },
+                                asset: { type: 'string' },
+                                portfolioValue: { type: 'number' },
+                            },
+                        },
+                    },
+                    timeline: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                timestamp: { type: 'integer' },
+                                date: { type: 'string' },
+                                value: { type: 'number' },
+                                buyAndHoldValue: { type: 'number' },
+                                maxDriftPct: { type: 'number' },
+                                rebalanced: { type: 'boolean' },
+                            },
+                        },
+                    },
+                    includedDays: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'List of UTC dates (YYYY-MM-DD) with complete asset quotes included in the backtest simulation.',
+                        example: ['2024-02-28', '2024-02-29', '2024-03-01'],
+                    },
+                    absentDayReasons: {
+                        type: 'object',
+                        additionalProperties: { type: 'string' },
+                        description: 'Map of absent UTC calendar dates to explicit reason for omission (e.g. leap day quotes unavailable, incomplete asset coverage).',
+                        example: { '2024-02-29': 'Leap day price feed unavailable for asset(s): BTC' },
+                    },
+                    absentDays: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                date: { type: 'string' },
+                                timestamp: { type: 'integer' },
+                                isLeapDay: { type: 'boolean' },
+                                missingAssets: { type: 'array', items: { type: 'string' } },
+                                reason: { type: 'string' },
+                            },
+                        },
+                    },
+                    decision: {
+                        type: 'object',
+                        properties: {
+                            status: { type: 'string', example: 'completed' },
+                            totalWindowDays: { type: 'integer', example: 3 },
+                            includedDaysCount: { type: 'integer', example: 3 },
+                            absentDaysCount: { type: 'integer', example: 0 },
+                            hasLeapDay: { type: 'boolean', example: true },
+                            leapDayIncluded: { type: 'boolean', example: true },
+                            includedDays: { type: 'array', items: { type: 'string' } },
+                            absentDayReasons: { type: 'object', additionalProperties: { type: 'string' } },
+                            evaluationSummary: { type: 'string', example: 'Evaluated 3 of 3 window days; leap day (Feb 29) successfully included.' },
+                        },
+                    },
+                    simulated: { type: 'boolean', example: true },
+                    dataSource: { type: 'string', example: 'coingecko_market_chart' },
+                    disclaimer: { type: 'string' },
+                },
+            },
+            UpdateAllocationsRequest: {
+                type: 'object',
+                required: ['allocations'],
+                properties: {
+                    allocations: {
+                        type: 'object',
+                        additionalProperties: { type: 'number' },
+                        description: 'Target asset weights summing to exactly 100%, between 1 and 10 assets.',
+                        example: { XLM: 60, USDC: 40 },
+                    },
+                    version: {
+                        type: 'integer',
+                        description: 'Optional expected version for compare-and-set concurrency guard.',
+                        example: 1,
+                    },
+                },
+            },
+            AllocationEditDecision: {
+                type: 'object',
+                required: ['result', 'applied', 'committedVersion', 'executionState', 'reason'],
+                properties: {
+                    result: {
+                        type: 'string',
+                        enum: ['committed', 'conflict_rebalancing', 'conflict_version', 'not_found', 'validation_error'],
+                        description: 'Stable result code documenting the persistence boundary outcome.',
+                        example: 'committed',
+                    },
+                    applied: {
+                        type: 'boolean',
+                        description: 'Whether the allocation edit was committed to storage.',
+                        example: true,
+                    },
+                    committedVersion: {
+                        type: 'integer',
+                        description: 'The committed version number of the portfolio record.',
+                        example: 2,
+                    },
+                    executionState: {
+                        type: 'string',
+                        enum: ['idle', 'rebalancing', 'completed', 'failed'],
+                        description: 'Current execution state of the rebalancing workflow.',
+                        example: 'idle',
+                    },
+                    reason: {
+                        type: 'string',
+                        description: 'Human-readable explanation of the boundary decision.',
+                        example: 'Allocation edit successfully committed',
+                    },
+                    portfolio: {
+                        $ref: '#/components/schemas/Portfolio',
+                    },
+                },
+            },
+            BacktestRecord: {
+                type: 'object',
+                description: 'Persisted backtest price window execution record guaranteeing state consistency.',
+                properties: {
+                    id: { type: 'string', example: 'bt_5dc8ced3-d819-43ac-a3ed-e858ade7db59' },
+                    portfolioId: { type: 'string', example: 'port-12345' },
+                    allocations: { type: 'object', example: { XLM: 50, USDC: 50 } },
+                    threshold: { type: 'number', example: 5 },
+                    initialValue: { type: 'number', example: 10000 },
+                    days: { type: 'integer', example: 30 },
+                    from: { type: 'string', format: 'date-time' },
+                    to: { type: 'string', format: 'date-time' },
+                    startDate: { type: 'string', example: '2024-02-28' },
+                    endDate: { type: 'string', example: '2024-03-01' },
+                    startTimestamp: { type: 'integer', example: 1709078400 },
+                    endTimestamp: { type: 'integer', example: 1709251200 },
+                    status: { type: 'string', enum: ['completed', 'failed', 'running'], example: 'completed' },
+                    hasLeapDay: { type: 'boolean', example: true },
+                    leapDayIncluded: { type: 'boolean', example: true },
+                    includedDays: { type: 'array', items: { type: 'string' } },
+                    absentDayReasons: { type: 'object', additionalProperties: { type: 'string' } },
+                    absentDays: { type: 'array', items: { type: 'object' } },
+                    decision: { type: 'object' },
+                    events: { type: 'array', items: { type: 'object' } },
+                    result: {
+                        type: 'object',
+                        properties: {
+                            days: { type: 'integer' },
+                            initialValue: { type: 'number' },
+                            finalValue: { type: 'number' },
+                            totalReturnPct: { type: 'number' },
+                            buyAndHoldFinalValue: { type: 'number' },
+                            buyAndHoldReturnPct: { type: 'number' },
+                            rebalanceCount: { type: 'integer' },
+                            maxDrawdownPct: { type: 'number' },
+                            maxDriftObservedPct: { type: 'number' },
+                        },
+                    },
+                    error: { type: 'string', nullable: true },
+                    createdAt: { type: 'string', format: 'date-time' },
+                    updatedAt: { type: 'string', format: 'date-time' },
                 },
             },
         },

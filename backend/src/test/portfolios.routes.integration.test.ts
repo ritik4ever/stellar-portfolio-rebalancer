@@ -285,6 +285,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             const res = await request(app)
                 .get(`/api/user/${OWNER_ADDRESS}/portfolios`)
+                .set(authHeader(OWNER_ADDRESS))
                 .expect(200)
 
             expect(res.body.success).toBe(true)
@@ -303,6 +304,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         it('returns empty array for user with no portfolios', async () => {
             const res = await request(app)
                 .get(`/api/user/${OTHER_ADDRESS}/portfolios`)
+                .set(authHeader(OTHER_ADDRESS))
                 .expect(200)
 
             expect(res.body.success).toBe(true)
@@ -365,6 +367,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             const listRes = await request(app)
                 .get(`/api/user/${OWNER_ADDRESS}/portfolios`)
+                .set(authHeader(OWNER_ADDRESS))
                 .expect(200)
 
             const ids = listRes.body.data.portfolios.map((p: any) => p.id)
@@ -376,6 +379,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             const listRes = await request(app)
                 .get(`/api/user/${OWNER_ADDRESS}/portfolios?include_archived=true`)
+                .set(authHeader(OWNER_ADDRESS))
                 .expect(200)
 
             const ids = listRes.body.data.portfolios.map((p: any) => p.id)
@@ -427,6 +431,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             const listRes = await request(app)
                 .get(`/api/user/${OWNER_ADDRESS}/portfolios`)
+                .set(authHeader(OWNER_ADDRESS))
                 .expect(200)
 
             const ids = listRes.body.data.portfolios.map((p: any) => p.id)
@@ -571,6 +576,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         it('GET /api/user/:address/portfolios returns correct envelope', async () => {
             const res = await request(app)
                 .get(`/api/user/${OWNER_ADDRESS}/portfolios`)
+                .set(authHeader(OWNER_ADDRESS))
                 .expect(200)
 
             expect(res.body).toHaveProperty('success')
@@ -656,8 +662,8 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         })
 
         it('does not mutate portfolio state on repeated calls', async () => {
-            const { portfolioStorage } = require('../services/portfolioStorage.js') as any
-            const before = portfolioStorage.getPortfolio(portfolioId)
+            const { portfolioStorage } = await import('../services/portfolioStorage.js')
+            const before = await portfolioStorage.getPortfolio(portfolioId)
 
             await request(app)
                 .post(`/api/portfolio/${portfolioId}/rebalance/dry-run`)
@@ -825,8 +831,6 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
     describe('POST /api/v1/portfolio/:id/clone & GET /api/v1/portfolios', () => {
         let originalPortfolioId: string
-    describe('GET /api/portfolio/:id/history - paginated rebalance history', () => {
-        let portfolioId: string
 
         beforeEach(async () => {
             const res = await request(app)
@@ -844,6 +848,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
         it('clones portfolio with identical allocations, threshold, and new ID', async () => {
             const cloneRes = await request(app)
                 .post(`/api/portfolio/${originalPortfolioId}/clone`)
+                .set(authHeader(OWNER_ADDRESS))
                 .send({ name: 'My Cloned Portfolio' })
                 .expect(201)
 
@@ -868,7 +873,7 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
 
             // Verify clone appears in GET /portfolios list
             const listRes = await request(app)
-                .get('/api/portfolios')
+                .get('/api/portfolios?limit=100')
                 .expect(200)
 
             expect(listRes.body.success).toBe(true)
@@ -890,7 +895,15 @@ describe('Portfolio CRUD API Integration Tests with JWT Authentication', () => {
             expect(res.body.error?.code).toBe('NOT_FOUND')
         })
     })
-})
+
+    describe('GET /api/portfolio/:id/history - paginated rebalance history', () => {
+        let portfolioId: string
+
+        beforeEach(async () => {
+            const res = await request(app)
+                .post('/api/portfolio')
+                .send({
+                    userAddress: OWNER_ADDRESS,
                     allocations: { XLM: 60, USDC: 40 },
                     threshold: 5
                 })

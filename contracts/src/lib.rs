@@ -62,6 +62,11 @@ impl PortfolioRebalancer {
             return Err(Error::AlreadyInitialized);
         }
 
+        // The address that becomes the contract admin must authorize the
+        // initialization. Otherwise any caller could choose the admin and the
+        // oracle source that protect all subsequent privileged operations.
+        admin.require_auth();
+
         
         let reflector_client = ReflectorClient::new(&env, &reflector_address);
         match reflector_client.try_base() {
@@ -153,10 +158,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Create a portfolio with full strategy configuration.
-    /// `strategy` defaults to [`StrategyType::Threshold`] for callers that
-    /// do not pass explicit strategy parameters (backward compatible with
-    /// the original [`create_portfolio`] signature).
+    
     pub fn create_portfolio_with_strategy(
         env: Env,
         user: Address,
@@ -182,11 +184,7 @@ impl PortfolioRebalancer {
         )
     }
 
-    /// Admin-only: store a new named on-chain allocation template.
-    ///
-    /// Templates are on-chain data (persistent storage), not hardcoded
-    /// constants, so the set of available templates can grow over time
-    /// without a contract upgrade.
+   
     pub fn create_template(
         env: Env,
         name: String,
@@ -327,7 +325,7 @@ impl PortfolioRebalancer {
         env.storage()
             .persistent()
             .set(&DataKey::UserPortfolioCount(user.clone()), &(user_count + 1));
-        portfolio::emit_portfolio_created(&env, portfolio_id, user);
+        portfolio::emit_portfolio_created(&env, portfolio_id, user, rebalance_threshold);
         Ok(portfolio_id)
     }
 
@@ -706,6 +704,14 @@ impl PortfolioRebalancer {
 
     pub fn set_circuit_breaker_config(env: Env, config: CircuitBreakerConfig) {
         require_admin(&env);
+        
+        if config.spike_threshold_bps == 0 || config.spike_threshold_bps > 10000 {
+            panic!("spike_threshold_bps must be between 1 and 10000");
+        }
+        if config.window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS || config.window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS {
+            panic!("window_seconds must be between {} and {}", MIN_CIRCUIT_BREAKER_WINDOW_SECONDS, MAX_CIRCUIT_BREAKER_WINDOW_SECONDS);
+        }
+        
         env.storage()
             .instance()
             .set(&DataKey::CircuitBreakerConfig, &config);
@@ -716,11 +722,20 @@ impl PortfolioRebalancer {
             .instance()
             .get(&DataKey::CircuitBreakerConfig)
             .unwrap_or(CircuitBreakerConfig {
-                spike_threshold_bps: 500,
-                window_seconds: 3600,
+                spike_threshold_bps: DEFAULT_CIRCUIT_BREAKER_SPIKE_THRESHOLD_BPS,
+                window_seconds: DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS,
             })
     }
 
+    /// Updates target allocations for an existing portfolio and emits `("portfolio", "alloc_upd")`.
+    ///
+    /// # Target-weight invariant & event alignment (SPR-2026-194):
+    /// - Validates that asset weights satisfy `MIN_TARGET_WEIGHT_BPS..=MAX_TARGET_WEIGHT_BPS` (`1..=10,000` bps)
+    ///   and sum strictly to `TARGET_WEIGHT_SUM_BPS` (`10,000` bps / 100.00%).
+    /// - Rejection (under-allocation, over-allocation, zero weight, or unauthorized caller) fails atomically
+    ///   before storage mutation, emitting NO `alloc_upd` event and preserving stored weights and funds.
+    /// - On success, writes the updated portfolio to storage and emits `("portfolio", "alloc_upd")` once
+    ///   with `(portfolio_id, old_allocations, new_allocations)`.
     pub fn update_allocations(
         env: Env,
         portfolio_id: u64,
@@ -748,13 +763,7 @@ impl PortfolioRebalancer {
             .persistent()
             .set(&DataKey::PortfolioV2(portfolio_id), &portfolio);
 
-        env.events().publish(
-            (
-                symbol_short!("portfolio"),
-                Symbol::new(&env, "alloc_upd"),
-            ),
-            (portfolio_id, old_allocations, new_allocations),
-        );
+        portfolio::emit_allocation_updated(&env, portfolio_id, old_allocations, new_allocations);
 
         Ok(())
     }
@@ -1122,6 +1131,10 @@ impl PortfolioRebalancer {
         portfolio.user.require_auth();
 
         if spike_threshold_bps == 0 || spike_threshold_bps > 10000 {
+            return Err(Error::InvalidAssetThreshold);
+        }
+        
+        if window_seconds < MIN_CIRCUIT_BREAKER_WINDOW_SECONDS || window_seconds > MAX_CIRCUIT_BREAKER_WINDOW_SECONDS {
             return Err(Error::InvalidAssetThreshold);
         }
         
