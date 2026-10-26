@@ -45,6 +45,10 @@ jobs:
       - name: Ensure testnet secret exists
         run: |
           if [ -z "${STELLAR_SECRET_KEY}" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::notice::Skipping testnet deployment on fork PR because repository secrets are unavailable."
+              exit 0
+            fi
             echo "::error::Missing STELLAR_TESTNET_SECRET_KEY repository secret"
             exit 1
           fi
@@ -122,6 +126,7 @@ jobs:
           path: contracts/bench_summary.md
 
       - name: Deploy and run smoke tests on testnet
+        if: env.STELLAR_SECRET_KEY != ''
         working-directory: ./
         run: |
           chmod +x scripts/testnet-smoke.sh
