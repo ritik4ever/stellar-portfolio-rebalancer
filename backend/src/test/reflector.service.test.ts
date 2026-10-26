@@ -39,6 +39,7 @@ describe('ReflectorService staleness and fallback', () => {
 
         vi.spyOn(assetRegistryService, 'getSymbols').mockReturnValue(['XLM'])
         vi.spyOn(assetRegistryService, 'getCoingeckoIdMap').mockReturnValue({ XLM: 'stellar' })
+        vi.stubEnv('ORACLE_CACHE_TTL_SECONDS', '0')
     })
 
     afterEach(() => {

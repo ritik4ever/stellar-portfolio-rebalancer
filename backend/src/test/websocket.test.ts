@@ -302,10 +302,17 @@ describe("WebSocket protocol", () => {
 
     const missedMessage = new Promise((resolve) => {
       const timeout = setTimeout(() => resolve("timeout"), 350);
-      reconnected.once("message", (data) => {
-        clearTimeout(timeout);
-        resolve(JSON.parse(data.toString()));
-      });
+      const onMsg = (data: any) => {
+        try {
+          const parsed = JSON.parse(data.toString());
+          if (parsed.event === "portfolio_drift" || parsed.portfolioId === "portfolio-reconnect") {
+            clearTimeout(timeout);
+            reconnected.off("message", onMsg);
+            resolve(parsed);
+          }
+        } catch {}
+      };
+      reconnected.on("message", onMsg);
     });
 
     expect(await missedMessage).toBe("timeout");

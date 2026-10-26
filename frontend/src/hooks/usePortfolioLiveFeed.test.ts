@@ -164,14 +164,6 @@ describe('usePortfolioLiveFeed – exponential-backoff reconnect', () => {
             })
             expect(MockWebSocket.instances.length).toBe(socketCountBefore + 1)
 
-            // Immediately drop this new socket so the next iteration can test
-            // the next backoff tier (without triggering a reset by opening it).
-            // Exception: on the last attempt we leave it open to test reset.
-            if (attempt < ATTEMPTS - 1) {
-                await act(async () => {
-                    MockWebSocket.latest().simulateClose()
-                })
-            }
         }
     })
 

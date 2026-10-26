@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { walletManager } from '../utils/walletManager'
 import {
   StellarNetwork,
@@ -16,6 +16,7 @@ export function useNetworkDetection(): NetworkDetectionResult & {
   const [walletNetwork, setWalletNetwork] = useState<StellarNetwork | null>(null)
   const [pendingWalletNetwork, setPendingWalletNetwork] = useState<StellarNetwork | null>(null)
   const [ignoredWalletNetwork, setIgnoredWalletNetwork] = useState<StellarNetwork | null>(null)
+  const ignoredWalletNetworkRef = useRef<StellarNetwork | null>(null)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,7 +32,7 @@ export function useNetworkDetection(): NetworkDetectionResult & {
         if (prev === null) {
           return detected
         }
-        if (detected !== prev && detected !== ignoredWalletNetwork) {
+        if (detected !== prev && detected !== ignoredWalletNetworkRef.current) {
           setPendingWalletNetwork(detected)
           return prev
         }
@@ -54,6 +55,7 @@ export function useNetworkDetection(): NetworkDetectionResult & {
   const confirmNetworkSwitch = useCallback(() => {
     if (pendingWalletNetwork) {
       setWalletNetwork(pendingWalletNetwork)
+      ignoredWalletNetworkRef.current = null
       setIgnoredWalletNetwork(null)
       setPendingWalletNetwork(null)
     }
@@ -61,6 +63,7 @@ export function useNetworkDetection(): NetworkDetectionResult & {
 
   const cancelNetworkSwitch = useCallback(() => {
     if (pendingWalletNetwork) {
+      ignoredWalletNetworkRef.current = pendingWalletNetwork
       setIgnoredWalletNetwork(pendingWalletNetwork)
       setPendingWalletNetwork(null)
     }

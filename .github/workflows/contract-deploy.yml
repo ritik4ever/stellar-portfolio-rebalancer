@@ -22,7 +22,7 @@ on:
     - cron: '0 2 * * *'
 
 concurrency:
-  group: contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging' || 'testnet') }}-${{ github.ref }}
+  group: contract-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

@@ -38,7 +38,6 @@ jobs:
       - name: Setup Rust (wasm32 target)
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.81.0"
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo registry + build artefacts
@@ -51,9 +50,6 @@ jobs:
           key: wasm-size-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
           restore-keys: |
             wasm-size-${{ runner.os }}-
-
-      - name: Ensure wasm32 target is installed
-        run: rustup target add wasm32-unknown-unknown
 
       - name: Build contract (release WASM)
         working-directory: contracts
