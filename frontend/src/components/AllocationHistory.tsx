@@ -80,7 +80,7 @@ export function computeAllocationDiff(
     })
   }
 
-  return diffs.sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+  return diffs.sort((a, b) => Math.abs(b.change) - Math.abs(a.change) || a.asset.localeCompare(b.asset))
 }
 
 function formatChartDate(timestamp: string): string {

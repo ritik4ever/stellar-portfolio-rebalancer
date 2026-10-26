@@ -38,6 +38,7 @@ jobs:
       - name: Setup Rust (wasm32 target)
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.81.0"
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo registry + build artefacts

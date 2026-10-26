@@ -26,6 +26,7 @@ vi.mock('../hooks/queries/usePortfolioQuery', () => ({
     usePortfolioDetails: queryMocks.usePortfolioDetails,
     useRebalanceEstimate: queryMocks.useRebalanceEstimate,
     useRebalancePlan: queryMocks.useRebalancePlan,
+    usePortfolioCostSummary: vi.fn(() => ({ data: undefined, isLoading: false })),
     buildRebalanceConfirmationSummary: vi.fn(() => ({
         slippage: ['Slippage note'],
         prices: ['Price note'],
