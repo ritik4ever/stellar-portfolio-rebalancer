@@ -1,5 +1,8 @@
 
 export function downloadBlob(filename: string, blob: Blob) {
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+        return
+    }
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

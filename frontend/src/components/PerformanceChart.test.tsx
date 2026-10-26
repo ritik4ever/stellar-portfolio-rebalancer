@@ -16,6 +16,11 @@ const exportMocks = vi.hoisted(() => ({
   toCSV: vi.fn((rows, headers) => 'mocked-csv-content'),
 }));
 
+vi.mock("../utils/export", () => ({
+  downloadCSV: exportMocks.downloadCSV,
+  toCSV: exportMocks.toCSV,
+}));
+
 vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePortfolioAnalytics: queryMocks.usePortfolioAnalytics,
   usePerformanceSummary: queryMocks.usePerformanceSummary,

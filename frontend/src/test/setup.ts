@@ -23,3 +23,8 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   } as any
 }
+
+if (typeof window !== 'undefined' && (!window.URL || !window.URL.createObjectURL)) {
+  window.URL.createObjectURL = () => 'blob:mock-url'
+  window.URL.revokeObjectURL = () => {}
+}

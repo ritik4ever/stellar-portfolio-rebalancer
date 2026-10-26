@@ -819,8 +819,10 @@ if (routeDataUnavailable) {
                                             )}
                                         </div>
                                         <div className="flex items-center mt-1">
-                                            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-                                            <span className="text-green-500 font-medium">+{portfolioData?.dayChange || 0}%</span>
+                                            <TrendingUp className={`w-4 h-4 mr-1 ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} />
+                                            <span className={`font-medium ${(portfolioData?.dayChange || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {(portfolioData?.dayChange || 0) >= 0 ? `+${portfolioData?.dayChange || 0}%` : `${portfolioData?.dayChange || 0}%`}
+                                            </span>
                                             <span className="text-gray-500 dark:text-gray-400 ml-2">Today</span>
                                         </div>
                                     </div>
