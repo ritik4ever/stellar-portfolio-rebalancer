@@ -222,6 +222,7 @@ describe('ReflectorService cache metrics and tuning', () => {
             XLM: 'stellar',
             BTC: 'bitcoin'
         })
+        vi.stubEnv('ORACLE_CACHE_TTL_SECONDS', '0')
     })
 
     afterEach(() => {

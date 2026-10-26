@@ -15,7 +15,6 @@ export function useNetworkDetection(): NetworkDetectionResult & {
   const [configuredNetwork] = useState<StellarNetwork>(getConfiguredNetwork)
   const [walletNetwork, setWalletNetwork] = useState<StellarNetwork | null>(null)
   const [pendingWalletNetwork, setPendingWalletNetwork] = useState<StellarNetwork | null>(null)
-  const [ignoredWalletNetwork, setIgnoredWalletNetwork] = useState<StellarNetwork | null>(null)
   const ignoredWalletNetworkRef = useRef<StellarNetwork | null>(null)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +55,6 @@ export function useNetworkDetection(): NetworkDetectionResult & {
     if (pendingWalletNetwork) {
       setWalletNetwork(pendingWalletNetwork)
       ignoredWalletNetworkRef.current = null
-      setIgnoredWalletNetwork(null)
       setPendingWalletNetwork(null)
     }
   }, [pendingWalletNetwork])
@@ -64,7 +62,6 @@ export function useNetworkDetection(): NetworkDetectionResult & {
   const cancelNetworkSwitch = useCallback(() => {
     if (pendingWalletNetwork) {
       ignoredWalletNetworkRef.current = pendingWalletNetwork
-      setIgnoredWalletNetwork(pendingWalletNetwork)
       setPendingWalletNetwork(null)
     }
   }, [pendingWalletNetwork])

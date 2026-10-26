@@ -30,6 +30,9 @@ beforeAll(async () => {
     process.env.RATE_LIMIT_BURST_MAX = '200'
     process.env.RATE_LIMIT_AUTH_MAX = '100'
 
+    const { redisProbe } = await import('../queue/connection.js')
+    vi.spyOn(redisProbe, 'isAvailable').mockResolvedValue(false)
+
     const express = (await import('express')).default
     const cors = (await import('cors')).default
     const { portfolioRouter } = await import('../api/routes.js')
