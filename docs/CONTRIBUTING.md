@@ -98,6 +98,7 @@ npm run db:migrate              # apply all pending migrations
 npm run db:migrate:status       # show applied/pending migrations
 npm run db:migrate:rollback     # roll back the last migration batch
 npm run db:migrate:dry-run      # preview SQL without executing
+npm run db:migrate:verify       # smoke-check migrations on throwaway databases (see docs/MIGRATION.md)
 ```
 
 The `db:migrate:rollback` command reverts the last applied migration batch. Pass a number to roll back multiple batches (e.g. `-- --rollback 2`). Run `db:migrate:dry-run` to inspect the SQL that would be executed without making changes.
