@@ -50,11 +50,15 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
 vi.mock('../context/ThemeContext', () => ({
     useTheme: vi.fn(() => ({ isDark: false })),
 }))
-vi.mock('@tanstack/react-query', () => ({
-    useQueryClient: vi.fn(() => ({
-        invalidateQueries: vi.fn(async () => undefined),
-    })),
-}))
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+    return {
+        ...actual,
+        useQueryClient: vi.fn(() => ({
+            invalidateQueries: vi.fn(async () => undefined),
+        })),
+    }
+})
 
 vi.mock('./ThemeToggle', () => ({ default: () => <div>Theme Toggle</div> }))
 vi.mock('recharts', () => ({

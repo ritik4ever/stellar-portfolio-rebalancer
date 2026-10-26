@@ -22,7 +22,7 @@ on:
     - cron: '0 2 * * *'
 
 concurrency:
-  group: contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}-${{ github.ref }}
+  group: contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging' || 'testnet') }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -88,21 +88,48 @@ jobs:
             ")
           done
 
+  resolve-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      stellar_network: ${{ steps.resolve.outputs.stellar_network }}
+      soroban_rpc_url: ${{ steps.resolve.outputs.soroban_rpc_url }}
+      soroban_network_passphrase: ${{ steps.resolve.outputs.soroban_network_passphrase }}
+    steps:
+      - id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV_NAME="${{ inputs.environment }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            ENV_NAME="staging"
+          else
+            ENV_NAME="testnet"
+          fi
+          echo "environment=${ENV_NAME}" >> "$GITHUB_OUTPUT"
+          if [ "${ENV_NAME}" = "mainnet" ]; then
+            echo "stellar_network=mainnet" >> "$GITHUB_OUTPUT"
+            echo "soroban_rpc_url=https://soroban-mainnet.stellar.org" >> "$GITHUB_OUTPUT"
+            echo "soroban_network_passphrase=Public Global Stellar Network ; September 2015" >> "$GITHUB_OUTPUT"
+          else
+            echo "stellar_network=testnet" >> "$GITHUB_OUTPUT"
+            echo "soroban_rpc_url=https://soroban-testnet.stellar.org" >> "$GITHUB_OUTPUT"
+            echo "soroban_network_passphrase=Test SDF Network ; September 2015" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy-contract:
-    needs: dependency-scan
+    needs: [dependency-scan, resolve-environment]
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}
+    environment: ${{ needs.resolve-environment.outputs.environment }}
     env:
-      DEPLOYMENT_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}
-      STELLAR_NETWORK: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'mainnet' || 'testnet' }}
-      SOROBAN_RPC_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'https://soroban-mainnet.stellar.org' || 'https://soroban-testnet.stellar.org' }}
-      SOROBAN_NETWORK_PASSPHRASE: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'mainnet' && 'Public Global Stellar Network ; September 2015' || 'Test SDF Network ; September 2015' }}
-      CONTRACT_ENV_FILE: ${{ runner.temp }}/contract-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'pull_request' && 'staging') || 'testnet' }}.env
-
+      DEPLOYMENT_ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+      STELLAR_NETWORK: ${{ needs.resolve-environment.outputs.stellar_network }}
+      SOROBAN_RPC_URL: ${{ needs.resolve-environment.outputs.soroban_rpc_url }}
+      SOROBAN_NETWORK_PASSPHRASE: ${{ needs.resolve-environment.outputs.soroban_network_passphrase }}
+      CONTRACT_ENV_FILE: ${{ runner.temp }}/contract-deploy-${{ needs.resolve-environment.outputs.environment }}.env
     steps:
       - uses: actions/checkout@v4
 

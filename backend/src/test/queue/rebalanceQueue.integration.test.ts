@@ -61,16 +61,21 @@ describe('Rebalance Job Queue – Integration Tests', () => {
   let worker: any;
 
   beforeAll(async () => {
-    // Start in-memory Redis server with generous timeout for CI binary download
+    if (process.env.REDIS_URL) {
+      return;
+    }
+    // Start in-memory Redis server with fallback to default port if binary download hangs
     try {
-      redisServer = await RedisMemoryServer.create();
+      const serverPromise = RedisMemoryServer.create();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('RedisMemoryServer startup timeout')), 8000)
+      );
+      redisServer = (await Promise.race([serverPromise, timeoutPromise])) as RedisMemoryServer;
       const host = await redisServer.getHost();
       const port = await redisServer.getPort();
       process.env.REDIS_URL = `redis://${host}:${port}`;
     } catch (err) {
-      if (!process.env.REDIS_URL) {
-        process.env.REDIS_URL = 'redis://127.0.0.1:6379';
-      }
+      process.env.REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
     }
   }, 120000);
 
