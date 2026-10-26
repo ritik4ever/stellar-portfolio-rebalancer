@@ -64,6 +64,8 @@ Every paginated portfolio response returns:
 | `nextCursor` | `string \| null` | Opaque cursor to pass into the next page request, or `null` on the final page. |
 | `count` | `number` | Number of items returned in the current page (`portfolios.length`). |
 | `total` | `number` | Total number of items matching the query filters (unaffected by page size or cursor). |
+| `itemsChanged` | `boolean` | Whether the matching item count changed since the cursor was issued. Clients should restart traversal when true if they require a consistent list. |
+| `changeKind` | `string` | Count-change diagnosis: `items_inserted`, `items_deleted`, or `none`. |
 
 ### Boundary Cases
 
