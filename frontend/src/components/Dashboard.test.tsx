@@ -95,6 +95,13 @@ vi.mock('../utils/stellar', () => ({
 
 vi.mock('../services/authService', () => ({
     logout: vi.fn(async () => undefined),
+    getAccessToken: vi.fn(() => 'mock-token'),
+    getRefreshToken: vi.fn(() => 'mock-refresh-token'),
+    isAuthenticated: vi.fn(() => true),
+    setTokens: vi.fn(),
+    clearTokens: vi.fn(),
+    onAuthSessionExpired: vi.fn(() => () => {}),
+    onAuthSessionRestored: vi.fn(() => () => {}),
 }))
 
 vi.mock('../hooks/usePortfolio', async () => {

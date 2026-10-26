@@ -75,6 +75,8 @@ describe('NotificationPreferences', () => {
                 userId: 'user-1',
                 emailEnabled: true,
                 emailAddress: 'user@example.com',
+                telegramEnabled: false,
+                telegramChatId: '',
                 webhookEnabled: false,
                 webhookUrl: '',
                 events: {

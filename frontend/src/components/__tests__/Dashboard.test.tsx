@@ -22,6 +22,11 @@ vi.mock('../../hooks/mutations/usePortfolioMutations', () => ({
   useExecuteRebalanceMutation: () => ({ mutateAsync: async () => ({}) })
 }))
 
+vi.mock('../../context/RealtimeConnectionContext', () => ({
+  useRealtimeConnection: () => ({ status: 'connected', isConnected: true }),
+  RealtimeConnectionProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
 import Dashboard from '../Dashboard'
 
 describe('Dashboard empty state', () => {

@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion"; // AnimatePresence adde
 import {
   buildRollbackMessage,
   useCreatePortfolioMutation,
+  useImportPortfolioMutation,
 } from "../hooks/mutations/usePortfolioMutations";
 import {
   Plus,
@@ -18,7 +19,11 @@ import {
   RefreshCw,
   RotateCcw,
   X,
+  Download,
+  Upload,
 } from "lucide-react";
+import PortfolioSuggestions from "./PortfolioSuggestions";
+import { downloadJSON } from "../utils/export";
 
 import ThemeToggle from "./ThemeToggle";
 import AssetSelector from "./AssetSelector"; // NEW: Enhanced asset selector with search
@@ -190,11 +195,32 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
     () => loadPortfolioSetupDraft(publicKey).status !== 'loaded',
   );
   const hasMountedDraftSaver = useRef(false);
+  const isRestoringDraft = useRef(false);
 
+  useEffect(() => {
+    setSavedTemplates(loadSavedTemplates(publicKey || ""));
+  }, [publicKey]);
 
+  useEffect(() => {
+    const draft = loadPortfolioCloneDraft();
+    if (!draft) return;
+
+    setCloneDraft(draft);
+    setAllocations(draft.allocations.map((row) => ({ ...row })));
+    setThreshold(draft.threshold);
+    setSlippageTolerance(draft.slippageTolerance);
+    setStrategy(draft.strategy || "threshold");
+    setStrategyConfig(draft.strategyConfig ?? {});
+    setSelectedTemplateId("custom");
+  }, []);
 
   useEffect(() => {
     if (!draftPromptResolved) return
+
+    if (isRestoringDraft.current) {
+      isRestoringDraft.current = false;
+      return;
+    }
 
     if (!hasMountedDraftSaver.current) {
       hasMountedDraftSaver.current = true
@@ -231,6 +257,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
 
   const restoreDraft = () => {
     if (!pendingDraft) return
+    isRestoringDraft.current = true
     setAllocations(
       pendingDraft.allocations.map((allocation) => ({ ...allocation })),
     )
@@ -307,7 +334,84 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
   }
   // Mutation for portfolio creation
   const createPortfolioMutation = useCreatePortfolioMutation()
+  const importPortfolioMutation = useImportPortfolioMutation()
+  const importFileInputRef = useRef<HTMLInputElement | null>(null)
   const { data: selectableAssets = [], isLoading: assetsLoading } = useAssets()
+
+  const applySuggestion = (nextAllocations: Allocation[]) => {
+    setSelectedTemplateId('custom');
+    setAllocations(nextAllocations.map((allocation) => ({ ...allocation })));
+  };
+
+  const hasDuplicateAssets = useMemo(() => {
+    const seen = new Set<string>();
+    return allocations.some((allocation) => {
+      const asset = allocation.asset.trim().toUpperCase();
+      if (!asset) return false;
+      if (seen.has(asset)) return true;
+      seen.add(asset);
+      return false;
+    });
+  }, [allocations]);
+
+  const buildExportPayload = () => ({
+    schemaVersion: 1 as const,
+    exportedAt: new Date().toISOString(),
+    userAddress: publicKey || 'demo-user',
+    allocations: allocations.reduce(
+      (acc, allocation) => {
+        acc[allocation.asset] = allocation.percentage;
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
+    threshold,
+    slippageTolerance,
+    strategy: strategy || 'threshold',
+    strategyConfig: Object.keys(strategyConfig).length > 0 ? strategyConfig : undefined,
+  });
+
+  const exportCurrentSettings = () => {
+    if (!isValidTotal || hasAnyFieldError) {
+      setError('Fix the allocation validation issues before exporting this portfolio');
+      return;
+    }
+
+    const filename = `portfolio-settings_${publicKey ? publicKey.slice(0, 6) : 'demo'}_${new Date().toISOString()}.json`;
+    downloadJSON(filename, buildExportPayload());
+  };
+
+  const openImportDialog = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setError(null);
+
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as any;
+      const payload = parsed?.portfolio ?? parsed?.data ?? parsed;
+      const imported = await importPortfolioMutation.mutateAsync(payload);
+
+      clearPortfolioSetupDraft(publicKey);
+      clearPortfolioCloneDraft();
+      setCloneDraft(null);
+      setPendingDraft(null);
+      setDraftPromptResolved(true);
+      setSuccess(true);
+
+      if (imported?.portfolioId) {
+        setTimeout(() => onNavigate('dashboard'), 2000);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed. Please check the JSON file and try again.');
+    }
+  };
 
  
   const getAllocationError = (percentage: number): string | null => {
@@ -498,7 +602,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
    */
   const createPortfolio = async () => {
     // Block submission if any validation check has not passed
-    if (!isValidTotal || hasAnyFieldError) {
+    if (!isValidTotal || hasAnyFieldError || hasDuplicateAssets) {
       setError('Please fix validation errors before submitting')
       return
     }
@@ -840,6 +944,15 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
           </div>
         )}
 
+        <div className="mb-6">
+          <PortfolioSuggestions
+            allocations={allocations}
+            assets={selectableAssets}
+            publicKey={publicKey}
+            onApply={applySuggestion}
+          />
+        </div>
+
         {/* ── Main two-column layout ── */}
         <div className="grid lg:grid-cols-2 gap-8">
           {/* ════ Left column: configuration inputs ════ */}
@@ -1083,6 +1196,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                     </div>
                   )
                 })}
+                {hasDuplicateAssets && (
+                  <p className="mt-1 text-xs text-red-600" role="alert">
+                    Duplicate assets are not allowed. Select each asset only once.
+                  </p>
+                )}
               </div>
 
               {/* ── Real-time total allocation summary ── */}
@@ -1513,22 +1631,48 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   $10,000 (Demo)
                 </span>
               </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={exportCurrentSettings}
+                    disabled={!isValidTotal || hasAnyFieldError}
+                    className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openImportDialog}
+                    disabled={importPortfolioMutation.isPending}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {importPortfolioMutation.isPending ? 'Importing...' : 'Import JSON'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Export saves the current settings as JSON. Import uploads a portfolio export and creates a new portfolio from it.
+                </p>
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  aria-label="Import portfolio JSON"
+                  onChange={handleImportFileChange}
+                />
+              </div>
             </div>
 
-            {/*
-             * Submit button.
-             * Disabled when any of these conditions are true:
-             *   - hasAnyFieldError: at least one percentage input is out of range
-             *   - !isValidTotal: percentages don't add up to 100%
-             *   - createPortfolioMutation.isPending: API call is already in progress
-             * disabled:cursor-not-allowed gives a visual cue that the button is blocked.
-             */}
             <button
               type="button"
               onClick={createPortfolio}
               disabled={
                 hasAnyFieldError ||
                 !isValidTotal ||
+                hasDuplicateAssets ||
                 createPortfolioMutation.isPending
               }
               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white p-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
@@ -1538,6 +1682,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                   <RefreshCw className="w-5 h-5 animate-spin" />
                   Creating Portfolio...
                 </>
+              ) : cloneDraft ? (
+                <>
+                  <Save className="w-5 h-5" />
+                  Save as new portfolio
+                </>
               ) : (
                 <>
                   <Save className="w-5 h-5" />
@@ -1545,6 +1694,13 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 </>
               )}
             </button>
+
+            {(hasAnyFieldError || !isValidTotal) &&
+              !createPortfolioMutation.isPending && (
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  Fix validation errors above to continue
+                </p>
+              )}
 
           </div>
         </div>
