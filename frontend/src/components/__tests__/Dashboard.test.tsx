@@ -9,6 +9,9 @@ vi.mock('../../hooks/queries/usePortfolioQuery', () => ({
   usePortfolioDetails: () => ({ data: null, isLoading: false, isError: false, error: null }),
   useRebalanceEstimate: () => ({ data: null }),
   usePortfolioCostSummary: () => ({ data: null, isLoading: false }),
+  useRebalancePlan: () => ({ data: null, isLoading: false, isError: false }),
+  buildRebalanceConfirmationSummary: () => ({ slippage: [], prices: [], risks: [] }),
+  buildRebalancePreconditions: () => [],
   portfolioKeys: { all: ['portfolios'] }
 }))
 

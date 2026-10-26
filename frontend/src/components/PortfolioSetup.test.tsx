@@ -580,7 +580,7 @@ describe('PortfolioSetup allocation validation', () => {
                     threshold: 8,
                     slippageTolerance: 2,
                     strategy: 'volatility',
-                    allocations: { BTC: 70, ETH: 30 },
+                    allocations: { BTC: 7000, ETH: 3000 },
                 }),
             )
         })

@@ -51,6 +51,10 @@ vi.mock('../hooks/mutations/usePortfolioMutations', () => ({
     mutateAsync: mockMutateAsync,
     isPending: mockIsPending,
   }),
+  useImportPortfolioMutation: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }))
 
 vi.mock('../hooks/queries/useAssetsQuery', () => ({

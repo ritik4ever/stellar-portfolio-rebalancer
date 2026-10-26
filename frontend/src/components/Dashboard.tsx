@@ -215,7 +215,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         needsRebalance: portfolioData?.needsRebalance,
         hasPartialPriceData,
         feedDegraded: feedMeta?.degraded,
-        hasHighGasWarning,
+        tradeCount: rebalanceEstimate?.tradeCount ?? (rebalanceEstimate?.breakdown?.length ?? 0),
+        hasHighGasWarning: Boolean(hasHighGasWarning),
     })
 
     const rebalanceBlocked = rebalancePreconditions.some(
@@ -254,24 +255,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, publicKey }) => {
         }
     }
 
-    const executeRebalance = useCallback(async () => {
-        try {
-            const result = await executeRebalanceMutation.mutateAsync()
-            trackEvent('rebalance_executed', { portfolioId: latestPortfolioId ?? 'unknown' })
-            setRebalanceNotice({
-                type: 'success',
-                message: `Rebalance executed successfully. Gas used: ${result?.result?.gasUsed || (result as any)?.gasUsed || 'N/A'}`,
-            })
-        } catch (error: any) {
-            console.error('Rebalance failed:', error)
-            const msg = error?.message ?? 'Rebalance failed. Please try again.'
-            const isSlippage = typeof msg === 'string' && (msg.toLowerCase().includes('slippage') || msg.toLowerCase().includes('tolerance'))
-            setRebalanceNotice({
-                type: 'error',
-                message: isSlippage ? `Slippage too high: ${msg}` : msg,
-            })
-        }
-    }, [executeRebalanceMutation, latestPortfolioId])
+
 
     const dismissRebalanceNotice = useCallback(() => {
         setRebalanceNotice(null)
@@ -489,7 +473,8 @@ if (routeDataUnavailable) {
         return (
             <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
                 <div className="max-w-2xl w-full bg-white dark:bg-gray-800 rounded-xl p-8 shadow-sm text-center">
-                    <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">No portfolios yet</h2>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{dashboardCopy.title}</h1>
+                    <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">No portfolios yet</h2>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
                         You don't have any portfolios yet. Create your first automated portfolio to start tracking and rebalancing on Stellar.
                     </p>
