@@ -19,6 +19,11 @@ const exportMocks = vi.hoisted(() => ({
 vi.mock("../hooks/queries/useAnalyticsQuery", () => ({
   usePortfolioAnalytics: queryMocks.usePortfolioAnalytics,
   usePerformanceSummary: queryMocks.usePerformanceSummary,
+  usePortfolioBenchmark: vi.fn(() => ({ data: null, isLoading: false, error: null })),
+}));
+
+vi.mock("../hooks/queries/useHistoryQuery", () => ({
+  useRebalanceHistory: queryMocks.useRebalanceHistory,
 }));
 
 // Mock ThemeContext

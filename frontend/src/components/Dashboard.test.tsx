@@ -116,7 +116,11 @@ vi.mock('../config/api', async () => {
     return {
         ...actual,
         API_CONFIG: { ...actual.API_CONFIG, USE_BROWSER_PRICES: false },
-        api: { delete: vi.fn(async () => undefined) },
+        api: {
+            ...actual.api,
+            get: vi.fn(async () => ({ success: true, data: [] })),
+            delete: vi.fn(async () => undefined),
+        },
         downloadPortfolioExport: vi.fn(async () => undefined),
     }
 })

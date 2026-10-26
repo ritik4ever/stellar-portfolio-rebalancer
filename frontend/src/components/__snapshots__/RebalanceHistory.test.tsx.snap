@@ -43,7 +43,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot in empty state 1`] = `
       >
         <svg
           aria-hidden="true"
-          class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
+          class="lucide lucide-clock w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -125,7 +125,7 @@ exports[`RebalanceHistory > snapshots > matches snapshot in error state 1`] = `
       >
         <svg
           aria-hidden="true"
-          class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
+          class="lucide lucide-clock w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"
           fill="none"
           height="24"
           stroke="currentColor"
@@ -243,7 +243,8 @@ exports[`RebalanceHistory > snapshots > matches snapshot with fetched history da
                 class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"
               >
                 <svg
-                  class="w-5 h-5 text-green-600"
+                  aria-hidden="true"
+                  class="lucide lucide-circle-check-big lucide-check-circle w-5 h-5 text-green-600"
                   fill="none"
                   height="24"
                   stroke="currentColor"

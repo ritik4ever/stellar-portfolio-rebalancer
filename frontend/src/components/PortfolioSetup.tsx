@@ -1407,10 +1407,11 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label htmlFor="max-slippage-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Max Slippage (%)
                   </label>
                   <input
+                    id="max-slippage-input"
                     type="number"
                     min="0.1"
                     max="5"

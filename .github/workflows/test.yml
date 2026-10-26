@@ -99,6 +99,7 @@ jobs:
         with:
           name: backend-blob-${{ matrix.shard }}-of-${{ matrix.total }}
           path: backend/.vitest-reports/
+          include-hidden-files: true
           retention-days: 7
 
   # ---------------------------------------------------------------------------
