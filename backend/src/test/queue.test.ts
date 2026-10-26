@@ -106,6 +106,8 @@ vi.mock('../services/analyticsService.js', () => ({
 vi.mock('../queue/workers/workerRuntime.js', () => ({
   acquireWorkerLock: vi.fn().mockResolvedValue(true),
   releaseWorkerLock: vi.fn().mockResolvedValue(true),
+  markRebalanceActive: vi.fn(),
+  markRebalanceInactive: vi.fn(),
   createWorkerRuntimeStatus: vi.fn().mockReturnValue({}),
 }));
 
@@ -360,6 +362,39 @@ describe('rebalanceWorker – Retry Policy Tests (Issue #255)', () => {
                     portfolioId,
                 })
             )
+        })
+
+        it('does not retry a committed rebalance when its history write fails', async () => {
+            const { rebalanceHistoryService } = await import('../services/serviceContainer.js')
+            const executeSpy = vi.fn().mockResolvedValue({ trades: 2, gasUsed: '0.01 XLM' })
+            StellarService.prototype.getPortfolio = vi.fn().mockResolvedValue({
+                id: portfolioId,
+                userAddress: 'GTEST123456789',
+                allocations: { XLM: 60, USDC: 40 },
+            })
+            StellarService.prototype.executeRebalance = executeSpy
+            const recordSpy = vi.spyOn(rebalanceHistoryService, 'recordRebalanceEvent')
+                .mockRejectedValueOnce(new Error('database write failed'))
+
+            const job = {
+                ...mockJob({ portfolioId, triggeredBy: 'auto' as const }, 'persist-failure-1'),
+                opts: { attempts: 3 },
+            } as Job<any>
+
+            await expect(processRebalanceJob(job)).resolves.toBeUndefined()
+
+            expect(executeSpy).toHaveBeenCalledTimes(1)
+            expect(recordSpy).toHaveBeenCalledTimes(1)
+            expect(recordSpy).toHaveBeenCalledWith(expect.objectContaining({
+                portfolioId,
+                status: 'completed',
+                persistenceContext: {
+                    source: 'worker',
+                    retryAvailable: false,
+                    stateTransition: 'committed',
+                },
+            }))
+            expect(releaseWorkerLock).toHaveBeenCalledWith(portfolioId)
         })
     })
 
