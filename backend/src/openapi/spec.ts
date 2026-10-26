@@ -561,6 +561,8 @@ const spec: Record<string, any> = {
                                                 nextCursor: { type: 'string', nullable: true },
                                                 count: { type: 'integer' },
                                                 total: { type: 'integer' },
+                                                itemsChanged: { type: 'boolean', description: 'Whether the matching item count changed since the supplied cursor was issued.' },
+                                                changeKind: { type: 'string', enum: ['none', 'items_inserted', 'items_deleted', 'count_drift'], description: 'Detected change in the matching item count during traversal.' },
                                             },
                                         },
                                         error: { type: 'object', nullable: true },
