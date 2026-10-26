@@ -140,6 +140,34 @@ describe('SPR-2026-188: State consistency in API error serialization', () => {
         }))
     })
 
+    it('returns the committed result without inviting a duplicate retry when history persistence fails', async () => {
+        mockStellarGetPortfolio.mockResolvedValue(MOCK_PORTFOLIO)
+        mockExecuteRebalance.mockResolvedValue({
+            status: 'completed',
+            trades: 2,
+            gasUsed: '0.01 XLM',
+        })
+        mockRecordRebalanceEvent.mockRejectedValueOnce(new Error('database write failed'))
+
+        const res = await request(app)
+            .post(`/api/portfolio/${PORTFOLIO_ID}/rebalance`)
+            .send({})
+            .expect(200)
+
+        expect(res.body.success).toBe(true)
+        expect(res.body.data.result.status).toBe('completed')
+        expect(res.body.data.historyPersisted).toBe(false)
+        expect(mockExecuteRebalance).toHaveBeenCalledTimes(1)
+        expect(mockRecordRebalanceEvent).toHaveBeenCalledTimes(1)
+        expect(mockRecordRebalanceEvent).toHaveBeenCalledWith(expect.objectContaining({
+            portfolioId: PORTFOLIO_ID,
+            persistenceContext: expect.objectContaining({
+                retryAvailable: false,
+                stateTransition: 'committed',
+            }),
+        }))
+    })
+
     it('persists failure record and returns sanitized error code without internal details on thrown error', async () => {
         mockStellarGetPortfolio.mockResolvedValue(MOCK_PORTFOLIO)
         // Simulate interrupted work / internal database or RPC failure with sensitive details
