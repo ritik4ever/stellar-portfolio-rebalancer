@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Address, SorobanRpc, scValToNative } from "@stellar/stellar-sdk";
+import { Address, rpc as SorobanRpc, scValToNative } from "@stellar/stellar-sdk";
 import { databaseService } from "./databaseService.js";
 import { sorobanRpcEndpointPool } from "./stellar.js";
 import { logger } from "../utils/logger.js";
