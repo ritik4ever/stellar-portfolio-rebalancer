@@ -34,10 +34,17 @@ vi.mock('framer-motion', () => ({
 vi.mock('./ThemeToggle', () => ({ default: () => null }))
 vi.mock('./AssetSelector', () => ({
   default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) =>
-    React.createElement('select', {
-      value,
-      onChange: (event: React.ChangeEvent<HTMLSelectElement>) => onChange(event.target.value),
-    }),
+    React.createElement(
+      'select',
+      {
+        value,
+        onChange: (event: React.ChangeEvent<HTMLSelectElement>) => onChange(event.target.value),
+      },
+      React.createElement('option', { value: 'USDC' }, 'USDC'),
+      React.createElement('option', { value: 'XLM' }, 'XLM'),
+      React.createElement('option', { value: 'BTC' }, 'BTC'),
+      React.createElement('option', { value: 'ETH' }, 'ETH'),
+    ),
 }))
 
 const mockMutateAsync = vi.fn()
@@ -101,7 +108,8 @@ describe('PortfolioSetup suggestions integration', () => {
       screen.getByText(/reduce concentration risk/i),
     ).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /^apply$/i }))
+    const suggestionCard = screen.getByText(/reduce concentration risk/i).closest('article')
+    fireEvent.click(within(suggestionCard as HTMLElement).getByRole('button', { name: /^apply$/i }))
 
     const allocationSection = screen
       .getByRole('heading', { name: /asset allocations/i })

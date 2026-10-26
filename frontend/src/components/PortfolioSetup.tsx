@@ -1675,6 +1675,7 @@ const PortfolioSetup: React.FC<PortfolioSetupProps> = ({
                 hasDuplicateAssets ||
                 createPortfolioMutation.isPending
               }
+              aria-label={cloneDraft ? "Save as new portfolio" : "Create Portfolio"}
               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white p-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
             >
               {createPortfolioMutation.isPending ? (
