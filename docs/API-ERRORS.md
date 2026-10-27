@@ -25,6 +25,26 @@ During portfolio rebalancing workflows, API error responses and persisted event 
 - Upstream exceptions carrying internal credentials (e.g., database connection strings with passwords, Stellar secret keys `S...`, or API tokens) are strictly redacted with `[REDACTED]`.
 - Persisted failure events record `source: 'api'`, `outcome: 'failed'`, and sanitized `diagnosticContext` in rebalance history details, enabling operators to diagnose upstream failures without exposing secret values to external callers or audit trails.
 
+## Boundary Handling for API Error Serialization (SPR-2026-186)
+
+> **Batch ID**: SPR-2026-186  
+> **Area**: backend  
+> **Workflow**: Portfolio Rebalancing & Asset Lookup  
+
+Service boundary handling for API error serialization ensures that boundary inputs (such as malformed asset IDs and unknown portfolio IDs) produce stable, deterministic, and consistent error codes without disclosing internal stack traces, system paths, or credential details:
+
+### Boundary Specifications
+- **Malformed & Unknown Asset IDs**:
+  - A blank required parameter (e.g. whitespace-only `GET /assets/%20`) is rejected at the request boundary with HTTP `400 VALIDATION_ERROR` and message `'Asset id is required'` without querying the asset registry.
+  - Non-blank malformed asset IDs (e.g. invalid symbols, path traversal sequences `%2E%2E%2F`, oversized inputs, or injection patterns) and unknown asset symbols consistently evaluate to HTTP `404 NOT_FOUND` with message `'Asset not found'`.
+  - Lookups are executed at most once without redundant registry round trips, and no freshness or quarantine side effects are written for invalid or missing assets.
+- **Unknown Portfolio IDs**:
+  - Requesting an unknown portfolio ID (`GET /portfolio/:id`) consistently returns HTTP `404 NOT_FOUND` with message `'Portfolio not found'` and stable error code `'NOT_FOUND'`.
+  - When the primary lookup fails to locate the portfolio or reports a missing portfolio, the failure is handled deterministically without repeatedly querying downstream pricing or oracle feeds.
+- **Upstream & Server Errors**:
+  - Any server-side error (HTTP `5xx`) drops the `details` payload completely.
+  - Error messages are sanitized by `sanitizeErrorMessage` to redact database URIs, API keys, Stellar secret keys (`S...`), and passwords to `[REDACTED]`, while removing stack frames and internal file paths.
+
 ## Error envelope
 
 Every failing request is serialized by the single helper
