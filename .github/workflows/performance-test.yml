@@ -72,7 +72,7 @@ jobs:
           export PORT=3000
 
           # Start backend with clinic.js doctor
-          timeout 180 clinic doctor --collect-only -- node dist/index.js &
+          clinic doctor --collect-only -- npm start &
           BACKEND_PID=$!
 
           # Wait for backend to become ready
