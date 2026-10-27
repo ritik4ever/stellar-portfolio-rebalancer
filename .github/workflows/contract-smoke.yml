@@ -56,6 +56,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.81.0'
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo and Soroban
@@ -69,6 +70,10 @@ jobs:
           key: contract-smoke-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock', 'contracts/Cargo.toml') }}
           restore-keys: |
             contract-smoke-${{ runner.os }}-
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Install Soroban CLI
         run: cargo install --locked soroban-cli --version 25.2.0
@@ -120,6 +125,7 @@ jobs:
 
       - name: Post benchmark summary
         uses: marocchino/sticky-pull-request-comment@v2
+        continue-on-error: true
         if: github.event_name == 'pull_request'
         with:
           header: benchmark

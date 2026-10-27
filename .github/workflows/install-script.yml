@@ -50,6 +50,10 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
       - name: Install Soroban CLI
         run: cargo install --locked soroban-cli --version 25.2.0
 
