@@ -29,6 +29,24 @@ interface IndexedOnChainEvent {
   userAddress?: string;
 }
 
+type SyncOutcome = "success" | "delayed" | "blocked";
+
+interface SyncOutcomeDetail {
+    source: "onchain"
+    outcome: SyncOutcome
+    /** Stable machine-readable reason code (no secrets or raw errors). */
+    reason: string
+    at: string
+    ingested: number
+    /** Events already recorded (in-memory dedup) — non-zero on a replayed page. */
+    duplicatesSkipped: number
+    malformedSkipped: number
+    pagesRead: number
+    cursor?: string
+    latestLedger?: number
+    consecutiveFailures: number
+}
+
 interface ContractEventIndexerStatus {
     enabled: boolean
     running: boolean
@@ -40,6 +58,7 @@ interface ContractEventIndexerStatus {
     lastFailedRunAt?: string
     lastError?: string
     lastIngestedCount: number
+    lastSyncOutcome?: SyncOutcomeDetail
     cursor?: string
     latestLedger?: number
     consecutiveFailures: number
@@ -531,15 +550,31 @@ export class ContractEventIndexerService {
             this.status.lastError = schemaCheck.message
             this.status.contractEventSchemaOk = false
             logger.error('[CHAIN-INDEXER] Contract event schema mismatch', { message: schemaCheck.message })
+            this.recordSyncOutcome({
+                outcome: 'blocked',
+                reason: 'contract_event_schema_mismatch',
+                ingested: 0,
+                duplicatesSkipped: 0,
+                malformedSkipped: 0,
+                pagesRead: 0,
+                cursor: databaseService.getIndexerState(INDEXER_CURSOR_KEY) || undefined,
+                latestLedger: this.status.latestLedger,
+            })
             return { ingested: 0, latestLedger: this.status.latestLedger }
         }
         this.status.contractEventSchemaOk = true
 
         this.isSyncing = true
+        let ingested = 0
+        let duplicatesSkipped = 0
+        let malformedSkipped = 0
+        let pagesRead = 0
+        let failureStage: 'rpc' | 'db_write' = 'rpc'
         try {
             const storedCursor = databaseService.getIndexerState(INDEXER_CURSOR_KEY)
             const storedLatestLedger = Number(databaseService.getIndexerState(INDEXER_LATEST_LEDGER_KEY) || 0) || undefined
 
+            failureStage = 'rpc'
             const rpcLatest = await this.rpcExecute((s) => s.getLatestLedger())
             const lag = rpcLatest.sequence - (storedLatestLedger || rpcLatest.sequence)
             recordIndexerLag(Math.max(0, lag))
@@ -551,12 +586,12 @@ export class ContractEventIndexerService {
                 startLedger = storedLatestLedger ? Math.max(1, storedLatestLedger - 1) : floorLedger
             }
 
-            let ingested = 0
+            let lastPageFull = false
             let latestLedger = storedLatestLedger
-            let pagesRead = 0
             const pageCursors = new Set<string>(cursor ? [cursor] : [])
 
             while (pagesRead < this.maxPagesPerSync) {
+                failureStage = 'rpc'
                 const response = await this.rpcExecute((s) =>
                     s.getEvents({
                         cursor,
@@ -567,6 +602,7 @@ export class ContractEventIndexerService {
                 )
                 pagesRead++
                 latestLedger = response.latestLedger
+                lastPageFull = response.events.length >= this.pageLimit
 
                 if (!response.events.length) break
 
@@ -583,6 +619,7 @@ export class ContractEventIndexerService {
                     try {
                         indexed = this.toIndexedOnChainEvent(event)
                     } catch (err) {
+                        malformedSkipped++
                         logger.warn('[CHAIN-INDEXER] Skipping malformed event', { error: String(err), txHash: event.txHash })
                         continue
                     }
@@ -593,9 +630,11 @@ export class ContractEventIndexerService {
                     }
                     const dedupKey = indexed.pagingToken
                     if (this.seenEventKeys.has(dedupKey)) {
+                        duplicatesSkipped++
                         continue
                     }
 
+                    failureStage = 'db_write'
                     databaseService.ensurePortfolioExists(indexed.portfolioId, indexed.userAddress || 'ONCHAIN-INDEXER')
                     const outcome = databaseService.recordRebalanceEventOnce({
                         portfolioId: indexed.portfolioId,
@@ -632,12 +671,14 @@ export class ContractEventIndexerService {
 
                 // Checkpoint only fully processed pages; partially committed pages can
                 // safely replay because their event writes are idempotent.
+                failureStage = 'db_write'
                 databaseService.setIndexerState(INDEXER_CURSOR_KEY, nextCursor)
                 pageCursors.add(nextCursor)
                 cursor = nextCursor
                 startLedger = undefined
             }
 
+            failureStage = 'db_write'
             if (cursor) databaseService.setIndexerState(INDEXER_CURSOR_KEY, cursor)
             if (latestLedger) databaseService.setIndexerState(INDEXER_LATEST_LEDGER_KEY, String(latestLedger))
 
@@ -650,6 +691,35 @@ export class ContractEventIndexerService {
             this.status.enabled = true
             this.consecutiveFailures = 0
 
+            const backlogRemaining = pagesRead >= this.maxPagesPerSync && lastPageFull
+            const lagLedgers = Math.max(0, rpcLatest.sequence - (latestLedger ?? rpcLatest.sequence))
+            const lagging = lagLedgers > this.gapReplayThreshold
+            const hasMalformed = malformedSkipped > 0
+            this.recordSyncOutcome({
+                outcome: hasMalformed
+                    ? 'blocked'
+                    : backlogRemaining || lagging
+                        ? 'delayed'
+                        : 'success',
+                reason: hasMalformed
+                    ? 'malformed_events_skipped'
+                    : backlogRemaining
+                        ? 'page_cap_reached_backlog_remaining'
+                        : lagging
+                            ? 'indexer_lagging_chain_tip'
+                            : ingested === 0 && duplicatesSkipped > 0
+                                ? 'replayed_page_already_recorded'
+                                : ingested === 0
+                                    ? 'no_new_events'
+                                    : 'ingested',
+                ingested,
+                duplicatesSkipped,
+                malformedSkipped,
+                pagesRead,
+                cursor,
+                latestLedger,
+            })
+
             return { ingested, latestLedger }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
@@ -660,6 +730,25 @@ export class ContractEventIndexerService {
             this.consecutiveFailures++
             this.pushRecentError(`[${now}] ${message}`)
             recordIndexerError()
+            const blocked = this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES_BEFORE_BACKOFF
+            const reason =
+                failureStage === 'db_write'
+                    ? blocked
+                        ? 'db_write_failures_exceeded_threshold'
+                        : 'db_write_failure_retrying'
+                    : blocked
+                        ? 'rpc_failures_exceeded_threshold'
+                        : 'rpc_failure_retrying'
+            this.recordSyncOutcome({
+                outcome: blocked ? 'blocked' : 'delayed',
+                reason,
+                ingested,
+                duplicatesSkipped,
+                malformedSkipped,
+                pagesRead,
+                cursor: databaseService.getIndexerState(INDEXER_CURSOR_KEY) || undefined,
+                latestLedger: this.status.latestLedger,
+            })
             logger.error('[CHAIN-INDEXER] Sync failed', {
                 error: message,
                 consecutiveFailures: this.consecutiveFailures
@@ -669,6 +758,25 @@ export class ContractEventIndexerService {
             this.isSyncing = false
         }
     }
+
+  /**
+   * Record the outcome of a sync pass (source, outcome, counts, cursor) so
+   * operators can tell success, delay and blocked work apart. Never includes
+   * RPC URLs, credentials or raw error text.
+   */
+  private recordSyncOutcome(
+    detail: Omit<SyncOutcomeDetail, "source" | "at" | "consecutiveFailures">,
+  ): void {
+    const record: SyncOutcomeDetail = {
+      source: "onchain",
+      at: new Date().toISOString(),
+      consecutiveFailures: this.consecutiveFailures,
+      ...detail,
+    };
+    this.status.lastSyncOutcome = record;
+    const log = record.outcome === "success" ? logger.info : logger.warn;
+    log.call(logger, "[CHAIN-INDEXER] Sync outcome", { ...record });
+  }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
