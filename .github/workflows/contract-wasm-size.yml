@@ -38,8 +38,7 @@ jobs:
       - name: Setup Rust (wasm32 target)
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: '1.81.0'
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none, wasm32-unknown-unknown
 
       - name: Cache Cargo registry + build artefacts
         uses: actions/cache@v4
@@ -54,7 +53,10 @@ jobs:
 
       - name: Build contract (release WASM)
         working-directory: contracts
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: |
+          cargo build --target wasm32v1-none --release
+          mkdir -p target/wasm32-unknown-unknown/release
+          cp target/wasm32v1-none/release/portfolio_rebalancer.wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
 
       - name: Measure WASM size and compare against baseline
         id: size_check

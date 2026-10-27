@@ -68,11 +68,16 @@ jobs:
           export PORT=3000
 
           # Start backend with clinic.js doctor (it will monitor for 5+ minutes)
-          timeout 400 clinic doctor --collect-only -- npm start &
+          timeout 400 clinic doctor --collect-only -- node dist/index.js &
           BACKEND_PID=$!
 
-          # Wait for backend to start
-          sleep 5
+          # Wait for backend to become ready
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/health > /dev/null || curl -sf http://localhost:3000/health > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
 
           # Run load test for 5 minutes
           BACKEND_URL="http://localhost:3000" timeout 320 node ./scripts/load-test.mjs

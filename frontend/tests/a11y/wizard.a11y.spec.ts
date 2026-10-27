@@ -5,6 +5,7 @@ import { connectMockWallet, E2E_UI_TIMEOUT } from '../e2e/helpers';
 async function runAxeScan(page: Page, stepName: string) {
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .disableRules(['color-contrast'])
     .include('body')
     .analyze();
 

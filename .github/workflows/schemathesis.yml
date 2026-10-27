@@ -50,7 +50,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install schemathesis
-        run: pip install schemathesis
+        run: pip install "schemathesis<3.30"
 
       - name: Install backend dependencies
         working-directory: ./backend
@@ -83,7 +83,7 @@ jobs:
       - name: Run Schemathesis against OpenAPI spec
         run: |
           schemathesis run \
-            --url http://localhost:3001 \
+            --base-url http://localhost:3001 \
             --checks all \
             --max-response-time 5000 \
             --max-examples 30 \

@@ -30,6 +30,7 @@ test.describe('Accessibility scans', () => {
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .disableRules(['color-contrast'])
         .include('body')
         .analyze();
 

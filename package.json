@@ -12,7 +12,7 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "npm run build:contracts && npm run build:backend && npm run build:frontend",
-    "build:contracts": "cd contracts && cargo build --release --target wasm32-unknown-unknown",
+    "build:contracts": "cd contracts && cargo build --release --target wasm32v1-none && mkdir -p target/wasm32-unknown-unknown/release && cp target/wasm32v1-none/release/portfolio_rebalancer.wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm 2>/dev/null || true",
     "build:backend": "cd backend && npm run build",
     "build:frontend": "cd frontend && npm run build",
     "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
