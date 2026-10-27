@@ -242,7 +242,7 @@ consentRouter.post('/consent/audit/purge', requireJwtWhenEnabled, (req: Request,
 /** GDPR: Delete all data for a user (portfolios, history, consent). Requires JWT when enabled. */
 consentRouter.delete('/user/:address/data', requireJwtWhenEnabled, async (req: Request, res: Response) => {
     try {
-        const address = req.params.address
+        const address = req.params.address as string
         const userId = req.user?.address ?? address
         if (userId !== address) return fail(res, 403, 'FORBIDDEN', 'You can only delete your own data')
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'address is required')

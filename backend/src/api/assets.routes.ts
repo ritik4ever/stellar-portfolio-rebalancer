@@ -62,7 +62,7 @@ assetsRouter.get('/assets', (req: Request, res: Response) => {
 /** Public: get asset by symbol */
 assetsRouter.get('/assets/:id', (req: Request, res: Response) => {
     try {
-        const id = req.params.id?.trim()
+        const id = (req.params.id as string)?.trim()
         if (!id) return fail(res, 400, 'VALIDATION_ERROR', 'Asset id is required')
 
         const asset = assetRegistryService.getBySymbol(id)
@@ -137,8 +137,8 @@ assetsRouter.post(
             const reviewer = req.adminPublicKey ?? 'unknown'
 
             const asset = decision === 'approve'
-                ? assetRegistryService.approveVerification(req.params.symbol, reviewer, notes)
-                : assetRegistryService.rejectVerification(req.params.symbol, reviewer, notes)
+                ? assetRegistryService.approveVerification(req.params.symbol as string, reviewer, notes)
+                : assetRegistryService.rejectVerification(req.params.symbol as string, reviewer, notes)
 
             logAudit(`asset_verification_${decision}d`, {
                 symbol: asset.symbol,
@@ -286,7 +286,7 @@ assetsRouter.post('/admin/assets', requireAdmin, idempotencyMiddleware, validate
 /** Admin: remove asset */
 assetsRouter.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, res: Response) => {
     try {
-        const symbol = req.params.symbol
+        const symbol = req.params.symbol as string
         if (!symbol) return fail(res, 400, 'VALIDATION_ERROR', 'symbol is required')
         const prior = assetRegistryService.getBySymbol(symbol)
         const removed = assetRegistryService.remove(symbol)
@@ -314,7 +314,7 @@ assetsRouter.delete('/admin/assets/:symbol', requireAdmin, async (req: Request, 
 /** Admin: patch asset attributes */
 assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, validateRequest(adminPatchAssetSchema), async (req: Request, res: Response) => {
     try {
-        const symbol = req.params.symbol
+        const symbol = req.params.symbol as string
         const { enabled, quarantined } = req.body
         const prior = assetRegistryService.getBySymbol(symbol)
         if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
@@ -354,7 +354,7 @@ assetsRouter.patch('/admin/assets/:symbol', requireAdmin, adminRateLimiter, vali
 /** Admin: refresh specific asset source */
 assetsRouter.post('/admin/assets/:symbol/refresh', requireAdmin, adminRateLimiter, async (req: Request, res: Response) => {
     try {
-        const symbol = req.params.symbol
+        const symbol = req.params.symbol as string
         const prior = assetRegistryService.getBySymbol(symbol)
         if (!prior) return fail(res, 404, 'NOT_FOUND', 'Asset not found')
 

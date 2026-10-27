@@ -55,7 +55,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Install Soroban CLI
-        run: cargo install --locked soroban-cli --version 25.2.0
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/stellar/stellar-cli/main/install.sh | sh
+          sudo ln -sf /usr/local/bin/stellar /usr/local/bin/soroban || true
 
       - name: Verify install.sh
         run: bash ./install.sh

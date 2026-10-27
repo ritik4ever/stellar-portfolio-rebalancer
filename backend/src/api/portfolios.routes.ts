@@ -135,7 +135,7 @@ portfoliosRouter.post('/portfolio', validateRequest(createPortfolioSchema, 400),
 // Update portfolio with optimistic concurrency control and boundary handling
 portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMiddleware, validateRequest(updatePortfolioSchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id;
+        const portfolioId = req.params.id as string;
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
         const { version, ...updates } = req.body;
         if (version === undefined) return fail(res, 400, 'VALIDATION_ERROR', 'Version is required for update');
@@ -227,7 +227,7 @@ portfoliosRouter.put('/portfolio/:id', ...protectedWriteLimiter, idempotencyMidd
 // Update portfolio allocations at the service boundary with deterministic rebalance handling
 portfoliosRouter.put('/portfolio/:id/allocations', validateRequest(updateAllocationsSchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id;
+        const portfolioId = req.params.id as string;
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
         const { allocations, version } = req.body;
         const decision = await applyAllocationEdit({
@@ -279,7 +279,7 @@ portfoliosRouter.put('/portfolio/:id/allocations', validateRequest(updateAllocat
 
 portfoliosRouter.patch('/portfolio/:id/allocations', validateRequest(updateAllocationsSchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id;
+        const portfolioId = req.params.id as string;
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required');
         const { allocations, version } = req.body;
         const decision = await applyAllocationEdit({
@@ -331,7 +331,7 @@ portfoliosRouter.patch('/portfolio/:id/allocations', validateRequest(updateAlloc
 
 portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         
         let portfolio: any
@@ -390,7 +390,7 @@ portfoliosRouter.get('/portfolio/:id', async (req: Request, res: Response) => {
 
 portfoliosRouter.get('/portfolio/:id/cost-summary', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const summary = await rebalanceHistoryService.getCostSummary(portfolioId)
@@ -407,7 +407,7 @@ portfoliosRouter.get('/portfolio/:id/cost-summary', async (req: Request, res: Re
 
 portfoliosRouter.post('/portfolio/:id/share', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -438,7 +438,7 @@ portfoliosRouter.post('/portfolio/:id/share', ...protectedWriteLimiter, idempote
 
 portfoliosRouter.delete('/portfolio/:id/share', ...protectedWriteLimiter, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -516,7 +516,7 @@ portfoliosRouter.get('/portfolio/share/:hash/og.png', async (req: Request, res: 
 
 portfoliosRouter.get('/portfolio/:id/share', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -543,7 +543,7 @@ portfoliosRouter.get('/portfolio/:id/share', async (req: Request, res: Response)
 
 portfoliosRouter.delete('/portfolio/:id', ...protectedWriteLimiter, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -577,7 +577,7 @@ portfoliosRouter.delete('/portfolio/:id', ...protectedWriteLimiter, async (req: 
 
 portfoliosRouter.post('/portfolio/:id/restore', ...protectedWriteLimiter, async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -1094,7 +1094,7 @@ portfoliosRouter.post('/portfolio/:id/clone', ...protectedWriteLimiter, idempote
 
 portfoliosRouter.get('/portfolio/:id/history', validateQuery(portfolioHistoryQuerySchema), async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         const portfolio = await portfolioStorage.getPortfolio(portfolioId)
@@ -1226,7 +1226,7 @@ portfoliosRouter.post('/portfolio/:id/rebalance/dry-run', async (req: Request, r
 
 portfoliosRouter.get('/portfolio/:id/rebalance-status', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.id
+        const portfolioId = req.params.id as string
         if (!portfolioId) return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
 
         let portfolio: Portfolio | null = null

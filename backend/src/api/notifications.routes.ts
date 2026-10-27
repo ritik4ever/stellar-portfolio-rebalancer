@@ -353,7 +353,7 @@ notificationsRouter.get('/admin/notifications/dead-letter', requireJwtWhenEnable
 // Replay a webhook dead letter item
 notificationsRouter.post('/admin/notifications/dead-letter/:id/replay', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const itemId = req.params.id
+        const itemId = req.params.id as string
         const item = await webhookDeadLetterQueue.replay(itemId)
         if (!item) {
             return fail(res, 404, 'NOT_FOUND', 'Dead-letter item not found')
@@ -498,7 +498,7 @@ notificationsRouter.post('/admin/notifications/dead-letter/batch-replay', requir
 
 notificationsRouter.delete('/admin/notifications/dead-letter/:id', requireJwtWhenEnabled, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const itemId = req.params.id
+        const itemId = req.params.id as string
         const deleted = await webhookDeadLetterQueue.delete(itemId)
         if (!deleted) {
             return fail(res, 404, 'NOT_FOUND', 'Dead-letter item not found')

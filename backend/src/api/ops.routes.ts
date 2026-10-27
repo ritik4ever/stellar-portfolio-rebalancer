@@ -943,7 +943,7 @@ opsRouter.get('/prices/enhanced', async (req: Request, res: Response) => {
 
 opsRouter.get('/market/:asset/details', async (req: Request, res: Response) => {
     try {
-        const asset = req.params.asset.toUpperCase()
+        const asset = (req.params.asset as string).toUpperCase()
         const marketData = await reflectorService.getDetailedMarketData(asset)
 
         return ok(res, marketData)
@@ -955,7 +955,7 @@ opsRouter.get('/market/:asset/details', async (req: Request, res: Response) => {
 
 opsRouter.get('/market/:asset/chart', async (req: Request, res: Response) => {
     try {
-        const asset = req.params.asset.toUpperCase()
+        const asset = (req.params.asset as string).toUpperCase()
         const days = parseInt(req.query.days as string) || 7
 
         const history = await reflectorService.getPriceHistory(asset, days)

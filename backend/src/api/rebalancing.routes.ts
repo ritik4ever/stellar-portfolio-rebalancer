@@ -131,7 +131,7 @@ rebalancingRouter.post('/rebalance/history/sync-onchain', requireAdmin, async (r
 
 rebalancingRouter.get('/rebalance/summary/:portfolioId', async (req: Request, res: Response) => {
     try {
-        const portfolioId = req.params.portfolioId
+        const portfolioId = req.params.portfolioId as string
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
@@ -383,7 +383,7 @@ rebalancingRouter.post('/auto-rebalancer/dry-run/:portfolioId', requireAdmin, ad
             return fail(res, 500, 'INTERNAL_ERROR', 'Auto-rebalancer not initialized')
         }
 
-        const portfolioId = req.params.portfolioId
+        const portfolioId = req.params.portfolioId as string
         if (!portfolioId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Portfolio ID required')
         }
