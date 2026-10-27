@@ -13,14 +13,16 @@ export async function connectMockWallet(page: Page) {
 
     // Accept consent modal if prompted for this session
     const acceptBtn = page.getByRole('button', { name: /Accept and continue/i })
-    if (await acceptBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    try {
+        await acceptBtn.waitFor({ state: 'visible', timeout: 3000 })
         const checkboxes = page.locator('input[type="checkbox"]')
         const count = await checkboxes.count()
         for (let i = 0; i < count; i++) {
-            if (!(await checkboxes.nth(i).isChecked())) {
-                await checkboxes.nth(i).check().catch(() => {})
-            }
+            await checkboxes.nth(i).setChecked(true).catch(() => {})
         }
-        await acceptBtn.click().catch(() => {})
+        await acceptBtn.click()
+        await acceptBtn.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
+    } catch {
+        // Consent modal was not prompted
     }
 }

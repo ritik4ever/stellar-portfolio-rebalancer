@@ -486,6 +486,14 @@ if (routeDataUnavailable) {
                             Create Portfolio
                         </button>
                         <button
+                            type="button"
+                            onClick={() => onNavigate('wizard')}
+                            className="border border-blue-600 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-500 dark:hover:bg-blue-900/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+                            title="Use step-by-step wizard to create a portfolio"
+                        >
+                            ✨ Wizard
+                        </button>
+                        <button
                             onClick={() => window.open('/docs/DEMO_WALKTHROUGH.md', '_blank')}
                             className="border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition-colors"
                         >

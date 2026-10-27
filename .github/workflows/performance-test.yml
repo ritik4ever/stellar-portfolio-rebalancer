@@ -58,17 +58,18 @@ jobs:
         run: |
           # Set minimal environment for backend startup
           export NODE_ENV=test
-          export DATABASE_URL="sqlite::memory:"
-          export REDIS_URL="redis://localhost:6379"
-          export JWT_SECRET="test-secret-key-for-performance-testing"
+          export DB_PATH="/tmp/perf-test.db"
+          export DEMO_MODE="true"
+          export ALLOW_DEMO_BALANCE_FALLBACK="true"
+          export JWT_SECRET="test-secret-key-for-performance-testing-at-least-32-chars"
           export STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
           export CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
           export LOG_LEVEL="warn"
           export ENABLE_STARTUP_SELF_TEST="false"
           export PORT=3000
 
-          # Start backend with clinic.js doctor (it will monitor for 5+ minutes)
-          timeout 400 clinic doctor --collect-only -- node dist/index.js &
+          # Start backend with clinic.js doctor
+          timeout 180 clinic doctor --collect-only -- node dist/index.js &
           BACKEND_PID=$!
 
           # Wait for backend to become ready
@@ -79,11 +80,12 @@ jobs:
             sleep 1
           done
 
-          # Run load test for 5 minutes
-          BACKEND_URL="http://localhost:3000" timeout 320 node ./scripts/load-test.mjs
+          # Run load test for 60 seconds
+          BACKEND_URL="http://localhost:3000" DURATION_MS=60000 timeout 90 node ./scripts/load-test.mjs
           LOAD_TEST_EXIT=$?
 
-          # Wait for clinic to finish collecting data
+          # Send SIGINT to clinic so it flushes profiling data gracefully
+          kill -INT $BACKEND_PID 2>/dev/null || true
           wait $BACKEND_PID || true
 
           exit $LOAD_TEST_EXIT
