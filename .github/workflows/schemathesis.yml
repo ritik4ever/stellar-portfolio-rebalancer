@@ -86,7 +86,7 @@ jobs:
             --base-url http://localhost:3001 \
             --checks all \
             --max-response-time 5000 \
-            --max-examples 30 \
+            --hypothesis-max-examples 30 \
             --hypothesis-deadline 500 \
             --contrib-openapi-formats-uuid \
             backend/openapi.json
