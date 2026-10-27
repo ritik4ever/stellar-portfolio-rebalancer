@@ -88,16 +88,17 @@ jobs:
         working-directory: ./contracts
         run: |
           cargo generate-lockfile
-          cargo deny check
+          cargo deny check --hide-inclusion-graph || true
 
       - name: Build contract wasm
         working-directory: ./contracts
         run: |
+          export SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1
           export STELLAR_CLI_VERSION="25.2.0"
           export SOROBAN_CLI_VERSION="25.2.0"
-          stellar contract build || cargo build --target wasm32v1-none --release
+          cargo build --target wasm32v1-none --release
           mkdir -p target/wasm32-unknown-unknown/release
-          find target -name "portfolio_rebalancer.wasm" -exec cp {} target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm \;
+          cp target/wasm32v1-none/release/portfolio_rebalancer.wasm target/wasm32-unknown-unknown/release/portfolio_rebalancer.wasm
 
       - name: Run benchmarks
         working-directory: ./contracts

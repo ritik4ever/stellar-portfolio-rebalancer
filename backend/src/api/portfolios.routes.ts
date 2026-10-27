@@ -461,7 +461,7 @@ portfoliosRouter.delete('/portfolio/:id/share', ...protectedWriteLimiter, async 
 
 portfoliosRouter.get('/portfolio/share/:hash', async (req: Request, res: Response) => {
     try {
-        const { hash } = req.params
+        const hash = req.params.hash as string
         if (typeof hash !== 'string' || hash.length === 0) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
         }
@@ -485,7 +485,7 @@ portfoliosRouter.get('/portfolio/share/:hash', async (req: Request, res: Respons
  */
 portfoliosRouter.get('/portfolio/share/:hash/og.png', async (req: Request, res: Response) => {
     try {
-        const { hash } = req.params
+        const hash = req.params.hash as string
         if (typeof hash !== 'string' || hash.length === 0) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Share hash required')
         }
@@ -640,7 +640,7 @@ portfoliosRouter.post('/portfolio/draft', ...protectedWriteLimiter, idempotencyM
 
 portfoliosRouter.get('/portfolio/draft/:id', async (req: Request, res: Response) => {
     try {
-        const draftId = req.params.id
+        const draftId = req.params.id as string
         if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
         const draft = databaseService.getDraft(draftId)
         if (!draft) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
@@ -653,7 +653,7 @@ portfoliosRouter.get('/portfolio/draft/:id', async (req: Request, res: Response)
 
 portfoliosRouter.patch('/portfolio/draft/:id', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
-        const draftId = req.params.id
+        const draftId = req.params.id as string
         if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
         const parsed = updateDraftSchema.safeParse(req.body)
         if (!parsed.success) {
@@ -680,7 +680,7 @@ portfoliosRouter.patch('/portfolio/draft/:id', ...protectedWriteLimiter, idempot
 
 portfoliosRouter.post('/portfolio/draft/:id/publish', ...protectedWriteLimiter, idempotencyMiddleware, async (req: Request, res: Response) => {
     try {
-        const draftId = req.params.id
+        const draftId = req.params.id as string
         if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
         const portfolioId = databaseService.publishDraft(draftId)
         if (!portfolioId) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
@@ -694,7 +694,7 @@ portfoliosRouter.post('/portfolio/draft/:id/publish', ...protectedWriteLimiter, 
 
 portfoliosRouter.delete('/portfolio/draft/:id', ...protectedWriteLimiter, async (req: Request, res: Response) => {
     try {
-        const draftId = req.params.id
+        const draftId = req.params.id as string
         if (!draftId) return fail(res, 400, 'VALIDATION_ERROR', 'Draft ID required')
         const deleted = databaseService.deleteDraft(draftId)
         if (!deleted) return fail(res, 404, 'NOT_FOUND', 'Draft not found')
@@ -708,7 +708,7 @@ portfoliosRouter.delete('/portfolio/draft/:id', ...protectedWriteLimiter, async 
 
 portfoliosRouter.get('/user/:address/drafts', async (req: Request, res: Response) => {
     try {
-        const address = req.params.address
+        const address = req.params.address as string
         if (!address) return fail(res, 400, 'VALIDATION_ERROR', 'User address required')
         const drafts = databaseService.listDrafts(address)
         return ok(res, { drafts })
