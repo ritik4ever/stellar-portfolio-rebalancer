@@ -54,7 +54,10 @@ jobs:
       - name: Build contract (release WASM)
         working-directory: contracts
         run: |
-          curl -fsSL https://raw.githubusercontent.com/stellar/stellar-cli/main/install.sh | sh
+          curl -fsSL "https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-25.2.0-x86_64-unknown-linux-gnu.tar.gz" -o stellar.tar.gz
+          tar -xzf stellar.tar.gz
+          sudo cp stellar /usr/local/bin/stellar
+          sudo ln -sf /usr/local/bin/stellar /usr/local/bin/soroban
           export STELLAR_CLI_VERSION="25.2.0"
           export SOROBAN_CLI_VERSION="25.2.0"
           stellar contract build || cargo build --target wasm32v1-none --release

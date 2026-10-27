@@ -56,8 +56,14 @@ jobs:
 
       - name: Install Soroban CLI
         run: |
-          curl -fsSL https://raw.githubusercontent.com/stellar/stellar-cli/main/install.sh | sh
-          sudo ln -sf /usr/local/bin/stellar /usr/local/bin/soroban || true
+          if [ "$(uname -s)" = "Darwin" ]; then
+            curl -fsSL "https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-25.2.0-aarch64-apple-darwin.tar.gz" -o stellar.tar.gz
+          else
+            curl -fsSL "https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-25.2.0-x86_64-unknown-linux-gnu.tar.gz" -o stellar.tar.gz
+          fi
+          tar -xzf stellar.tar.gz
+          sudo cp stellar /usr/local/bin/stellar
+          sudo ln -sf /usr/local/bin/stellar /usr/local/bin/soroban
 
       - name: Verify install.sh
         run: bash ./install.sh

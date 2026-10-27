@@ -166,8 +166,8 @@ function exportConsentAuditTrail(req: Request, res: Response) {
             documentVersion: e.documentVersion,
             version: e.documentVersion,
             categories: e.categories ?? [],
-            category: e.category ?? e.categories ?? [],
-            categoryDetails: e.categoryDetails ?? {
+            category: (e as any).category ?? e.categories ?? [],
+            categoryDetails: (e as any).categoryDetails ?? {
                 terms: (e.categories ?? []).includes('terms'),
                 privacy: (e.categories ?? []).includes('privacy'),
                 cookies: (e.categories ?? []).includes('cookies'),

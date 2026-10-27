@@ -17,7 +17,7 @@ import { getPortfolioCheckWorkerStatus } from '../queue/workers/portfolioCheckWo
 import { getRebalanceWorkerStatus } from '../queue/workers/rebalanceWorker.js'
 import { getAnalyticsSnapshotWorkerStatus } from '../queue/workers/analyticsSnapshotWorker.js'
 import { getPortfolioExportWorkerStatus } from '../queue/workers/portfolioExportWorker.js'
-import { getQueueByName } from '../queue/queues.js'
+import { getQueueByName, QUEUE_NAMES, getPortfolioCheckQueue, getRebalanceQueue, getAnalyticsSnapshotQueue, getPortfolioExportQueue } from '../queue/queues.js'
 import { getWorkerHealthSummary, getAllPersistedWorkerStatuses } from '../queue/workers/workerHeartbeat.js'
 import { REBALANCE_STRATEGIES } from '../services/rebalancingStrategyService.js'
 import { logger } from '../utils/logger.js'
@@ -219,7 +219,7 @@ opsRouter.get('/indexer/cursor', (_req: Request, res: Response) => {
 
 opsRouter.get('/jobs/:id', async (req: Request, res: Response) => {
     try {
-        const jobId = req.params.id
+        const jobId = req.params.id as string
         if (!jobId) {
             return fail(res, 400, 'VALIDATION_ERROR', 'Job ID is required')
         }
@@ -339,7 +339,7 @@ opsRouter.get('/queue/failed', async (req: Request, res: Response) => {
 
 opsRouter.post('/queue/failed/:jobId/retry', async (req: Request, res: Response) => {
     try {
-        const { jobId } = req.params
+        const jobId = req.params.jobId as string
         const { queue: queueName } = req.body
 
         const queueMap: Record<string, any> = {
@@ -440,7 +440,7 @@ opsRouter.post('/queue/dlq/:jobId/replay', async (req: Request, res: Response) =
 
 opsRouter.post('/queue/:queueName/pause', async (req: Request, res: Response) => {
     try {
-        const { queueName } = req.params
+        const queueName = req.params.queueName as string
         const queue = getQueueByName(queueName)
 
         if (!queue) {

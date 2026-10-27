@@ -76,8 +76,10 @@ jobs:
 
       - name: Install Soroban CLI
         run: |
-          curl -fsSL https://raw.githubusercontent.com/stellar/stellar-cli/main/install.sh | sh
-          sudo ln -sf /usr/local/bin/stellar /usr/local/bin/soroban || true
+          curl -fsSL "https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-25.2.0-x86_64-unknown-linux-gnu.tar.gz" -o stellar.tar.gz
+          tar -xzf stellar.tar.gz
+          sudo cp stellar /usr/local/bin/stellar
+          sudo ln -sf /usr/local/bin/stellar /usr/local/bin/soroban
 
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny
