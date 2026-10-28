@@ -112,13 +112,15 @@ describe('Rebalance Job Queue – Integration Tests', () => {
     await closeAllQueues();
   });
 
-  async function waitForJobCompletion(jobId: string, retryCount = 100) {
+  async function waitForJobCompletion(jobId: string, retryCount = 100, expectedAttempts?: number) {
     for (let i = 0; i < retryCount; i++) {
       const job = await queue.getJob(jobId);
       if (job) {
         const state = await job.getState();
         if (state === 'completed' || state === 'failed') {
-          return job;
+          if (!expectedAttempts || (job.attemptsMade ?? 0) >= expectedAttempts) {
+            return job;
+          }
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -215,13 +217,13 @@ describe('Rebalance Job Queue – Integration Tests', () => {
       }
     );
 
-    const finishedJob = await waitForJobCompletion(job.id);
-    expect(await finishedJob.getState()).toBe('failed');
-    expect(finishedJob.attemptsMade).toBe(2);
-
-    // Wait for the job to be moved to the Dead-Letter Queue
+    // Wait for the job to be moved to the Dead-Letter Queue (ensures all retries completed)
     const dlqJobs = await waitForDLQJobs();
     expect(dlqJobs.length).toBe(1);
+
+    const finishedJob = await waitForJobCompletion(job.id, 100, 2);
+    expect(await finishedJob.getState()).toBe('failed');
+    expect(finishedJob.attemptsMade).toBe(2);
 
     const dlqJob = dlqJobs[0];
     expect(dlqJob.data.originalQueue).toBe(queue.name);

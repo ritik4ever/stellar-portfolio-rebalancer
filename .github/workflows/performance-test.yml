@@ -72,7 +72,7 @@ jobs:
           export PORT=3000
 
           # Start backend with clinic.js doctor
-          clinic doctor --collect-only -- npm start &
+          clinic doctor --collect-only -- node --import ./dist/observability/register-tracing.js --import ./dist/observability/apm-register.js dist/index.js &
           BACKEND_PID=$!
 
           # Wait for backend to become ready
